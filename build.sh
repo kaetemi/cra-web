@@ -51,8 +51,8 @@ cp worker.js dist/
 cp sw.js dist/
 
 # Copy default images
-cp scripts/assets/retarget_input.jpg dist/assets/
-cp scripts/assets/retarget_ref.jpg dist/assets/
+cp scripts/assets/forest_plain.png dist/assets/
+cp scripts/assets/flowers_golden.png dist/assets/
 
 echo "Files copied."
 

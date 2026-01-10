@@ -194,7 +194,7 @@ function updateProcessButton() {
 async function loadDefaultImages() {
     try {
         // Load input image
-        const inputResponse = await fetch('./assets/retarget_input.jpg');
+        const inputResponse = await fetch('./assets/forest_plain.png');
         const inputBlob = await inputResponse.blob();
         const inputArrayBuffer = await inputBlob.arrayBuffer();
         inputImageData = new Uint8Array(inputArrayBuffer);
@@ -207,7 +207,7 @@ async function loadDefaultImages() {
         inputBox.querySelectorAll('.hint').forEach(el => el.style.display = 'none');
 
         // Load reference image
-        const refResponse = await fetch('./assets/retarget_ref.jpg');
+        const refResponse = await fetch('./assets/flowers_golden.png');
         const refBlob = await refResponse.blob();
         const refArrayBuffer = await refBlob.arrayBuffer();
         refImageData = new Uint8Array(refArrayBuffer);
