@@ -27,7 +27,7 @@ echo "WASM build complete."
 echo ""
 echo "[2/4] Creating dist directory..."
 rm -rf dist
-mkdir -p dist/wasm dist/scripts
+mkdir -p dist/wasm dist/scripts dist/assets
 
 # Step 3: Copy files
 echo ""
@@ -47,6 +47,10 @@ cp scripts/color_correction_tiled.py dist/scripts/
 # Copy web files
 cp index.html dist/
 cp app.js dist/
+
+# Copy default images
+cp scripts/assets/retarget_input.jpg dist/assets/
+cp scripts/assets/retarget_ref.jpg dist/assets/
 
 echo "Files copied."
 

@@ -121,9 +121,9 @@ Displayed as blob URL in browser
 ```
 
 ## Next Steps (Optional Enhancements)
-- [ ] Self-host Pyodide for offline capability
-- [ ] Add pyodide-pack tree shaking to reduce bundle size
-- [ ] Add Web Worker for non-blocking processing
+- [ ] Self-host Pyodide for offline capability <- DO THIS
+- [ ] Add pyodide-pack tree shaking to reduce bundle size <- DO THIS
+- [ ] Add Web Worker for non-blocking processing <- DO THIS
 - [ ] Add more options (keep-luminosity toggle)
 - [ ] Add batch processing support
 - [ ] Add image size/format validation

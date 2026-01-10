@@ -196,6 +196,41 @@ function updateProcessButton() {
     btn.disabled = !pyodide || !wasmReady || !inputImageData || !refImageData;
 }
 
+// Load default images
+async function loadDefaultImages() {
+    try {
+        // Load input image
+        const inputResponse = await fetch('./assets/retarget_input.jpg');
+        const inputBlob = await inputResponse.blob();
+        const inputArrayBuffer = await inputBlob.arrayBuffer();
+        inputImageData = new Uint8Array(inputArrayBuffer);
+
+        const inputPreview = document.getElementById('input-preview');
+        inputPreview.src = URL.createObjectURL(inputBlob);
+        inputPreview.style.display = 'block';
+        const inputBox = document.getElementById('input-upload');
+        inputBox.classList.add('has-image');
+        inputBox.querySelectorAll('.hint').forEach(el => el.style.display = 'none');
+
+        // Load reference image
+        const refResponse = await fetch('./assets/retarget_ref.jpg');
+        const refBlob = await refResponse.blob();
+        const refArrayBuffer = await refBlob.arrayBuffer();
+        refImageData = new Uint8Array(refArrayBuffer);
+
+        const refPreview = document.getElementById('ref-preview');
+        refPreview.src = URL.createObjectURL(refBlob);
+        refPreview.style.display = 'block';
+        const refBox = document.getElementById('ref-upload');
+        refBox.classList.add('has-image');
+        refBox.querySelectorAll('.hint').forEach(el => el.style.display = 'none');
+
+        updateProcessButton();
+    } catch (e) {
+        console.log('Could not load default images:', e);
+    }
+}
+
 // Process images
 async function processImages() {
     const method = document.getElementById('method-select').value;
@@ -276,6 +311,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('process-btn').addEventListener('click', processImages);
+
+    // Load default images
+    loadDefaultImages();
 
     // Start initialization
     init();
