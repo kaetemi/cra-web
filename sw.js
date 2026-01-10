@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cra-web-v2';
+const CACHE_NAME = 'cra-web-v5';
 
 // Resources to cache immediately on install
 const PRECACHE_RESOURCES = [

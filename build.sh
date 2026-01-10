@@ -33,9 +33,12 @@ mkdir -p dist/wasm dist/scripts dist/assets
 echo ""
 echo "[3/4] Copying files..."
 
-# Copy WASM files
+# Copy WASM dither files
 cp dither/pkg/dither.js dist/wasm/
 cp dither/pkg/dither_bg.wasm dist/wasm/
+
+# Copy CRA WASM files
+cp -r wasm_cra dist/
 
 # Copy Python scripts
 cp scripts/color_correction_basic.py dist/scripts/

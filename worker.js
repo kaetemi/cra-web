@@ -72,9 +72,13 @@ async function initialize() {
     }
 }
 
+// Track currently active script
+let currentScript = null;
+
 // Load a Python script
 async function loadScript(scriptName) {
-    if (scriptsLoaded[scriptName]) {
+    // Always reload if switching to a different script (each script defines its own main())
+    if (currentScript === scriptName && scriptsLoaded[scriptName]) {
         return;
     }
 
@@ -86,6 +90,7 @@ async function loadScript(scriptName) {
 
     await pyodide.runPythonAsync(code);
     scriptsLoaded[scriptName] = true;
+    currentScript = scriptName;
 }
 
 // Decode PNG image data to raw RGBA pixels
