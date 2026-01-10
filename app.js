@@ -25,6 +25,30 @@ let wasmReady = false;
 let inputImageData = null;
 let refImageData = null;
 let scriptsLoaded = {};
+let consoleOutput = null;
+
+// Format and append a line to console output
+function appendConsole(text) {
+    if (!consoleOutput) return;
+
+    // Count leading spaces to determine indent level
+    const match = text.match(/^(\s*)/);
+    const spaces = match ? match[1].length : 0;
+    const indentLevel = Math.min(Math.floor(spaces / 2), 3);
+
+    const line = document.createElement('div');
+    line.className = `indent-${indentLevel}`;
+    line.textContent = text.trimStart();
+    consoleOutput.appendChild(line);
+    consoleOutput.scrollTop = consoleOutput.scrollHeight;
+}
+
+// Clear console output
+function clearConsole() {
+    if (consoleOutput) {
+        consoleOutput.innerHTML = '';
+    }
+}
 
 // Initialize everything
 async function init() {
@@ -58,9 +82,16 @@ async function init() {
         await pyodide.loadPackage(['numpy', 'opencv-python', 'pillow', 'scikit-image', 'micropip']);
         progressBar.style.width = '85%';
 
-        // Step 4: Install blendmodes (not needed for these scripts but mentioned in plan)
+        // Step 4: Setup Python stdout redirect
         statusEl.textContent = 'Finalizing setup...';
         progressBar.style.width = '95%';
+
+        // Redirect Python stdout to our console
+        pyodide.setStdout({
+            batched: (text) => {
+                appendConsole(text);
+            }
+        });
 
         // Done
         progressBar.style.width = '100%';
@@ -174,11 +205,13 @@ async function processImages() {
     const errorMessage = document.getElementById('error-message');
     const statusMessage = document.getElementById('processing-status');
     const outputSection = document.getElementById('output-section');
+    consoleOutput = document.getElementById('console-output');
 
     errorMessage.classList.remove('visible');
     loading.classList.add('active');
     processBtn.disabled = true;
     outputSection.style.display = 'none';
+    clearConsole();
 
     try {
         // Load the script
@@ -191,7 +224,7 @@ async function processImages() {
         pyodide.FS.writeFile('/ref.png', refImageData);
 
         // Build the main call based on script and options
-        statusMessage.textContent = 'Processing (this may take a while)...';
+        statusMessage.textContent = 'Running color correction...';
 
         let pythonCode;
         if (config.script === 'color_correction_basic.py') {

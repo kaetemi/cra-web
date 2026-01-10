@@ -212,6 +212,30 @@
             font-size: 14px;
         }
 
+        .console-output {
+            margin-top: 20px;
+            padding: 15px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            border-radius: 8px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 12px;
+            text-align: left;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.4;
+        }
+
+        .console-output:empty {
+            display: none;
+        }
+
+        .console-output .indent-0 { color: #569cd6; }
+        .console-output .indent-1 { color: #9cdcfe; margin-left: 1em; }
+        .console-output .indent-2 { color: #b5cea8; margin-left: 2em; }
+        .console-output .indent-3 { color: #ce9178; margin-left: 3em; }
+
         .init-overlay {
             position: fixed;
             top: 0;
@@ -345,6 +369,7 @@
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <p class="status-message" id="processing-status">Processing images...</p>
+            <pre class="console-output" id="console-output"></pre>
         </div>
     </div>
 
