@@ -4,7 +4,9 @@
 importScripts('https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js');
 
 let pyodide = null;
-let wasmReady = false;
+let wasmDitherReady = false;
+let wasmCraReady = false;
+let craWasm = null;
 let scriptsLoaded = {};
 
 // Send progress update to main thread
@@ -30,16 +32,23 @@ function sendComplete(outputData) {
 // Initialize Pyodide and WASM
 async function initialize() {
     try {
-        // Load WASM dither module
+        // Load WASM dither module (for Python fallback)
         sendProgress('init', 'Loading WASM dither module...', 5);
         const wasmModule = await import('./wasm/dither.js');
         await wasmModule.default();
         self.floyd_steinberg_dither_wasm = wasmModule.floyd_steinberg_dither;
-        wasmReady = true;
-        sendProgress('init', 'WASM module loaded', 10);
+        wasmDitherReady = true;
+        sendProgress('init', 'WASM dither module loaded', 8);
+
+        // Load CRA WASM module (full Rust implementation)
+        sendProgress('init', 'Loading CRA WASM module...', 10);
+        craWasm = await import('./wasm_cra/cra_wasm.js');
+        await craWasm.default();
+        wasmCraReady = true;
+        sendProgress('init', 'CRA WASM module loaded', 15);
 
         // Load Pyodide
-        sendProgress('init', 'Loading Python runtime...', 15);
+        sendProgress('init', 'Loading Python runtime...', 18);
         pyodide = await loadPyodide({
             indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/'
         });
@@ -79,37 +88,190 @@ async function loadScript(scriptName) {
     scriptsLoaded[scriptName] = true;
 }
 
-// Process images
-async function processImages(inputData, refData, method, config) {
+// Decode PNG image data to raw RGBA pixels
+async function decodeImage(data) {
+    const blob = new Blob([data], { type: 'image/png' });
+    const bitmap = await createImageBitmap(blob);
+    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    const imageData = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
+    return {
+        width: bitmap.width,
+        height: bitmap.height,
+        data: imageData.data // RGBA
+    };
+}
+
+// Convert RGBA to RGB (remove alpha channel)
+function rgbaToRgb(rgbaData) {
+    const pixels = rgbaData.length / 4;
+    const rgb = new Uint8Array(pixels * 3);
+    for (let i = 0; i < pixels; i++) {
+        rgb[i * 3] = rgbaData[i * 4];
+        rgb[i * 3 + 1] = rgbaData[i * 4 + 1];
+        rgb[i * 3 + 2] = rgbaData[i * 4 + 2];
+    }
+    return rgb;
+}
+
+// Encode RGB pixels to PNG
+async function encodePng(rgbData, width, height) {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    const imageData = ctx.createImageData(width, height);
+
+    // Convert RGB to RGBA
+    const pixels = width * height;
+    for (let i = 0; i < pixels; i++) {
+        imageData.data[i * 4] = rgbData[i * 3];
+        imageData.data[i * 4 + 1] = rgbData[i * 3 + 1];
+        imageData.data[i * 4 + 2] = rgbData[i * 3 + 2];
+        imageData.data[i * 4 + 3] = 255;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    return new Uint8Array(await blob.arrayBuffer());
+}
+
+// Process images using WASM
+async function processImagesWasm(inputData, refData, method, config) {
+    sendProgress('process', 'Decoding images...', 10);
+    const inputImg = await decodeImage(inputData);
+    const refImg = await decodeImage(refData);
+
+    sendProgress('process', 'Converting to RGB...', 20);
+    const inputRgb = rgbaToRgb(inputImg.data);
+    const refRgb = rgbaToRgb(refImg.data);
+
+    sendProgress('process', 'Processing with WASM...', 30);
+    sendConsole(`Processing ${inputImg.width}x${inputImg.height} image with WASM...`);
+    sendConsole(`Method: ${method}`);
+
+    let resultRgb;
+    const startTime = performance.now();
+
+    switch (method) {
+        case 'lab':
+            sendConsole('Running basic LAB histogram matching...');
+            resultRgb = craWasm.color_correct_basic_lab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false // keep_luminosity
+            );
+            break;
+
+        case 'rgb':
+            sendConsole('Running basic RGB histogram matching...');
+            resultRgb = craWasm.color_correct_basic_rgb(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height
+            );
+            break;
+
+        case 'cra_lab':
+            sendConsole('Running CRA LAB color correction...');
+            resultRgb = craWasm.color_correct_cra_lab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false // keep_luminosity
+            );
+            break;
+
+        case 'cra_lab_tiled':
+            sendConsole('Running CRA LAB tiled color correction (with tiled luminosity)...');
+            resultRgb = craWasm.color_correct_tiled_lab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                true // tiled_luminosity
+            );
+            break;
+
+        case 'cra_lab_tiled_ab':
+            sendConsole('Running CRA LAB tiled color correction (AB only)...');
+            resultRgb = craWasm.color_correct_tiled_lab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false // tiled_luminosity
+            );
+            break;
+
+        case 'cra_rgb':
+            sendConsole('Running CRA RGB color correction...');
+            resultRgb = craWasm.color_correct_cra_rgb(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false // use_perceptual
+            );
+            break;
+
+        case 'cra_rgb_perceptual':
+            sendConsole('Running CRA RGB color correction (perceptual)...');
+            resultRgb = craWasm.color_correct_cra_rgb(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                true // use_perceptual
+            );
+            break;
+
+        default:
+            throw new Error(`Unknown method: ${method}`);
+    }
+
+    const elapsed = performance.now() - startTime;
+    sendConsole(`Processing completed in ${elapsed.toFixed(0)}ms`);
+
+    sendProgress('process', 'Encoding result...', 80);
+    const outputData = await encodePng(resultRgb, inputImg.width, inputImg.height);
+
+    return outputData;
+}
+
+// Process images using Python
+async function processImagesPython(inputData, refData, method, config) {
+    sendProgress('process', 'Loading script...', 0);
+    await loadScript(config.script);
+
+    sendProgress('process', 'Preparing images...', 10);
+    pyodide.FS.writeFile('/input.png', inputData);
+    pyodide.FS.writeFile('/ref.png', refData);
+
+    sendProgress('process', 'Processing...', 20);
+
+    let pythonCode;
+    if (config.script === 'color_correction_basic.py') {
+        pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
+    } else if (config.script === 'color_correction_basic_rgb.py') {
+        pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True)`;
+    } else if (config.script === 'color_correction_cra.py') {
+        pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
+    } else if (config.script === 'color_correction_tiled.py') {
+        const tiledLum = config.options.tiled_luminosity ? 'True' : 'False';
+        pythonCode = `main('/input.png', '/ref.png', '/output.png', tiled_luminosity=${tiledLum}, verbose=True)`;
+    } else if (config.script === 'color_correction_cra_rgb.py') {
+        const perceptual = config.options.perceptual ? 'True' : 'False';
+        pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True, use_perceptual=${perceptual})`;
+    }
+
+    await pyodide.runPythonAsync(pythonCode);
+
+    sendProgress('process', 'Reading result...', 90);
+    const outputData = pyodide.FS.readFile('/output.png');
+
+    return outputData;
+}
+
+// Process images (dispatcher)
+async function processImages(inputData, refData, method, config, useWasm) {
     try {
-        sendProgress('process', 'Loading script...', 0);
-        await loadScript(config.script);
+        let outputData;
 
-        sendProgress('process', 'Preparing images...', 10);
-        pyodide.FS.writeFile('/input.png', inputData);
-        pyodide.FS.writeFile('/ref.png', refData);
-
-        sendProgress('process', 'Processing...', 20);
-
-        let pythonCode;
-        if (config.script === 'color_correction_basic.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
-        } else if (config.script === 'color_correction_basic_rgb.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True)`;
-        } else if (config.script === 'color_correction_cra.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
-        } else if (config.script === 'color_correction_tiled.py') {
-            const tiledLum = config.options.tiled_luminosity ? 'True' : 'False';
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', tiled_luminosity=${tiledLum}, verbose=True)`;
-        } else if (config.script === 'color_correction_cra_rgb.py') {
-            const perceptual = config.options.perceptual ? 'True' : 'False';
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True, use_perceptual=${perceptual})`;
+        if (useWasm && wasmCraReady) {
+            outputData = await processImagesWasm(inputData, refData, method, config);
+        } else {
+            outputData = await processImagesPython(inputData, refData, method, config);
         }
-
-        await pyodide.runPythonAsync(pythonCode);
-
-        sendProgress('process', 'Reading result...', 90);
-        const outputData = pyodide.FS.readFile('/output.png');
 
         sendComplete(outputData);
 
@@ -127,7 +289,7 @@ self.onmessage = async function(e) {
             await initialize();
             break;
         case 'process':
-            await processImages(data.inputData, data.refData, data.method, data.config);
+            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm);
             break;
     }
 };

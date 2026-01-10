@@ -1,3 +1,9 @@
+// Implementation descriptions
+const IMPL_DESCRIPTIONS = {
+    'wasm': 'Pure Rust implementation compiled to WebAssembly. Fast and runs entirely in the browser.',
+    'python': 'Python implementation running via Pyodide. Slower but matches the original scripts exactly.'
+};
+
 // Method descriptions
 const METHOD_DESCRIPTIONS = {
     'lab': 'Basic LAB histogram matching. Converts to LAB color space and matches histograms for each channel independently. Fast but may cause color flips on axis-aligned colors.',
@@ -184,6 +190,21 @@ function updateMethodDescription() {
     description.textContent = METHOD_DESCRIPTIONS[select.value];
 }
 
+// Update implementation toggle label and description
+function updateImplementationLabel() {
+    const useWasm = document.getElementById('use-wasm').checked;
+    const label = document.getElementById('impl-label');
+    const description = document.getElementById('impl-description');
+
+    if (useWasm) {
+        label.textContent = 'WASM (Rust)';
+        description.textContent = IMPL_DESCRIPTIONS.wasm;
+    } else {
+        label.textContent = 'Python (Pyodide)';
+        description.textContent = IMPL_DESCRIPTIONS.python;
+    }
+}
+
 // Update process button state
 function updateProcessButton() {
     const btn = document.getElementById('process-btn');
@@ -229,6 +250,7 @@ async function loadDefaultImages() {
 function processImages() {
     const method = document.getElementById('method-select').value;
     const config = METHOD_CONFIG[method];
+    const useWasm = document.getElementById('use-wasm').checked;
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');
     const errorMessage = document.getElementById('error-message');
@@ -242,7 +264,8 @@ function processImages() {
     outputSection.style.display = 'none';
     clearConsole();
 
-    statusMessage.textContent = 'Running color correction...';
+    const implName = useWasm ? 'WASM' : 'Python';
+    statusMessage.textContent = `Running color correction (${implName})...`;
 
     // Send processing request to worker
     worker.postMessage({
@@ -250,7 +273,8 @@ function processImages() {
         inputData: inputImageData,
         refData: refImageData,
         method: method,
-        config: config
+        config: config,
+        useWasm: useWasm
     });
 }
 
@@ -267,6 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
     handleFileUpload('ref-file', 'ref-preview', 'ref-upload', false);
 
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
+    document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Load default images

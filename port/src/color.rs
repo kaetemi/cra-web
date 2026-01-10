@@ -1,0 +1,201 @@
+/// Color conversion utilities for sRGB, Linear RGB, and Lab color spaces.
+
+// RGB to XYZ matrix (sRGB/Rec.709 primaries, D65 illuminant)
+const RGB_TO_XYZ: [[f32; 3]; 3] = [
+    [0.412453, 0.357580, 0.180423],
+    [0.212671, 0.715160, 0.072169],
+    [0.019334, 0.119193, 0.950227],
+];
+
+// XYZ to RGB matrix (inverse of above)
+const XYZ_TO_RGB: [[f32; 3]; 3] = [
+    [3.240479, -1.537150, -0.498535],
+    [-0.969256, 1.875991, 0.041556],
+    [0.055648, -0.204043, 1.057311],
+];
+
+// D65 white point
+const X_N: f32 = 0.950456;
+#[allow(dead_code)]
+const Y_N: f32 = 1.0;
+const Z_N: f32 = 1.088754;
+
+// Lab threshold: (6/29)^3
+const EPSILON: f32 = 0.008856;
+
+// Lab linear segment slope: used for f(t) linear segment
+const KAPPA_INV: f32 = 7.787;
+
+/// Convert sRGB value (0-1) to linear RGB
+#[inline]
+pub fn srgb_to_linear_single(srgb: f32) -> f32 {
+    if srgb <= 0.04045 {
+        srgb / 12.92
+    } else {
+        ((srgb + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// Convert linear RGB value (0-1) to sRGB
+#[inline]
+pub fn linear_to_srgb_single(linear: f32) -> f32 {
+    if linear <= 0.04045 / 12.92 {
+        linear * 12.92
+    } else {
+        1.055 * linear.max(0.0).powf(1.0 / 2.4) - 0.055
+    }
+}
+
+/// Convert sRGB image to linear RGB (in-place modification of flat array)
+pub fn srgb_to_linear(data: &mut [f32]) {
+    for v in data.iter_mut() {
+        *v = srgb_to_linear_single(*v);
+    }
+}
+
+/// Convert linear RGB image to sRGB (in-place modification of flat array)
+pub fn linear_to_srgb(data: &mut [f32]) {
+    for v in data.iter_mut() {
+        *v = linear_to_srgb_single(*v);
+    }
+}
+
+/// Lab f(t) function - attempt to linearize cube root near zero
+#[inline]
+fn lab_f(t: f32) -> f32 {
+    if t > EPSILON {
+        t.cbrt()
+    } else {
+        KAPPA_INV * t + 16.0 / 116.0
+    }
+}
+
+/// Inverse of lab_f
+#[inline]
+fn lab_f_inv(t: f32) -> f32 {
+    // Threshold in f-space: f(EPSILON) ≈ 0.206893
+    if t > 0.206893 {
+        t * t * t
+    } else {
+        (t - 16.0 / 116.0) / KAPPA_INV
+    }
+}
+
+/// Convert linear RGB (0-1) to Lab
+/// Returns (L, a, b) where L is 0-100 and a,b are roughly -127 to +127
+#[inline]
+pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // RGB -> XYZ, normalized by white point
+    let x = (RGB_TO_XYZ[0][0] * r + RGB_TO_XYZ[0][1] * g + RGB_TO_XYZ[0][2] * b) / X_N;
+    let y = RGB_TO_XYZ[1][0] * r + RGB_TO_XYZ[1][1] * g + RGB_TO_XYZ[1][2] * b; // Y_N = 1.0
+    let z = (RGB_TO_XYZ[2][0] * r + RGB_TO_XYZ[2][1] * g + RGB_TO_XYZ[2][2] * b) / Z_N;
+
+    // Apply f(t)
+    let fx = lab_f(x);
+    let fy = lab_f(y);
+    let fz = lab_f(z);
+
+    // XYZ -> Lab
+    let l = 116.0 * fy - 16.0;
+    let a = 500.0 * (fx - fy);
+    let b_ch = 200.0 * (fy - fz);
+
+    (l, a, b_ch)
+}
+
+/// Convert Lab to linear RGB (0-1)
+#[inline]
+pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+    // Lab -> f values
+    let fy = (l + 16.0) / 116.0;
+    let fx = a / 500.0 + fy;
+    let fz = fy - b / 200.0;
+
+    // Invert f(t) to get XYZ (normalized)
+    let x = lab_f_inv(fx);
+    let y = lab_f_inv(fy);
+    let z = lab_f_inv(fz);
+
+    // Denormalize by white point
+    let x = x * X_N;
+    // y = y * Y_N where Y_N = 1.0
+    let z = z * Z_N;
+
+    // XYZ -> linear RGB
+    let r = XYZ_TO_RGB[0][0] * x + XYZ_TO_RGB[0][1] * y + XYZ_TO_RGB[0][2] * z;
+    let g = XYZ_TO_RGB[1][0] * x + XYZ_TO_RGB[1][1] * y + XYZ_TO_RGB[1][2] * z;
+    let b_out = XYZ_TO_RGB[2][0] * x + XYZ_TO_RGB[2][1] * y + XYZ_TO_RGB[2][2] * z;
+
+    (r, g, b_out)
+}
+
+/// Convert linear RGB image (HxWx3 flat array) to Lab
+/// Output: L is 0-100, a,b are roughly -127 to +127
+pub fn image_rgb_to_lab(rgb: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut lab = vec![0.0f32; width * height * 3];
+    for i in 0..(width * height) {
+        let idx = i * 3;
+        let (l, a, b) = linear_rgb_to_lab(rgb[idx], rgb[idx + 1], rgb[idx + 2]);
+        lab[idx] = l;
+        lab[idx + 1] = a;
+        lab[idx + 2] = b;
+    }
+    lab
+}
+
+/// Convert Lab image (HxWx3 flat array) to linear RGB
+pub fn image_lab_to_rgb(lab: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut rgb = vec![0.0f32; width * height * 3];
+    for i in 0..(width * height) {
+        let idx = i * 3;
+        let (r, g, b) = lab_to_linear_rgb(lab[idx], lab[idx + 1], lab[idx + 2]);
+        rgb[idx] = r;
+        rgb[idx + 1] = g;
+        rgb[idx + 2] = b;
+    }
+    rgb
+}
+
+/// Extract a single channel from an interleaved image
+pub fn extract_channel(img: &[f32], width: usize, height: usize, channel: usize) -> Vec<f32> {
+    let mut ch = vec![0.0f32; width * height];
+    for i in 0..(width * height) {
+        ch[i] = img[i * 3 + channel];
+    }
+    ch
+}
+
+/// Set a single channel in an interleaved image
+#[allow(dead_code)]
+pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize, data: &[f32]) {
+    for i in 0..(width * height) {
+        img[i * 3 + channel] = data[i];
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_srgb_linear_roundtrip() {
+        let test_values = [0.0, 0.04045, 0.1, 0.5, 1.0];
+        for &v in &test_values {
+            let linear = srgb_to_linear_single(v);
+            let back = linear_to_srgb_single(linear);
+            assert!((v - back).abs() < 1e-5, "Failed at {}: got {}", v, back);
+        }
+    }
+
+    #[test]
+    fn test_lab_roundtrip() {
+        let test_rgb = [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.5, 0.3, 0.7)];
+        for (r, g, b) in test_rgb {
+            let (l, a, b_ch) = linear_rgb_to_lab(r, g, b);
+            let (r2, g2, b2) = lab_to_linear_rgb(l, a, b_ch);
+            assert!((r - r2).abs() < 1e-4, "R failed: {} vs {}", r, r2);
+            assert!((g - g2).abs() < 1e-4, "G failed: {} vs {}", g, g2);
+            assert!((b - b2).abs() < 1e-4, "B failed: {} vs {}", b, b2);
+        }
+    }
+}

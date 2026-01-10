@@ -312,6 +312,82 @@
             font-weight: 600;
             color: #555;
         }
+
+        .implementation-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+        }
+
+        .toggle-label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #e67e22;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #27ae60;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .toggle-text {
+            font-weight: 600;
+            color: #333;
+            min-width: 100px;
+        }
+
+        .impl-description {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -360,6 +436,20 @@
             <div class="method-description" id="method-description">
                 Chroma Rotation Averaging in LAB color space. Rotates the AB chroma plane at multiple angles (0°, 30°, 60°), performs histogram matching at each rotation, then averages the results. This prevents color flips and preserves complex color relationships.
             </div>
+        </div>
+
+        <div class="implementation-section">
+            <label class="toggle-container">
+                <span class="toggle-label">Implementation:</span>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="use-wasm" checked>
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="toggle-text" id="impl-label">WASM (Rust)</span>
+            </label>
+            <p class="impl-description" id="impl-description">
+                Pure Rust implementation compiled to WebAssembly. Fast and runs entirely in the browser.
+            </p>
         </div>
 
         <button class="process-btn" id="process-btn" disabled>Process Images</button>
