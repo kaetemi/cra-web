@@ -11,12 +11,25 @@ pub enum InterpolationMode {
     Linear,
 }
 
+/// Wang hash for tie-breaking - excellent avalanche properties.
+/// Each bit of input affects all bits of output.
+#[inline]
+fn wang_hash(mut x: u32) -> u32 {
+    x = (x ^ 61) ^ (x >> 16);
+    x = x.wrapping_mul(9);
+    x = x ^ (x >> 4);
+    x = x.wrapping_mul(0x27d4eb2d);
+    x = x ^ (x >> 15);
+    x
+}
+
 /// Match histogram for f32 values using sort-based quantile matching.
 /// No binning/quantization required - works directly on continuous values.
 ///
 /// This approach sorts both arrays and maps quantiles directly:
 /// - For each source pixel at rank r, assign the reference value at the equivalent rank
 /// - With linear interpolation, smoothly interpolates between adjacent reference values
+/// - Uses random tie-breaking to avoid banding artifacts on flat regions
 ///
 /// Args:
 ///     source: Source values (any range, typically 0.0-255.0)
@@ -33,12 +46,17 @@ pub fn match_histogram_f32(source: &[f32], reference: &[f32], mode: Interpolatio
     let src_len = source.len();
     let ref_len = reference.len();
 
-    // Get sorted indices for source (argsort)
+    // Get sorted indices for source (argsort) with random tie-breaking.
+    // This prevents horizontal banding when flat regions map to varying reference.
     let mut src_indices: Vec<usize> = (0..src_len).collect();
     src_indices.sort_unstable_by(|&a, &b| {
-        source[a]
-            .partial_cmp(&source[b])
-            .unwrap_or(std::cmp::Ordering::Equal)
+        match source[a].partial_cmp(&source[b]) {
+            Some(std::cmp::Ordering::Equal) | None => {
+                // Random tie-breaking using Wang hash of indices
+                wang_hash(a as u32).cmp(&wang_hash(b as u32))
+            }
+            Some(ord) => ord,
+        }
     });
 
     // Sort reference values
