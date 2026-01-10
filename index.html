@@ -325,11 +325,11 @@
         <div class="method-section">
             <label for="method-select">Color Matching Method</label>
             <select id="method-select" class="method-select">
-                <option value="lab">Lab (Basic LAB histogram matching)</option>
+                <option value="lab">* Lab (Basic LAB histogram matching)</option>
                 <option value="rgb">RGB (Basic RGB histogram matching)</option>
-                <option value="cra_lab" selected>CRA Lab (Recommended - Chroma Rotation in LAB)</option>
+                <option value="cra_lab" selected>* CRA Lab (Recommended - Chroma Rotation in LAB)</option>
                 <option value="cra_lab_tiled">CRA Lab Tiled (For spatially varying colors)</option>
-                <option value="cra_lab_tiled_ab">CRA Lab Tiled AB (Tiled with original luminosity)</option>
+                <option value="cra_lab_tiled_ab">* CRA Lab Tiled AB (Tiled AB + global luminosity)</option>
                 <option value="cra_rgb">CRA RGB (Chroma Rotation in RGB)</option>
                 <option value="cra_rgb_perceptual">CRA RGB Perceptual (RGB with perceptual weighting)</option>
             </select>
@@ -367,6 +367,7 @@
         <a class="download-btn" id="download-btn" download="cra_output.png">Download Result</a>
     </div>
 
-    <script src="app.js"></script>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js"></script>
+    <script src="app.js" type="module"></script>
 </body>
 </html>

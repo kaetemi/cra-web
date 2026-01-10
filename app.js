@@ -4,7 +4,7 @@ const METHOD_DESCRIPTIONS = {
     'rgb': 'Basic RGB histogram matching in linear RGB space. Simple approach that matches each RGB channel independently. Can cause color shifts.',
     'cra_lab': 'Chroma Rotation Averaging in LAB color space. Rotates the AB chroma plane at multiple angles (0°, 30°, 60°), performs histogram matching at each rotation, then averages the results. This prevents color flips and preserves complex color relationships.',
     'cra_lab_tiled': 'CRA with overlapping tile-based processing. Divides the image into blocks with 50% overlap, applies CRA to each block, then blends results using Hamming windows. Best for images with spatially varying color casts. Includes tiled luminosity processing.',
-    'cra_lab_tiled_ab': 'CRA tiled processing for chroma channels only. Same as CRA Lab Tiled but preserves the original luminosity (L channel) before the global histogram match. Use when you want localized color correction but global luminosity matching.',
+    'cra_lab_tiled_ab': 'CRA tiled processing for AB chroma channels with global luminosity matching. Applies per-block CRA correction to the A and B channels only, then performs a final global histogram match on all LAB channels including luminosity. Best balance of localized color correction with consistent global tone.',
     'cra_rgb': 'Chroma Rotation Averaging in RGB space. Rotates the RGB cube around the neutral gray axis (1,1,1) using Rodrigues\' rotation formula at 0°, 40°, 80°. Works well when you want to stay in RGB space.',
     'cra_rgb_perceptual': 'CRA RGB with perceptual weighting. Scales channels by Rec.709 luminance weights before rotation, giving more importance to green (which humans perceive most sensitively) and less to blue. Can produce more natural-looking results.'
 };
@@ -79,14 +79,19 @@ async function init() {
     }
 }
 
-// Load a Python script
+// Load a Python script (stripping out the __main__ block)
 async function loadScript(scriptName) {
     if (scriptsLoaded[scriptName]) {
         return;
     }
 
     const response = await fetch('./scripts/' + scriptName);
-    const code = await response.text();
+    let code = await response.text();
+
+    // Remove the if __name__ == "__main__": block to prevent argparse from running
+    // This regex matches the block and everything after it
+    code = code.replace(/if\s+__name__\s*==\s*["']__main__["']:\s*[\s\S]*$/, '');
+
     await pyodide.runPythonAsync(code);
     scriptsLoaded[scriptName] = true;
 }
