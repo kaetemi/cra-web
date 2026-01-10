@@ -41,6 +41,7 @@ pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u
 /// Dither multiple channels and interleave them
 /// channels: Vec of channel data, each scaled to 0-255
 /// Returns interleaved u8 data
+#[allow(dead_code)]
 pub fn dither_channel_stack(channels: &[Vec<f32>], width: usize, height: usize) -> Vec<u8> {
     let num_channels = channels.len();
     let pixels = width * height;
@@ -63,6 +64,7 @@ pub fn dither_channel_stack(channels: &[Vec<f32>], width: usize, height: usize) 
 }
 
 /// Dither RGB float image (0-1 range) to uint8
+#[allow(dead_code)]
 pub fn dither_rgb(rgb: &[f32], width: usize, height: usize) -> Vec<u8> {
     let pixels = width * height;
 

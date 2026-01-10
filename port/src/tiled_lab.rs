@@ -2,9 +2,10 @@
 /// Corresponds to color_correction_tiled.py
 
 use crate::color::{
-    extract_channel, image_lab_to_rgb, image_rgb_to_lab, linear_to_srgb, srgb_to_linear,
+    interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
+    linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
-use crate::dither::{dither_rgb, floyd_steinberg_dither};
+use crate::dither::floyd_steinberg_dither;
 use crate::histogram::match_histogram;
 use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
@@ -75,7 +76,6 @@ fn process_block_iteration(
     rotation_angles: &[f32],
 ) -> (Vec<f32>, Vec<f32>) {
     let block_pixels = block_width * block_height;
-    let ref_block_pixels = ref_block_width * ref_block_height;
 
     let mut all_corrected_a: Vec<Vec<f32>> = Vec::new();
     let mut all_corrected_b: Vec<Vec<f32>> = Vec::new();
@@ -137,9 +137,6 @@ fn process_block_iteration_with_l(
     ref_block_height: usize,
     rotation_angles: &[f32],
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let block_pixels = block_width * block_height;
-    let ref_block_pixels = ref_block_width * ref_block_height;
-
     // Process AB channels
     let (avg_a, avg_b) = process_block_iteration(
         current_a,
@@ -187,26 +184,14 @@ pub fn color_correct_tiled_lab(
     tiled_luminosity: bool,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
-    let ref_pixels = ref_width * ref_height;
 
-    // Convert to linear RGB
-    let mut input_linear = input_srgb.to_vec();
-    let mut ref_linear = ref_srgb.to_vec();
-    srgb_to_linear(&mut input_linear);
-    srgb_to_linear(&mut ref_linear);
+    // Convert to separate linear RGB channels
+    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
-    // Convert to LAB
-    let input_lab = image_rgb_to_lab(&input_linear, input_width, input_height);
-    let ref_lab = image_rgb_to_lab(&ref_linear, ref_width, ref_height);
-
-    // Extract channels
-    let input_l = extract_channel(&input_lab, input_width, input_height, 0);
-    let input_a = extract_channel(&input_lab, input_width, input_height, 1);
-    let input_b = extract_channel(&input_lab, input_width, input_height, 2);
-
-    let ref_l = extract_channel(&ref_lab, ref_width, ref_height, 0);
-    let ref_a = extract_channel(&ref_lab, ref_width, ref_height, 1);
-    let ref_b = extract_channel(&ref_lab, ref_width, ref_height, 2);
+    // Convert to separate LAB channels
+    let (input_l, input_a, input_b) = linear_rgb_to_lab_channels(&in_r, &in_g, &in_b);
+    let (ref_l, ref_a, ref_b) = linear_rgb_to_lab_channels(&ref_r, &ref_g, &ref_b);
 
     // Store original L for use when tiled_luminosity is disabled
     let original_l = input_l.clone();
@@ -413,18 +398,17 @@ pub fn color_correct_tiled_lab(
     let final_l = scale_uint8_to_l(&matched_l);
     let (final_a, final_b) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
 
-    // Reconstruct LAB image
-    let mut final_lab = vec![0.0f32; input_pixels * 3];
-    for i in 0..input_pixels {
-        final_lab[i * 3] = final_l[i];
-        final_lab[i * 3 + 1] = final_a[i];
-        final_lab[i * 3 + 2] = final_b[i];
-    }
+    // Convert LAB back to linear RGB (separate channels)
+    let (out_r, out_g, out_b) = lab_to_linear_rgb_channels(&final_l, &final_a, &final_b);
 
-    // Convert back to linear RGB, then sRGB
-    let mut final_linear = image_lab_to_rgb(&final_lab, input_width, input_height);
-    linear_to_srgb(&mut final_linear);
+    // Convert to sRGB and scale to 0-255
+    let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Final dither to uint8
-    dither_rgb(&final_linear, input_width, input_height)
+    // Dither each channel
+    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
+    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
+    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+
+    // Interleave only at the very end
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }

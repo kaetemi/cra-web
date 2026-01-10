@@ -1,8 +1,10 @@
 /// Basic RGB histogram matching algorithm.
 /// Corresponds to color_correction_basic_rgb.py
 
-use crate::color::{linear_to_srgb, srgb_to_linear};
-use crate::dither::{dither_rgb, floyd_steinberg_dither};
+use crate::color::{
+    interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear_channels,
+};
+use crate::dither::floyd_steinberg_dither;
 use crate::histogram::match_histogram;
 
 /// Basic RGB histogram matching
@@ -23,59 +25,46 @@ pub fn color_correct_basic_rgb(
     ref_width: usize,
     ref_height: usize,
 ) -> Vec<u8> {
-    let input_pixels = input_width * input_height;
-    let ref_pixels = ref_width * ref_height;
+    // Convert to separate linear RGB channels
+    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
-    // Convert to linear RGB
-    let mut input_linear = input_srgb.to_vec();
-    let mut ref_linear = ref_srgb.to_vec();
-    srgb_to_linear(&mut input_linear);
-    srgb_to_linear(&mut ref_linear);
+    // Scale to 0-255 and dither each channel
+    let in_r_scaled: Vec<f32> = in_r.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
+    let in_g_scaled: Vec<f32> = in_g.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
+    let in_b_scaled: Vec<f32> = in_b.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
 
-    // Scale to 0-255 range
-    let input_scaled: Vec<Vec<f32>> = (0..3)
-        .map(|ch| {
-            (0..input_pixels)
-                .map(|i| (input_linear[i * 3 + ch] * 255.0).clamp(0.0, 255.0))
-                .collect()
-        })
-        .collect();
+    let ref_r_scaled: Vec<f32> = ref_r.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
+    let ref_g_scaled: Vec<f32> = ref_g.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
+    let ref_b_scaled: Vec<f32> = ref_b.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
 
-    let ref_scaled: Vec<Vec<f32>> = (0..3)
-        .map(|ch| {
-            (0..ref_pixels)
-                .map(|i| (ref_linear[i * 3 + ch] * 255.0).clamp(0.0, 255.0))
-                .collect()
-        })
-        .collect();
+    let in_r_u8 = floyd_steinberg_dither(&in_r_scaled, input_width, input_height);
+    let in_g_u8 = floyd_steinberg_dither(&in_g_scaled, input_width, input_height);
+    let in_b_u8 = floyd_steinberg_dither(&in_b_scaled, input_width, input_height);
 
-    // Dither each channel directly
-    let input_channels: Vec<Vec<u8>> = input_scaled
-        .iter()
-        .map(|ch| floyd_steinberg_dither(ch, input_width, input_height))
-        .collect();
-
-    let ref_channels: Vec<Vec<u8>> = ref_scaled
-        .iter()
-        .map(|ch| floyd_steinberg_dither(ch, ref_width, ref_height))
-        .collect();
+    let ref_r_u8 = floyd_steinberg_dither(&ref_r_scaled, ref_width, ref_height);
+    let ref_g_u8 = floyd_steinberg_dither(&ref_g_scaled, ref_width, ref_height);
+    let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
     // Match histograms
-    let matched_channels: Vec<Vec<u8>> = (0..3)
-        .map(|ch| match_histogram(&input_channels[ch], &ref_channels[ch]))
-        .collect();
+    let matched_r = match_histogram(&in_r_u8, &ref_r_u8);
+    let matched_g = match_histogram(&in_g_u8, &ref_g_u8);
+    let matched_b = match_histogram(&in_b_u8, &ref_b_u8);
 
-    // Scale back to 0-1 range
-    let mut matched_linear = vec![0.0f32; input_pixels * 3];
-    for i in 0..input_pixels {
-        for ch in 0..3 {
-            matched_linear[i * 3 + ch] = matched_channels[ch][i] as f32 / 255.0;
-        }
-    }
+    // Scale back to linear 0-1 range (separate channels)
+    let matched_r_linear: Vec<f32> = matched_r.iter().map(|&v| v as f32 / 255.0).collect();
+    let matched_g_linear: Vec<f32> = matched_g.iter().map(|&v| v as f32 / 255.0).collect();
+    let matched_b_linear: Vec<f32> = matched_b.iter().map(|&v| v as f32 / 255.0).collect();
 
-    // Convert back to sRGB
-    linear_to_srgb(&mut matched_linear);
+    // Convert to sRGB and scale to 0-255
+    let (r_scaled, g_scaled, b_scaled) =
+        linear_to_srgb_scaled_channels(&matched_r_linear, &matched_g_linear, &matched_b_linear);
 
-    // Final dither to uint8
-    dither_rgb(&matched_linear, input_width, input_height)
+    // Dither each channel
+    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
+    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
+    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+
+    // Interleave only at the very end
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }

@@ -2,57 +2,37 @@
 /// Corresponds to color_correction_basic.py
 
 use crate::color::{
-    extract_channel, image_lab_to_rgb, image_rgb_to_lab, linear_to_srgb, srgb_to_linear,
+    interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
+    linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
-use crate::dither::{dither_rgb, floyd_steinberg_dither};
+use crate::dither::floyd_steinberg_dither;
 use crate::histogram::match_histogram;
 
-/// Scale LAB values to uint8 range for histogram matching
-/// L: 0-100 -> 0-255
-/// A, B: -127 to 127 -> 0-255
-fn scale_lab_to_uint8(lab: &[f32], width: usize, height: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let pixels = width * height;
-    let mut l_scaled = vec![0.0f32; pixels];
-    let mut a_scaled = vec![0.0f32; pixels];
-    let mut b_scaled = vec![0.0f32; pixels];
-
-    for i in 0..pixels {
-        let idx = i * 3;
-        l_scaled[i] = lab[idx] * 255.0 / 100.0;
-        a_scaled[i] = (lab[idx + 1] + 127.0) * 255.0 / 254.0;
-        b_scaled[i] = (lab[idx + 2] + 127.0) * 255.0 / 254.0;
-    }
-
-    (l_scaled, a_scaled, b_scaled)
+/// Scale L channel: 0-100 -> 0-255
+fn scale_l_to_uint8(l: &[f32]) -> Vec<f32> {
+    l.iter().map(|&v| v * 255.0 / 100.0).collect()
 }
 
-/// Reverse the uint8 scaling back to LAB range
-fn scale_uint8_to_lab(l: &[u8], a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let pixels = l.len();
-    let mut l_lab = vec![0.0f32; pixels];
-    let mut a_lab = vec![0.0f32; pixels];
-    let mut b_lab = vec![0.0f32; pixels];
+/// Scale AB channels: -127..127 -> 0-255
+fn scale_ab_to_uint8(a: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>) {
+    let a_scaled: Vec<f32> = a.iter().map(|&v| (v + 127.0) * 255.0 / 254.0).collect();
+    let b_scaled: Vec<f32> = b.iter().map(|&v| (v + 127.0) * 255.0 / 254.0).collect();
+    (a_scaled, b_scaled)
+}
 
-    for i in 0..pixels {
-        l_lab[i] = l[i] as f32 * 100.0 / 255.0;
-        a_lab[i] = a[i] as f32 * 254.0 / 255.0 - 127.0;
-        b_lab[i] = b[i] as f32 * 254.0 / 255.0 - 127.0;
-    }
+/// Reverse L scaling: uint8 -> 0-100
+fn scale_uint8_to_l(l: &[u8]) -> Vec<f32> {
+    l.iter().map(|&v| v as f32 * 100.0 / 255.0).collect()
+}
 
-    (l_lab, a_lab, b_lab)
+/// Reverse AB scaling: uint8 -> -127..127
+fn scale_uint8_to_ab(a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>) {
+    let a_lab: Vec<f32> = a.iter().map(|&v| v as f32 * 254.0 / 255.0 - 127.0).collect();
+    let b_lab: Vec<f32> = b.iter().map(|&v| v as f32 * 254.0 / 255.0 - 127.0).collect();
+    (a_lab, b_lab)
 }
 
 /// Basic LAB histogram matching
-///
-/// Args:
-///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
-///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
-///     input_width, input_height: Input image dimensions
-///     ref_width, ref_height: Reference image dimensions
-///     keep_luminosity: If true, preserve original L channel
-///
-/// Returns:
-///     Output image as sRGB uint8, flat array HxWx3
 pub fn color_correct_basic_lab(
     input_srgb: &[f32],
     ref_srgb: &[f32],
@@ -62,66 +42,59 @@ pub fn color_correct_basic_lab(
     ref_height: usize,
     keep_luminosity: bool,
 ) -> Vec<u8> {
-    let input_pixels = input_width * input_height;
+    // Convert to separate linear RGB channels
+    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
-    // Convert to linear RGB
-    let mut input_linear = input_srgb.to_vec();
-    let mut ref_linear = ref_srgb.to_vec();
-    srgb_to_linear(&mut input_linear);
-    srgb_to_linear(&mut ref_linear);
+    // Convert to separate LAB channels
+    let (in_l, in_a, in_b_ch) = linear_rgb_to_lab_channels(&in_r, &in_g, &in_b);
+    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab_channels(&ref_r, &ref_g, &ref_b);
 
-    // Convert to LAB
-    let input_lab = image_rgb_to_lab(&input_linear, input_width, input_height);
-    let ref_lab = image_rgb_to_lab(&ref_linear, ref_width, ref_height);
+    // Store original L if preserving luminosity
+    let original_l = if keep_luminosity { in_l.clone() } else { Vec::new() };
 
-    // Store original L channel if preserving luminosity
-    let original_l: Vec<f32> = if keep_luminosity {
-        extract_channel(&input_lab, input_width, input_height, 0)
-    } else {
-        Vec::new()
-    };
+    // Scale to 0-255 range
+    let in_l_scaled = scale_l_to_uint8(&in_l);
+    let (in_a_scaled, in_b_scaled) = scale_ab_to_uint8(&in_a, &in_b_ch);
+    let ref_l_scaled = scale_l_to_uint8(&ref_l);
+    let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch);
 
-    // Scale to uint8 range
-    let (input_l, input_a, input_b) = scale_lab_to_uint8(&input_lab, input_width, input_height);
-    let (ref_l, ref_a, ref_b) = scale_lab_to_uint8(&ref_lab, ref_width, ref_height);
-
-    // Dither each channel directly
-    let input_l_u8 = floyd_steinberg_dither(&input_l, input_width, input_height);
-    let input_a_u8 = floyd_steinberg_dither(&input_a, input_width, input_height);
-    let input_b_u8 = floyd_steinberg_dither(&input_b, input_width, input_height);
-
-    let ref_pixels = ref_width * ref_height;
-    let ref_l_u8 = floyd_steinberg_dither(&ref_l, ref_width, ref_height);
-    let ref_a_u8 = floyd_steinberg_dither(&ref_a, ref_width, ref_height);
-    let ref_b_u8 = floyd_steinberg_dither(&ref_b, ref_width, ref_height);
+    // Dither each channel
+    let in_l_u8 = floyd_steinberg_dither(&in_l_scaled, input_width, input_height);
+    let in_a_u8 = floyd_steinberg_dither(&in_a_scaled, input_width, input_height);
+    let in_b_u8 = floyd_steinberg_dither(&in_b_scaled, input_width, input_height);
+    let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
+    let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
+    let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
     // Match histograms
     let (final_l, final_a, final_b) = if keep_luminosity {
-        let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
-        let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
-        let (_, a_lab, b_lab) = scale_uint8_to_lab(&vec![0u8; input_pixels], &matched_a, &matched_b);
+        let matched_a = match_histogram(&in_a_u8, &ref_a_u8);
+        let matched_b = match_histogram(&in_b_u8, &ref_b_u8);
+        let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b);
         (original_l, a_lab, b_lab)
     } else {
-        let matched_l = match_histogram(&input_l_u8, &ref_l_u8);
-        let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
-        let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
-        scale_uint8_to_lab(&matched_l, &matched_a, &matched_b)
+        let matched_l = match_histogram(&in_l_u8, &ref_l_u8);
+        let matched_a = match_histogram(&in_a_u8, &ref_a_u8);
+        let matched_b = match_histogram(&in_b_u8, &ref_b_u8);
+        let l_lab = scale_uint8_to_l(&matched_l);
+        let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b);
+        (l_lab, a_lab, b_lab)
     };
 
-    // Reconstruct LAB image
-    let mut final_lab = vec![0.0f32; input_pixels * 3];
-    for i in 0..input_pixels {
-        final_lab[i * 3] = final_l[i];
-        final_lab[i * 3 + 1] = final_a[i];
-        final_lab[i * 3 + 2] = final_b[i];
-    }
+    // Convert LAB back to linear RGB (separate channels)
+    let (out_r, out_g, out_b) = lab_to_linear_rgb_channels(&final_l, &final_a, &final_b);
 
-    // Convert back to linear RGB, then sRGB
-    let mut final_linear = image_lab_to_rgb(&final_lab, input_width, input_height);
-    linear_to_srgb(&mut final_linear);
+    // Convert to sRGB and scale to 0-255
+    let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Final dither to uint8
-    dither_rgb(&final_linear, input_width, input_height)
+    // Dither each channel
+    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
+    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
+    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+
+    // Interleave only at the very end
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }
 
 #[cfg(test)]
@@ -130,15 +103,19 @@ mod tests {
 
     #[test]
     fn test_scale_roundtrip() {
-        let lab = vec![50.0, 0.0, 0.0]; // Middle gray in LAB
-        let (l, a, b) = scale_lab_to_uint8(&lab, 1, 1);
+        let l = vec![50.0];
+        let a = vec![0.0];
+        let b = vec![0.0];
 
-        // Simulate dithering (just round for test)
-        let l_u8 = vec![l[0].round() as u8];
-        let a_u8 = vec![a[0].round() as u8];
-        let b_u8 = vec![b[0].round() as u8];
+        let l_scaled = scale_l_to_uint8(&l);
+        let (a_scaled, b_scaled) = scale_ab_to_uint8(&a, &b);
 
-        let (l2, a2, b2) = scale_uint8_to_lab(&l_u8, &a_u8, &b_u8);
+        let l_u8 = vec![l_scaled[0].round() as u8];
+        let a_u8 = vec![a_scaled[0].round() as u8];
+        let b_u8 = vec![b_scaled[0].round() as u8];
+
+        let l2 = scale_uint8_to_l(&l_u8);
+        let (a2, b2) = scale_uint8_to_ab(&a_u8, &b_u8);
 
         assert!((l2[0] - 50.0).abs() < 1.0);
         assert!((a2[0] - 0.0).abs() < 1.0);

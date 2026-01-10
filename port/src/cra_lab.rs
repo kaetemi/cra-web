@@ -2,9 +2,10 @@
 /// Corresponds to color_correction_cra.py
 
 use crate::color::{
-    extract_channel, image_lab_to_rgb, image_rgb_to_lab, linear_to_srgb, srgb_to_linear,
+    interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
+    linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
-use crate::dither::{dither_rgb, floyd_steinberg_dither};
+use crate::dither::floyd_steinberg_dither;
 use crate::histogram::match_histogram;
 use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
 
@@ -71,7 +72,6 @@ fn process_lab_iteration(
     rotation_angles: &[f32],
 ) -> (Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
-    let ref_pixels = ref_width * ref_height;
 
     let mut all_corrected_a: Vec<Vec<f32>> = Vec::new();
     let mut all_corrected_b: Vec<Vec<f32>> = Vec::new();
@@ -140,26 +140,18 @@ pub fn color_correct_cra_lab(
     keep_luminosity: bool,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
-    let ref_pixels = ref_width * ref_height;
 
-    // Convert to linear RGB
-    let mut input_linear = input_srgb.to_vec();
-    let mut ref_linear = ref_srgb.to_vec();
-    srgb_to_linear(&mut input_linear);
-    srgb_to_linear(&mut ref_linear);
+    // Convert to separate linear RGB channels
+    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
-    // Convert to LAB
-    let input_lab = image_rgb_to_lab(&input_linear, input_width, input_height);
-    let ref_lab = image_rgb_to_lab(&ref_linear, ref_width, ref_height);
+    // Convert to separate LAB channels
+    let (original_l, in_a, in_b_ch) = linear_rgb_to_lab_channels(&in_r, &in_g, &in_b);
+    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab_channels(&ref_r, &ref_g, &ref_b);
 
-    // Extract channels
-    let original_l = extract_channel(&input_lab, input_width, input_height, 0);
-    let mut current_a = extract_channel(&input_lab, input_width, input_height, 1);
-    let mut current_b = extract_channel(&input_lab, input_width, input_height, 2);
-
-    let ref_l = extract_channel(&ref_lab, ref_width, ref_height, 0);
-    let ref_a = extract_channel(&ref_lab, ref_width, ref_height, 1);
-    let ref_b = extract_channel(&ref_lab, ref_width, ref_height, 2);
+    // Initialize current AB channels
+    let mut current_a = in_a;
+    let mut current_b = in_b_ch;
 
     // Store current L (may be modified)
     let current_l = original_l.clone();
@@ -170,7 +162,7 @@ pub fn color_correct_cra_lab(
             &current_a,
             &current_b,
             &ref_a,
-            &ref_b,
+            &ref_b_ch,
             input_width,
             input_height,
             ref_width,
@@ -196,7 +188,7 @@ pub fn color_correct_cra_lab(
     let current_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
 
     let ref_l_scaled = scale_l_to_uint8(&ref_l);
-    let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b, final_ab_ranges);
+    let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
     let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
     let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
     let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
@@ -216,18 +208,17 @@ pub fn color_correct_cra_lab(
         (l_lab, a_lab, b_lab)
     };
 
-    // Reconstruct LAB image
-    let mut final_lab = vec![0.0f32; input_pixels * 3];
-    for i in 0..input_pixels {
-        final_lab[i * 3] = final_l[i];
-        final_lab[i * 3 + 1] = final_a[i];
-        final_lab[i * 3 + 2] = final_b[i];
-    }
+    // Convert LAB back to linear RGB (separate channels)
+    let (out_r, out_g, out_b) = lab_to_linear_rgb_channels(&final_l, &final_a, &final_b);
 
-    // Convert back to linear RGB, then sRGB
-    let mut final_linear = image_lab_to_rgb(&final_lab, input_width, input_height);
-    linear_to_srgb(&mut final_linear);
+    // Convert to sRGB and scale to 0-255
+    let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Final dither to uint8
-    dither_rgb(&final_linear, input_width, input_height)
+    // Dither each channel
+    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
+    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
+    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+
+    // Interleave only at the very end
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }

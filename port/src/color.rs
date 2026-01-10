@@ -54,6 +54,7 @@ pub fn srgb_to_linear(data: &mut [f32]) {
 }
 
 /// Convert linear RGB image to sRGB (in-place modification of flat array)
+#[allow(dead_code)]
 pub fn linear_to_srgb(data: &mut [f32]) {
     for v in data.iter_mut() {
         *v = linear_to_srgb_single(*v);
@@ -131,6 +132,7 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
 
 /// Convert linear RGB image (HxWx3 flat array) to Lab
 /// Output: L is 0-100, a,b are roughly -127 to +127
+#[allow(dead_code)]
 pub fn image_rgb_to_lab(rgb: &[f32], width: usize, height: usize) -> Vec<f32> {
     let mut lab = vec![0.0f32; width * height * 3];
     for i in 0..(width * height) {
@@ -144,6 +146,7 @@ pub fn image_rgb_to_lab(rgb: &[f32], width: usize, height: usize) -> Vec<f32> {
 }
 
 /// Convert Lab image (HxWx3 flat array) to linear RGB
+#[allow(dead_code)]
 pub fn image_lab_to_rgb(lab: &[f32], width: usize, height: usize) -> Vec<f32> {
     let mut rgb = vec![0.0f32; width * height * 3];
     for i in 0..(width * height) {
@@ -157,6 +160,7 @@ pub fn image_lab_to_rgb(lab: &[f32], width: usize, height: usize) -> Vec<f32> {
 }
 
 /// Extract a single channel from an interleaved image
+#[allow(dead_code)]
 pub fn extract_channel(img: &[f32], width: usize, height: usize, channel: usize) -> Vec<f32> {
     let mut ch = vec![0.0f32; width * height];
     for i in 0..(width * height) {
@@ -171,6 +175,88 @@ pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize,
     for i in 0..(width * height) {
         img[i * 3 + channel] = data[i];
     }
+}
+
+// ============== Channel-separated processing ==============
+
+/// Convert interleaved sRGB (0-1) to separate linear RGB channels
+pub fn srgb_to_linear_channels(rgb: &[f32], width: usize, height: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = width * height;
+    let mut r = vec![0.0f32; pixels];
+    let mut g = vec![0.0f32; pixels];
+    let mut b = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        r[i] = srgb_to_linear_single(rgb[i * 3]);
+        g[i] = srgb_to_linear_single(rgb[i * 3 + 1]);
+        b[i] = srgb_to_linear_single(rgb[i * 3 + 2]);
+    }
+
+    (r, g, b)
+}
+
+/// Convert separate linear RGB channels to separate LAB channels
+pub fn linear_rgb_to_lab_channels(r: &[f32], g: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = r.len();
+    let mut l_ch = vec![0.0f32; pixels];
+    let mut a_ch = vec![0.0f32; pixels];
+    let mut b_ch = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        let (l, a, b_val) = linear_rgb_to_lab(r[i], g[i], b[i]);
+        l_ch[i] = l;
+        a_ch[i] = a;
+        b_ch[i] = b_val;
+    }
+
+    (l_ch, a_ch, b_ch)
+}
+
+/// Convert separate LAB channels to separate linear RGB channels
+pub fn lab_to_linear_rgb_channels(l: &[f32], a: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = l.len();
+    let mut r_ch = vec![0.0f32; pixels];
+    let mut g_ch = vec![0.0f32; pixels];
+    let mut b_ch = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        let (r, g, b_val) = lab_to_linear_rgb(l[i], a[i], b[i]);
+        r_ch[i] = r;
+        g_ch[i] = g;
+        b_ch[i] = b_val;
+    }
+
+    (r_ch, g_ch, b_ch)
+}
+
+/// Convert separate linear RGB channels to sRGB and scale to 0-255
+pub fn linear_to_srgb_scaled_channels(r: &[f32], g: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = r.len();
+    let mut r_out = vec![0.0f32; pixels];
+    let mut g_out = vec![0.0f32; pixels];
+    let mut b_out = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        r_out[i] = (linear_to_srgb_single(r[i]) * 255.0).clamp(0.0, 255.0);
+        g_out[i] = (linear_to_srgb_single(g[i]) * 255.0).clamp(0.0, 255.0);
+        b_out[i] = (linear_to_srgb_single(b[i]) * 255.0).clamp(0.0, 255.0);
+    }
+
+    (r_out, g_out, b_out)
+}
+
+/// Interleave three u8 channels into RGB output
+pub fn interleave_rgb_u8(r: &[u8], g: &[u8], b: &[u8]) -> Vec<u8> {
+    let pixels = r.len();
+    let mut out = vec![0u8; pixels * 3];
+
+    for i in 0..pixels {
+        out[i * 3] = r[i];
+        out[i * 3 + 1] = g[i];
+        out[i * 3 + 2] = b[i];
+    }
+
+    out
 }
 
 #[cfg(test)]

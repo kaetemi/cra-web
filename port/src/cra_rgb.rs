@@ -1,8 +1,8 @@
 /// CRA (Chroma Rotation Averaging) in RGB color space.
 /// Corresponds to color_correction_cra_rgb.py
 
-use crate::color::{linear_to_srgb, srgb_to_linear};
-use crate::dither::{dither_rgb, floyd_steinberg_dither};
+use crate::color::{interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear};
+use crate::dither::floyd_steinberg_dither;
 use crate::histogram::match_histogram;
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
@@ -231,9 +231,20 @@ pub fn color_correct_cra_rgb(
         final_scaled = perceptual_unscale_rgb(&final_scaled, scale);
     }
 
-    // Convert back to sRGB
-    linear_to_srgb(&mut final_scaled);
+    // Extract separate linear RGB channels
+    let final_r: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3]).collect();
+    let final_g: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 1]).collect();
+    let final_b: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 2]).collect();
 
-    // Final dither to uint8
-    dither_rgb(&final_scaled, input_width, input_height)
+    // Convert to sRGB and scale to 0-255
+    let (r_scaled, g_scaled, b_scaled) =
+        linear_to_srgb_scaled_channels(&final_r, &final_g, &final_b);
+
+    // Dither each channel
+    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
+    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
+    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+
+    // Interleave only at the very end
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }
