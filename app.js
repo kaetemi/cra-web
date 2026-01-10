@@ -20,11 +20,10 @@ const METHOD_CONFIG = {
     'cra_rgb_perceptual': { script: 'color_correction_cra_rgb.py', options: { perceptual: true } }
 };
 
-let pyodide = null;
-let wasmReady = false;
+let worker = null;
+let workerReady = false;
 let inputImageData = null;
 let refImageData = null;
-let scriptsLoaded = {};
 let consoleOutput = null;
 
 // Format and append a line to console output
@@ -50,81 +49,76 @@ function clearConsole() {
     }
 }
 
-// Initialize everything
-async function init() {
+// Initialize worker
+function initWorker() {
     const overlay = document.getElementById('init-overlay');
     const statusEl = document.getElementById('init-status');
     const progressBar = document.getElementById('init-progress-bar');
 
-    try {
-        // Step 1: Load WASM dither module (10%)
-        statusEl.textContent = 'Loading WASM dither module...';
-        progressBar.style.width = '5%';
+    worker = new Worker('./worker.js');
 
-        const wasmModule = await import('./wasm/dither.js');
-        await wasmModule.default();
-        window.floyd_steinberg_dither_wasm = wasmModule.floyd_steinberg_dither;
-        wasmReady = true;
-        progressBar.style.width = '10%';
+    worker.onmessage = function(e) {
+        const { type, ...data } = e.data;
 
-        // Step 2: Load Pyodide (60%)
-        statusEl.textContent = 'Loading Python runtime (this may take a moment)...';
-        progressBar.style.width = '15%';
+        switch (type) {
+            case 'progress':
+                statusEl.textContent = data.message;
+                progressBar.style.width = data.percent + '%';
+                break;
 
-        pyodide = await loadPyodide({
-            indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/'
-        });
-        progressBar.style.width = '50%';
+            case 'ready':
+                workerReady = true;
+                overlay.classList.add('hidden');
+                updateProcessButton();
+                break;
 
-        // Step 3: Load packages (90%)
-        statusEl.textContent = 'Loading image processing packages...';
+            case 'console':
+                appendConsole(data.text);
+                break;
 
-        await pyodide.loadPackage(['numpy', 'opencv-python', 'pillow', 'scikit-image', 'micropip']);
-        progressBar.style.width = '85%';
+            case 'error':
+                if (!workerReady) {
+                    statusEl.textContent = 'Error: ' + data.message;
+                    progressBar.style.background = '#e74c3c';
+                } else {
+                    document.getElementById('error-message').textContent = 'Error: ' + data.message;
+                    document.getElementById('error-message').classList.add('visible');
+                    document.getElementById('loading').classList.remove('active');
+                    updateProcessButton();
+                }
+                console.error('Worker error:', data.message);
+                break;
 
-        // Step 4: Setup Python stdout redirect
-        statusEl.textContent = 'Finalizing setup...';
-        progressBar.style.width = '95%';
+            case 'complete':
+                handleProcessingComplete(data.outputData);
+                break;
+        }
+    };
 
-        // Redirect Python stdout to our console
-        pyodide.setStdout({
-            batched: (text) => {
-                appendConsole(text);
-            }
-        });
-
-        // Done
-        progressBar.style.width = '100%';
-        statusEl.textContent = 'Ready!';
-
-        await new Promise(resolve => setTimeout(resolve, 500));
-        overlay.classList.add('hidden');
-
-        // Enable the process button if we have images
-        updateProcessButton();
-
-    } catch (error) {
+    worker.onerror = function(error) {
+        console.error('Worker error:', error);
         statusEl.textContent = 'Error: ' + error.message;
         progressBar.style.background = '#e74c3c';
-        console.error('Initialization error:', error);
-    }
+    };
+
+    // Start initialization
+    worker.postMessage({ type: 'init' });
 }
 
-// Load a Python script (stripping out the __main__ block)
-async function loadScript(scriptName) {
-    if (scriptsLoaded[scriptName]) {
-        return;
-    }
+// Handle processing completion
+function handleProcessingComplete(outputData) {
+    const blob = new Blob([outputData], { type: 'image/png' });
+    const url = URL.createObjectURL(blob);
 
-    const response = await fetch('./scripts/' + scriptName);
-    let code = await response.text();
+    // Show comparison
+    document.getElementById('compare-input').src = document.getElementById('input-preview').src;
+    document.getElementById('compare-output').src = url;
+    document.getElementById('compare-ref').src = document.getElementById('ref-preview').src;
+    document.getElementById('download-btn').href = url;
 
-    // Remove the if __name__ == "__main__": block to prevent argparse from running
-    // This regex matches the block and everything after it
-    code = code.replace(/if\s+__name__\s*==\s*["']__main__["']:\s*[\s\S]*$/, '');
-
-    await pyodide.runPythonAsync(code);
-    scriptsLoaded[scriptName] = true;
+    document.getElementById('output-section').style.display = 'block';
+    document.getElementById('loading').classList.remove('active');
+    updateProcessButton();
 }
 
 // Handle file upload
@@ -193,7 +187,7 @@ function updateMethodDescription() {
 // Update process button state
 function updateProcessButton() {
     const btn = document.getElementById('process-btn');
-    btn.disabled = !pyodide || !wasmReady || !inputImageData || !refImageData;
+    btn.disabled = !workerReady || !inputImageData || !refImageData;
 }
 
 // Load default images
@@ -231,8 +225,8 @@ async function loadDefaultImages() {
     }
 }
 
-// Process images
-async function processImages() {
+// Process images using worker
+function processImages() {
     const method = document.getElementById('method-select').value;
     const config = METHOD_CONFIG[method];
     const loading = document.getElementById('loading');
@@ -248,60 +242,23 @@ async function processImages() {
     outputSection.style.display = 'none';
     clearConsole();
 
-    try {
-        // Load the script
-        statusMessage.textContent = 'Loading color correction script...';
-        await loadScript(config.script);
+    statusMessage.textContent = 'Running color correction...';
 
-        // Write images to Pyodide filesystem
-        statusMessage.textContent = 'Preparing images...';
-        pyodide.FS.writeFile('/input.png', inputImageData);
-        pyodide.FS.writeFile('/ref.png', refImageData);
+    // Send processing request to worker
+    worker.postMessage({
+        type: 'process',
+        inputData: inputImageData,
+        refData: refImageData,
+        method: method,
+        config: config
+    });
+}
 
-        // Build the main call based on script and options
-        statusMessage.textContent = 'Running color correction...';
-
-        let pythonCode;
-        if (config.script === 'color_correction_basic.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
-        } else if (config.script === 'color_correction_basic_rgb.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True)`;
-        } else if (config.script === 'color_correction_cra.py') {
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', keep_luminosity=False, verbose=True)`;
-        } else if (config.script === 'color_correction_tiled.py') {
-            const tiledLum = config.options.tiled_luminosity ? 'True' : 'False';
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', tiled_luminosity=${tiledLum}, verbose=True)`;
-        } else if (config.script === 'color_correction_cra_rgb.py') {
-            const perceptual = config.options.perceptual ? 'True' : 'False';
-            pythonCode = `main('/input.png', '/ref.png', '/output.png', verbose=True, use_perceptual=${perceptual})`;
-        }
-
-        await pyodide.runPythonAsync(pythonCode);
-
-        // Read output
-        statusMessage.textContent = 'Reading result...';
-        const outputData = pyodide.FS.readFile('/output.png');
-
-        // Create blob and display
-        const blob = new Blob([outputData], { type: 'image/png' });
-        const url = URL.createObjectURL(blob);
-
-        // Show comparison
-        document.getElementById('compare-input').src = document.getElementById('input-preview').src;
-        document.getElementById('compare-output').src = url;
-        document.getElementById('compare-ref').src = document.getElementById('ref-preview').src;
-        document.getElementById('download-btn').href = url;
-
-        outputSection.style.display = 'block';
-
-    } catch (error) {
-        console.error('Processing error:', error);
-        errorMessage.textContent = 'Error: ' + error.message;
-        errorMessage.classList.add('visible');
-    } finally {
-        loading.classList.remove('active');
-        updateProcessButton();
-    }
+// Register service worker for offline support
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js')
+        .then((reg) => console.log('Service worker registered'))
+        .catch((err) => console.log('Service worker registration failed:', err));
 }
 
 // Setup event listeners
@@ -315,6 +272,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Load default images
     loadDefaultImages();
 
-    // Start initialization
-    init();
+    // Start worker initialization
+    initWorker();
 });

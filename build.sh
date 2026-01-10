@@ -47,6 +47,8 @@ cp scripts/color_correction_tiled.py dist/scripts/
 # Copy web files
 cp index.html dist/
 cp app.js dist/
+cp worker.js dist/
+cp sw.js dist/
 
 # Copy default images
 cp scripts/assets/retarget_input.jpg dist/assets/

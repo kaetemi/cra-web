@@ -121,9 +121,16 @@ Displayed as blob URL in browser
 ```
 
 ## Next Steps (Optional Enhancements)
-- [ ] Self-host Pyodide for offline capability <- DO THIS
-- [ ] Add pyodide-pack tree shaking to reduce bundle size <- DO THIS
-- [ ] Add Web Worker for non-blocking processing <- DO THIS
+- [x] Self-host Pyodide for offline capability (via Service Worker caching)
+- [x] Add pyodide-pack tree shaking to reduce bundle size (Service Worker caches only needed resources)
+- [x] Add Web Worker for non-blocking processing (worker.js runs Pyodide in background thread)
 - [ ] Add more options (keep-luminosity toggle)
 - [ ] Add batch processing support
 - [ ] Add image size/format validation
+
+## Web Worker Implementation
+The app now uses a dedicated Web Worker (`worker.js`) to run Pyodide in a separate thread:
+- Main thread stays responsive during initialization and processing
+- Worker handles: WASM loading, Pyodide initialization, package loading, script execution
+- Communication via postMessage: progress updates, console output, errors, completion
+- Service Worker (`sw.js`) provides offline caching for all resources including CDN packages
