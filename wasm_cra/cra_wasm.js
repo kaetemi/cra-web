@@ -46,6 +46,7 @@ let WASM_VECTOR_LEN = 0;
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
@@ -56,14 +57,15 @@ let WASM_VECTOR_LEN = 0;
  * @param {number} ref_width
  * @param {number} ref_height
  * @param {boolean} keep_luminosity
+ * @param {boolean} use_f32_histogram
  * @returns {Uint8Array}
  */
-export function color_correct_basic_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity) {
+export function color_correct_basic_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity, use_f32_histogram) {
     const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.color_correct_basic_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity);
+    const ret = wasm.color_correct_basic_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
@@ -77,6 +79,7 @@ export function color_correct_basic_lab(input_data, input_width, input_height, r
  *     input_width, input_height: Input image dimensions
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
@@ -86,14 +89,15 @@ export function color_correct_basic_lab(input_data, input_width, input_height, r
  * @param {Uint8Array} ref_data
  * @param {number} ref_width
  * @param {number} ref_height
+ * @param {boolean} use_f32_histogram
  * @returns {Uint8Array}
  */
-export function color_correct_basic_rgb(input_data, input_width, input_height, ref_data, ref_width, ref_height) {
+export function color_correct_basic_rgb(input_data, input_width, input_height, ref_data, ref_width, ref_height, use_f32_histogram) {
     const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.color_correct_basic_rgb(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height);
+    const ret = wasm.color_correct_basic_rgb(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
@@ -112,6 +116,7 @@ export function color_correct_basic_rgb(input_data, input_width, input_height, r
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
@@ -122,14 +127,15 @@ export function color_correct_basic_rgb(input_data, input_width, input_height, r
  * @param {number} ref_width
  * @param {number} ref_height
  * @param {boolean} keep_luminosity
+ * @param {boolean} use_f32_histogram
  * @returns {Uint8Array}
  */
-export function color_correct_cra_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity) {
+export function color_correct_cra_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity, use_f32_histogram) {
     const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.color_correct_cra_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity);
+    const ret = wasm.color_correct_cra_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
@@ -147,6 +153,7 @@ export function color_correct_cra_lab(input_data, input_width, input_height, ref
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     use_perceptual: If true, use perceptual weighting
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
@@ -157,14 +164,15 @@ export function color_correct_cra_lab(input_data, input_width, input_height, ref
  * @param {number} ref_width
  * @param {number} ref_height
  * @param {boolean} use_perceptual
+ * @param {boolean} use_f32_histogram
  * @returns {Uint8Array}
  */
-export function color_correct_cra_rgb(input_data, input_width, input_height, ref_data, ref_width, ref_height, use_perceptual) {
+export function color_correct_cra_rgb(input_data, input_width, input_height, ref_data, ref_width, ref_height, use_perceptual, use_f32_histogram) {
     const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.color_correct_cra_rgb(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, use_perceptual);
+    const ret = wasm.color_correct_cra_rgb(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, use_perceptual, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;
@@ -183,6 +191,7 @@ export function color_correct_cra_rgb(input_data, input_width, input_height, ref
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     tiled_luminosity: If true, process L channel per-tile before global match
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
@@ -193,14 +202,15 @@ export function color_correct_cra_rgb(input_data, input_width, input_height, ref
  * @param {number} ref_width
  * @param {number} ref_height
  * @param {boolean} tiled_luminosity
+ * @param {boolean} use_f32_histogram
  * @returns {Uint8Array}
  */
-export function color_correct_tiled_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, tiled_luminosity) {
+export function color_correct_tiled_lab(input_data, input_width, input_height, ref_data, ref_width, ref_height, tiled_luminosity, use_f32_histogram) {
     const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ret = wasm.color_correct_tiled_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, tiled_luminosity);
+    const ret = wasm.color_correct_tiled_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, tiled_luminosity, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;

@@ -10,11 +10,12 @@
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_basic_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean): Uint8Array;
+export function color_correct_basic_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * Basic RGB histogram matching (WASM export)
@@ -24,11 +25,12 @@ export function color_correct_basic_lab(input_data: Uint8Array, input_width: num
  *     input_width, input_height: Input image dimensions
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_basic_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number): Uint8Array;
+export function color_correct_basic_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * CRA LAB color correction (WASM export)
@@ -43,11 +45,12 @@ export function color_correct_basic_rgb(input_data: Uint8Array, input_width: num
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_cra_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean): Uint8Array;
+export function color_correct_cra_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * CRA RGB color correction (WASM export)
@@ -61,11 +64,12 @@ export function color_correct_cra_lab(input_data: Uint8Array, input_width: numbe
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     use_perceptual: If true, use perceptual weighting
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_cra_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_perceptual: boolean): Uint8Array;
+export function color_correct_cra_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_perceptual: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * Tiled CRA LAB color correction (WASM export)
@@ -80,11 +84,12 @@ export function color_correct_cra_rgb(input_data: Uint8Array, input_width: numbe
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     tiled_luminosity: If true, process L channel per-tile before global match
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_tiled_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean): Uint8Array;
+export function color_correct_tiled_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * Floyd-Steinberg dithering (WASM export)
@@ -96,11 +101,11 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly color_correct_basic_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
-  readonly color_correct_basic_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number) => [number, number];
-  readonly color_correct_cra_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
-  readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
-  readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
+  readonly color_correct_basic_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_basic_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
+  readonly color_correct_cra_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly floyd_steinberg_dither_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbindgen_externrefs: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

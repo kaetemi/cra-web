@@ -34,6 +34,7 @@ pub fn floyd_steinberg_dither_wasm(img: Vec<f32>, w: usize, h: usize) -> Vec<u8>
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -46,6 +47,7 @@ pub fn color_correct_basic_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     // Convert uint8 to float (0-1)
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -59,6 +61,7 @@ pub fn color_correct_basic_lab(
         ref_width,
         ref_height,
         keep_luminosity,
+        use_f32_histogram,
     )
 }
 
@@ -69,6 +72,7 @@ pub fn color_correct_basic_lab(
 ///     input_width, input_height: Input image dimensions
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -80,6 +84,7 @@ pub fn color_correct_basic_rgb(
     ref_data: &[u8],
     ref_width: usize,
     ref_height: usize,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -91,6 +96,7 @@ pub fn color_correct_basic_rgb(
         input_height,
         ref_width,
         ref_height,
+        use_f32_histogram,
     )
 }
 
@@ -106,6 +112,7 @@ pub fn color_correct_basic_rgb(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -118,6 +125,7 @@ pub fn color_correct_cra_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -130,6 +138,7 @@ pub fn color_correct_cra_lab(
         ref_width,
         ref_height,
         keep_luminosity,
+        use_f32_histogram,
     )
 }
 
@@ -145,6 +154,7 @@ pub fn color_correct_cra_lab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -157,6 +167,7 @@ pub fn color_correct_tiled_lab(
     ref_width: usize,
     ref_height: usize,
     tiled_luminosity: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -169,6 +180,7 @@ pub fn color_correct_tiled_lab(
         ref_width,
         ref_height,
         tiled_luminosity,
+        use_f32_histogram,
     )
 }
 
@@ -183,6 +195,7 @@ pub fn color_correct_tiled_lab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -195,6 +208,7 @@ pub fn color_correct_cra_rgb(
     ref_width: usize,
     ref_height: usize,
     use_perceptual: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -207,6 +221,7 @@ pub fn color_correct_cra_rgb(
         ref_width,
         ref_height,
         use_perceptual,
+        use_f32_histogram,
     )
 }
 
@@ -224,8 +239,12 @@ mod tests {
             255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0,
         ];
 
-        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false);
+        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, false);
         assert_eq!(result.len(), 12); // 2x2x3 = 12
+
+        // Also test with f32 histogram
+        let result_f32 = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, true);
+        assert_eq!(result_f32.len(), 12);
     }
 
     #[test]
@@ -233,8 +252,12 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2);
+        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, false);
         assert_eq!(result.len(), 12);
+
+        // Also test with f32 histogram
+        let result_f32 = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, true);
+        assert_eq!(result_f32.len(), 12);
     }
 
     #[test]
@@ -242,8 +265,12 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false);
+        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, false);
         assert_eq!(result.len(), 12);
+
+        // Also test with f32 histogram
+        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, true);
+        assert_eq!(result_f32.len(), 12);
     }
 
     #[test]
@@ -251,7 +278,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false);
+        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, false);
         assert_eq!(result.len(), 12);
+
+        // Also test with f32 histogram
+        let result_f32 = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, true);
+        assert_eq!(result_f32.len(), 12);
     }
 }

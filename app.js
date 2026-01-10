@@ -195,13 +195,37 @@ function updateImplementationLabel() {
     const useWasm = document.getElementById('use-wasm').checked;
     const label = document.getElementById('impl-label');
     const description = document.getElementById('impl-description');
+    const f32HistogramSection = document.getElementById('f32-histogram-section');
 
     if (useWasm) {
         label.textContent = 'WASM (Rust)';
         description.textContent = IMPL_DESCRIPTIONS.wasm;
+        // Show f32 histogram toggle when WASM is enabled
+        if (f32HistogramSection) {
+            f32HistogramSection.style.display = 'block';
+        }
     } else {
         label.textContent = 'Python (Pyodide)';
         description.textContent = IMPL_DESCRIPTIONS.python;
+        // Hide f32 histogram toggle when Python is selected
+        if (f32HistogramSection) {
+            f32HistogramSection.style.display = 'none';
+        }
+    }
+}
+
+// Update histogram toggle label and description
+function updateHistogramLabel() {
+    const useF32Histogram = document.getElementById('use-f32-histogram').checked;
+    const label = document.getElementById('histogram-label');
+    const description = document.getElementById('histogram-description');
+
+    if (useF32Histogram) {
+        label.textContent = 'F32 Quantile';
+        description.textContent = 'Use f32 sort-based quantile matching. No quantization noise, works directly on floating point values with linear interpolation.';
+    } else {
+        label.textContent = 'Binned (256)';
+        description.textContent = 'Use binned histogram matching with 256 bins (original/reference). Toggle for f32 sort-based quantile matching (no quantization noise).';
     }
 }
 
@@ -251,6 +275,7 @@ function processImages() {
     const method = document.getElementById('method-select').value;
     const config = METHOD_CONFIG[method];
     const useWasm = document.getElementById('use-wasm').checked;
+    const useF32Histogram = document.getElementById('use-f32-histogram')?.checked || false;
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');
     const errorMessage = document.getElementById('error-message');
@@ -274,7 +299,8 @@ function processImages() {
         refData: refImageData,
         method: method,
         config: config,
-        useWasm: useWasm
+        useWasm: useWasm,
+        useF32Histogram: useF32Histogram
     });
 }
 
@@ -292,6 +318,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
+    document.getElementById('use-f32-histogram').addEventListener('change', updateHistogramLabel);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Load default images

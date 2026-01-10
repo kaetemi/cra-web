@@ -452,6 +452,20 @@
             </p>
         </div>
 
+        <div class="implementation-section" id="f32-histogram-section">
+            <label class="toggle-container">
+                <span class="toggle-label">Histogram:</span>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="use-f32-histogram">
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="toggle-text" id="histogram-label">Binned (256)</span>
+            </label>
+            <p class="impl-description" id="histogram-description">
+                Use binned histogram matching with 256 bins (original/reference). Toggle for f32 sort-based quantile matching (no quantization noise).
+            </p>
+        </div>
+
         <button class="process-btn" id="process-btn" disabled>Process Images</button>
 
         <div class="error-message" id="error-message"></div>

@@ -141,7 +141,7 @@ async function encodePng(rgbData, width, height) {
 }
 
 // Process images using WASM
-async function processImagesWasm(inputData, refData, method, config) {
+async function processImagesWasm(inputData, refData, method, config, useF32Histogram) {
     sendProgress('process', 'Decoding images...', 10);
     const inputImg = await decodeImage(inputData);
     const refImg = await decodeImage(refData);
@@ -153,6 +153,9 @@ async function processImagesWasm(inputData, refData, method, config) {
     sendProgress('process', 'Processing with WASM...', 30);
     sendConsole(`Processing ${inputImg.width}x${inputImg.height} image with WASM...`);
     sendConsole(`Method: ${method}`);
+    if (useF32Histogram) {
+        sendConsole('Using f32 histogram matching (no quantization)');
+    }
 
     let resultRgb;
     const startTime = performance.now();
@@ -163,7 +166,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_basic_lab(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                false // keep_luminosity
+                false, // keep_luminosity
+                useF32Histogram
             );
             break;
 
@@ -171,7 +175,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             sendConsole('Running basic RGB histogram matching...');
             resultRgb = craWasm.color_correct_basic_rgb(
                 inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height
+                refRgb, refImg.width, refImg.height,
+                useF32Histogram
             );
             break;
 
@@ -180,7 +185,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_cra_lab(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                false // keep_luminosity
+                false, // keep_luminosity
+                useF32Histogram
             );
             break;
 
@@ -189,7 +195,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_tiled_lab(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                true // tiled_luminosity
+                true, // tiled_luminosity
+                useF32Histogram
             );
             break;
 
@@ -198,7 +205,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_tiled_lab(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                false // tiled_luminosity
+                false, // tiled_luminosity
+                useF32Histogram
             );
             break;
 
@@ -207,7 +215,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_cra_rgb(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                false // use_perceptual
+                false, // use_perceptual
+                useF32Histogram
             );
             break;
 
@@ -216,7 +225,8 @@ async function processImagesWasm(inputData, refData, method, config) {
             resultRgb = craWasm.color_correct_cra_rgb(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                true // use_perceptual
+                true, // use_perceptual
+                useF32Histogram
             );
             break;
 
@@ -268,12 +278,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm) {
+async function processImages(inputData, refData, method, config, useWasm, useF32Histogram) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config);
+            outputData = await processImagesWasm(inputData, refData, method, config, useF32Histogram);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -294,7 +304,7 @@ self.onmessage = async function(e) {
             await initialize();
             break;
         case 'process':
-            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm);
+            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm, data.useF32Histogram);
             break;
     }
 };

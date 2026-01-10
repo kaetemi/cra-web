@@ -1,6 +1,90 @@
 /// Histogram matching implementation for uint8 images.
 /// Based on the algorithm described in PORTING.md
 
+/// Interpolation mode for f32 histogram matching
+#[derive(Clone, Copy, Debug, Default)]
+pub enum InterpolationMode {
+    /// Snap to nearest reference value (can cause banding)
+    Nearest,
+    /// Linear interpolation between adjacent reference values (smoother)
+    #[default]
+    Linear,
+}
+
+/// Match histogram for f32 values using sort-based quantile matching.
+/// No binning/quantization required - works directly on continuous values.
+///
+/// This approach sorts both arrays and maps quantiles directly:
+/// - For each source pixel at rank r, assign the reference value at the equivalent rank
+/// - With linear interpolation, smoothly interpolates between adjacent reference values
+///
+/// Args:
+///     source: Source values (any range, typically 0.0-255.0)
+///     reference: Reference values (same range as source)
+///     mode: Interpolation mode (Linear recommended for smoothness)
+///
+/// Returns:
+///     Matched values with same length as source
+pub fn match_histogram_f32(source: &[f32], reference: &[f32], mode: InterpolationMode) -> Vec<f32> {
+    if source.is_empty() || reference.is_empty() {
+        return source.to_vec();
+    }
+
+    let src_len = source.len();
+    let ref_len = reference.len();
+
+    // Get sorted indices for source (argsort)
+    let mut src_indices: Vec<usize> = (0..src_len).collect();
+    src_indices.sort_unstable_by(|&a, &b| {
+        source[a]
+            .partial_cmp(&source[b])
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Sort reference values
+    let mut ref_sorted: Vec<f32> = reference.to_vec();
+    ref_sorted.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut output = vec![0.0f32; src_len];
+
+    // Handle edge case: single source pixel
+    if src_len == 1 {
+        output[src_indices[0]] = match mode {
+            InterpolationMode::Nearest => ref_sorted[ref_len / 2],
+            InterpolationMode::Linear => {
+                // Return median of reference
+                if ref_len % 2 == 0 {
+                    (ref_sorted[ref_len / 2 - 1] + ref_sorted[ref_len / 2]) / 2.0
+                } else {
+                    ref_sorted[ref_len / 2]
+                }
+            }
+        };
+        return output;
+    }
+
+    for (rank, &src_idx) in src_indices.iter().enumerate() {
+        // Map rank from source space to reference space
+        let ref_rank_f =
+            (rank as f64) * ((ref_len - 1) as f64) / ((src_len - 1).max(1) as f64);
+
+        match mode {
+            InterpolationMode::Nearest => {
+                let ref_idx = ref_rank_f.round() as usize;
+                output[src_idx] = ref_sorted[ref_idx.min(ref_len - 1)];
+            }
+            InterpolationMode::Linear => {
+                let ref_lo = ref_rank_f.floor() as usize;
+                let ref_hi = (ref_lo + 1).min(ref_len - 1);
+                let t = (ref_rank_f - ref_lo as f64) as f32;
+                output[src_idx] = ref_sorted[ref_lo] * (1.0 - t) + ref_sorted[ref_hi] * t;
+            }
+        }
+    }
+
+    output
+}
+
 /// Linear interpolation helper
 /// Given x, find the corresponding value by interpolating between xp and fp
 fn interpolate(x: f32, xp: &[f32], fp: &[u8]) -> u8 {
@@ -150,6 +234,69 @@ mod tests {
         let result = match_histogram(&source, &reference);
         for &v in &result {
             assert_eq!(v, 255);
+        }
+    }
+
+    #[test]
+    fn test_match_histogram_f32_identity() {
+        // Matching histogram to itself should preserve relative ordering
+        let data: Vec<f32> = (0..256).map(|i| i as f32).collect();
+        let result = match_histogram_f32(&data, &data, InterpolationMode::Linear);
+        for (a, b) in data.iter().zip(result.iter()) {
+            assert!((a - b).abs() < 0.01, "Expected {} but got {}", a, b);
+        }
+    }
+
+    #[test]
+    fn test_match_histogram_f32_simple() {
+        // Source: all 0s, Reference: all 255s
+        // Result should be all 255s
+        let source = vec![0.0f32; 100];
+        let reference = vec![255.0f32; 100];
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+        for &v in &result {
+            assert!((v - 255.0).abs() < 0.01, "Expected 255.0 but got {}", v);
+        }
+    }
+
+    #[test]
+    fn test_match_histogram_f32_different_sizes() {
+        // Source has 10 values, reference has 100 values
+        let source: Vec<f32> = (0..10).map(|i| i as f32 * 25.5).collect();
+        let reference: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+        assert_eq!(result.len(), 10);
+        // Results should be monotonic (preserving order)
+        for i in 1..result.len() {
+            assert!(
+                result[i] >= result[i - 1],
+                "Not monotonic at {}: {} < {}",
+                i,
+                result[i],
+                result[i - 1]
+            );
+        }
+    }
+
+    #[test]
+    fn test_match_histogram_f32_nearest_vs_linear() {
+        let source: Vec<f32> = vec![0.0, 50.0, 100.0, 150.0, 200.0];
+        let reference: Vec<f32> = vec![10.0, 110.0, 210.0];
+
+        let nearest = match_histogram_f32(&source, &reference, InterpolationMode::Nearest);
+        let linear = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+
+        // Both should have same length
+        assert_eq!(nearest.len(), source.len());
+        assert_eq!(linear.len(), source.len());
+
+        // Nearest should only have values from reference
+        for &v in &nearest {
+            assert!(
+                (v - 10.0).abs() < 0.01 || (v - 110.0).abs() < 0.01 || (v - 210.0).abs() < 0.01,
+                "Nearest value {} not in reference",
+                v
+            );
         }
     }
 }

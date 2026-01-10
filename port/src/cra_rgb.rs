@@ -3,7 +3,7 @@
 
 use crate::color::{interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear};
 use crate::dither::floyd_steinberg_dither;
-use crate::histogram::match_histogram;
+use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
     perceptual_unscale_rgb, rotate_rgb,
@@ -46,6 +46,21 @@ fn scale_uint8_to_rgb(rgb_uint8: &[u8], channel_ranges: [[f32; 2]; 3]) -> Vec<f3
     result
 }
 
+/// Reverse f32 (0-255 range) to RGB scaling
+fn scale_255_to_rgb(rgb_255: &[f32], channel_ranges: [[f32; 2]; 3]) -> Vec<f32> {
+    let pixels = rgb_255.len() / 3;
+    let mut result = vec![0.0f32; rgb_255.len()];
+
+    for i in 0..pixels {
+        for c in 0..3 {
+            let [min_val, max_val] = channel_ranges[c];
+            result[i * 3 + c] = rgb_255[i * 3 + c] / 255.0 * (max_val - min_val) + min_val;
+        }
+    }
+
+    result
+}
+
 /// Process one iteration of RGB-space histogram matching
 fn process_rgb_iteration(
     current_rgb: &[f32],
@@ -56,6 +71,7 @@ fn process_rgb_iteration(
     ref_height: usize,
     rotation_angles: &[f32],
     perceptual_scale: Option<[f32; 3]>,
+    use_f32_histogram: bool,
 ) -> Vec<f32> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -70,43 +86,68 @@ fn process_rgb_iteration(
         let current_rot = rotate_rgb(current_rgb, theta_rad);
         let ref_rot = rotate_rgb(ref_rgb, theta_rad);
 
-        // Scale
+        // Scale to 0-255 range
         let current_scaled = scale_rgb_to_uint8(&current_rot, channel_ranges);
         let ref_scaled = scale_rgb_to_uint8(&ref_rot, channel_ranges);
 
-        // Extract and dither each channel directly
-        let current_u8: Vec<Vec<u8>> = (0..3)
-            .map(|c| {
-                let ch: Vec<f32> = (0..input_pixels)
-                    .map(|i| current_scaled[i * 3 + c])
-                    .collect();
-                floyd_steinberg_dither(&ch, input_width, input_height)
-            })
-            .collect();
-        let ref_u8: Vec<Vec<u8>> = (0..3)
-            .map(|c| {
-                let ch: Vec<f32> = (0..ref_pixels)
-                    .map(|i| ref_scaled[i * 3 + c])
-                    .collect();
-                floyd_steinberg_dither(&ch, ref_width, ref_height)
-            })
-            .collect();
+        let matched_scaled = if use_f32_histogram {
+            // Use f32 histogram matching directly (no dithering/quantization)
+            // Extract each channel
+            let current_chs: Vec<Vec<f32>> = (0..3)
+                .map(|c| (0..input_pixels).map(|i| current_scaled[i * 3 + c]).collect())
+                .collect();
+            let ref_chs: Vec<Vec<f32>> = (0..3)
+                .map(|c| (0..ref_pixels).map(|i| ref_scaled[i * 3 + c]).collect())
+                .collect();
 
-        // Match histograms
-        let matched: Vec<Vec<u8>> = (0..3)
-            .map(|c| match_histogram(&current_u8[c], &ref_u8[c]))
-            .collect();
+            // Match histograms
+            let matched: Vec<Vec<f32>> = (0..3)
+                .map(|c| {
+                    match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear)
+                })
+                .collect();
 
-        // Reconstruct interleaved
-        let mut matched_uint8 = vec![0u8; input_pixels * 3];
-        for i in 0..input_pixels {
-            for c in 0..3 {
-                matched_uint8[i * 3 + c] = matched[c][i];
+            // Reconstruct interleaved
+            let mut matched_255 = vec![0.0f32; input_pixels * 3];
+            for i in 0..input_pixels {
+                for c in 0..3 {
+                    matched_255[i * 3 + c] = matched[c][i];
+                }
             }
-        }
+            scale_255_to_rgb(&matched_255, channel_ranges)
+        } else {
+            // Use binned histogram matching with dithering
+            let current_u8: Vec<Vec<u8>> = (0..3)
+                .map(|c| {
+                    let ch: Vec<f32> = (0..input_pixels)
+                        .map(|i| current_scaled[i * 3 + c])
+                        .collect();
+                    floyd_steinberg_dither(&ch, input_width, input_height)
+                })
+                .collect();
+            let ref_u8: Vec<Vec<u8>> = (0..3)
+                .map(|c| {
+                    let ch: Vec<f32> = (0..ref_pixels)
+                        .map(|i| ref_scaled[i * 3 + c])
+                        .collect();
+                    floyd_steinberg_dither(&ch, ref_width, ref_height)
+                })
+                .collect();
 
-        // Scale back
-        let matched_scaled = scale_uint8_to_rgb(&matched_uint8, channel_ranges);
+            // Match histograms
+            let matched: Vec<Vec<u8>> = (0..3)
+                .map(|c| match_histogram(&current_u8[c], &ref_u8[c]))
+                .collect();
+
+            // Reconstruct interleaved
+            let mut matched_uint8 = vec![0u8; input_pixels * 3];
+            for i in 0..input_pixels {
+                for c in 0..3 {
+                    matched_uint8[i * 3 + c] = matched[c][i];
+                }
+            }
+            scale_uint8_to_rgb(&matched_uint8, channel_ranges)
+        };
 
         // Rotate back
         let matched_rgb = rotate_rgb(&matched_scaled, -theta_rad);
@@ -132,6 +173,7 @@ fn process_rgb_iteration(
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -143,6 +185,7 @@ pub fn color_correct_cra_rgb(
     ref_width: usize,
     ref_height: usize,
     use_perceptual: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -181,6 +224,7 @@ pub fn color_correct_cra_rgb(
             ref_height,
             &ROTATION_ANGLES,
             perceptual_scale,
+            use_f32_histogram,
         );
 
         // Blend with current
@@ -195,36 +239,59 @@ pub fn color_correct_cra_rgb(
     let current_scaled = scale_rgb_to_uint8(&current, final_ranges);
     let ref_scaled_final = scale_rgb_to_uint8(&ref_scaled, final_ranges);
 
-    // Extract and dither each channel directly
-    let current_u8: Vec<Vec<u8>> = (0..3)
-        .map(|c| {
-            let ch: Vec<f32> = (0..input_pixels)
-                .map(|i| current_scaled[i * 3 + c])
-                .collect();
-            floyd_steinberg_dither(&ch, input_width, input_height)
-        })
-        .collect();
-    let ref_u8: Vec<Vec<u8>> = (0..3)
-        .map(|c| {
-            let ch: Vec<f32> = (0..ref_pixels)
-                .map(|i| ref_scaled_final[i * 3 + c])
-                .collect();
-            floyd_steinberg_dither(&ch, ref_width, ref_height)
-        })
-        .collect();
+    let mut final_scaled = if use_f32_histogram {
+        // Use f32 histogram matching directly (no dithering/quantization)
+        let current_chs: Vec<Vec<f32>> = (0..3)
+            .map(|c| (0..input_pixels).map(|i| current_scaled[i * 3 + c]).collect())
+            .collect();
+        let ref_chs: Vec<Vec<f32>> = (0..3)
+            .map(|c| (0..ref_pixels).map(|i| ref_scaled_final[i * 3 + c]).collect())
+            .collect();
 
-    let matched: Vec<Vec<u8>> = (0..3)
-        .map(|c| match_histogram(&current_u8[c], &ref_u8[c]))
-        .collect();
+        let matched: Vec<Vec<f32>> = (0..3)
+            .map(|c| {
+                match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear)
+            })
+            .collect();
 
-    let mut matched_uint8 = vec![0u8; input_pixels * 3];
-    for i in 0..input_pixels {
-        for c in 0..3 {
-            matched_uint8[i * 3 + c] = matched[c][i];
+        let mut matched_255 = vec![0.0f32; input_pixels * 3];
+        for i in 0..input_pixels {
+            for c in 0..3 {
+                matched_255[i * 3 + c] = matched[c][i];
+            }
         }
-    }
+        scale_255_to_rgb(&matched_255, final_ranges)
+    } else {
+        // Use binned histogram matching with dithering
+        let current_u8: Vec<Vec<u8>> = (0..3)
+            .map(|c| {
+                let ch: Vec<f32> = (0..input_pixels)
+                    .map(|i| current_scaled[i * 3 + c])
+                    .collect();
+                floyd_steinberg_dither(&ch, input_width, input_height)
+            })
+            .collect();
+        let ref_u8: Vec<Vec<u8>> = (0..3)
+            .map(|c| {
+                let ch: Vec<f32> = (0..ref_pixels)
+                    .map(|i| ref_scaled_final[i * 3 + c])
+                    .collect();
+                floyd_steinberg_dither(&ch, ref_width, ref_height)
+            })
+            .collect();
 
-    let mut final_scaled = scale_uint8_to_rgb(&matched_uint8, final_ranges);
+        let matched: Vec<Vec<u8>> = (0..3)
+            .map(|c| match_histogram(&current_u8[c], &ref_u8[c]))
+            .collect();
+
+        let mut matched_uint8 = vec![0u8; input_pixels * 3];
+        for i in 0..input_pixels {
+            for c in 0..3 {
+                matched_uint8[i * 3 + c] = matched[c][i];
+            }
+        }
+        scale_uint8_to_rgb(&matched_uint8, final_ranges)
+    };
 
     // Remove perceptual scaling if it was applied
     if let Some(scale) = perceptual_scale {
@@ -240,7 +307,7 @@ pub fn color_correct_cra_rgb(
     let (r_scaled, g_scaled, b_scaled) =
         linear_to_srgb_scaled_channels(&final_r, &final_g, &final_b);
 
-    // Dither each channel
+    // Dither each channel for final output
     let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
     let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
     let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);

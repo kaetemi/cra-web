@@ -6,7 +6,7 @@ use crate::color::{
     linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
 use crate::dither::floyd_steinberg_dither;
-use crate::histogram::match_histogram;
+use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
 
 /// Default rotation angles for CRA
@@ -15,12 +15,17 @@ const ROTATION_ANGLES: [f32; 3] = [0.0, 30.0, 60.0];
 /// Default blend factors for iterative refinement
 const BLEND_FACTORS: [f32; 3] = [0.25, 0.5, 1.0];
 
-/// Scale L channel to uint8 range: L (0-100) -> 0-255
-fn scale_l_to_uint8(l: &[f32]) -> Vec<f32> {
+/// Scale L channel to 0-255 range: L (0-100) -> 0-255
+fn scale_l_to_255(l: &[f32]) -> Vec<f32> {
     l.iter().map(|&v| v * 255.0 / 100.0).collect()
 }
 
-/// Reverse L scaling: uint8 -> L (0-100)
+/// Reverse L scaling: 0-255 -> L (0-100)
+fn scale_255_to_l(l: &[f32]) -> Vec<f32> {
+    l.iter().map(|&v| v * 100.0 / 255.0).collect()
+}
+
+/// Reverse L scaling from uint8: uint8 -> L (0-100)
 fn scale_uint8_to_l(l: &[u8]) -> Vec<f32> {
     l.iter().map(|&v| v as f32 * 100.0 / 255.0).collect()
 }
@@ -59,6 +64,23 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>,
     (a_lab, b_lab)
 }
 
+/// Reverse f32 (0-255 range) to AB scaling
+fn scale_255_to_ab(a: &[f32], b: &[f32], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>, Vec<f32>) {
+    let [a_min, a_max] = ab_ranges[0];
+    let [b_min, b_max] = ab_ranges[1];
+
+    let a_lab: Vec<f32> = a
+        .iter()
+        .map(|&v| v / 255.0 * (a_max - a_min) + a_min)
+        .collect();
+    let b_lab: Vec<f32> = b
+        .iter()
+        .map(|&v| v / 255.0 * (b_max - b_min) + b_min)
+        .collect();
+
+    (a_lab, b_lab)
+}
+
 /// Process one iteration of LAB-space histogram matching
 fn process_lab_iteration(
     current_a: &[f32],
@@ -70,6 +92,7 @@ fn process_lab_iteration(
     ref_width: usize,
     ref_height: usize,
     rotation_angles: &[f32],
+    use_f32_histogram: bool,
 ) -> (Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
 
@@ -84,21 +107,28 @@ fn process_lab_iteration(
         let (a_rot, b_rot) = rotate_ab(current_a, current_b, theta_rad);
         let (ref_a_rot, ref_b_rot) = rotate_ab(ref_a, ref_b, theta_rad);
 
-        // Scale and dither each channel directly (no interleave/extract overhead)
+        // Scale to 0-255 range
         let (a_scaled, b_scaled) = scale_ab_to_uint8(&a_rot, &b_rot, ab_ranges);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a_rot, &ref_b_rot, ab_ranges);
 
-        let input_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
-        let input_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
-        let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
-        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
+        let (a_matched, b_matched) = if use_f32_histogram {
+            // Use f32 histogram matching directly (no dithering/quantization)
+            let matched_a =
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+            let matched_b =
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+            scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
+        } else {
+            // Use binned histogram matching with dithering
+            let input_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
+            let input_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+            let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
+            let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
-        // Match histograms
-        let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
-        let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
-
-        // Scale back
-        let (a_matched, b_matched) = scale_uint8_to_ab(&matched_a, &matched_b, ab_ranges);
+            let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
+            let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
+            scale_uint8_to_ab(&matched_a, &matched_b, ab_ranges)
+        };
 
         // Rotate back
         let (a_back, b_back) = rotate_ab(&a_matched, &b_matched, -theta_rad);
@@ -127,6 +157,7 @@ fn process_lab_iteration(
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
+///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -138,6 +169,7 @@ pub fn color_correct_cra_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
+    use_f32_histogram: bool,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
 
@@ -168,6 +200,7 @@ pub fn color_correct_cra_lab(
             ref_width,
             ref_height,
             &ROTATION_ANGLES,
+            use_f32_histogram,
         );
 
         // Blend with current
@@ -180,32 +213,55 @@ pub fn color_correct_cra_lab(
     // Final LAB histogram match
     let final_ab_ranges = compute_ab_ranges(0.0);
 
-    // Scale and dither each channel directly
-    let l_scaled = scale_l_to_uint8(&current_l);
+    // Scale to 0-255 range
+    let l_scaled = scale_l_to_255(&current_l);
     let (a_scaled, b_scaled) = scale_ab_to_uint8(&current_a, &current_b, final_ab_ranges);
-    let current_l_u8 = floyd_steinberg_dither(&l_scaled, input_width, input_height);
-    let current_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
-    let current_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
-
-    let ref_l_scaled = scale_l_to_uint8(&ref_l);
+    let ref_l_scaled = scale_l_to_255(&ref_l);
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
-    let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
-    let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
-    let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
     // Match histograms
-    let (final_l, final_a, final_b) = if keep_luminosity {
-        let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
-        let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
-        let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
-        (original_l, a_lab, b_lab)
+    let (final_l, final_a, final_b) = if use_f32_histogram {
+        // Use f32 histogram matching directly
+        if keep_luminosity {
+            let matched_a =
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+            let matched_b =
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+            let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
+            (original_l, a_lab, b_lab)
+        } else {
+            let matched_l =
+                match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear);
+            let matched_a =
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+            let matched_b =
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+            let l_lab = scale_255_to_l(&matched_l);
+            let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
+            (l_lab, a_lab, b_lab)
+        }
     } else {
-        let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
-        let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
-        let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
-        let l_lab = scale_uint8_to_l(&matched_l);
-        let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
-        (l_lab, a_lab, b_lab)
+        // Use binned histogram matching with dithering
+        let current_l_u8 = floyd_steinberg_dither(&l_scaled, input_width, input_height);
+        let current_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
+        let current_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+        let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
+        let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
+        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
+
+        if keep_luminosity {
+            let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
+            let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
+            let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
+            (original_l, a_lab, b_lab)
+        } else {
+            let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
+            let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
+            let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
+            let l_lab = scale_uint8_to_l(&matched_l);
+            let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
+            (l_lab, a_lab, b_lab)
+        }
     };
 
     // Convert LAB back to linear RGB (separate channels)
@@ -214,7 +270,7 @@ pub fn color_correct_cra_lab(
     // Convert to sRGB and scale to 0-255
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Dither each channel
+    // Dither each channel for final output
     let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
     let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
     let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
