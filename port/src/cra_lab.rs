@@ -4,7 +4,7 @@
 use crate::color::{
     extract_channel, image_lab_to_rgb, image_rgb_to_lab, linear_to_srgb, srgb_to_linear,
 };
-use crate::dither::{dither_channel_stack, dither_rgb};
+use crate::dither::{dither_rgb, floyd_steinberg_dither};
 use crate::histogram::match_histogram;
 use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
 
@@ -84,18 +84,14 @@ fn process_lab_iteration(
         let (a_rot, b_rot) = rotate_ab(current_a, current_b, theta_rad);
         let (ref_a_rot, ref_b_rot) = rotate_ab(ref_a, ref_b, theta_rad);
 
-        // Scale and dither
+        // Scale and dither each channel directly (no interleave/extract overhead)
         let (a_scaled, b_scaled) = scale_ab_to_uint8(&a_rot, &b_rot, ab_ranges);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a_rot, &ref_b_rot, ab_ranges);
 
-        let input_uint8 = dither_channel_stack(&[a_scaled, b_scaled], input_width, input_height);
-        let ref_uint8 = dither_channel_stack(&[ref_a_scaled, ref_b_scaled], ref_width, ref_height);
-
-        // Extract channels
-        let input_a_u8: Vec<u8> = (0..input_pixels).map(|i| input_uint8[i * 2]).collect();
-        let input_b_u8: Vec<u8> = (0..input_pixels).map(|i| input_uint8[i * 2 + 1]).collect();
-        let ref_a_u8: Vec<u8> = (0..ref_pixels).map(|i| ref_uint8[i * 2]).collect();
-        let ref_b_u8: Vec<u8> = (0..ref_pixels).map(|i| ref_uint8[i * 2 + 1]).collect();
+        let input_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
+        let input_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+        let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
+        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
         // Match histograms
         let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
@@ -192,22 +188,18 @@ pub fn color_correct_cra_lab(
     // Final LAB histogram match
     let final_ab_ranges = compute_ab_ranges(0.0);
 
+    // Scale and dither each channel directly
     let l_scaled = scale_l_to_uint8(&current_l);
     let (a_scaled, b_scaled) = scale_ab_to_uint8(&current_a, &current_b, final_ab_ranges);
-    let current_uint8 = dither_channel_stack(&[l_scaled, a_scaled, b_scaled], input_width, input_height);
+    let current_l_u8 = floyd_steinberg_dither(&l_scaled, input_width, input_height);
+    let current_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
+    let current_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
 
     let ref_l_scaled = scale_l_to_uint8(&ref_l);
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b, final_ab_ranges);
-    let ref_uint8 = dither_channel_stack(&[ref_l_scaled, ref_a_scaled, ref_b_scaled], ref_width, ref_height);
-
-    // Extract channels
-    let current_l_u8: Vec<u8> = (0..input_pixels).map(|i| current_uint8[i * 3]).collect();
-    let current_a_u8: Vec<u8> = (0..input_pixels).map(|i| current_uint8[i * 3 + 1]).collect();
-    let current_b_u8: Vec<u8> = (0..input_pixels).map(|i| current_uint8[i * 3 + 2]).collect();
-
-    let ref_l_u8: Vec<u8> = (0..ref_pixels).map(|i| ref_uint8[i * 3]).collect();
-    let ref_a_u8: Vec<u8> = (0..ref_pixels).map(|i| ref_uint8[i * 3 + 1]).collect();
-    let ref_b_u8: Vec<u8> = (0..ref_pixels).map(|i| ref_uint8[i * 3 + 2]).collect();
+    let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
+    let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
+    let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
 
     // Match histograms
     let (final_l, final_a, final_b) = if keep_luminosity {

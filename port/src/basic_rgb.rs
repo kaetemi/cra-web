@@ -2,7 +2,7 @@
 /// Corresponds to color_correction_basic_rgb.py
 
 use crate::color::{linear_to_srgb, srgb_to_linear};
-use crate::dither::{dither_channel_stack, dither_rgb};
+use crate::dither::{dither_rgb, floyd_steinberg_dither};
 use crate::histogram::match_histogram;
 
 /// Basic RGB histogram matching
@@ -49,17 +49,15 @@ pub fn color_correct_basic_rgb(
         })
         .collect();
 
-    // Dither
-    let input_uint8 = dither_channel_stack(&input_scaled, input_width, input_height);
-    let ref_uint8 = dither_channel_stack(&ref_scaled, ref_width, ref_height);
-
-    // Extract channels
-    let input_channels: Vec<Vec<u8>> = (0..3)
-        .map(|ch| (0..input_pixels).map(|i| input_uint8[i * 3 + ch]).collect())
+    // Dither each channel directly
+    let input_channels: Vec<Vec<u8>> = input_scaled
+        .iter()
+        .map(|ch| floyd_steinberg_dither(ch, input_width, input_height))
         .collect();
 
-    let ref_channels: Vec<Vec<u8>> = (0..3)
-        .map(|ch| (0..ref_pixels).map(|i| ref_uint8[i * 3 + ch]).collect())
+    let ref_channels: Vec<Vec<u8>> = ref_scaled
+        .iter()
+        .map(|ch| floyd_steinberg_dither(ch, ref_width, ref_height))
         .collect();
 
     // Match histograms

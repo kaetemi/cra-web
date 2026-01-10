@@ -2,7 +2,7 @@
 /// Corresponds to color_correction_cra_rgb.py
 
 use crate::color::{linear_to_srgb, srgb_to_linear};
-use crate::dither::{dither_channel_stack, dither_rgb};
+use crate::dither::{dither_rgb, floyd_steinberg_dither};
 use crate::histogram::match_histogram;
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
@@ -74,28 +74,22 @@ fn process_rgb_iteration(
         let current_scaled = scale_rgb_to_uint8(&current_rot, channel_ranges);
         let ref_scaled = scale_rgb_to_uint8(&ref_rot, channel_ranges);
 
-        // Extract channels for dithering
-        let current_channels: Vec<Vec<f32>> = (0..3)
+        // Extract and dither each channel directly
+        let current_u8: Vec<Vec<u8>> = (0..3)
             .map(|c| {
-                (0..input_pixels)
+                let ch: Vec<f32> = (0..input_pixels)
                     .map(|i| current_scaled[i * 3 + c])
-                    .collect()
+                    .collect();
+                floyd_steinberg_dither(&ch, input_width, input_height)
             })
             .collect();
-        let ref_channels: Vec<Vec<f32>> = (0..3)
-            .map(|c| (0..ref_pixels).map(|i| ref_scaled[i * 3 + c]).collect())
-            .collect();
-
-        // Dither
-        let current_uint8 = dither_channel_stack(&current_channels, input_width, input_height);
-        let ref_uint8 = dither_channel_stack(&ref_channels, ref_width, ref_height);
-
-        // Extract channels for histogram matching
-        let current_u8: Vec<Vec<u8>> = (0..3)
-            .map(|c| (0..input_pixels).map(|i| current_uint8[i * 3 + c]).collect())
-            .collect();
         let ref_u8: Vec<Vec<u8>> = (0..3)
-            .map(|c| (0..ref_pixels).map(|i| ref_uint8[i * 3 + c]).collect())
+            .map(|c| {
+                let ch: Vec<f32> = (0..ref_pixels)
+                    .map(|i| ref_scaled[i * 3 + c])
+                    .collect();
+                floyd_steinberg_dither(&ch, ref_width, ref_height)
+            })
             .collect();
 
         // Match histograms
@@ -201,29 +195,22 @@ pub fn color_correct_cra_rgb(
     let current_scaled = scale_rgb_to_uint8(&current, final_ranges);
     let ref_scaled_final = scale_rgb_to_uint8(&ref_scaled, final_ranges);
 
-    let current_channels: Vec<Vec<f32>> = (0..3)
-        .map(|c| {
-            (0..input_pixels)
-                .map(|i| current_scaled[i * 3 + c])
-                .collect()
-        })
-        .collect();
-    let ref_channels: Vec<Vec<f32>> = (0..3)
-        .map(|c| {
-            (0..ref_pixels)
-                .map(|i| ref_scaled_final[i * 3 + c])
-                .collect()
-        })
-        .collect();
-
-    let current_uint8 = dither_channel_stack(&current_channels, input_width, input_height);
-    let ref_uint8 = dither_channel_stack(&ref_channels, ref_width, ref_height);
-
+    // Extract and dither each channel directly
     let current_u8: Vec<Vec<u8>> = (0..3)
-        .map(|c| (0..input_pixels).map(|i| current_uint8[i * 3 + c]).collect())
+        .map(|c| {
+            let ch: Vec<f32> = (0..input_pixels)
+                .map(|i| current_scaled[i * 3 + c])
+                .collect();
+            floyd_steinberg_dither(&ch, input_width, input_height)
+        })
         .collect();
     let ref_u8: Vec<Vec<u8>> = (0..3)
-        .map(|c| (0..ref_pixels).map(|i| ref_uint8[i * 3 + c]).collect())
+        .map(|c| {
+            let ch: Vec<f32> = (0..ref_pixels)
+                .map(|i| ref_scaled_final[i * 3 + c])
+                .collect();
+            floyd_steinberg_dither(&ch, ref_width, ref_height)
+        })
         .collect();
 
     let matched: Vec<Vec<u8>> = (0..3)
