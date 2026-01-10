@@ -44,11 +44,11 @@ pub fn color_correct_basic_rgb(
     let (matched_r_linear, matched_g_linear, matched_b_linear) = if use_f32_histogram {
         // Use f32 histogram matching directly (no dithering/quantization)
         let matched_r =
-            match_histogram_f32(&in_r_scaled, &ref_r_scaled, InterpolationMode::Linear);
+            match_histogram_f32(&in_r_scaled, &ref_r_scaled, InterpolationMode::Linear, 0);
         let matched_g =
-            match_histogram_f32(&in_g_scaled, &ref_g_scaled, InterpolationMode::Linear);
+            match_histogram_f32(&in_g_scaled, &ref_g_scaled, InterpolationMode::Linear, 1);
         let matched_b =
-            match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+            match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 2);
 
         // Scale back to linear 0-1 range
         let r_linear: Vec<f32> = matched_r.iter().map(|&v| v / 255.0).collect();

@@ -77,18 +77,18 @@ pub fn color_correct_basic_lab(
         // Use f32 histogram matching directly (no dithering/quantization)
         if keep_luminosity {
             let matched_a =
-                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, 0);
             let matched_b =
-                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 1);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b);
             (original_l, a_lab, b_lab)
         } else {
             let matched_l =
-                match_histogram_f32(&in_l_scaled, &ref_l_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&in_l_scaled, &ref_l_scaled, InterpolationMode::Linear, 0);
             let matched_a =
-                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, 1);
             let matched_b =
-                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 2);
             let l_lab = scale_255_to_l(&matched_l);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b);
             (l_lab, a_lab, b_lab)

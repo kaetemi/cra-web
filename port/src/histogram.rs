@@ -35,10 +35,16 @@ fn wang_hash(mut x: u32) -> u32 {
 ///     source: Source values (any range, typically 0.0-255.0)
 ///     reference: Reference values (same range as source)
 ///     mode: Interpolation mode (Linear recommended for smoothness)
+///     seed: Random seed for tie-breaking (use different values per pass to reduce noise when averaging)
 ///
 /// Returns:
 ///     Matched values with same length as source
-pub fn match_histogram_f32(source: &[f32], reference: &[f32], mode: InterpolationMode) -> Vec<f32> {
+pub fn match_histogram_f32(
+    source: &[f32],
+    reference: &[f32],
+    mode: InterpolationMode,
+    seed: u32,
+) -> Vec<f32> {
     if source.is_empty() || reference.is_empty() {
         return source.to_vec();
     }
@@ -48,12 +54,14 @@ pub fn match_histogram_f32(source: &[f32], reference: &[f32], mode: Interpolatio
 
     // Get sorted indices for source (argsort) with random tie-breaking.
     // This prevents horizontal banding when flat regions map to varying reference.
+    // Hash the seed so consecutive seeds (0,1,2...) produce uncorrelated patterns.
+    let hashed_seed = wang_hash(seed);
     let mut src_indices: Vec<usize> = (0..src_len).collect();
     src_indices.sort_unstable_by(|&a, &b| {
         match source[a].partial_cmp(&source[b]) {
             Some(std::cmp::Ordering::Equal) | None => {
-                // Random tie-breaking using Wang hash of indices
-                wang_hash(a as u32).cmp(&wang_hash(b as u32))
+                // Random tie-breaking using Wang hash of index XOR hashed seed
+                wang_hash(a as u32 ^ hashed_seed).cmp(&wang_hash(b as u32 ^ hashed_seed))
             }
             Some(ord) => ord,
         }
@@ -259,7 +267,7 @@ mod tests {
     fn test_match_histogram_f32_identity() {
         // Matching histogram to itself should preserve relative ordering
         let data: Vec<f32> = (0..256).map(|i| i as f32).collect();
-        let result = match_histogram_f32(&data, &data, InterpolationMode::Linear);
+        let result = match_histogram_f32(&data, &data, InterpolationMode::Linear, 0);
         for (a, b) in data.iter().zip(result.iter()) {
             assert!((a - b).abs() < 0.01, "Expected {} but got {}", a, b);
         }
@@ -271,7 +279,7 @@ mod tests {
         // Result should be all 255s
         let source = vec![0.0f32; 100];
         let reference = vec![255.0f32; 100];
-        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
         for &v in &result {
             assert!((v - 255.0).abs() < 0.01, "Expected 255.0 but got {}", v);
         }
@@ -282,7 +290,7 @@ mod tests {
         // Source has 10 values, reference has 100 values
         let source: Vec<f32> = (0..10).map(|i| i as f32 * 25.5).collect();
         let reference: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
         assert_eq!(result.len(), 10);
         // Results should be monotonic (preserving order)
         for i in 1..result.len() {
@@ -301,8 +309,8 @@ mod tests {
         let source: Vec<f32> = vec![0.0, 50.0, 100.0, 150.0, 200.0];
         let reference: Vec<f32> = vec![10.0, 110.0, 210.0];
 
-        let nearest = match_histogram_f32(&source, &reference, InterpolationMode::Nearest);
-        let linear = match_histogram_f32(&source, &reference, InterpolationMode::Linear);
+        let nearest = match_histogram_f32(&source, &reference, InterpolationMode::Nearest, 0);
+        let linear = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
 
         // Both should have same length
         assert_eq!(nearest.len(), source.len());

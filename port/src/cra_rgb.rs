@@ -78,7 +78,7 @@ fn process_rgb_iteration(
 
     let mut all_corrected: Vec<Vec<f32>> = Vec::new();
 
-    for &theta_deg in rotation_angles {
+    for (pass_idx, &theta_deg) in rotation_angles.iter().enumerate() {
         let theta_rad = deg_to_rad(theta_deg);
         let channel_ranges = compute_rgb_channel_ranges(theta_deg, perceptual_scale);
 
@@ -100,10 +100,11 @@ fn process_rgb_iteration(
                 .map(|c| (0..ref_pixels).map(|i| ref_scaled[i * 3 + c]).collect())
                 .collect();
 
-            // Match histograms
+            // Match histograms with different seeds per pass and channel for noise averaging
             let matched: Vec<Vec<f32>> = (0..3)
                 .map(|c| {
-                    match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear)
+                    let seed = (pass_idx * 3 + c) as u32;
+                    match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, seed)
                 })
                 .collect();
 
@@ -248,9 +249,11 @@ pub fn color_correct_cra_rgb(
             .map(|c| (0..ref_pixels).map(|i| ref_scaled_final[i * 3 + c]).collect())
             .collect();
 
+        // Final pass uses high seed values to avoid collision with rotation passes
         let matched: Vec<Vec<f32>> = (0..3)
             .map(|c| {
-                match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear)
+                let seed = (100 + c) as u32;
+                match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, seed)
             })
             .collect();
 

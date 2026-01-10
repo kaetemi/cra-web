@@ -97,13 +97,14 @@ fn process_block_iteration(
     ref_block_height: usize,
     rotation_angles: &[f32],
     use_f32_histogram: bool,
+    block_seed: u32,
 ) -> (Vec<f32>, Vec<f32>) {
     let block_pixels = block_width * block_height;
 
     let mut all_corrected_a: Vec<Vec<f32>> = Vec::new();
     let mut all_corrected_b: Vec<Vec<f32>> = Vec::new();
 
-    for &theta_deg in rotation_angles {
+    for (pass_idx, &theta_deg) in rotation_angles.iter().enumerate() {
         let theta_rad = deg_to_rad(theta_deg);
         let ab_ranges = compute_ab_ranges(theta_deg);
 
@@ -117,10 +118,13 @@ fn process_block_iteration(
 
         let (a_matched, b_matched) = if use_f32_histogram {
             // Use f32 histogram matching directly (no dithering/quantization)
+            // Different seeds per block, pass, and channel for noise averaging
+            let seed_a = block_seed.wrapping_mul(10) + (pass_idx as u32 * 2);
+            let seed_b = block_seed.wrapping_mul(10) + (pass_idx as u32 * 2 + 1);
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, seed_a);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, seed_b);
             scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
         } else {
             // Use binned histogram matching with dithering
@@ -167,6 +171,7 @@ fn process_block_iteration_with_l(
     ref_block_height: usize,
     rotation_angles: &[f32],
     use_f32_histogram: bool,
+    block_seed: u32,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Process AB channels
     let (avg_a, avg_b) = process_block_iteration(
@@ -180,6 +185,7 @@ fn process_block_iteration_with_l(
         ref_block_height,
         rotation_angles,
         use_f32_histogram,
+        block_seed,
     );
 
     // Process L channel
@@ -187,7 +193,9 @@ fn process_block_iteration_with_l(
     let ref_l_scaled = scale_l_to_255(ref_l);
 
     let avg_l = if use_f32_histogram {
-        let matched_l = match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear);
+        // Use a distinct seed for L channel (offset by 100)
+        let l_seed = block_seed.wrapping_mul(10) + 100;
+        let matched_l = match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, l_seed);
         scale_255_to_l(&matched_l)
     } else {
         let l_uint8 = floyd_steinberg_dither(&l_scaled, block_width, block_height);
@@ -248,7 +256,7 @@ pub fn color_correct_tiled_lab(
     };
 
     // Process each block
-    for block in &blocks {
+    for (block_idx, block) in blocks.iter().enumerate() {
         let block_height = block.y_end - block.y_start;
         let block_width = block.x_end - block.x_start;
         let ref_block_height = block.ref_y_end - block.ref_y_start;
@@ -327,6 +335,7 @@ pub fn color_correct_tiled_lab(
                     ref_block_height,
                     &ROTATION_ANGLES,
                     use_f32_histogram,
+                    block_idx as u32,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -348,6 +357,7 @@ pub fn color_correct_tiled_lab(
                     ref_block_height,
                     &ROTATION_ANGLES,
                     use_f32_histogram,
+                    block_idx as u32,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -423,12 +433,12 @@ pub fn color_correct_tiled_lab(
     let ref_l_scaled = scale_l_to_255(&ref_l);
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b, final_ab_ranges);
 
-    // Match histograms for all channels
+    // Match histograms for all channels (final pass uses high seeds to avoid collision with block passes)
     let (final_l, final_a, final_b) = if use_f32_histogram {
         // Use f32 histogram matching directly (no dithering/quantization)
-        let matched_l = match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear);
-        let matched_a = match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
-        let matched_b = match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+        let matched_l = match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, 1000);
+        let matched_a = match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 1001);
+        let matched_b = match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 1002);
         let l_lab = scale_255_to_l(&matched_l);
         let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
         (l_lab, a_lab, b_lab)

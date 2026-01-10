@@ -99,7 +99,7 @@ fn process_lab_iteration(
     let mut all_corrected_a: Vec<Vec<f32>> = Vec::new();
     let mut all_corrected_b: Vec<Vec<f32>> = Vec::new();
 
-    for &theta_deg in rotation_angles {
+    for (pass_idx, &theta_deg) in rotation_angles.iter().enumerate() {
         let theta_rad = deg_to_rad(theta_deg);
         let ab_ranges = compute_ab_ranges(theta_deg);
 
@@ -113,10 +113,13 @@ fn process_lab_iteration(
 
         let (a_matched, b_matched) = if use_f32_histogram {
             // Use f32 histogram matching directly (no dithering/quantization)
+            // Use different seeds per pass and channel for noise averaging
+            let seed_a = (pass_idx * 2) as u32;
+            let seed_b = (pass_idx * 2 + 1) as u32;
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, seed_a);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, seed_b);
             scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
         } else {
             // Use binned histogram matching with dithering
@@ -219,23 +222,23 @@ pub fn color_correct_cra_lab(
     let ref_l_scaled = scale_l_to_255(&ref_l);
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
 
-    // Match histograms
+    // Match histograms (final pass uses high seed values to avoid collision with rotation passes)
     let (final_l, final_a, final_b) = if use_f32_histogram {
         // Use f32 histogram matching directly
         if keep_luminosity {
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 100);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 101);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (original_l, a_lab, b_lab)
         } else {
             let matched_l =
-                match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, 100);
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 101);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 102);
             let l_lab = scale_255_to_l(&matched_l);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (l_lab, a_lab, b_lab)
