@@ -291,6 +291,44 @@ export function color_correct_tiled_lab(input_data, input_width, input_height, r
 }
 
 /**
+ * Tiled CRA Oklab color correction (WASM export)
+ *
+ * CRA with overlapping tile-based processing in Oklab color space. Divides the image
+ * into blocks with 50% overlap, applies CRA to each block, then blends results using
+ * Hamming windows. Combines Oklab's perceptual uniformity with spatial adaptation.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     tiled_luminosity: If true, process L channel per-tile before global match
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ * @param {Uint8Array} input_data
+ * @param {number} input_width
+ * @param {number} input_height
+ * @param {Uint8Array} ref_data
+ * @param {number} ref_width
+ * @param {number} ref_height
+ * @param {boolean} tiled_luminosity
+ * @param {boolean} use_f32_histogram
+ * @returns {Uint8Array}
+ */
+export function color_correct_tiled_oklab(input_data, input_width, input_height, ref_data, ref_width, ref_height, tiled_luminosity, use_f32_histogram) {
+    const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.color_correct_tiled_oklab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, tiled_luminosity, use_f32_histogram);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
  * Floyd-Steinberg dithering (WASM export)
  * Matches the existing dither WASM implementation
  * @param {Float32Array} img

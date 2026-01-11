@@ -14,7 +14,9 @@ const METHOD_DESCRIPTIONS = {
     'cra_rgb': 'Chroma Rotation Averaging in RGB space. Rotates the RGB cube around the neutral gray axis (1,1,1) using Rodrigues\' rotation formula at 0°, 40°, 80°. Works well when you want to stay in RGB space.',
     'cra_rgb_perceptual': 'CRA RGB with perceptual weighting. Scales channels by Rec.709 luminance weights before rotation, giving more importance to green (which humans perceive most sensitively) and less to blue. Can produce more natural-looking results.',
     'oklab': 'Basic Oklab histogram matching. Oklab is a perceptually uniform color space (2020) with better hue linearity than LAB. Matches histograms for L, a, b channels independently. Modern alternative to LAB with more predictable color behavior.',
-    'cra_oklab': 'Chroma Rotation Averaging in Oklab color space. Combines CRA\'s rotation averaging with Oklab\'s superior perceptual uniformity. Rotates the AB chroma plane at multiple angles, performs histogram matching, then averages results. Best choice for perceptually accurate color transfer.'
+    'cra_oklab': 'Chroma Rotation Averaging in Oklab color space. Combines CRA\'s rotation averaging with Oklab\'s superior perceptual uniformity. Rotates the AB chroma plane at multiple angles, performs histogram matching, then averages results. Best choice for perceptually accurate color transfer.',
+    'cra_oklab_tiled': 'CRA Oklab with overlapping tile-based processing. Divides the image into blocks with 50% overlap, applies CRA in Oklab space to each block, then blends results using Hamming windows. Best for images with spatially varying color casts. Includes tiled luminosity processing.',
+    'cra_oklab_tiled_ab': 'CRA Oklab tiled processing for AB chroma channels with global luminosity matching. Applies per-block CRA correction in Oklab to the A and B channels only, then performs a final global histogram match. Best balance of localized color correction with consistent global tone.'
 };
 
 // Map method values to script files and options
@@ -27,7 +29,9 @@ const METHOD_CONFIG = {
     'cra_rgb': { script: 'color_correction_cra_rgb.py', options: { perceptual: false } },
     'cra_rgb_perceptual': { script: 'color_correction_cra_rgb.py', options: { perceptual: true } },
     'oklab': { script: null, options: {}, wasmOnly: true },
-    'cra_oklab': { script: null, options: {}, wasmOnly: true }
+    'cra_oklab': { script: null, options: {}, wasmOnly: true },
+    'cra_oklab_tiled': { script: null, options: { tiled_luminosity: true }, wasmOnly: true },
+    'cra_oklab_tiled_ab': { script: null, options: { tiled_luminosity: false }, wasmOnly: true }
 };
 
 let worker = null;

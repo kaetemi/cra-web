@@ -250,6 +250,26 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
             );
             break;
 
+        case 'cra_oklab_tiled':
+            sendConsole('Running CRA Oklab tiled color correction (with tiled luminosity)...');
+            resultRgb = craWasm.color_correct_tiled_oklab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                true, // tiled_luminosity
+                useF32Histogram
+            );
+            break;
+
+        case 'cra_oklab_tiled_ab':
+            sendConsole('Running CRA Oklab tiled color correction (AB only)...');
+            resultRgb = craWasm.color_correct_tiled_oklab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false, // tiled_luminosity
+                useF32Histogram
+            );
+            break;
+
         default:
             throw new Error(`Unknown method: ${method}`);
     }

@@ -446,6 +446,8 @@
                 <option value="cra_rgb_perceptual">CRA RGB Perceptual (RGB with perceptual weighting)</option>
                 <option value="oklab">* Oklab (Modern perceptually uniform)</option>
                 <option value="cra_oklab">* CRA Oklab (CRA in Oklab space)</option>
+                <option value="cra_oklab_tiled">CRA Oklab Tiled (For spatially varying colors)</option>
+                <option value="cra_oklab_tiled_ab">* CRA Oklab Tiled AB (Tiled AB + global luminosity)</option>
             </select>
             <div class="method-description" id="method-description">
                 Chroma Rotation Averaging in LAB color space. Rotates the AB chroma plane at multiple angles (0°, 30°, 60°), performs histogram matching at each rotation, then averages the results. This prevents color flips and preserves complex color relationships.

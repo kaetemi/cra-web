@@ -130,6 +130,26 @@ export function color_correct_cra_rgb(input_data: Uint8Array, input_width: numbe
 export function color_correct_tiled_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
+ * Tiled CRA Oklab color correction (WASM export)
+ *
+ * CRA with overlapping tile-based processing in Oklab color space. Divides the image
+ * into blocks with 50% overlap, applies CRA to each block, then blends results using
+ * Hamming windows. Combines Oklab's perceptual uniformity with spatial adaptation.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     tiled_luminosity: If true, process L channel per-tile before global match
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ */
+export function color_correct_tiled_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
+
+/**
  * Floyd-Steinberg dithering (WASM export)
  * Matches the existing dither WASM implementation
  */
@@ -146,6 +166,7 @@ export interface InitOutput {
   readonly color_correct_cra_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_tiled_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly floyd_steinberg_dither_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbindgen_externrefs: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;
