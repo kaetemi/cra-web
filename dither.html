@@ -159,6 +159,83 @@
             font-weight: 500;
         }
 
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .toggle-row > span {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.3s;
+            border-radius: 26px;
+        }
+
+        .toggle-slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.3s;
+            border-radius: 50%;
+        }
+
+        .toggle-switch input:checked + .toggle-slider {
+            background-color: #555;
+        }
+
+        .toggle-switch input:checked + .toggle-slider:before {
+            transform: translateX(24px);
+        }
+
+        .channel-box.gray {
+            background: #f5f5f5;
+            border: 2px solid #888;
+        }
+
+        .channel-box.gray h4 {
+            color: #555;
+        }
+
+        .grayscale-options {
+            display: none;
+        }
+
+        .grayscale-options.active {
+            display: block;
+        }
+
+        .rgb-options.hidden {
+            display: none;
+        }
+
         .process-btn {
             width: 100%;
             padding: 15px 30px;
@@ -328,7 +405,15 @@
                 </select>
             </div>
 
-            <div class="channel-options">
+            <div class="toggle-row">
+                <span>Grayscale:</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="grayscale-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="channel-options rgb-options" id="rgb-options">
                 <div class="channel-box red">
                     <h4>Red Channel</h4>
                     <input type="range" id="bits-r" min="1" max="8" value="5">
@@ -343,6 +428,14 @@
                     <h4>Blue Channel</h4>
                     <input type="range" id="bits-b" min="1" max="8" value="5">
                     <p class="bit-value" id="bits-b-label">5 bits (32 levels)</p>
+                </div>
+            </div>
+
+            <div class="grayscale-options" id="grayscale-options">
+                <div class="channel-box gray">
+                    <h4>Grayscale</h4>
+                    <input type="range" id="bits-gray" min="1" max="8" value="4">
+                    <p class="bit-value" id="bits-gray-label">4 bits (16 levels)</p>
                 </div>
             </div>
         </div>
@@ -460,36 +553,67 @@
 
             try {
                 const mode = parseInt(document.getElementById('dither-mode').value);
-                const bitsR = parseInt(document.getElementById('bits-r').value);
-                const bitsG = parseInt(document.getElementById('bits-g').value);
-                const bitsB = parseInt(document.getElementById('bits-b').value);
-
+                const isGrayscale = document.getElementById('grayscale-toggle').checked;
                 const data = inputImageData.data;
                 const pixelCount = inputWidth * inputHeight;
 
-                // Extract channels
-                const rChannel = new Uint8Array(pixelCount);
-                const gChannel = new Uint8Array(pixelCount);
-                const bChannel = new Uint8Array(pixelCount);
-
-                for (let i = 0; i < pixelCount; i++) {
-                    rChannel[i] = data[i * 4];
-                    gChannel[i] = data[i * 4 + 1];
-                    bChannel[i] = data[i * 4 + 2];
-                }
-
-                // Dither each channel with different seeds
-                const rDithered = ditherChannel(rChannel, inputWidth, inputHeight, mode, SEEDS.r, bitsR);
-                const gDithered = ditherChannel(gChannel, inputWidth, inputHeight, mode, SEEDS.g, bitsG);
-                const bDithered = ditherChannel(bChannel, inputWidth, inputHeight, mode, SEEDS.b, bitsB);
-
-                // Combine channels back
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
-                for (let i = 0; i < pixelCount; i++) {
-                    outputData[i * 4] = rDithered[i];
-                    outputData[i * 4 + 1] = gDithered[i];
-                    outputData[i * 4 + 2] = bDithered[i];
-                    outputData[i * 4 + 3] = 255; // Alpha
+
+                if (isGrayscale) {
+                    // Grayscale mode: convert to luma using Rec.709 coefficients
+                    const bitsGray = parseInt(document.getElementById('bits-gray').value);
+                    const grayChannel = new Uint8Array(pixelCount);
+
+                    // Rec.709 luma coefficients (already normalized, sum to 1.0)
+                    const rCoef = 0.2126;
+                    const gCoef = 0.7152;
+                    const bCoef = 0.0722;
+
+                    for (let i = 0; i < pixelCount; i++) {
+                        const r = data[i * 4];
+                        const g = data[i * 4 + 1];
+                        const b = data[i * 4 + 2];
+                        grayChannel[i] = Math.round(r * rCoef + g * gCoef + b * bCoef);
+                    }
+
+                    // Dither the grayscale channel
+                    const grayDithered = ditherChannel(grayChannel, inputWidth, inputHeight, mode, SEEDS.r, bitsGray);
+
+                    // Output as grayscale (R=G=B)
+                    for (let i = 0; i < pixelCount; i++) {
+                        const v = grayDithered[i];
+                        outputData[i * 4] = v;
+                        outputData[i * 4 + 1] = v;
+                        outputData[i * 4 + 2] = v;
+                        outputData[i * 4 + 3] = 255;
+                    }
+                } else {
+                    // RGB mode: process each channel separately
+                    const bitsR = parseInt(document.getElementById('bits-r').value);
+                    const bitsG = parseInt(document.getElementById('bits-g').value);
+                    const bitsB = parseInt(document.getElementById('bits-b').value);
+
+                    const rChannel = new Uint8Array(pixelCount);
+                    const gChannel = new Uint8Array(pixelCount);
+                    const bChannel = new Uint8Array(pixelCount);
+
+                    for (let i = 0; i < pixelCount; i++) {
+                        rChannel[i] = data[i * 4];
+                        gChannel[i] = data[i * 4 + 1];
+                        bChannel[i] = data[i * 4 + 2];
+                    }
+
+                    // Dither each channel with different seeds
+                    const rDithered = ditherChannel(rChannel, inputWidth, inputHeight, mode, SEEDS.r, bitsR);
+                    const gDithered = ditherChannel(gChannel, inputWidth, inputHeight, mode, SEEDS.g, bitsG);
+                    const bDithered = ditherChannel(bChannel, inputWidth, inputHeight, mode, SEEDS.b, bitsB);
+
+                    for (let i = 0; i < pixelCount; i++) {
+                        outputData[i * 4] = rDithered[i];
+                        outputData[i * 4 + 1] = gDithered[i];
+                        outputData[i * 4 + 2] = bDithered[i];
+                        outputData[i * 4 + 3] = 255;
+                    }
                 }
 
                 // Create output image
@@ -552,9 +676,18 @@
             label.textContent = `${bits} bit${bits > 1 ? 's' : ''} (${levels} levels)`;
         }
 
-        ['r', 'g', 'b'].forEach(channel => {
+        ['r', 'g', 'b', 'gray'].forEach(channel => {
             document.getElementById(`bits-${channel}`).addEventListener('input', () => updateBitLabel(channel));
         });
+
+        // Grayscale toggle
+        function updateGrayscaleMode() {
+            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
+            document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
+        }
+
+        document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
 
         // Drag and drop support
         const uploadBox = document.getElementById('input-upload');
