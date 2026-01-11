@@ -50,6 +50,40 @@ pub fn floyd_steinberg_dither_wasm(img: Vec<f32>, w: usize, h: usize) -> Vec<u8>
     dither::floyd_steinberg_dither(&img, w, h)
 }
 
+/// Floyd-Steinberg dithering with configurable bit depth (WASM export)
+///
+/// Args:
+///     img: flat array of f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     bits: output bit depth (1-8), controls number of quantization levels
+///
+/// Returns:
+///     flat array of u8 values. Lower bit depths are represented in uint8
+///     by extending bits through repetition (e.g., 3-bit value ABC becomes ABCABCAB).
+#[wasm_bindgen]
+pub fn floyd_steinberg_dither_bits_wasm(img: Vec<f32>, w: usize, h: usize, bits: u8) -> Vec<u8> {
+    dither::floyd_steinberg_dither_bits(&img, w, h, bits)
+}
+
+/// Dithering with selectable mode and bit depth (WASM export)
+///
+/// Args:
+///     img: flat array of f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     mode: dither mode (0-6, see dither_mode_from_u8)
+///     seed: random seed for mixed modes
+///     bits: output bit depth (1-8), controls number of quantization levels
+///
+/// Returns:
+///     flat array of u8 values. Lower bit depths are represented in uint8
+///     by extending bits through repetition.
+#[wasm_bindgen]
+pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: u32, bits: u8) -> Vec<u8> {
+    dither::dither_with_mode_bits(&img, w, h, dither_mode_from_u8(mode), seed, bits)
+}
+
 /// Basic LAB histogram matching (WASM export)
 ///
 /// Args:
