@@ -9,9 +9,12 @@ struct QuantParams {
     bits: u8,
     /// Maximum level value (2^bits - 1), e.g., 31 for 5 bits, 255 for 8 bits
     max_level: f32,
-    /// Pre-computed lookup table for bit-replicated values (only for non-8-bit)
-    /// Maps level index (0..=max_level) to the 8-bit extended value
-    lut: [f32; 256],
+    /// LUT mapping each uint8 input to the nearest bit-replicated level
+    lut_nearest: [f32; 256],
+    /// LUT mapping each uint8 input to the floor (largest level <= input)
+    lut_floor: [f32; 256],
+    /// LUT mapping each uint8 input to the ceil (smallest level >= input)
+    lut_ceil: [f32; 256],
 }
 
 impl QuantParams {
@@ -21,16 +24,48 @@ impl QuantParams {
     #[inline]
     fn new(bits: u8) -> Self {
         debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
-        let levels = 1u32 << bits; // 2^bits
+        let levels = 1u32 << bits;
         let max_level = (levels - 1) as f32;
+        let max_idx = (levels - 1) as usize;
+        let shift = 8 - bits;
 
         // Pre-compute bit-replicated values for each level
-        let mut lut = [0.0f32; 256];
-        for v in 0..levels {
-            lut[v as usize] = Self::bit_replicate(v as u8, bits) as f32;
+        let level_values: Vec<u8> = (0..levels)
+            .map(|l| Self::bit_replicate(l as u8, bits))
+            .collect();
+
+        let mut lut_nearest = [0.0f32; 256];
+        let mut lut_floor = [0.0f32; 256];
+        let mut lut_ceil = [0.0f32; 256];
+
+        for v in 0..256u16 {
+            // Use bit truncation to find a nearby level
+            let trunc_idx = (v as u8 >> shift) as usize;
+            let trunc_val = level_values[trunc_idx];
+
+            let (floor_val, ceil_val) = if trunc_val == v as u8 {
+                (trunc_val, trunc_val)
+            } else if trunc_val < v as u8 {
+                // trunc is floor, ceil is trunc+1
+                let ceil = if trunc_idx < max_idx { level_values[trunc_idx + 1] } else { trunc_val };
+                (trunc_val, ceil)
+            } else {
+                // trunc is ceil, floor is trunc-1
+                let floor = if trunc_idx > 0 { level_values[trunc_idx - 1] } else { trunc_val };
+                (floor, trunc_val)
+            };
+
+            // Nearest: closer of floor/ceil (ties go to floor)
+            let dist_floor = v.abs_diff(floor_val as u16);
+            let dist_ceil = v.abs_diff(ceil_val as u16);
+            let nearest_val = if dist_floor <= dist_ceil { floor_val } else { ceil_val };
+
+            lut_floor[v as usize] = floor_val as f32;
+            lut_ceil[v as usize] = ceil_val as f32;
+            lut_nearest[v as usize] = nearest_val as f32;
         }
 
-        Self { bits, max_level, lut }
+        Self { bits, max_level, lut_nearest, lut_floor, lut_ceil }
     }
 
     /// Extend n-bit value to 8 bits by repeating the bit pattern.
@@ -56,20 +91,23 @@ impl QuantParams {
 
     /// Quantize a value to the nearest level and return the bit-replicated value.
     /// Input and output are in 0-255 range.
-    ///
-    /// First finds the nearest n-bit level, then returns the 8-bit value with
-    /// bits extended by repetition (e.g., 3-bit ABC becomes ABCABCAB).
     #[inline]
     fn quantize(&self, value: f32) -> f32 {
-        if self.bits == 8 {
-            // 8-bit: just round to nearest integer
-            value.round()
-        } else {
-            // Find nearest level: round(value * max_level / 255)
-            let level = (value * self.max_level / 255.0).round() as usize;
-            // Look up the bit-replicated value
-            self.lut[level.min(self.max_level as usize)]
-        }
+        self.lut_nearest[value.round().clamp(0.0, 255.0) as usize]
+    }
+
+    /// Quantize a value to the floor level (largest level <= input).
+    #[inline]
+    #[allow(dead_code)]
+    fn quantize_floor(&self, value: f32) -> f32 {
+        self.lut_floor[value.round().clamp(0.0, 255.0) as usize]
+    }
+
+    /// Quantize a value to the ceil level (smallest level >= input).
+    #[inline]
+    #[allow(dead_code)]
+    fn quantize_ceil(&self, value: f32) -> f32 {
+        self.lut_ceil[value.round().clamp(0.0, 255.0) as usize]
     }
 
     /// Create default 8-bit quantization (standard rounding to integers)
@@ -82,7 +120,9 @@ impl QuantParams {
         Self {
             bits: 8,
             max_level: 255.0,
-            lut,
+            lut_nearest: lut,
+            lut_floor: lut,
+            lut_ceil: lut,
         }
     }
 }
