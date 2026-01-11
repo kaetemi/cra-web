@@ -230,6 +230,26 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
             );
             break;
 
+        case 'oklab':
+            sendConsole('Running basic Oklab histogram matching...');
+            resultRgb = craWasm.color_correct_basic_oklab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false, // keep_luminosity
+                useF32Histogram
+            );
+            break;
+
+        case 'cra_oklab':
+            sendConsole('Running CRA Oklab color correction...');
+            resultRgb = craWasm.color_correct_cra_oklab(
+                inputRgb, inputImg.width, inputImg.height,
+                refRgb, refImg.width, refImg.height,
+                false, // keep_luminosity
+                useF32Histogram
+            );
+            break;
+
         default:
             throw new Error(`Unknown method: ${method}`);
     }

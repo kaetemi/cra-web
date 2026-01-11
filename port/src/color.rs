@@ -1,4 +1,4 @@
-/// Color conversion utilities for sRGB, Linear RGB, and Lab color spaces.
+/// Color conversion utilities for sRGB, Linear RGB, Lab, and Oklab color spaces.
 
 // RGB to XYZ matrix (sRGB/Rec.709 primaries, D65 illuminant)
 const RGB_TO_XYZ: [[f32; 3]; 3] = [
@@ -177,6 +177,53 @@ pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize,
     }
 }
 
+// ============== Oklab color space ==============
+// Oklab is a perceptually uniform color space developed by Björn Ottosson (2020)
+// L: 0-1, a/b: roughly -0.4 to +0.4
+
+/// Convert linear RGB (0-1) to Oklab
+/// Returns (L, a, b) where L is 0-1 and a,b are roughly -0.4 to +0.4
+#[inline]
+pub fn linear_rgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Linear sRGB to LMS
+    let l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
+    let m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
+    let s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+
+    // Cube root (with sign handling for out-of-gamut values)
+    let l_ = l.max(0.0).cbrt();
+    let m_ = m.max(0.0).cbrt();
+    let s_ = s.max(0.0).cbrt();
+
+    // LMS' to Oklab
+    let ok_l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+    let ok_a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+    let ok_b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+
+    (ok_l, ok_a, ok_b)
+}
+
+/// Convert Oklab to linear RGB (0-1)
+#[inline]
+pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
+    // Oklab to LMS'
+    let l_ = l + 0.3963377774 * a + 0.2158037573 * b;
+    let m_ = l - 0.1055613458 * a - 0.0638541728 * b;
+    let s_ = l - 0.0894841775 * a - 1.2914855480 * b;
+
+    // Cube LMS'
+    let lms_l = l_ * l_ * l_;
+    let lms_m = m_ * m_ * m_;
+    let lms_s = s_ * s_ * s_;
+
+    // LMS to linear sRGB
+    let r = 4.0767416621 * lms_l - 3.3077115913 * lms_m + 0.2309699292 * lms_s;
+    let g = -1.2684380046 * lms_l + 2.6097574011 * lms_m - 0.3413193965 * lms_s;
+    let b_out = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
+
+    (r, g, b_out)
+}
+
 // ============== Channel-separated processing ==============
 
 /// Convert interleaved sRGB (0-1) to separate linear RGB channels
@@ -221,6 +268,40 @@ pub fn lab_to_linear_rgb_channels(l: &[f32], a: &[f32], b: &[f32]) -> (Vec<f32>,
 
     for i in 0..pixels {
         let (r, g, b_val) = lab_to_linear_rgb(l[i], a[i], b[i]);
+        r_ch[i] = r;
+        g_ch[i] = g;
+        b_ch[i] = b_val;
+    }
+
+    (r_ch, g_ch, b_ch)
+}
+
+/// Convert separate linear RGB channels to separate Oklab channels
+pub fn linear_rgb_to_oklab_channels(r: &[f32], g: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = r.len();
+    let mut l_ch = vec![0.0f32; pixels];
+    let mut a_ch = vec![0.0f32; pixels];
+    let mut b_ch = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        let (l, a, b_val) = linear_rgb_to_oklab(r[i], g[i], b[i]);
+        l_ch[i] = l;
+        a_ch[i] = a;
+        b_ch[i] = b_val;
+    }
+
+    (l_ch, a_ch, b_ch)
+}
+
+/// Convert separate Oklab channels to separate linear RGB channels
+pub fn oklab_to_linear_rgb_channels(l: &[f32], a: &[f32], b: &[f32]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let pixels = l.len();
+    let mut r_ch = vec![0.0f32; pixels];
+    let mut g_ch = vec![0.0f32; pixels];
+    let mut b_ch = vec![0.0f32; pixels];
+
+    for i in 0..pixels {
+        let (r, g, b_val) = oklab_to_linear_rgb(l[i], a[i], b[i]);
         r_ch[i] = r;
         g_ch[i] = g;
         b_ch[i] = b_val;
@@ -279,6 +360,18 @@ mod tests {
         for (r, g, b) in test_rgb {
             let (l, a, b_ch) = linear_rgb_to_lab(r, g, b);
             let (r2, g2, b2) = lab_to_linear_rgb(l, a, b_ch);
+            assert!((r - r2).abs() < 1e-4, "R failed: {} vs {}", r, r2);
+            assert!((g - g2).abs() < 1e-4, "G failed: {} vs {}", g, g2);
+            assert!((b - b2).abs() < 1e-4, "B failed: {} vs {}", b, b2);
+        }
+    }
+
+    #[test]
+    fn test_oklab_roundtrip() {
+        let test_rgb = [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.5, 0.3, 0.7), (0.2, 0.8, 0.4)];
+        for (r, g, b) in test_rgb {
+            let (l, a, b_ch) = linear_rgb_to_oklab(r, g, b);
+            let (r2, g2, b2) = oklab_to_linear_rgb(l, a, b_ch);
             assert!((r - r2).abs() < 1e-4, "R failed: {} vs {}", r, r2);
             assert!((g - g2).abs() < 1e-4, "G failed: {} vs {}", g, g2);
             assert!((b - b2).abs() < 1e-4, "B failed: {} vs {}", b, b2);

@@ -67,6 +67,43 @@ pub fn rotate_ab(a: &[f32], b: &[f32], theta_rad: f32) -> (Vec<f32>, Vec<f32>) {
     (a_rot, b_rot)
 }
 
+/// Compute the min/max range for A and B channels after rotation for Oklab.
+/// The Oklab AB plane is roughly -0.5 to +0.5 on each axis.
+/// After rotation, we need the bounding box of the rotated square.
+///
+/// Returns: [[a_min, a_max], [b_min, b_max]]
+pub fn compute_oklab_ab_ranges(theta_deg: f32) -> [[f32; 2]; 2] {
+    // Corners of the Oklab AB square (using -0.5 to +0.5 range)
+    let corners = [
+        [-0.5f32, -0.5f32],
+        [-0.5, 0.5],
+        [0.5, -0.5],
+        [0.5, 0.5],
+    ];
+
+    let theta_rad = deg_to_rad(theta_deg);
+    let cos_t = theta_rad.cos();
+    let sin_t = theta_rad.sin();
+
+    // Rotate all corners and find min/max
+    let mut a_min = f32::MAX;
+    let mut a_max = f32::MIN;
+    let mut b_min = f32::MAX;
+    let mut b_max = f32::MIN;
+
+    for [a, b] in corners {
+        let a_rot = a * cos_t - b * sin_t;
+        let b_rot = a * sin_t + b * cos_t;
+
+        a_min = a_min.min(a_rot);
+        a_max = a_max.max(a_rot);
+        b_min = b_min.min(b_rot);
+        b_max = b_max.max(b_rot);
+    }
+
+    [[a_min, a_max], [b_min, b_max]]
+}
+
 /// Rodrigues' rotation formula for axis (1,1,1)/sqrt(3)
 /// Used for RGB cube rotation
 pub fn rotation_matrix_around_111(theta: f32) -> [[f32; 3]; 3] {

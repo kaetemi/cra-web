@@ -18,6 +18,24 @@
 export function color_correct_basic_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
+ * Basic Oklab histogram matching (WASM export)
+ *
+ * Oklab is a perceptually uniform color space with better hue linearity than LAB.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ */
+export function color_correct_basic_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
+
+/**
  * Basic RGB histogram matching (WASM export)
  *
  * Args:
@@ -51,6 +69,26 @@ export function color_correct_basic_rgb(input_data: Uint8Array, input_width: num
  *     Output image as sRGB uint8 (RGBRGB...)
  */
 export function color_correct_cra_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
+
+/**
+ * CRA Oklab color correction (WASM export)
+ *
+ * Chroma Rotation Averaging in Oklab color space. Rotates the AB chroma plane
+ * at multiple angles, performs histogram matching at each rotation, then
+ * averages the results. Oklab provides better perceptual uniformity than LAB.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ */
+export function color_correct_cra_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean): Uint8Array;
 
 /**
  * CRA RGB color correction (WASM export)
@@ -102,8 +140,10 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
   readonly color_correct_basic_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_basic_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly color_correct_basic_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number) => [number, number];
   readonly color_correct_cra_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
+  readonly color_correct_cra_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
   readonly floyd_steinberg_dither_wasm: (a: number, b: number, c: number, d: number) => [number, number];

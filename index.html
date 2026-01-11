@@ -150,6 +150,18 @@
             cursor: not-allowed;
         }
 
+        .wasm-only-warning {
+            display: none;
+            margin-top: 10px;
+            padding: 12px 15px;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 8px;
+            color: #856404;
+            font-size: 14px;
+            text-align: center;
+        }
+
         .output-section {
             text-align: center;
         }
@@ -432,6 +444,8 @@
                 <option value="cra_lab_tiled_ab">* CRA Lab Tiled AB (Tiled AB + global luminosity)</option>
                 <option value="cra_rgb">CRA RGB (Chroma Rotation in RGB)</option>
                 <option value="cra_rgb_perceptual">CRA RGB Perceptual (RGB with perceptual weighting)</option>
+                <option value="oklab">* Oklab (Modern perceptually uniform)</option>
+                <option value="cra_oklab">* CRA Oklab (CRA in Oklab space)</option>
             </select>
             <div class="method-description" id="method-description">
                 Chroma Rotation Averaging in LAB color space. Rotates the AB chroma plane at multiple angles (0°, 30°, 60°), performs histogram matching at each rotation, then averages the results. This prevents color flips and preserves complex color relationships.
@@ -467,6 +481,10 @@
         </div>
 
         <button class="process-btn" id="process-btn" disabled>Process Images</button>
+
+        <div class="wasm-only-warning" id="wasm-only-warning">
+            This method is only available with WASM implementation. Please enable WASM or select a different method.
+        </div>
 
         <div class="error-message" id="error-message"></div>
 

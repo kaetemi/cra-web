@@ -72,6 +72,42 @@ export function color_correct_basic_lab(input_data, input_width, input_height, r
 }
 
 /**
+ * Basic Oklab histogram matching (WASM export)
+ *
+ * Oklab is a perceptually uniform color space with better hue linearity than LAB.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ * @param {Uint8Array} input_data
+ * @param {number} input_width
+ * @param {number} input_height
+ * @param {Uint8Array} ref_data
+ * @param {number} ref_width
+ * @param {number} ref_height
+ * @param {boolean} keep_luminosity
+ * @param {boolean} use_f32_histogram
+ * @returns {Uint8Array}
+ */
+export function color_correct_basic_oklab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity, use_f32_histogram) {
+    const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.color_correct_basic_oklab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity, use_f32_histogram);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
  * Basic RGB histogram matching (WASM export)
  *
  * Args:
@@ -136,6 +172,44 @@ export function color_correct_cra_lab(input_data, input_width, input_height, ref
     const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
     const ret = wasm.color_correct_cra_lab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity, use_f32_histogram);
+    var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
+    wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
+    return v3;
+}
+
+/**
+ * CRA Oklab color correction (WASM export)
+ *
+ * Chroma Rotation Averaging in Oklab color space. Rotates the AB chroma plane
+ * at multiple angles, performs histogram matching at each rotation, then
+ * averages the results. Oklab provides better perceptual uniformity than LAB.
+ *
+ * Args:
+ *     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+ *     input_width, input_height: Input image dimensions
+ *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+ *     ref_width, ref_height: Reference image dimensions
+ *     keep_luminosity: If true, preserve original L channel
+ *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+ *
+ * Returns:
+ *     Output image as sRGB uint8 (RGBRGB...)
+ * @param {Uint8Array} input_data
+ * @param {number} input_width
+ * @param {number} input_height
+ * @param {Uint8Array} ref_data
+ * @param {number} ref_width
+ * @param {number} ref_height
+ * @param {boolean} keep_luminosity
+ * @param {boolean} use_f32_histogram
+ * @returns {Uint8Array}
+ */
+export function color_correct_cra_oklab(input_data, input_width, input_height, ref_data, ref_width, ref_height, keep_luminosity, use_f32_histogram) {
+    const ptr0 = passArray8ToWasm0(input_data, wasm.__wbindgen_malloc);
+    const len0 = WASM_VECTOR_LEN;
+    const ptr1 = passArray8ToWasm0(ref_data, wasm.__wbindgen_malloc);
+    const len1 = WASM_VECTOR_LEN;
+    const ret = wasm.color_correct_cra_oklab(ptr0, len0, input_width, input_height, ptr1, len1, ref_width, ref_height, keep_luminosity, use_f32_histogram);
     var v3 = getArrayU8FromWasm0(ret[0], ret[1]).slice();
     wasm.__wbindgen_free(ret[0], ret[1] * 1, 1);
     return v3;

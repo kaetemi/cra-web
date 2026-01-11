@@ -12,7 +12,9 @@ const METHOD_DESCRIPTIONS = {
     'cra_lab_tiled': 'CRA with overlapping tile-based processing. Divides the image into blocks with 50% overlap, applies CRA to each block, then blends results using Hamming windows. Best for images with spatially varying color casts. Includes tiled luminosity processing.',
     'cra_lab_tiled_ab': 'CRA tiled processing for AB chroma channels with global luminosity matching. Applies per-block CRA correction to the A and B channels only, then performs a final global histogram match on all LAB channels including luminosity. Best balance of localized color correction with consistent global tone.',
     'cra_rgb': 'Chroma Rotation Averaging in RGB space. Rotates the RGB cube around the neutral gray axis (1,1,1) using Rodrigues\' rotation formula at 0°, 40°, 80°. Works well when you want to stay in RGB space.',
-    'cra_rgb_perceptual': 'CRA RGB with perceptual weighting. Scales channels by Rec.709 luminance weights before rotation, giving more importance to green (which humans perceive most sensitively) and less to blue. Can produce more natural-looking results.'
+    'cra_rgb_perceptual': 'CRA RGB with perceptual weighting. Scales channels by Rec.709 luminance weights before rotation, giving more importance to green (which humans perceive most sensitively) and less to blue. Can produce more natural-looking results.',
+    'oklab': 'Basic Oklab histogram matching. Oklab is a perceptually uniform color space (2020) with better hue linearity than LAB. Matches histograms for L, a, b channels independently. Modern alternative to LAB with more predictable color behavior.',
+    'cra_oklab': 'Chroma Rotation Averaging in Oklab color space. Combines CRA\'s rotation averaging with Oklab\'s superior perceptual uniformity. Rotates the AB chroma plane at multiple angles, performs histogram matching, then averages results. Best choice for perceptually accurate color transfer.'
 };
 
 // Map method values to script files and options
@@ -23,7 +25,9 @@ const METHOD_CONFIG = {
     'cra_lab_tiled': { script: 'color_correction_tiled.py', options: { tiled_luminosity: true } },
     'cra_lab_tiled_ab': { script: 'color_correction_tiled.py', options: { tiled_luminosity: false } },
     'cra_rgb': { script: 'color_correction_cra_rgb.py', options: { perceptual: false } },
-    'cra_rgb_perceptual': { script: 'color_correction_cra_rgb.py', options: { perceptual: true } }
+    'cra_rgb_perceptual': { script: 'color_correction_cra_rgb.py', options: { perceptual: true } },
+    'oklab': { script: null, options: {}, wasmOnly: true },
+    'cra_oklab': { script: null, options: {}, wasmOnly: true }
 };
 
 let worker = null;
@@ -188,6 +192,7 @@ function updateMethodDescription() {
     const select = document.getElementById('method-select');
     const description = document.getElementById('method-description');
     description.textContent = METHOD_DESCRIPTIONS[select.value];
+    updateProcessButton();
 }
 
 // Update implementation toggle label and description
@@ -212,6 +217,7 @@ function updateImplementationLabel() {
             f32HistogramSection.style.display = 'none';
         }
     }
+    updateProcessButton();
 }
 
 // Update histogram toggle label and description
@@ -229,10 +235,26 @@ function updateHistogramLabel() {
     }
 }
 
+// Check if a WASM-only method is selected with Python mode
+function isWasmOnlyWithPython() {
+    const method = document.getElementById('method-select').value;
+    const useWasm = document.getElementById('use-wasm').checked;
+    const config = METHOD_CONFIG[method];
+    return config && config.wasmOnly && !useWasm;
+}
+
 // Update process button state
 function updateProcessButton() {
     const btn = document.getElementById('process-btn');
-    btn.disabled = !workerReady || !inputImageData || !refImageData;
+    const wasmOnlyWarning = document.getElementById('wasm-only-warning');
+    const isIncompatible = isWasmOnlyWithPython();
+
+    btn.disabled = !workerReady || !inputImageData || !refImageData || isIncompatible;
+
+    // Show/hide warning message
+    if (wasmOnlyWarning) {
+        wasmOnlyWarning.style.display = isIncompatible ? 'block' : 'none';
+    }
 }
 
 // Load default images
