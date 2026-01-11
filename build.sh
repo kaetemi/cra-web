@@ -15,11 +15,13 @@ if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
 
-# Step 1: Build WASM
+# Step 1: Build WASM modules
 echo ""
-echo "[1/4] Building WASM dither module..."
+echo "[1/4] Building WASM modules..."
 cd "$SCRIPT_DIR/dither"
 wasm-pack build --target web --release
+cd "$SCRIPT_DIR/port"
+wasm-pack build --target web --out-dir pkg
 cd "$SCRIPT_DIR"
 echo "WASM build complete."
 
@@ -27,18 +29,20 @@ echo "WASM build complete."
 echo ""
 echo "[2/4] Creating dist directory..."
 rm -rf dist
-mkdir -p dist/wasm dist/scripts dist/assets
+mkdir -p dist/wasm dist/wasm_cra dist/scripts dist/assets
 
 # Step 3: Copy files
 echo ""
 echo "[3/4] Copying files..."
 
-# Copy WASM dither files
+# Copy dither WASM files
 cp dither/pkg/dither.js dist/wasm/
 cp dither/pkg/dither_bg.wasm dist/wasm/
 
-# Copy CRA WASM files
-cp -r wasm_cra dist/
+# Copy CRA WASM files (from port build)
+cp port/pkg/cra_wasm.js dist/wasm_cra/
+cp port/pkg/cra_wasm_bg.wasm dist/wasm_cra/
+cp port/pkg/cra_wasm.d.ts dist/wasm_cra/
 
 # Copy Python scripts
 cp scripts/color_correction_basic.py dist/scripts/
@@ -49,6 +53,7 @@ cp scripts/color_correction_tiled.py dist/scripts/
 
 # Copy web files
 cp index.html dist/
+cp dither.html dist/
 cp app.js dist/
 cp worker.js dist/
 cp sw.js dist/
@@ -74,6 +79,7 @@ ls -la dist/
 echo ""
 echo "WASM files:"
 ls -la dist/wasm/
+ls -la dist/wasm_cra/
 echo ""
 echo "Python scripts:"
 ls -la dist/scripts/
@@ -82,4 +88,5 @@ echo "=========================================="
 echo "To test locally:"
 echo "  cd dist && python -m http.server 8000"
 echo "  Then open http://localhost:8000"
+echo "  Dither demo: http://localhost:8000/dither.html"
 echo "=========================================="
