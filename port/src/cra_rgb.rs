@@ -3,7 +3,7 @@
 
 use crate::color::{interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear};
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
+use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
     perceptual_unscale_rgb, rotate_rgb,
@@ -62,6 +62,8 @@ fn scale_255_to_rgb(rgb_255: &[f32], channel_ranges: [[f32; 2]; 3]) -> Vec<f32> 
 }
 
 /// Process one iteration of RGB-space histogram matching
+///
+/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 fn process_rgb_iteration(
     current_rgb: &[f32],
     ref_rgb: &[f32],
@@ -71,7 +73,7 @@ fn process_rgb_iteration(
     ref_height: usize,
     rotation_angles: &[f32],
     perceptual_scale: Option<[f32; 3]>,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     dither_seed_base: u32,
 ) -> Vec<f32> {
@@ -92,8 +94,13 @@ fn process_rgb_iteration(
         let current_scaled = scale_rgb_to_uint8(&current_rot, channel_ranges);
         let ref_scaled = scale_rgb_to_uint8(&ref_rot, channel_ranges);
 
-        let matched_scaled = if use_f32_histogram {
+        let matched_scaled = if histogram_mode > 0 {
             // Use f32 histogram matching directly (no dithering/quantization)
+            let align_mode = if histogram_mode == 2 {
+                AlignmentMode::Midpoint
+            } else {
+                AlignmentMode::Endpoint
+            };
             // Extract each channel
             let current_chs: Vec<Vec<f32>> = (0..3)
                 .map(|c| (0..input_pixels).map(|i| current_scaled[i * 3 + c]).collect())
@@ -106,7 +113,7 @@ fn process_rgb_iteration(
             let matched: Vec<Vec<f32>> = (0..3)
                 .map(|c| {
                     let seed = (pass_idx * 3 + c) as u32;
-                    match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, seed)
+                    match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, align_mode, seed)
                 })
                 .collect();
 
@@ -178,7 +185,7 @@ fn process_rgb_iteration(
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -190,7 +197,7 @@ pub fn color_correct_cra_rgb(
     ref_width: usize,
     ref_height: usize,
     use_perceptual: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     output_dither_mode: DitherMode,
 ) -> Vec<u8> {
@@ -232,7 +239,7 @@ pub fn color_correct_cra_rgb(
             ref_height,
             &ROTATION_ANGLES,
             perceptual_scale,
-            use_f32_histogram,
+            histogram_mode,
             histogram_dither_mode,
             (iter_idx as u32) * 100,
         );
@@ -249,8 +256,13 @@ pub fn color_correct_cra_rgb(
     let current_scaled = scale_rgb_to_uint8(&current, final_ranges);
     let ref_scaled_final = scale_rgb_to_uint8(&ref_scaled, final_ranges);
 
-    let mut final_scaled = if use_f32_histogram {
+    let mut final_scaled = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         let current_chs: Vec<Vec<f32>> = (0..3)
             .map(|c| (0..input_pixels).map(|i| current_scaled[i * 3 + c]).collect())
             .collect();
@@ -262,7 +274,7 @@ pub fn color_correct_cra_rgb(
         let matched: Vec<Vec<f32>> = (0..3)
             .map(|c| {
                 let seed = (100 + c) as u32;
-                match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, seed)
+                match_histogram_f32(&current_chs[c], &ref_chs[c], InterpolationMode::Linear, align_mode, seed)
             })
             .collect();
 

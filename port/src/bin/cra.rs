@@ -65,6 +65,27 @@ impl DitherMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum HistogramMode {
+    /// Binned uint8 histogram matching (256 bins, with dithering)
+    #[default]
+    Binned,
+    /// F32 sort-based, endpoint-aligned (no quantization, preserves extremes)
+    F32Endpoint,
+    /// F32 sort-based, midpoint-aligned (no quantization, statistically correct)
+    F32Midpoint,
+}
+
+impl HistogramMode {
+    fn to_u8(self) -> u8 {
+        match self {
+            HistogramMode::Binned => 0,
+            HistogramMode::F32Endpoint => 1,
+            HistogramMode::F32Midpoint => 2,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "cra")]
 #[command(author, version, about = "CRA Color Correction Tool", long_about = None)]
@@ -97,15 +118,15 @@ struct Args {
     #[arg(short, long)]
     perceptual: bool,
 
-    /// Use f32 sort-based histogram matching (no quantization artifacts)
-    #[arg(long)]
-    f32_histogram: bool,
+    /// Histogram matching mode
+    #[arg(long, value_enum, default_value_t = HistogramMode::Binned)]
+    histogram_mode: HistogramMode,
 
     /// Dithering method for final output quantization
     #[arg(long, value_enum, default_value_t = DitherMethod::JjnStandard)]
     output_dither: DitherMethod,
 
-    /// Dithering method for histogram processing (only used when not using --f32-histogram)
+    /// Dithering method for histogram processing (only used with --histogram-mode=binned)
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     histogram_dither: DitherMethod,
 
@@ -158,16 +179,16 @@ fn save_image_rgb(
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
+    let histogram_mode = args.histogram_mode.to_u8();
     let histogram_dither = args.histogram_dither.to_u8();
     let output_dither = args.output_dither.to_u8();
 
     if args.verbose {
         eprintln!("Method: {:?}", args.method);
+        eprintln!("Histogram mode: {:?}", args.histogram_mode);
         eprintln!("Output dither: {:?}", args.output_dither);
-        if !args.f32_histogram {
+        if histogram_mode == 0 {
             eprintln!("Histogram dither: {:?}", args.histogram_dither);
-        } else {
-            eprintln!("Using f32 histogram (no quantization)");
         }
     }
 
@@ -189,7 +210,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.keep_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -200,7 +221,7 @@ fn main() -> Result<(), String> {
             &ref_data,
             ref_width,
             ref_height,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -212,7 +233,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.keep_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -224,7 +245,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.keep_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -236,7 +257,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.perceptual,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -248,7 +269,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.keep_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -260,7 +281,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.tiled_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),
@@ -272,7 +293,7 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.tiled_luminosity,
-            args.f32_histogram,
+            histogram_mode,
             histogram_dither,
             output_dither,
         ),

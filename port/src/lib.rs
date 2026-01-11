@@ -92,7 +92,7 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -107,7 +107,7 @@ pub fn color_correct_basic_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -123,7 +123,7 @@ pub fn color_correct_basic_lab(
         ref_width,
         ref_height,
         keep_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -136,7 +136,7 @@ pub fn color_correct_basic_lab(
 ///     input_width, input_height: Input image dimensions
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -150,7 +150,7 @@ pub fn color_correct_basic_rgb(
     ref_data: &[u8],
     ref_width: usize,
     ref_height: usize,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -164,7 +164,7 @@ pub fn color_correct_basic_rgb(
         input_height,
         ref_width,
         ref_height,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -182,7 +182,7 @@ pub fn color_correct_basic_rgb(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -197,7 +197,7 @@ pub fn color_correct_cra_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -212,7 +212,7 @@ pub fn color_correct_cra_lab(
         ref_width,
         ref_height,
         keep_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -230,7 +230,7 @@ pub fn color_correct_cra_lab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -245,7 +245,7 @@ pub fn color_correct_tiled_lab(
     ref_width: usize,
     ref_height: usize,
     tiled_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -260,7 +260,7 @@ pub fn color_correct_tiled_lab(
         ref_width,
         ref_height,
         tiled_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -277,7 +277,7 @@ pub fn color_correct_tiled_lab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -292,7 +292,7 @@ pub fn color_correct_cra_rgb(
     ref_width: usize,
     ref_height: usize,
     use_perceptual: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -307,7 +307,7 @@ pub fn color_correct_cra_rgb(
         ref_width,
         ref_height,
         use_perceptual,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -323,7 +323,7 @@ pub fn color_correct_cra_rgb(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -338,7 +338,7 @@ pub fn color_correct_basic_oklab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -354,7 +354,7 @@ pub fn color_correct_basic_oklab(
         ref_width,
         ref_height,
         keep_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -372,7 +372,7 @@ pub fn color_correct_basic_oklab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -387,7 +387,7 @@ pub fn color_correct_cra_oklab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -402,7 +402,7 @@ pub fn color_correct_cra_oklab(
         ref_width,
         ref_height,
         keep_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -420,7 +420,7 @@ pub fn color_correct_cra_oklab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
@@ -435,7 +435,7 @@ pub fn color_correct_tiled_oklab(
     ref_width: usize,
     ref_height: usize,
     tiled_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
@@ -450,7 +450,7 @@ pub fn color_correct_tiled_oklab(
         ref_width,
         ref_height,
         tiled_luminosity,
-        use_f32_histogram,
+        histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
@@ -470,13 +470,17 @@ mod tests {
             255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0,
         ];
 
-        // histogram_dither_mode=4 (Mixed), output_dither_mode=2 (Jarvis)
-        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        // histogram_mode=0 (uint8), histogram_dither_mode=4 (Mixed), output_dither_mode=2 (Jarvis)
+        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result.len(), 12); // 2x2x3 = 12
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -484,12 +488,16 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, false, 4, 2);
+        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -497,12 +505,16 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -510,12 +522,16 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -523,12 +539,16 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        let result = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -536,12 +556,16 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 
     #[test]
@@ -549,16 +573,20 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        // Test with tiled luminosity
-        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, false, 4, 2);
+        // Test with tiled luminosity, uint8 histogram
+        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 0, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Test without tiled luminosity (AB only)
-        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
+        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
         assert_eq!(result_ab.len(), 12);
 
-        // Also test with f32 histogram
-        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, true, 4, 2);
+        // Test with f32 histogram endpoint-aligned
+        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 1, 4, 2);
         assert_eq!(result_f32.len(), 12);
+
+        // Test with f32 histogram midpoint-aligned
+        let result_mid = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 2, 4, 2);
+        assert_eq!(result_mid.len(), 12);
     }
 }

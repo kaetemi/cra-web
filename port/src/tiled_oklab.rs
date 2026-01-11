@@ -6,7 +6,7 @@ use crate::color::{
     oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
+use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
     accumulate_block_single, create_hamming_weights, extract_block_single, generate_tile_blocks,
@@ -86,6 +86,8 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>,
 }
 
 /// Process one iteration for a single block (AB only)
+///
+/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 fn process_block_iteration(
     current_a: &[f32],
     current_b: &[f32],
@@ -96,7 +98,7 @@ fn process_block_iteration(
     ref_block_width: usize,
     ref_block_height: usize,
     rotation_angles: &[f32],
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     block_seed: u32,
     histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>) {
@@ -117,15 +119,20 @@ fn process_block_iteration(
         let (a_scaled, b_scaled) = scale_ab_to_255(&a_rot, &b_rot, ab_ranges);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a_rot, &ref_b_rot, ab_ranges);
 
-        let (a_matched, b_matched) = if use_f32_histogram {
+        let (a_matched, b_matched) = if histogram_mode > 0 {
             // Use f32 histogram matching directly (no dithering/quantization)
+            let align_mode = if histogram_mode == 2 {
+                AlignmentMode::Midpoint
+            } else {
+                AlignmentMode::Endpoint
+            };
             // Different seeds per block, pass, and channel for noise averaging
             let seed_a = block_seed.wrapping_mul(10) + (pass_idx as u32 * 2);
             let seed_b = block_seed.wrapping_mul(10) + (pass_idx as u32 * 2 + 1);
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, seed_a);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, seed_a);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, seed_b);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, seed_b);
             scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
         } else {
             // Use binned histogram matching with dithering
@@ -161,6 +168,8 @@ fn process_block_iteration(
 }
 
 /// Process one iteration for a single block (with L channel)
+///
+/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 fn process_block_iteration_with_l(
     current_l: &[f32],
     current_a: &[f32],
@@ -173,7 +182,7 @@ fn process_block_iteration_with_l(
     ref_block_width: usize,
     ref_block_height: usize,
     rotation_angles: &[f32],
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     block_seed: u32,
     histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
@@ -188,7 +197,7 @@ fn process_block_iteration_with_l(
         ref_block_width,
         ref_block_height,
         rotation_angles,
-        use_f32_histogram,
+        histogram_mode,
         block_seed,
         histogram_dither_mode,
     );
@@ -197,11 +206,16 @@ fn process_block_iteration_with_l(
     let l_scaled = scale_l_to_255(current_l);
     let ref_l_scaled = scale_l_to_255(ref_l);
 
-    let avg_l = if use_f32_histogram {
+    let avg_l = if histogram_mode > 0 {
         // Use a distinct seed for L channel (offset by 100)
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         let l_seed = block_seed.wrapping_mul(10) + 100;
         let matched_l =
-            match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, l_seed);
+            match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, align_mode, l_seed);
         scale_255_to_l(&matched_l)
     } else {
         // L channel seeds: block_seed * 1000 + 500 offset to avoid collision with AB passes
@@ -223,7 +237,7 @@ fn process_block_iteration_with_l(
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -235,7 +249,7 @@ pub fn color_correct_tiled_oklab(
     ref_width: usize,
     ref_height: usize,
     tiled_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     output_dither_mode: DitherMode,
 ) -> Vec<u8> {
@@ -344,7 +358,7 @@ pub fn color_correct_tiled_oklab(
                     ref_block_width,
                     ref_block_height,
                     &ROTATION_ANGLES,
-                    use_f32_histogram,
+                    histogram_mode,
                     block_idx as u32,
                     histogram_dither_mode,
                 );
@@ -367,7 +381,7 @@ pub fn color_correct_tiled_oklab(
                     ref_block_width,
                     ref_block_height,
                     &ROTATION_ANGLES,
-                    use_f32_histogram,
+                    histogram_mode,
                     block_idx as u32,
                     histogram_dither_mode,
                 );
@@ -446,14 +460,19 @@ pub fn color_correct_tiled_oklab(
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b, final_ab_ranges);
 
     // Match histograms for all channels (final pass uses high seeds to avoid collision with block passes)
-    let (final_l, final_a, final_b) = if use_f32_histogram {
+    let (final_l, final_a, final_b) = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         let matched_l =
-            match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, 1000);
+            match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, align_mode, 1000);
         let matched_a =
-            match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 1001);
+            match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 1001);
         let matched_b =
-            match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 1002);
+            match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 1002);
         let l_oklab = scale_255_to_l(&matched_l);
         let (a_oklab, b_oklab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
         (l_oklab, a_oklab, b_oklab)

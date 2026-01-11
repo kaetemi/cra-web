@@ -6,7 +6,7 @@ use crate::color::{
     oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
+use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 
 // Oklab ranges:
 // L: 0-1
@@ -72,6 +72,8 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>) {
 }
 
 /// Basic Oklab histogram matching
+///
+/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 pub fn color_correct_basic_oklab(
     input_srgb: &[f32],
     ref_srgb: &[f32],
@@ -80,7 +82,7 @@ pub fn color_correct_basic_oklab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     output_dither_mode: DitherMode,
 ) -> Vec<u8> {
@@ -106,22 +108,28 @@ pub fn color_correct_basic_oklab(
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b_ch);
 
     // Match histograms
-    let (final_l, final_a, final_b) = if use_f32_histogram {
+    // histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+    let (final_l, final_a, final_b) = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         if keep_luminosity {
             let matched_a =
-                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, 0);
+                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 0);
             let matched_b =
-                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 1);
+                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 1);
             let (a_oklab, b_oklab) = scale_255_to_ab(&matched_a, &matched_b);
             (original_l, a_oklab, b_oklab)
         } else {
             let matched_l =
-                match_histogram_f32(&in_l_scaled, &ref_l_scaled, InterpolationMode::Linear, 0);
+                match_histogram_f32(&in_l_scaled, &ref_l_scaled, InterpolationMode::Linear, align_mode, 0);
             let matched_a =
-                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, 1);
+                match_histogram_f32(&in_a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 1);
             let matched_b =
-                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 2);
+                match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 2);
             let l_oklab = scale_255_to_l(&matched_l);
             let (a_oklab, b_oklab) = scale_255_to_ab(&matched_a, &matched_b);
             (l_oklab, a_oklab, b_oklab)

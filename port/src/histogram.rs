@@ -11,6 +11,18 @@ pub enum InterpolationMode {
     Linear,
 }
 
+/// Alignment mode for f32 histogram matching
+#[derive(Clone, Copy, Debug, Default)]
+pub enum AlignmentMode {
+    /// Endpoint-aligned: rank 0 → ref[0], rank n-1 → ref[m-1]
+    /// Preserves exact min/max of reference, but may expand source range
+    #[default]
+    Endpoint,
+    /// Midpoint-aligned: treats each rank as a bin center
+    /// More statistically correct quantile sampling, doesn't force range expansion
+    Midpoint,
+}
+
 /// Wang hash for tie-breaking - excellent avalanche properties.
 /// Each bit of input affects all bits of output.
 #[inline]
@@ -34,7 +46,8 @@ fn wang_hash(mut x: u32) -> u32 {
 /// Args:
 ///     source: Source values (any range, typically 0.0-255.0)
 ///     reference: Reference values (same range as source)
-///     mode: Interpolation mode (Linear recommended for smoothness)
+///     interp_mode: Interpolation mode (Linear recommended for smoothness)
+///     align_mode: Alignment mode (Endpoint preserves ref extremes, Midpoint is statistically correct)
 ///     seed: Random seed for tie-breaking (use different values per pass to reduce noise when averaging)
 ///
 /// Returns:
@@ -42,7 +55,8 @@ fn wang_hash(mut x: u32) -> u32 {
 pub fn match_histogram_f32(
     source: &[f32],
     reference: &[f32],
-    mode: InterpolationMode,
+    interp_mode: InterpolationMode,
+    align_mode: AlignmentMode,
     seed: u32,
 ) -> Vec<f32> {
     if source.is_empty() || reference.is_empty() {
@@ -75,7 +89,7 @@ pub fn match_histogram_f32(
 
     // Handle edge case: single source pixel
     if src_len == 1 {
-        output[src_indices[0]] = match mode {
+        output[src_indices[0]] = match interp_mode {
             InterpolationMode::Nearest => ref_sorted[ref_len / 2],
             InterpolationMode::Linear => {
                 // Return median of reference
@@ -91,18 +105,27 @@ pub fn match_histogram_f32(
 
     for (rank, &src_idx) in src_indices.iter().enumerate() {
         // Map rank from source space to reference space
-        let ref_rank_f =
-            (rank as f64) * ((ref_len - 1) as f64) / ((src_len - 1).max(1) as f64);
+        let ref_rank_f = match align_mode {
+            AlignmentMode::Endpoint => {
+                // Endpoint-aligned: rank 0 → 0, rank (n-1) → (m-1)
+                (rank as f64) * ((ref_len - 1) as f64) / ((src_len - 1).max(1) as f64)
+            }
+            AlignmentMode::Midpoint => {
+                // Midpoint-aligned: treat each rank as bin center
+                // (rank + 0.5) * ref_len / src_len - 0.5
+                (rank as f64 + 0.5) * (ref_len as f64) / (src_len as f64) - 0.5
+            }
+        };
 
-        match mode {
+        match interp_mode {
             InterpolationMode::Nearest => {
-                let ref_idx = ref_rank_f.round() as usize;
-                output[src_idx] = ref_sorted[ref_idx.min(ref_len - 1)];
+                let ref_idx = ref_rank_f.round().clamp(0.0, (ref_len - 1) as f64) as usize;
+                output[src_idx] = ref_sorted[ref_idx];
             }
             InterpolationMode::Linear => {
-                let ref_lo = ref_rank_f.floor() as usize;
+                let ref_lo = ref_rank_f.floor().max(0.0) as usize;
                 let ref_hi = (ref_lo + 1).min(ref_len - 1);
-                let t = (ref_rank_f - ref_lo as f64) as f32;
+                let t = (ref_rank_f - ref_lo as f64).clamp(0.0, 1.0) as f32;
                 output[src_idx] = ref_sorted[ref_lo] * (1.0 - t) + ref_sorted[ref_hi] * t;
             }
         }
@@ -267,7 +290,7 @@ mod tests {
     fn test_match_histogram_f32_identity() {
         // Matching histogram to itself should preserve relative ordering
         let data: Vec<f32> = (0..256).map(|i| i as f32).collect();
-        let result = match_histogram_f32(&data, &data, InterpolationMode::Linear, 0);
+        let result = match_histogram_f32(&data, &data, InterpolationMode::Linear, AlignmentMode::Endpoint, 0);
         for (a, b) in data.iter().zip(result.iter()) {
             assert!((a - b).abs() < 0.01, "Expected {} but got {}", a, b);
         }
@@ -279,7 +302,7 @@ mod tests {
         // Result should be all 255s
         let source = vec![0.0f32; 100];
         let reference = vec![255.0f32; 100];
-        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, AlignmentMode::Endpoint, 0);
         for &v in &result {
             assert!((v - 255.0).abs() < 0.01, "Expected 255.0 but got {}", v);
         }
@@ -290,7 +313,7 @@ mod tests {
         // Source has 10 values, reference has 100 values
         let source: Vec<f32> = (0..10).map(|i| i as f32 * 25.5).collect();
         let reference: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
+        let result = match_histogram_f32(&source, &reference, InterpolationMode::Linear, AlignmentMode::Endpoint, 0);
         assert_eq!(result.len(), 10);
         // Results should be monotonic (preserving order)
         for i in 1..result.len() {
@@ -309,8 +332,8 @@ mod tests {
         let source: Vec<f32> = vec![0.0, 50.0, 100.0, 150.0, 200.0];
         let reference: Vec<f32> = vec![10.0, 110.0, 210.0];
 
-        let nearest = match_histogram_f32(&source, &reference, InterpolationMode::Nearest, 0);
-        let linear = match_histogram_f32(&source, &reference, InterpolationMode::Linear, 0);
+        let nearest = match_histogram_f32(&source, &reference, InterpolationMode::Nearest, AlignmentMode::Endpoint, 0);
+        let linear = match_histogram_f32(&source, &reference, InterpolationMode::Linear, AlignmentMode::Endpoint, 0);
 
         // Both should have same length
         assert_eq!(nearest.len(), source.len());
@@ -324,5 +347,25 @@ mod tests {
                 v
             );
         }
+    }
+
+    #[test]
+    fn test_match_histogram_f32_endpoint_vs_midpoint() {
+        // With 3 source values and 1000 reference values
+        let source: Vec<f32> = vec![0.0, 127.5, 255.0];
+        let reference: Vec<f32> = (0..1000).map(|i| i as f32 * 0.255).collect();
+
+        let endpoint = match_histogram_f32(&source, &reference, InterpolationMode::Linear, AlignmentMode::Endpoint, 0);
+        let midpoint = match_histogram_f32(&source, &reference, InterpolationMode::Linear, AlignmentMode::Midpoint, 0);
+
+        // Endpoint should hit exact extremes of reference
+        assert!((endpoint[0] - 0.0).abs() < 0.01, "Endpoint min: {}", endpoint[0]);
+        assert!((endpoint[2] - 254.745).abs() < 0.01, "Endpoint max: {}", endpoint[2]);
+
+        // Midpoint should sample from quantile centers, not extremes
+        // rank 0: (0 + 0.5) * 1000 / 3 - 0.5 = 166.17 → ref ~= 42.4
+        // rank 2: (2 + 0.5) * 1000 / 3 - 0.5 = 832.83 → ref ~= 212.4
+        assert!(midpoint[0] > 40.0 && midpoint[0] < 45.0, "Midpoint min: {}", midpoint[0]);
+        assert!(midpoint[2] > 210.0 && midpoint[2] < 215.0, "Midpoint max: {}", midpoint[2]);
     }
 }

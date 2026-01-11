@@ -5,7 +5,7 @@ use crate::color::{
     interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
+use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 
 /// Basic RGB histogram matching
 ///
@@ -14,7 +14,7 @@ use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 ///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -25,7 +25,7 @@ pub fn color_correct_basic_rgb(
     input_height: usize,
     ref_width: usize,
     ref_height: usize,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     output_dither_mode: DitherMode,
 ) -> Vec<u8> {
@@ -43,14 +43,20 @@ pub fn color_correct_basic_rgb(
     let ref_b_scaled: Vec<f32> = ref_b.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
 
     // Match histograms
-    let (matched_r_linear, matched_g_linear, matched_b_linear) = if use_f32_histogram {
+    // histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+    let (matched_r_linear, matched_g_linear, matched_b_linear) = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         let matched_r =
-            match_histogram_f32(&in_r_scaled, &ref_r_scaled, InterpolationMode::Linear, 0);
+            match_histogram_f32(&in_r_scaled, &ref_r_scaled, InterpolationMode::Linear, align_mode, 0);
         let matched_g =
-            match_histogram_f32(&in_g_scaled, &ref_g_scaled, InterpolationMode::Linear, 1);
+            match_histogram_f32(&in_g_scaled, &ref_g_scaled, InterpolationMode::Linear, align_mode, 1);
         let matched_b =
-            match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, 2);
+            match_histogram_f32(&in_b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 2);
 
         // Scale back to linear 0-1 range
         let r_linear: Vec<f32> = matched_r.iter().map(|&v| v / 255.0).collect();

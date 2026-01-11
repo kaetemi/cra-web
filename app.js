@@ -204,29 +204,29 @@ function updateImplementationLabel() {
     const useWasm = document.getElementById('use-wasm').checked;
     const label = document.getElementById('impl-label');
     const description = document.getElementById('impl-description');
-    const f32HistogramSection = document.getElementById('f32-histogram-section');
+    const histogramModeSection = document.getElementById('histogram-mode-section');
     const outputDitherSection = document.getElementById('output-dither-section');
     const histogramDitherSection = document.getElementById('histogram-dither-section');
 
     if (useWasm) {
         label.textContent = 'WASM (Rust)';
         description.textContent = IMPL_DESCRIPTIONS.wasm;
-        // Show f32 histogram toggle when WASM is enabled
-        if (f32HistogramSection) {
-            f32HistogramSection.style.display = 'block';
+        // Show histogram mode dropdown when WASM is enabled
+        if (histogramModeSection) {
+            histogramModeSection.style.display = 'block';
         }
         // Show output dither section when WASM is enabled
         if (outputDitherSection) {
             outputDitherSection.style.display = 'block';
         }
-        // Show/hide histogram dither based on f32 histogram setting
-        updateHistogramLabel();
+        // Show/hide histogram dither based on histogram mode setting
+        updateHistogramModeDescription();
     } else {
         label.textContent = 'Python (Pyodide)';
         description.textContent = IMPL_DESCRIPTIONS.python;
-        // Hide f32 histogram toggle when Python is selected
-        if (f32HistogramSection) {
-            f32HistogramSection.style.display = 'none';
+        // Hide histogram mode dropdown when Python is selected
+        if (histogramModeSection) {
+            histogramModeSection.style.display = 'none';
         }
         // Hide dithering options when Python is selected (not supported)
         if (outputDitherSection) {
@@ -239,27 +239,24 @@ function updateImplementationLabel() {
     updateProcessButton();
 }
 
-// Update histogram toggle label and description
-function updateHistogramLabel() {
-    const useF32Histogram = document.getElementById('use-f32-histogram').checked;
-    const label = document.getElementById('histogram-label');
-    const description = document.getElementById('histogram-description');
+// Histogram mode descriptions
+const HISTOGRAM_MODE_DESCRIPTIONS = {
+    '0': 'Binned histogram matching with 256 bins. Classic approach with dithering for quantization.',
+    '1': 'F32 sort-based quantile matching with endpoint alignment. Rank 0 maps to ref[0], rank n-1 maps to ref[m-1]. Preserves reference extremes.',
+    '2': 'F32 sort-based quantile matching with midpoint alignment. Statistically correct quantile sampling, avoids color expansion bias at extremes.'
+};
+
+// Update histogram mode description and show/hide histogram dither section
+function updateHistogramModeDescription() {
+    const histogramMode = document.getElementById('histogram-mode-select').value;
+    const description = document.getElementById('histogram-mode-description');
     const histogramDitherSection = document.getElementById('histogram-dither-section');
 
-    if (useF32Histogram) {
-        label.textContent = 'F32 Quantile';
-        description.textContent = 'Use f32 sort-based quantile matching. No quantization noise, works directly on floating point values with linear interpolation.';
-        // Hide histogram dither section when using f32 (no quantization needed)
-        if (histogramDitherSection) {
-            histogramDitherSection.style.display = 'none';
-        }
-    } else {
-        label.textContent = 'Binned (256)';
-        description.textContent = 'Use binned histogram matching with 256 bins (original/reference). Toggle for f32 sort-based quantile matching (no quantization noise).';
-        // Show histogram dither section when using binned histogram
-        if (histogramDitherSection) {
-            histogramDitherSection.style.display = 'block';
-        }
+    description.textContent = HISTOGRAM_MODE_DESCRIPTIONS[histogramMode] || HISTOGRAM_MODE_DESCRIPTIONS['0'];
+
+    // Show histogram dither section only when using binned histogram (mode 0)
+    if (histogramDitherSection) {
+        histogramDitherSection.style.display = (histogramMode === '0') ? 'block' : 'none';
     }
 }
 
@@ -361,7 +358,8 @@ function processImages() {
     const method = document.getElementById('method-select').value;
     const config = METHOD_CONFIG[method];
     const useWasm = document.getElementById('use-wasm').checked;
-    const useF32Histogram = document.getElementById('use-f32-histogram')?.checked || false;
+    // histogramMode: 0 = binned, 1 = f32 endpoint, 2 = f32 midpoint
+    const histogramMode = parseInt(document.getElementById('histogram-mode-select')?.value || '0', 10);
     // Default: output=2 (Jarvis), histogram=4 (Mixed)
     const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '2', 10);
     const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
@@ -389,7 +387,7 @@ function processImages() {
         method: method,
         config: config,
         useWasm: useWasm,
-        useF32Histogram: useF32Histogram,
+        histogramMode: histogramMode,
         histogramDitherMode: histogramDitherMode,
         outputDitherMode: outputDitherMode
     });
@@ -409,13 +407,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
-    document.getElementById('use-f32-histogram').addEventListener('change', updateHistogramLabel);
+    document.getElementById('histogram-mode-select').addEventListener('change', updateHistogramModeDescription);
     document.getElementById('output-dither-select').addEventListener('change', updateOutputDitherDescription);
     document.getElementById('histogram-dither-select').addEventListener('change', updateHistogramDitherDescription);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
-    // Initialize histogram dither visibility based on initial f32 histogram state
-    updateHistogramLabel();
+    // Initialize histogram dither visibility based on initial histogram mode state
+    updateHistogramModeDescription();
 
     // Load default images
     loadDefaultImages();

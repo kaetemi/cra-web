@@ -6,7 +6,7 @@ use crate::color::{
     linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
+use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
 
 /// Default rotation angles for CRA
@@ -82,6 +82,8 @@ fn scale_255_to_ab(a: &[f32], b: &[f32], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>,
 }
 
 /// Process one iteration of LAB-space histogram matching
+///
+/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 fn process_lab_iteration(
     current_a: &[f32],
     current_b: &[f32],
@@ -92,7 +94,7 @@ fn process_lab_iteration(
     ref_width: usize,
     ref_height: usize,
     rotation_angles: &[f32],
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     dither_seed_base: u32,
 ) -> (Vec<f32>, Vec<f32>) {
@@ -113,15 +115,20 @@ fn process_lab_iteration(
         let (a_scaled, b_scaled) = scale_ab_to_uint8(&a_rot, &b_rot, ab_ranges);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a_rot, &ref_b_rot, ab_ranges);
 
-        let (a_matched, b_matched) = if use_f32_histogram {
+        let (a_matched, b_matched) = if histogram_mode > 0 {
             // Use f32 histogram matching directly (no dithering/quantization)
+            let align_mode = if histogram_mode == 2 {
+                AlignmentMode::Midpoint
+            } else {
+                AlignmentMode::Endpoint
+            };
             // Use different seeds per pass and channel for noise averaging
             let seed_a = (pass_idx * 2) as u32;
             let seed_b = (pass_idx * 2 + 1) as u32;
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, seed_a);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, seed_a);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, seed_b);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, seed_b);
             scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
         } else {
             // Use binned histogram matching with dithering
@@ -164,7 +171,7 @@ fn process_lab_iteration(
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
-///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -176,7 +183,7 @@ pub fn color_correct_cra_lab(
     ref_width: usize,
     ref_height: usize,
     keep_luminosity: bool,
-    use_f32_histogram: bool,
+    histogram_mode: u8,
     histogram_dither_mode: DitherMode,
     output_dither_mode: DitherMode,
 ) -> Vec<u8> {
@@ -210,7 +217,7 @@ pub fn color_correct_cra_lab(
             ref_width,
             ref_height,
             &ROTATION_ANGLES,
-            use_f32_histogram,
+            histogram_mode,
             histogram_dither_mode,
             (iter_idx as u32) * 100,
         );
@@ -232,22 +239,27 @@ pub fn color_correct_cra_lab(
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
 
     // Match histograms (final pass uses high seed values to avoid collision with rotation passes)
-    let (final_l, final_a, final_b) = if use_f32_histogram {
+    let (final_l, final_a, final_b) = if histogram_mode > 0 {
         // Use f32 histogram matching directly
+        let align_mode = if histogram_mode == 2 {
+            AlignmentMode::Midpoint
+        } else {
+            AlignmentMode::Endpoint
+        };
         if keep_luminosity {
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 100);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 100);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 101);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 101);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (original_l, a_lab, b_lab)
         } else {
             let matched_l =
-                match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, 100);
+                match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, align_mode, 100);
             let matched_a =
-                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, 101);
+                match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 101);
             let matched_b =
-                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, 102);
+                match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 102);
             let l_lab = scale_255_to_l(&matched_l);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (l_lab, a_lab, b_lab)
