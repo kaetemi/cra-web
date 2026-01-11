@@ -483,16 +483,15 @@
         </div>
 
         <div class="implementation-section" id="dither-mode-section">
-            <label class="toggle-container">
-                <span class="toggle-label">Dithering:</span>
-                <div class="toggle-switch">
-                    <input type="checkbox" id="use-serpentine-dither">
-                    <span class="toggle-slider"></span>
-                </div>
-                <span class="toggle-text" id="dither-label">Standard</span>
-            </label>
+            <label for="dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Dithering Method:</label>
+            <select id="dither-select" class="method-select" style="margin-bottom: 10px;">
+                <option value="0">Floyd-Steinberg (Standard)</option>
+                <option value="1">Floyd-Steinberg (Serpentine)</option>
+                <option value="2">Jarvis-Judice-Ninke (Standard)</option>
+                <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
+            </select>
             <p class="impl-description" id="dither-description">
-                Standard Floyd-Steinberg dithering (left-to-right scanning). Toggle for serpentine scanning which reduces diagonal banding artifacts.
+                Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm.
             </p>
         </div>
 

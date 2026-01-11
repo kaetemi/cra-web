@@ -24,10 +24,15 @@ pub use dither::floyd_steinberg_dither;
 use dither::DitherMode;
 
 /// Convert u8 to DitherMode for WASM interface
-/// 0 = Standard (default), 1 = Serpentine
+/// 0 = Floyd-Steinberg Standard (default)
+/// 1 = Floyd-Steinberg Serpentine
+/// 2 = Jarvis-Judice-Ninke Standard
+/// 3 = Jarvis-Judice-Ninke Serpentine
 fn dither_mode_from_u8(mode: u8) -> DitherMode {
     match mode {
         1 => DitherMode::Serpentine,
+        2 => DitherMode::JarvisStandard,
+        3 => DitherMode::JarvisSerpentine,
         _ => DitherMode::Standard,
     }
 }

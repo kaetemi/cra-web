@@ -156,9 +156,13 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
     if (useF32Histogram) {
         sendConsole('Using f32 histogram matching (no quantization)');
     }
-    if (ditherMode === 1) {
-        sendConsole('Using serpentine dithering');
-    }
+    const ditherNames = {
+        0: 'Floyd-Steinberg (standard)',
+        1: 'Floyd-Steinberg (serpentine)',
+        2: 'Jarvis-Judice-Ninke (standard)',
+        3: 'Jarvis-Judice-Ninke (serpentine)'
+    };
+    sendConsole(`Dithering: ${ditherNames[ditherMode] || ditherNames[0]}`);
 
     let resultRgb;
     const startTime = performance.now();
