@@ -123,7 +123,7 @@ struct Args {
     histogram_mode: HistogramMode,
 
     /// Dithering method for final output quantization
-    #[arg(long, value_enum, default_value_t = DitherMethod::JjnStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::FsStandard)]
     output_dither: DitherMethod,
 
     /// Dithering method for histogram processing (only used with --histogram-mode=binned)

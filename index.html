@@ -471,9 +471,9 @@
         <div class="implementation-section" id="histogram-mode-section">
             <label for="histogram-mode-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Histogram Mode:</label>
             <select id="histogram-mode-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0">Binned (256 bins)</option>
-                <option value="1">* F32 Endpoint-aligned</option>
-                <option value="2">F32 Midpoint-aligned</option>
+                <option value="0">* Binned (256 bins)</option>
+                <option value="1">F32 Endpoint-aligned</option>
+                <option value="2">* F32 Midpoint-aligned</option>
             </select>
             <p class="impl-description" id="histogram-mode-description">
                 Binned histogram matching with 256 bins. Classic approach with dithering for quantization.
@@ -483,16 +483,16 @@
         <div class="implementation-section" id="output-dither-section">
             <label for="output-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Output Dithering:</label>
             <select id="output-dither-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0">Floyd-Steinberg (Standard)</option>
+                <option value="0" selected>* Floyd-Steinberg (Standard)</option>
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
-                <option value="2" selected>* Jarvis-Judice-Ninke (Standard)</option>
+                <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4">Mixed (Standard)</option>
+                <option value="4">* Mixed (Standard)</option>
                 <option value="5">Mixed (Serpentine)</option>
                 <option value="6">Mixed (Random Direction)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
-                Jarvis-Judice-Ninke with standard scanning. Larger 3-row kernel produces smoother gradients. Used for final output quantization.
+                Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm. Used for final output quantization.
             </p>
         </div>
 
