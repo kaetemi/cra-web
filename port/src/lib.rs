@@ -28,11 +28,17 @@ use dither::DitherMode;
 /// 1 = Floyd-Steinberg Serpentine
 /// 2 = Jarvis-Judice-Ninke Standard
 /// 3 = Jarvis-Judice-Ninke Serpentine
+/// 4 = Mixed Standard (random kernel, standard scan)
+/// 5 = Mixed Serpentine (random kernel, serpentine scan)
+/// 6 = Mixed Random (random kernel and random scan direction)
 fn dither_mode_from_u8(mode: u8) -> DitherMode {
     match mode {
         1 => DitherMode::Serpentine,
         2 => DitherMode::JarvisStandard,
         3 => DitherMode::JarvisSerpentine,
+        4 => DitherMode::MixedStandard,
+        5 => DitherMode::MixedSerpentine,
+        6 => DitherMode::MixedRandom,
         _ => DitherMode::Standard,
     }
 }

@@ -244,7 +244,10 @@ const DITHER_DESCRIPTIONS = {
     '0': 'Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm.',
     '1': 'Floyd-Steinberg with serpentine scanning (alternating direction each row). Reduces diagonal banding artifacts.',
     '2': 'Jarvis-Judice-Ninke with standard scanning. Larger 3-row kernel produces smoother gradients but is slower.',
-    '3': 'Jarvis-Judice-Ninke with serpentine scanning. Combines larger kernel with alternating scan direction for best quality.'
+    '3': 'Jarvis-Judice-Ninke with serpentine scanning. Combines larger kernel with alternating scan direction for best quality.',
+    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Different seed each processing run.',
+    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Different seed each processing run.',
+    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Most randomized option with different seed each processing run.'
 };
 
 // Update dither method description

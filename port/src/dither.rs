@@ -1,5 +1,27 @@
 /// Error diffusion dithering implementations.
-/// Supports Floyd-Steinberg and Jarvis-Judice-Ninke algorithms.
+/// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
+
+use std::sync::atomic::{AtomicU32, Ordering};
+
+/// Global seed counter for generating unique seeds per dithering call
+static SEED_COUNTER: AtomicU32 = AtomicU32::new(0);
+
+/// Get a unique seed for this dithering operation
+fn get_next_seed() -> u32 {
+    SEED_COUNTER.fetch_add(1, Ordering::Relaxed)
+}
+
+/// Wang hash for deterministic randomization - excellent avalanche properties.
+/// Each bit of input affects all bits of output.
+#[inline]
+fn wang_hash(mut x: u32) -> u32 {
+    x = (x ^ 61) ^ (x >> 16);
+    x = x.wrapping_mul(9);
+    x = x ^ (x >> 4);
+    x = x.wrapping_mul(0x27d4eb2d);
+    x = x ^ (x >> 15);
+    x
+}
 
 /// Dithering mode selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -16,6 +38,15 @@ pub enum DitherMode {
     /// Jarvis-Judice-Ninke: Serpentine scanning
     /// Combines larger kernel with alternating scan direction
     JarvisSerpentine,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// Standard left-to-right scanning
+    MixedStandard,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// Serpentine scanning (alternating direction each row)
+    MixedSerpentine,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// AND randomly selects scan direction per row
+    MixedRandom,
 }
 
 /// Floyd-Steinberg dithering with linear buffer and overflow padding.
@@ -52,6 +83,9 @@ pub fn floyd_steinberg_dither_with_mode(
         DitherMode::Serpentine => floyd_steinberg_serpentine(img, width, height),
         DitherMode::JarvisStandard => jarvis_judice_ninke_standard(img, width, height),
         DitherMode::JarvisSerpentine => jarvis_judice_ninke_serpentine(img, width, height),
+        DitherMode::MixedStandard => mixed_dither_standard(img, width, height),
+        DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height),
+        DitherMode::MixedRandom => mixed_dither_random(img, width, height),
     }
 }
 
@@ -357,6 +391,293 @@ fn jarvis_judice_ninke_serpentine(img: &[f32], width: usize, height: usize) -> V
         .collect()
 }
 
+/// Apply Floyd-Steinberg error diffusion kernel at position (x, y)
+/// For left-to-right scanning
+#[inline]
+fn apply_fs_kernel_ltr(buf: &mut [Vec<f32>], x: usize, y: usize, err: f32, width: usize) {
+    // FS kernel:   * 7
+    //            3 5 1
+    if x + 1 < width {
+        buf[y][x + 1] += err * (7.0 / 16.0);
+    }
+    if x > 0 {
+        buf[y + 1][x - 1] += err * (3.0 / 16.0);
+    }
+    buf[y + 1][x] += err * (5.0 / 16.0);
+    if x + 1 < width {
+        buf[y + 1][x + 1] += err * (1.0 / 16.0);
+    }
+}
+
+/// Apply Floyd-Steinberg error diffusion kernel at position (x, y)
+/// For right-to-left scanning (mirrored)
+#[inline]
+fn apply_fs_kernel_rtl(buf: &mut [Vec<f32>], x: usize, y: usize, err: f32, width: usize) {
+    // FS kernel mirrored: 7 *
+    //                     1 5 3
+    if x > 0 {
+        buf[y][x - 1] += err * (7.0 / 16.0);
+    }
+    if x + 1 < width {
+        buf[y + 1][x + 1] += err * (3.0 / 16.0);
+    }
+    buf[y + 1][x] += err * (5.0 / 16.0);
+    if x > 0 {
+        buf[y + 1][x - 1] += err * (1.0 / 16.0);
+    }
+}
+
+/// Apply Jarvis-Judice-Ninke error diffusion kernel at position (x, y)
+/// For left-to-right scanning
+#[inline]
+fn apply_jjn_kernel_ltr(buf: &mut [Vec<f32>], x: usize, y: usize, err: f32, width: usize) {
+    // JJN kernel:     * 7 5
+    //             3 5 7 5 3
+    //             1 3 5 3 1
+    // Row 0
+    if x + 1 < width {
+        buf[y][x + 1] += err * (7.0 / 48.0);
+    }
+    if x + 2 < width {
+        buf[y][x + 2] += err * (5.0 / 48.0);
+    }
+    // Row 1
+    if x >= 2 {
+        buf[y + 1][x - 2] += err * (3.0 / 48.0);
+    }
+    if x >= 1 {
+        buf[y + 1][x - 1] += err * (5.0 / 48.0);
+    }
+    buf[y + 1][x] += err * (7.0 / 48.0);
+    if x + 1 < width {
+        buf[y + 1][x + 1] += err * (5.0 / 48.0);
+    }
+    if x + 2 < width {
+        buf[y + 1][x + 2] += err * (3.0 / 48.0);
+    }
+    // Row 2
+    if x >= 2 {
+        buf[y + 2][x - 2] += err * (1.0 / 48.0);
+    }
+    if x >= 1 {
+        buf[y + 2][x - 1] += err * (3.0 / 48.0);
+    }
+    buf[y + 2][x] += err * (5.0 / 48.0);
+    if x + 1 < width {
+        buf[y + 2][x + 1] += err * (3.0 / 48.0);
+    }
+    if x + 2 < width {
+        buf[y + 2][x + 2] += err * (1.0 / 48.0);
+    }
+}
+
+/// Apply Jarvis-Judice-Ninke error diffusion kernel at position (x, y)
+/// For right-to-left scanning (mirrored)
+#[inline]
+fn apply_jjn_kernel_rtl(buf: &mut [Vec<f32>], x: usize, y: usize, err: f32, width: usize) {
+    // JJN kernel mirrored: 5 7 *
+    //                    3 5 7 5 3
+    //                    1 3 5 3 1
+    // Row 0
+    if x >= 1 {
+        buf[y][x - 1] += err * (7.0 / 48.0);
+    }
+    if x >= 2 {
+        buf[y][x - 2] += err * (5.0 / 48.0);
+    }
+    // Row 1
+    if x + 2 < width {
+        buf[y + 1][x + 2] += err * (3.0 / 48.0);
+    }
+    if x + 1 < width {
+        buf[y + 1][x + 1] += err * (5.0 / 48.0);
+    }
+    buf[y + 1][x] += err * (7.0 / 48.0);
+    if x >= 1 {
+        buf[y + 1][x - 1] += err * (5.0 / 48.0);
+    }
+    if x >= 2 {
+        buf[y + 1][x - 2] += err * (3.0 / 48.0);
+    }
+    // Row 2
+    if x + 2 < width {
+        buf[y + 2][x + 2] += err * (1.0 / 48.0);
+    }
+    if x + 1 < width {
+        buf[y + 2][x + 1] += err * (3.0 / 48.0);
+    }
+    buf[y + 2][x] += err * (5.0 / 48.0);
+    if x >= 1 {
+        buf[y + 2][x - 1] += err * (3.0 / 48.0);
+    }
+    if x >= 2 {
+        buf[y + 2][x - 2] += err * (1.0 / 48.0);
+    }
+}
+
+/// Mixed dithering with standard left-to-right scanning
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
+fn mixed_dither_standard(img: &[f32], width: usize, height: usize) -> Vec<u8> {
+    let seed = get_next_seed();
+    let hashed_seed = wang_hash(seed);
+
+    // Use 2D buffer with 2 padding rows for JJN kernel
+    let mut buf: Vec<Vec<f32>> = (0..height)
+        .map(|y| {
+            let start = y * width;
+            img[start..start + width].to_vec()
+        })
+        .collect();
+    buf.push(vec![0.0f32; width]);
+    buf.push(vec![0.0f32; width]);
+
+    for y in 0..height {
+        for x in 0..width {
+            let old = buf[y][x];
+            let new = old.round();
+            buf[y][x] = new;
+            let err = old - new;
+
+            // Deterministically choose kernel based on position and seed
+            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+
+            if use_jjn {
+                apply_jjn_kernel_ltr(&mut buf, x, y, err, width);
+            } else {
+                apply_fs_kernel_ltr(&mut buf, x, y, err, width);
+            }
+        }
+    }
+
+    buf[..height]
+        .iter()
+        .flat_map(|row| row.iter().map(|&v| v.clamp(0.0, 255.0) as u8))
+        .collect()
+}
+
+/// Mixed dithering with serpentine scanning
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
+/// Alternates scan direction each row
+fn mixed_dither_serpentine(img: &[f32], width: usize, height: usize) -> Vec<u8> {
+    let seed = get_next_seed();
+    let hashed_seed = wang_hash(seed);
+
+    let mut buf: Vec<Vec<f32>> = (0..height)
+        .map(|y| {
+            let start = y * width;
+            img[start..start + width].to_vec()
+        })
+        .collect();
+    buf.push(vec![0.0f32; width]);
+    buf.push(vec![0.0f32; width]);
+
+    for y in 0..height {
+        let is_reverse = y % 2 == 1;
+
+        if is_reverse {
+            for x in (0..width).rev() {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+
+                if use_jjn {
+                    apply_jjn_kernel_rtl(&mut buf, x, y, err, width);
+                } else {
+                    apply_fs_kernel_rtl(&mut buf, x, y, err, width);
+                }
+            }
+        } else {
+            for x in 0..width {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+
+                if use_jjn {
+                    apply_jjn_kernel_ltr(&mut buf, x, y, err, width);
+                } else {
+                    apply_fs_kernel_ltr(&mut buf, x, y, err, width);
+                }
+            }
+        }
+    }
+
+    buf[..height]
+        .iter()
+        .flat_map(|row| row.iter().map(|&v| v.clamp(0.0, 255.0) as u8))
+        .collect()
+}
+
+/// Mixed dithering with random scan direction
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
+/// AND randomly selects scan direction per row (instead of alternating)
+fn mixed_dither_random(img: &[f32], width: usize, height: usize) -> Vec<u8> {
+    let seed = get_next_seed();
+    let hashed_seed = wang_hash(seed);
+
+    let mut buf: Vec<Vec<f32>> = (0..height)
+        .map(|y| {
+            let start = y * width;
+            img[start..start + width].to_vec()
+        })
+        .collect();
+    buf.push(vec![0.0f32; width]);
+    buf.push(vec![0.0f32; width]);
+
+    for y in 0..height {
+        // Randomly determine scan direction for this row
+        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let is_reverse = row_hash & 1 == 1;
+
+        if is_reverse {
+            for x in (0..width).rev() {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+
+                if use_jjn {
+                    apply_jjn_kernel_rtl(&mut buf, x, y, err, width);
+                } else {
+                    apply_fs_kernel_rtl(&mut buf, x, y, err, width);
+                }
+            }
+        } else {
+            for x in 0..width {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+
+                if use_jjn {
+                    apply_jjn_kernel_ltr(&mut buf, x, y, err, width);
+                } else {
+                    apply_fs_kernel_ltr(&mut buf, x, y, err, width);
+                }
+            }
+        }
+    }
+
+    buf[..height]
+        .iter()
+        .flat_map(|row| row.iter().map(|&v| v.clamp(0.0, 255.0) as u8))
+        .collect()
+}
+
 /// Dither multiple channels and interleave them
 /// channels: Vec of channel data, each scaled to 0-255
 /// Returns interleaved u8 data
@@ -493,5 +814,79 @@ mod tests {
         assert_eq!(serpentine.len(), 100);
         // They should produce different results
         assert_ne!(standard, serpentine);
+    }
+
+    #[test]
+    fn test_mixed_standard() {
+        // Test that mixed standard mode produces valid output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        assert_eq!(result.len(), 100);
+        // All values should be valid uint8
+        for &v in &result {
+            assert!(v == 127 || v == 128);
+        }
+    }
+
+    #[test]
+    fn test_mixed_serpentine() {
+        // Test that mixed serpentine mode produces valid output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine);
+        assert_eq!(result.len(), 100);
+        for &v in &result {
+            assert!(v == 127 || v == 128);
+        }
+    }
+
+    #[test]
+    fn test_mixed_random() {
+        // Test that mixed random mode produces valid output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom);
+        assert_eq!(result.len(), 100);
+        for &v in &result {
+            assert!(v == 127 || v == 128);
+        }
+    }
+
+    #[test]
+    fn test_mixed_vs_pure_algorithms() {
+        // Mixed modes should produce different results from pure FS and JJN
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let fs = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard);
+        let jjn = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard);
+        let mixed = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        assert_eq!(fs.len(), 100);
+        assert_eq!(jjn.len(), 100);
+        assert_eq!(mixed.len(), 100);
+        // Mixed should differ from both pure algorithms
+        assert_ne!(fs, mixed);
+        assert_ne!(jjn, mixed);
+    }
+
+    #[test]
+    fn test_mixed_deterministic_with_same_seed_counter() {
+        // Note: Since seed counter increments, consecutive calls will produce different results
+        // But the algorithm itself is deterministic given the same seed
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result1 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        let result2 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        assert_eq!(result1.len(), 100);
+        assert_eq!(result2.len(), 100);
+        // Different seeds should produce different results
+        assert_ne!(result1, result2);
+    }
+
+    #[test]
+    fn test_mixed_all_modes_produce_different_results() {
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine);
+        let random = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom);
+        // All three mixed modes should produce different results
+        assert_ne!(standard, serpentine);
+        assert_ne!(standard, random);
+        assert_ne!(serpentine, random);
     }
 }

@@ -160,7 +160,10 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
         0: 'Floyd-Steinberg (standard)',
         1: 'Floyd-Steinberg (serpentine)',
         2: 'Jarvis-Judice-Ninke (standard)',
-        3: 'Jarvis-Judice-Ninke (serpentine)'
+        3: 'Jarvis-Judice-Ninke (serpentine)',
+        4: 'Mixed (standard)',
+        5: 'Mixed (serpentine)',
+        6: 'Mixed (random direction)'
     };
     sendConsole(`Dithering: ${ditherNames[ditherMode] || ditherNames[0]}`);
 
