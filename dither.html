@@ -269,6 +269,82 @@
             margin-top: 8px;
         }
 
+        .scale-options {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .scale-options.visible {
+            display: block;
+        }
+
+        .scale-options .size-inputs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .scale-options .size-inputs label {
+            font-weight: 600;
+            color: #555;
+        }
+
+        .scale-options .size-inputs input[type="number"] {
+            width: 80px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .scale-options .size-inputs span {
+            color: #888;
+        }
+
+        .scale-options .scale-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+
+        .upscale-options {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f0f8ff;
+            border-radius: 8px;
+            border: 1px solid #64b5f6;
+        }
+
+        .upscale-options.visible {
+            display: block;
+        }
+
+        .upscale-options label {
+            font-weight: 600;
+            color: #555;
+            margin-right: 10px;
+        }
+
+        .upscale-options input[type="number"] {
+            width: 60px;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .upscale-options .upscale-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+
         .process-btn {
             width: 100%;
             padding: 15px 30px;
@@ -452,6 +528,40 @@
                 </label>
             </div>
 
+            <div class="toggle-row">
+                <span>Downscale:</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="downscale-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="scale-options" id="scale-options">
+                <div class="size-inputs">
+                    <label for="scale-width">Width:</label>
+                    <input type="number" id="scale-width" value="128" min="1" max="4096">
+                    <span>x</span>
+                    <label for="scale-height">Height:</label>
+                    <input type="number" id="scale-height" value="128" min="1" max="4096">
+                </div>
+                <p class="scale-hint">Aspect ratio is preserved. Edit one dimension to auto-calculate the other.</p>
+            </div>
+
+            <div class="toggle-row">
+                <span>Upscale for viewing:</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="upscale-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="upscale-options" id="upscale-options">
+                <label for="upscale-factor">Scale factor:</label>
+                <input type="number" id="upscale-factor" value="4" min="1" max="16">
+                <span>x</span>
+                <p class="upscale-hint">Integer upscaling with nearest neighbor for pixel-perfect viewing.</p>
+            </div>
+
             <div class="channel-options rgb-options" id="rgb-options">
                 <div class="channel-box red">
                     <h4>Red Channel</h4>
@@ -521,6 +631,10 @@
         let inputImageData = null;
         let inputWidth = 0;
         let inputHeight = 0;
+        let originalWidth = 0;
+        let originalHeight = 0;
+        let aspectRatio = 1;
+        let updatingSize = false; // Prevent recursive updates
 
         // Initialize WASM
         async function initWasm() {
@@ -569,6 +683,67 @@
             return ctx.getImageData(0, 0, img.width, img.height);
         }
 
+        // Downscale image data using canvas (bilinear/bicubic)
+        function downscaleImageData(imageData, srcWidth, srcHeight, dstWidth, dstHeight) {
+            const srcCanvas = document.createElement('canvas');
+            srcCanvas.width = srcWidth;
+            srcCanvas.height = srcHeight;
+            const srcCtx = srcCanvas.getContext('2d');
+            srcCtx.putImageData(imageData, 0, 0);
+
+            const dstCanvas = document.createElement('canvas');
+            dstCanvas.width = dstWidth;
+            dstCanvas.height = dstHeight;
+            const dstCtx = dstCanvas.getContext('2d');
+            dstCtx.imageSmoothingEnabled = true;
+            dstCtx.imageSmoothingQuality = 'high';
+            dstCtx.drawImage(srcCanvas, 0, 0, dstWidth, dstHeight);
+
+            return dstCtx.getImageData(0, 0, dstWidth, dstHeight);
+        }
+
+        // Upscale image data using nearest neighbor
+        function upscaleNearestNeighbor(imageData, srcWidth, srcHeight, factor) {
+            const dstWidth = srcWidth * factor;
+            const dstHeight = srcHeight * factor;
+            const srcData = imageData.data;
+            const dstData = new Uint8ClampedArray(dstWidth * dstHeight * 4);
+
+            for (let y = 0; y < dstHeight; y++) {
+                const srcY = Math.floor(y / factor);
+                for (let x = 0; x < dstWidth; x++) {
+                    const srcX = Math.floor(x / factor);
+                    const srcIdx = (srcY * srcWidth + srcX) * 4;
+                    const dstIdx = (y * dstWidth + x) * 4;
+                    dstData[dstIdx] = srcData[srcIdx];
+                    dstData[dstIdx + 1] = srcData[srcIdx + 1];
+                    dstData[dstIdx + 2] = srcData[srcIdx + 2];
+                    dstData[dstIdx + 3] = srcData[srcIdx + 3];
+                }
+            }
+
+            return new ImageData(dstData, dstWidth, dstHeight);
+        }
+
+        // Update size fields based on aspect ratio
+        function updateSizeFromWidth() {
+            if (updatingSize || !originalWidth) return;
+            updatingSize = true;
+            const width = parseInt(document.getElementById('scale-width').value) || 1;
+            const height = Math.round(width / aspectRatio);
+            document.getElementById('scale-height').value = height;
+            updatingSize = false;
+        }
+
+        function updateSizeFromHeight() {
+            if (updatingSize || !originalHeight) return;
+            updatingSize = true;
+            const height = parseInt(document.getElementById('scale-height').value) || 1;
+            const width = Math.round(height * aspectRatio);
+            document.getElementById('scale-width').value = width;
+            updatingSize = false;
+        }
+
         // Dither a single channel
         function ditherChannel(channelData, width, height, mode, seed, bits) {
             // Convert to Float32Array (expected by WASM)
@@ -596,8 +771,23 @@
             try {
                 const mode = parseInt(document.getElementById('dither-mode').value);
                 const isGrayscale = document.getElementById('grayscale-toggle').checked;
-                const data = inputImageData.data;
-                const pixelCount = inputWidth * inputHeight;
+                const doDownscale = document.getElementById('downscale-toggle').checked;
+                const doUpscale = document.getElementById('upscale-toggle').checked;
+                const upscaleFactor = parseInt(document.getElementById('upscale-factor').value) || 1;
+
+                // Determine processing dimensions
+                let processWidth = originalWidth;
+                let processHeight = originalHeight;
+                let processData = inputImageData;
+
+                if (doDownscale) {
+                    processWidth = parseInt(document.getElementById('scale-width').value) || originalWidth;
+                    processHeight = parseInt(document.getElementById('scale-height').value) || originalHeight;
+                    processData = downscaleImageData(inputImageData, originalWidth, originalHeight, processWidth, processHeight);
+                }
+
+                const data = processData.data;
+                const pixelCount = processWidth * processHeight;
 
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
@@ -620,7 +810,7 @@
 
                     // Dither the grayscale channel
                     const seeds = getSeeds();
-                    const grayDithered = ditherChannel(grayChannel, inputWidth, inputHeight, mode, seeds.r, bitsGray);
+                    const grayDithered = ditherChannel(grayChannel, processWidth, processHeight, mode, seeds.r, bitsGray);
 
                     // Output as grayscale (R=G=B)
                     for (let i = 0; i < pixelCount; i++) {
@@ -648,9 +838,9 @@
 
                     // Dither each channel with different seeds
                     const seeds = getSeeds();
-                    const rDithered = ditherChannel(rChannel, inputWidth, inputHeight, mode, seeds.r, bitsR);
-                    const gDithered = ditherChannel(gChannel, inputWidth, inputHeight, mode, seeds.g, bitsG);
-                    const bDithered = ditherChannel(bChannel, inputWidth, inputHeight, mode, seeds.b, bitsB);
+                    const rDithered = ditherChannel(rChannel, processWidth, processHeight, mode, seeds.r, bitsR);
+                    const gDithered = ditherChannel(gChannel, processWidth, processHeight, mode, seeds.g, bitsG);
+                    const bDithered = ditherChannel(bChannel, processWidth, processHeight, mode, seeds.b, bitsB);
 
                     for (let i = 0; i < pixelCount; i++) {
                         outputData[i * 4] = rDithered[i];
@@ -661,10 +851,20 @@
                 }
 
                 // Create output image
-                const outputImageData = new ImageData(outputData, inputWidth, inputHeight);
+                let outputImageData = new ImageData(outputData, processWidth, processHeight);
+
+                // Upscale for viewing if enabled
+                let displayWidth = processWidth;
+                let displayHeight = processHeight;
+                if (doUpscale && upscaleFactor > 1) {
+                    outputImageData = upscaleNearestNeighbor(outputImageData, processWidth, processHeight, upscaleFactor);
+                    displayWidth = processWidth * upscaleFactor;
+                    displayHeight = processHeight * upscaleFactor;
+                }
+
                 const canvas = document.createElement('canvas');
-                canvas.width = inputWidth;
-                canvas.height = inputHeight;
+                canvas.width = displayWidth;
+                canvas.height = displayHeight;
                 const ctx = canvas.getContext('2d');
                 ctx.putImageData(outputImageData, 0, 0);
 
@@ -702,6 +902,19 @@
                 inputImageData = getImageData(img);
                 inputWidth = img.width;
                 inputHeight = img.height;
+                originalWidth = img.width;
+                originalHeight = img.height;
+                aspectRatio = img.width / img.height;
+
+                // Set initial scale values (default to 128 on longest edge)
+                const maxDim = 128;
+                if (aspectRatio >= 1) {
+                    document.getElementById('scale-width').value = maxDim;
+                    document.getElementById('scale-height').value = Math.round(maxDim / aspectRatio);
+                } else {
+                    document.getElementById('scale-height').value = maxDim;
+                    document.getElementById('scale-width').value = Math.round(maxDim * aspectRatio);
+                }
 
                 updateProcessButton();
             } catch (err) {
@@ -732,6 +945,26 @@
         }
 
         document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
+
+        // Downscale toggle
+        function updateDownscaleVisibility() {
+            const doDownscale = document.getElementById('downscale-toggle').checked;
+            document.getElementById('scale-options').classList.toggle('visible', doDownscale);
+        }
+
+        document.getElementById('downscale-toggle').addEventListener('change', updateDownscaleVisibility);
+
+        // Upscale toggle
+        function updateUpscaleVisibility() {
+            const doUpscale = document.getElementById('upscale-toggle').checked;
+            document.getElementById('upscale-options').classList.toggle('visible', doUpscale);
+        }
+
+        document.getElementById('upscale-toggle').addEventListener('change', updateUpscaleVisibility);
+
+        // Size input handlers (maintain aspect ratio)
+        document.getElementById('scale-width').addEventListener('input', updateSizeFromWidth);
+        document.getElementById('scale-height').addEventListener('input', updateSizeFromHeight);
 
         // Show/hide seed options based on dither mode (only for mixed modes 4, 5, 6)
         function updateSeedVisibility() {
