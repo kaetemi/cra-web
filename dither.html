@@ -148,12 +148,15 @@
         .channel-box.green h4 { color: #2e7d32; }
         .channel-box.blue h4 { color: #1565c0; }
 
-        .channel-box select {
+        .channel-box input[type="range"] {
             width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
+            margin: 10px 0;
+        }
+
+        .bit-value {
             font-size: 14px;
+            color: #555;
+            font-weight: 500;
         }
 
         .process-btn {
@@ -289,12 +292,6 @@
         .error-message.visible {
             display: block;
         }
-
-        .seed-info {
-            margin-top: 10px;
-            font-size: 12px;
-            color: #888;
-        }
     </style>
 </head>
 <body>
@@ -334,45 +331,18 @@
             <div class="channel-options">
                 <div class="channel-box red">
                     <h4>Red Channel</h4>
-                    <select id="bits-r">
-                        <option value="1">1 bit (2 levels)</option>
-                        <option value="2">2 bits (4 levels)</option>
-                        <option value="3">3 bits (8 levels)</option>
-                        <option value="4">4 bits (16 levels)</option>
-                        <option value="5" selected>5 bits (32 levels)</option>
-                        <option value="6">6 bits (64 levels)</option>
-                        <option value="7">7 bits (128 levels)</option>
-                        <option value="8">8 bits (256 levels)</option>
-                    </select>
-                    <p class="seed-info">Seed: 12345</p>
+                    <input type="range" id="bits-r" min="1" max="8" value="5">
+                    <p class="bit-value" id="bits-r-label">5 bits (32 levels)</p>
                 </div>
                 <div class="channel-box green">
                     <h4>Green Channel</h4>
-                    <select id="bits-g">
-                        <option value="1">1 bit (2 levels)</option>
-                        <option value="2">2 bits (4 levels)</option>
-                        <option value="3">3 bits (8 levels)</option>
-                        <option value="4">4 bits (16 levels)</option>
-                        <option value="5">5 bits (32 levels)</option>
-                        <option value="6" selected>6 bits (64 levels)</option>
-                        <option value="7">7 bits (128 levels)</option>
-                        <option value="8">8 bits (256 levels)</option>
-                    </select>
-                    <p class="seed-info">Seed: 67890</p>
+                    <input type="range" id="bits-g" min="1" max="8" value="6">
+                    <p class="bit-value" id="bits-g-label">6 bits (64 levels)</p>
                 </div>
                 <div class="channel-box blue">
                     <h4>Blue Channel</h4>
-                    <select id="bits-b">
-                        <option value="1">1 bit (2 levels)</option>
-                        <option value="2">2 bits (4 levels)</option>
-                        <option value="3">3 bits (8 levels)</option>
-                        <option value="4">4 bits (16 levels)</option>
-                        <option value="5" selected>5 bits (32 levels)</option>
-                        <option value="6">6 bits (64 levels)</option>
-                        <option value="7">7 bits (128 levels)</option>
-                        <option value="8">8 bits (256 levels)</option>
-                    </select>
-                    <p class="seed-info">Seed: 13579</p>
+                    <input type="range" id="bits-b" min="1" max="8" value="5">
+                    <p class="bit-value" id="bits-b-label">5 bits (32 levels)</p>
                 </div>
             </div>
         </div>
@@ -572,6 +542,19 @@
         });
 
         document.getElementById('process-btn').addEventListener('click', processImage);
+
+        // Slider label updates
+        function updateBitLabel(channel) {
+            const slider = document.getElementById(`bits-${channel}`);
+            const label = document.getElementById(`bits-${channel}-label`);
+            const bits = parseInt(slider.value);
+            const levels = 1 << bits;
+            label.textContent = `${bits} bit${bits > 1 ? 's' : ''} (${levels} levels)`;
+        }
+
+        ['r', 'g', 'b'].forEach(channel => {
+            document.getElementById(`bits-${channel}`).addEventListener('input', () => updateBitLabel(channel));
+        });
 
         // Drag and drop support
         const uploadBox = document.getElementById('input-upload');
