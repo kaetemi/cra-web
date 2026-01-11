@@ -98,7 +98,7 @@ fn process_block_iteration(
     rotation_angles: &[f32],
     use_f32_histogram: bool,
     block_seed: u32,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>) {
     let block_pixels = block_width * block_height;
 
@@ -131,10 +131,10 @@ fn process_block_iteration(
             // Use binned histogram matching with dithering
             // Each pass gets unique seeds: block_seed * 1000 + pass_idx * 4 + channel offset
             let pass_seed = block_seed.wrapping_mul(1000) + (pass_idx as u32) * 4;
-            let input_a_u8 = dither_with_mode(&a_scaled, block_width, block_height, dither_mode, pass_seed);
-            let input_b_u8 = dither_with_mode(&b_scaled, block_width, block_height, dither_mode, pass_seed + 1);
-            let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 2);
-            let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 3);
+            let input_a_u8 = dither_with_mode(&a_scaled, block_width, block_height, histogram_dither_mode, pass_seed);
+            let input_b_u8 = dither_with_mode(&b_scaled, block_width, block_height, histogram_dither_mode, pass_seed + 1);
+            let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_block_width, ref_block_height, histogram_dither_mode, pass_seed + 2);
+            let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_block_width, ref_block_height, histogram_dither_mode, pass_seed + 3);
 
             let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
@@ -175,7 +175,7 @@ fn process_block_iteration_with_l(
     rotation_angles: &[f32],
     use_f32_histogram: bool,
     block_seed: u32,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Process AB channels
     let (avg_a, avg_b) = process_block_iteration(
@@ -190,7 +190,7 @@ fn process_block_iteration_with_l(
         rotation_angles,
         use_f32_histogram,
         block_seed,
-        dither_mode,
+        histogram_dither_mode,
     );
 
     // Process L channel
@@ -205,8 +205,8 @@ fn process_block_iteration_with_l(
     } else {
         // L channel uses distinct seeds based on block_seed
         let l_seed = block_seed.wrapping_mul(1000) + 500;
-        let l_uint8 = dither_with_mode(&l_scaled, block_width, block_height, dither_mode, l_seed);
-        let ref_l_uint8 = dither_with_mode(&ref_l_scaled, ref_block_width, ref_block_height, dither_mode, l_seed + 1);
+        let l_uint8 = dither_with_mode(&l_scaled, block_width, block_height, histogram_dither_mode, l_seed);
+        let ref_l_uint8 = dither_with_mode(&ref_l_scaled, ref_block_width, ref_block_height, histogram_dither_mode, l_seed + 1);
         let matched_l = match_histogram(&l_uint8, &ref_l_uint8);
         scale_uint8_to_l(&matched_l)
     };
@@ -235,7 +235,8 @@ pub fn color_correct_tiled_lab(
     ref_height: usize,
     tiled_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
+    output_dither_mode: DitherMode,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
 
@@ -344,7 +345,7 @@ pub fn color_correct_tiled_lab(
                     &ROTATION_ANGLES,
                     use_f32_histogram,
                     block_idx as u32,
-                    dither_mode,
+                    histogram_dither_mode,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -367,7 +368,7 @@ pub fn color_correct_tiled_lab(
                     &ROTATION_ANGLES,
                     use_f32_histogram,
                     block_idx as u32,
-                    dither_mode,
+                    histogram_dither_mode,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -455,12 +456,12 @@ pub fn color_correct_tiled_lab(
     } else {
         // Use binned histogram matching with dithering
         // Final global pass uses very high seed values to avoid collision with block passes
-        let current_l_u8 = dither_with_mode(&l_scaled, input_width, input_height, dither_mode, 10000);
-        let current_a_u8 = dither_with_mode(&a_scaled, input_width, input_height, dither_mode, 10001);
-        let current_b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10002);
-        let ref_l_u8 = dither_with_mode(&ref_l_scaled, ref_width, ref_height, dither_mode, 10003);
-        let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_width, ref_height, dither_mode, 10004);
-        let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode, 10005);
+        let current_l_u8 = dither_with_mode(&l_scaled, input_width, input_height, histogram_dither_mode, 10000);
+        let current_a_u8 = dither_with_mode(&a_scaled, input_width, input_height, histogram_dither_mode, 10001);
+        let current_b_u8 = dither_with_mode(&b_scaled, input_width, input_height, histogram_dither_mode, 10002);
+        let ref_l_u8 = dither_with_mode(&ref_l_scaled, ref_width, ref_height, histogram_dither_mode, 10003);
+        let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_width, ref_height, histogram_dither_mode, 10004);
+        let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_width, ref_height, histogram_dither_mode, 10005);
 
         let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
         let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
@@ -477,9 +478,9 @@ pub fn color_correct_tiled_lab(
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
     // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, dither_mode, 10006);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, dither_mode, 10007);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10008);
+    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 10006);
+    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 10007);
+    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 10008);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

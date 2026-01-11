@@ -11,12 +11,13 @@
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_basic_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_basic_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * Basic Oklab histogram matching (WASM export)
@@ -30,12 +31,13 @@ export function color_correct_basic_lab(input_data: Uint8Array, input_width: num
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_basic_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_basic_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * Basic RGB histogram matching (WASM export)
@@ -46,12 +48,13 @@ export function color_correct_basic_oklab(input_data: Uint8Array, input_width: n
  *     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
  *     ref_width, ref_height: Reference image dimensions
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_basic_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_basic_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * CRA LAB color correction (WASM export)
@@ -67,12 +70,13 @@ export function color_correct_basic_rgb(input_data: Uint8Array, input_width: num
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_cra_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_cra_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * CRA Oklab color correction (WASM export)
@@ -88,12 +92,13 @@ export function color_correct_cra_lab(input_data: Uint8Array, input_width: numbe
  *     ref_width, ref_height: Reference image dimensions
  *     keep_luminosity: If true, preserve original L channel
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_cra_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_cra_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, keep_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * CRA RGB color correction (WASM export)
@@ -108,12 +113,13 @@ export function color_correct_cra_oklab(input_data: Uint8Array, input_width: num
  *     ref_width, ref_height: Reference image dimensions
  *     use_perceptual: If true, use perceptual weighting
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_cra_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_perceptual: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_cra_rgb(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, use_perceptual: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * Tiled CRA LAB color correction (WASM export)
@@ -129,12 +135,13 @@ export function color_correct_cra_rgb(input_data: Uint8Array, input_width: numbe
  *     ref_width, ref_height: Reference image dimensions
  *     tiled_luminosity: If true, process L channel per-tile before global match
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_tiled_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_tiled_lab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * Tiled CRA Oklab color correction (WASM export)
@@ -150,12 +157,13 @@ export function color_correct_tiled_lab(input_data: Uint8Array, input_width: num
  *     ref_width, ref_height: Reference image dimensions
  *     tiled_luminosity: If true, process L channel per-tile before global match
  *     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
- *     dither_mode: 0 = Standard (default), 1 = Serpentine
+ *     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+ *     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
  *
  * Returns:
  *     Output image as sRGB uint8 (RGBRGB...)
  */
-export function color_correct_tiled_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean, dither_mode: number): Uint8Array;
+export function color_correct_tiled_oklab(input_data: Uint8Array, input_width: number, input_height: number, ref_data: Uint8Array, ref_width: number, ref_height: number, tiled_luminosity: boolean, use_f32_histogram: boolean, histogram_dither_mode: number, output_dither_mode: number): Uint8Array;
 
 /**
  * Floyd-Steinberg dithering (WASM export)
@@ -167,14 +175,14 @@ export type InitInput = RequestInfo | URL | Response | BufferSource | WebAssembl
 
 export interface InitOutput {
   readonly memory: WebAssembly.Memory;
-  readonly color_correct_basic_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_basic_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_basic_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number) => [number, number];
-  readonly color_correct_cra_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_cra_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
-  readonly color_correct_tiled_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
+  readonly color_correct_basic_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_basic_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_basic_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number) => [number, number];
+  readonly color_correct_cra_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_cra_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_cra_rgb: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_tiled_lab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
+  readonly color_correct_tiled_oklab: (a: number, b: number, c: number, d: number, e: number, f: number, g: number, h: number, i: number, j: number, k: number, l: number) => [number, number];
   readonly floyd_steinberg_dither_wasm: (a: number, b: number, c: number, d: number) => [number, number];
   readonly __wbindgen_externrefs: WebAssembly.Table;
   readonly __wbindgen_malloc: (a: number, b: number) => number;

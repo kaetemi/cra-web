@@ -229,32 +229,59 @@ function updateHistogramLabel() {
     const useF32Histogram = document.getElementById('use-f32-histogram').checked;
     const label = document.getElementById('histogram-label');
     const description = document.getElementById('histogram-description');
+    const histogramDitherSection = document.getElementById('histogram-dither-section');
 
     if (useF32Histogram) {
         label.textContent = 'F32 Quantile';
         description.textContent = 'Use f32 sort-based quantile matching. No quantization noise, works directly on floating point values with linear interpolation.';
+        // Hide histogram dither section when using f32 (no quantization needed)
+        if (histogramDitherSection) {
+            histogramDitherSection.style.display = 'none';
+        }
     } else {
         label.textContent = 'Binned (256)';
         description.textContent = 'Use binned histogram matching with 256 bins (original/reference). Toggle for f32 sort-based quantile matching (no quantization noise).';
+        // Show histogram dither section when using binned histogram
+        if (histogramDitherSection) {
+            histogramDitherSection.style.display = 'block';
+        }
     }
 }
 
-// Dithering method descriptions
-const DITHER_DESCRIPTIONS = {
-    '0': 'Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm.',
-    '1': 'Floyd-Steinberg with serpentine scanning (alternating direction each row). Reduces diagonal banding artifacts.',
-    '2': 'Jarvis-Judice-Ninke with standard scanning. Larger 3-row kernel produces smoother gradients but is slower.',
-    '3': 'Jarvis-Judice-Ninke with serpentine scanning. Combines larger kernel with alternating scan direction for best quality.',
-    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Different seed each processing run.',
-    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Different seed each processing run.',
-    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Most randomized option with different seed each processing run.'
+// Output dithering method descriptions
+const OUTPUT_DITHER_DESCRIPTIONS = {
+    '0': 'Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm. Used for final output quantization.',
+    '1': 'Floyd-Steinberg with serpentine scanning (alternating direction each row). Reduces diagonal banding artifacts. Used for final output quantization.',
+    '2': 'Jarvis-Judice-Ninke with standard scanning. Larger 3-row kernel produces smoother gradients. Used for final output quantization.',
+    '3': 'Jarvis-Judice-Ninke with serpentine scanning. Combines larger kernel with alternating scan direction for best quality. Used for final output quantization.',
+    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.',
+    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for final output quantization.',
+    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Most randomized option. Used for final output quantization.'
 };
 
-// Update dither method description
-function updateDitherDescription() {
-    const ditherMode = document.getElementById('dither-select').value;
-    const description = document.getElementById('dither-description');
-    description.textContent = DITHER_DESCRIPTIONS[ditherMode] || DITHER_DESCRIPTIONS['0'];
+// Histogram dithering method descriptions
+const HISTOGRAM_DITHER_DESCRIPTIONS = {
+    '0': 'Floyd-Steinberg with standard scanning. Used for histogram processing quantization (when not using f32 histogram).',
+    '1': 'Floyd-Steinberg with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).',
+    '2': 'Jarvis-Judice-Ninke with standard scanning. Used for histogram processing quantization (when not using f32 histogram).',
+    '3': 'Jarvis-Judice-Ninke with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).',
+    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).',
+    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for histogram processing quantization.',
+    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Used for histogram processing quantization.'
+};
+
+// Update output dither method description
+function updateOutputDitherDescription() {
+    const ditherMode = document.getElementById('output-dither-select').value;
+    const description = document.getElementById('output-dither-description');
+    description.textContent = OUTPUT_DITHER_DESCRIPTIONS[ditherMode] || OUTPUT_DITHER_DESCRIPTIONS['2'];
+}
+
+// Update histogram dither method description
+function updateHistogramDitherDescription() {
+    const ditherMode = document.getElementById('histogram-dither-select').value;
+    const description = document.getElementById('histogram-dither-description');
+    description.textContent = HISTOGRAM_DITHER_DESCRIPTIONS[ditherMode] || HISTOGRAM_DITHER_DESCRIPTIONS['4'];
 }
 
 // Check if a WASM-only method is selected with Python mode
@@ -320,7 +347,9 @@ function processImages() {
     const config = METHOD_CONFIG[method];
     const useWasm = document.getElementById('use-wasm').checked;
     const useF32Histogram = document.getElementById('use-f32-histogram')?.checked || false;
-    const ditherMode = parseInt(document.getElementById('dither-select')?.value || '0', 10);
+    // Default: output=2 (Jarvis), histogram=4 (Mixed)
+    const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '2', 10);
+    const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');
     const errorMessage = document.getElementById('error-message');
@@ -346,7 +375,8 @@ function processImages() {
         config: config,
         useWasm: useWasm,
         useF32Histogram: useF32Histogram,
-        ditherMode: ditherMode
+        histogramDitherMode: histogramDitherMode,
+        outputDitherMode: outputDitherMode
     });
 }
 
@@ -365,8 +395,12 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
     document.getElementById('use-f32-histogram').addEventListener('change', updateHistogramLabel);
-    document.getElementById('dither-select').addEventListener('change', updateDitherDescription);
+    document.getElementById('output-dither-select').addEventListener('change', updateOutputDitherDescription);
+    document.getElementById('histogram-dither-select').addEventListener('change', updateHistogramDitherDescription);
     document.getElementById('process-btn').addEventListener('click', processImages);
+
+    // Initialize histogram dither visibility based on initial f32 histogram state
+    updateHistogramLabel();
 
     // Load default images
     loadDefaultImages();

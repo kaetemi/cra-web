@@ -24,11 +24,11 @@ pub use dither::floyd_steinberg_dither;
 use dither::DitherMode;
 
 /// Convert u8 to DitherMode for WASM interface
-/// 0 = Floyd-Steinberg Standard (default)
+/// 0 = Floyd-Steinberg Standard
 /// 1 = Floyd-Steinberg Serpentine
-/// 2 = Jarvis-Judice-Ninke Standard
+/// 2 = Jarvis-Judice-Ninke Standard (default for output_dither_mode)
 /// 3 = Jarvis-Judice-Ninke Serpentine
-/// 4 = Mixed Standard (random kernel, standard scan)
+/// 4 = Mixed Standard (random kernel, standard scan) (default for histogram_dither_mode)
 /// 5 = Mixed Serpentine (random kernel, serpentine scan)
 /// 6 = Mixed Random (random kernel and random scan direction)
 fn dither_mode_from_u8(mode: u8) -> DitherMode {
@@ -59,7 +59,8 @@ pub fn floyd_steinberg_dither_wasm(img: Vec<f32>, w: usize, h: usize) -> Vec<u8>
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -73,7 +74,8 @@ pub fn color_correct_basic_lab(
     ref_height: usize,
     keep_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     // Convert uint8 to float (0-1)
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -88,7 +90,8 @@ pub fn color_correct_basic_lab(
         ref_height,
         keep_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -100,7 +103,8 @@ pub fn color_correct_basic_lab(
 ///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -113,7 +117,8 @@ pub fn color_correct_basic_rgb(
     ref_width: usize,
     ref_height: usize,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -126,7 +131,8 @@ pub fn color_correct_basic_rgb(
         ref_width,
         ref_height,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -143,7 +149,8 @@ pub fn color_correct_basic_rgb(
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -157,7 +164,8 @@ pub fn color_correct_cra_lab(
     ref_height: usize,
     keep_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -171,7 +179,8 @@ pub fn color_correct_cra_lab(
         ref_height,
         keep_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -188,7 +197,8 @@ pub fn color_correct_cra_lab(
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -202,7 +212,8 @@ pub fn color_correct_tiled_lab(
     ref_height: usize,
     tiled_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -216,7 +227,8 @@ pub fn color_correct_tiled_lab(
         ref_height,
         tiled_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -232,7 +244,8 @@ pub fn color_correct_tiled_lab(
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -246,7 +259,8 @@ pub fn color_correct_cra_rgb(
     ref_height: usize,
     use_perceptual: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -260,7 +274,8 @@ pub fn color_correct_cra_rgb(
         ref_height,
         use_perceptual,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -275,7 +290,8 @@ pub fn color_correct_cra_rgb(
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -289,7 +305,8 @@ pub fn color_correct_basic_oklab(
     ref_height: usize,
     keep_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     // Convert uint8 to float (0-1)
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -304,7 +321,8 @@ pub fn color_correct_basic_oklab(
         ref_height,
         keep_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -321,7 +339,8 @@ pub fn color_correct_basic_oklab(
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -335,7 +354,8 @@ pub fn color_correct_cra_oklab(
     ref_height: usize,
     keep_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -349,7 +369,8 @@ pub fn color_correct_cra_oklab(
         ref_height,
         keep_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -366,7 +387,8 @@ pub fn color_correct_cra_oklab(
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
 ///     use_f32_histogram: If true, use f32 sort-based histogram matching (no quantization)
-///     dither_mode: 0 = Standard (default), 1 = Serpentine
+///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -380,7 +402,8 @@ pub fn color_correct_tiled_oklab(
     ref_height: usize,
     tiled_luminosity: bool,
     use_f32_histogram: bool,
-    dither_mode: u8,
+    histogram_dither_mode: u8,
+    output_dither_mode: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -394,7 +417,8 @@ pub fn color_correct_tiled_oklab(
         ref_height,
         tiled_luminosity,
         use_f32_histogram,
-        dither_mode_from_u8(dither_mode),
+        dither_mode_from_u8(histogram_dither_mode),
+        dither_mode_from_u8(output_dither_mode),
     )
 }
 
@@ -412,11 +436,12 @@ mod tests {
             255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0,
         ];
 
-        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        // histogram_dither_mode=4 (Mixed), output_dither_mode=2 (Jarvis)
+        let result = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result.len(), 12); // 2x2x3 = 12
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, true, 0);
+        let result_f32 = color_correct_basic_lab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -425,11 +450,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, false, 0);
+        let result = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, true, 0);
+        let result_f32 = color_correct_basic_rgb(&input, 2, 2, &reference, 2, 2, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -438,11 +463,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, true, 0);
+        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -451,11 +476,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        let result = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, true, 0);
+        let result_f32 = color_correct_cra_rgb(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -464,11 +489,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        let result = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, true, 0);
+        let result_f32 = color_correct_basic_oklab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -477,11 +502,11 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, true, 0);
+        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 
@@ -491,15 +516,15 @@ mod tests {
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
         // Test with tiled luminosity
-        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, false, 0);
+        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, false, 4, 2);
         assert_eq!(result.len(), 12);
 
         // Test without tiled luminosity (AB only)
-        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, false, 0);
+        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, false, 4, 2);
         assert_eq!(result_ab.len(), 12);
 
         // Also test with f32 histogram
-        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, true, 0);
+        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, true, 4, 2);
         assert_eq!(result_f32.len(), 12);
     }
 }

@@ -141,7 +141,7 @@ async function encodePng(rgbData, width, height) {
 }
 
 // Process images using WASM
-async function processImagesWasm(inputData, refData, method, config, useF32Histogram, ditherMode) {
+async function processImagesWasm(inputData, refData, method, config, useF32Histogram, histogramDitherMode, outputDitherMode) {
     sendProgress('process', 'Decoding images...', 10);
     const inputImg = await decodeImage(inputData);
     const refImg = await decodeImage(refData);
@@ -155,8 +155,19 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
     sendConsole(`Method: ${method}`);
     if (useF32Histogram) {
         sendConsole('Using f32 histogram matching (no quantization)');
+    } else {
+        const ditherNames = {
+            0: 'Floyd-Steinberg (standard)',
+            1: 'Floyd-Steinberg (serpentine)',
+            2: 'Jarvis-Judice-Ninke (standard)',
+            3: 'Jarvis-Judice-Ninke (serpentine)',
+            4: 'Mixed (standard)',
+            5: 'Mixed (serpentine)',
+            6: 'Mixed (random direction)'
+        };
+        sendConsole(`Histogram dithering: ${ditherNames[histogramDitherMode] || ditherNames[4]}`);
     }
-    const ditherNames = {
+    const outputDitherNames = {
         0: 'Floyd-Steinberg (standard)',
         1: 'Floyd-Steinberg (serpentine)',
         2: 'Jarvis-Judice-Ninke (standard)',
@@ -165,7 +176,7 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
         5: 'Mixed (serpentine)',
         6: 'Mixed (random direction)'
     };
-    sendConsole(`Dithering: ${ditherNames[ditherMode] || ditherNames[0]}`);
+    sendConsole(`Output dithering: ${outputDitherNames[outputDitherMode] || outputDitherNames[2]}`);
 
     let resultRgb;
     const startTime = performance.now();
@@ -178,7 +189,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -188,7 +200,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -199,7 +212,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -210,7 +224,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 true, // tiled_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -221,7 +236,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // tiled_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -232,7 +248,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // use_perceptual
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -243,7 +260,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 true, // use_perceptual
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -254,7 +272,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -265,7 +284,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -276,7 +296,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 true, // tiled_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -287,7 +308,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 refRgb, refImg.width, refImg.height,
                 false, // tiled_luminosity
                 useF32Histogram,
-                ditherMode
+                histogramDitherMode,
+                outputDitherMode
             );
             break;
 
@@ -339,12 +361,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, useF32Histogram, ditherMode) {
+async function processImages(inputData, refData, method, config, useWasm, useF32Histogram, histogramDitherMode, outputDitherMode) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, useF32Histogram, ditherMode);
+            outputData = await processImagesWasm(inputData, refData, method, config, useF32Histogram, histogramDitherMode, outputDitherMode);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -365,7 +387,17 @@ self.onmessage = async function(e) {
             await initialize();
             break;
         case 'process':
-            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm, data.useF32Histogram, data.ditherMode || 0);
+            // Default: histogramDitherMode=4 (Mixed), outputDitherMode=2 (Jarvis)
+            await processImages(
+                data.inputData,
+                data.refData,
+                data.method,
+                data.config,
+                data.useWasm,
+                data.useF32Histogram,
+                data.histogramDitherMode !== undefined ? data.histogramDitherMode : 4,
+                data.outputDitherMode !== undefined ? data.outputDitherMode : 2
+            );
             break;
     }
 };

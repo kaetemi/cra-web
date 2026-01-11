@@ -26,7 +26,8 @@ pub fn color_correct_basic_rgb(
     ref_width: usize,
     ref_height: usize,
     use_f32_histogram: bool,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
+    output_dither_mode: DitherMode,
 ) -> Vec<u8> {
     // Convert to separate linear RGB channels
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
@@ -59,13 +60,13 @@ pub fn color_correct_basic_rgb(
     } else {
         // Use binned histogram matching with dithering
         // Each dither call gets a unique seed for deterministic but varied randomization
-        let in_r_u8 = dither_with_mode(&in_r_scaled, input_width, input_height, dither_mode, 0);
-        let in_g_u8 = dither_with_mode(&in_g_scaled, input_width, input_height, dither_mode, 1);
-        let in_b_u8 = dither_with_mode(&in_b_scaled, input_width, input_height, dither_mode, 2);
+        let in_r_u8 = dither_with_mode(&in_r_scaled, input_width, input_height, histogram_dither_mode, 0);
+        let in_g_u8 = dither_with_mode(&in_g_scaled, input_width, input_height, histogram_dither_mode, 1);
+        let in_b_u8 = dither_with_mode(&in_b_scaled, input_width, input_height, histogram_dither_mode, 2);
 
-        let ref_r_u8 = dither_with_mode(&ref_r_scaled, ref_width, ref_height, dither_mode, 3);
-        let ref_g_u8 = dither_with_mode(&ref_g_scaled, ref_width, ref_height, dither_mode, 4);
-        let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode, 5);
+        let ref_r_u8 = dither_with_mode(&ref_r_scaled, ref_width, ref_height, histogram_dither_mode, 3);
+        let ref_g_u8 = dither_with_mode(&ref_g_scaled, ref_width, ref_height, histogram_dither_mode, 4);
+        let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_width, ref_height, histogram_dither_mode, 5);
 
         let matched_r = match_histogram(&in_r_u8, &ref_r_u8);
         let matched_g = match_histogram(&in_g_u8, &ref_g_u8);
@@ -83,9 +84,9 @@ pub fn color_correct_basic_rgb(
         linear_to_srgb_scaled_channels(&matched_r_linear, &matched_g_linear, &matched_b_linear);
 
     // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, dither_mode, 6);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, dither_mode, 7);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 8);
+    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 6);
+    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 7);
+    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 8);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

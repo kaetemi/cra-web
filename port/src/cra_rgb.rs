@@ -72,7 +72,7 @@ fn process_rgb_iteration(
     rotation_angles: &[f32],
     perceptual_scale: Option<[f32; 3]>,
     use_f32_histogram: bool,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
     dither_seed_base: u32,
 ) -> Vec<f32> {
     let input_pixels = input_width * input_height;
@@ -127,7 +127,7 @@ fn process_rgb_iteration(
                     let ch: Vec<f32> = (0..input_pixels)
                         .map(|i| current_scaled[i * 3 + c])
                         .collect();
-                    dither_with_mode(&ch, input_width, input_height, dither_mode, pass_seed + c as u32)
+                    dither_with_mode(&ch, input_width, input_height, histogram_dither_mode, pass_seed + c as u32)
                 })
                 .collect();
             let ref_u8: Vec<Vec<u8>> = (0..3)
@@ -135,7 +135,7 @@ fn process_rgb_iteration(
                     let ch: Vec<f32> = (0..ref_pixels)
                         .map(|i| ref_scaled[i * 3 + c])
                         .collect();
-                    dither_with_mode(&ch, ref_width, ref_height, dither_mode, pass_seed + 3 + c as u32)
+                    dither_with_mode(&ch, ref_width, ref_height, histogram_dither_mode, pass_seed + 3 + c as u32)
                 })
                 .collect();
 
@@ -191,7 +191,8 @@ pub fn color_correct_cra_rgb(
     ref_height: usize,
     use_perceptual: bool,
     use_f32_histogram: bool,
-    dither_mode: DitherMode,
+    histogram_dither_mode: DitherMode,
+    output_dither_mode: DitherMode,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -232,7 +233,7 @@ pub fn color_correct_cra_rgb(
             &ROTATION_ANGLES,
             perceptual_scale,
             use_f32_histogram,
-            dither_mode,
+            histogram_dither_mode,
             (iter_idx as u32) * 100,
         );
 
@@ -280,7 +281,7 @@ pub fn color_correct_cra_rgb(
                 let ch: Vec<f32> = (0..input_pixels)
                     .map(|i| current_scaled[i * 3 + c])
                     .collect();
-                dither_with_mode(&ch, input_width, input_height, dither_mode, 1000 + c as u32)
+                dither_with_mode(&ch, input_width, input_height, histogram_dither_mode, 1000 + c as u32)
             })
             .collect();
         let ref_u8: Vec<Vec<u8>> = (0..3)
@@ -288,7 +289,7 @@ pub fn color_correct_cra_rgb(
                 let ch: Vec<f32> = (0..ref_pixels)
                     .map(|i| ref_scaled_final[i * 3 + c])
                     .collect();
-                dither_with_mode(&ch, ref_width, ref_height, dither_mode, 1003 + c as u32)
+                dither_with_mode(&ch, ref_width, ref_height, histogram_dither_mode, 1003 + c as u32)
             })
             .collect();
 
@@ -320,9 +321,9 @@ pub fn color_correct_cra_rgb(
         linear_to_srgb_scaled_channels(&final_r, &final_g, &final_b);
 
     // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, dither_mode, 1006);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, dither_mode, 1007);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 1008);
+    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 1006);
+    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 1007);
+    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 1008);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
