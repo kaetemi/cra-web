@@ -157,6 +157,10 @@ cra-web/
 └── dist/                # Build output
 ```
 
+## Acknowledgements
+
+Web demo and Rust port built with Claude Opus 4.5 using [Claude Code](https://claude.ai/claude-code).
+
 ## License
 
 See [scripts/LICENSE.md](scripts/LICENSE.md) for the original Python implementation license.
