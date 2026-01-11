@@ -205,6 +205,8 @@ function updateImplementationLabel() {
     const label = document.getElementById('impl-label');
     const description = document.getElementById('impl-description');
     const f32HistogramSection = document.getElementById('f32-histogram-section');
+    const outputDitherSection = document.getElementById('output-dither-section');
+    const histogramDitherSection = document.getElementById('histogram-dither-section');
 
     if (useWasm) {
         label.textContent = 'WASM (Rust)';
@@ -213,12 +215,25 @@ function updateImplementationLabel() {
         if (f32HistogramSection) {
             f32HistogramSection.style.display = 'block';
         }
+        // Show output dither section when WASM is enabled
+        if (outputDitherSection) {
+            outputDitherSection.style.display = 'block';
+        }
+        // Show/hide histogram dither based on f32 histogram setting
+        updateHistogramLabel();
     } else {
         label.textContent = 'Python (Pyodide)';
         description.textContent = IMPL_DESCRIPTIONS.python;
         // Hide f32 histogram toggle when Python is selected
         if (f32HistogramSection) {
             f32HistogramSection.style.display = 'none';
+        }
+        // Hide dithering options when Python is selected (not supported)
+        if (outputDitherSection) {
+            outputDitherSection.style.display = 'none';
+        }
+        if (histogramDitherSection) {
+            histogramDitherSection.style.display = 'none';
         }
     }
     updateProcessButton();

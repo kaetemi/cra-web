@@ -8,8 +8,9 @@ use image::{GenericImageView, ImageBuffer, Rgb};
 use std::path::PathBuf;
 
 use cra_wasm::{
-    color_correct_basic_lab, color_correct_basic_rgb, color_correct_cra_lab,
-    color_correct_cra_rgb, color_correct_tiled_lab,
+    color_correct_basic_lab, color_correct_basic_oklab, color_correct_basic_rgb,
+    color_correct_cra_lab, color_correct_cra_oklab, color_correct_cra_rgb,
+    color_correct_tiled_lab, color_correct_tiled_oklab,
 };
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -18,12 +19,50 @@ enum Method {
     BasicLab,
     /// Basic RGB histogram matching (color_correction_basic_rgb.py)
     BasicRgb,
+    /// Basic Oklab histogram matching (perceptually uniform)
+    BasicOklab,
     /// CRA LAB - Chroma Rotation Averaging in LAB space (color_correction_cra.py)
     CraLab,
     /// CRA RGB - Chroma Rotation Averaging in RGB space (color_correction_cra_rgb.py)
     CraRgb,
+    /// CRA Oklab - Chroma Rotation Averaging in Oklab space (perceptually uniform)
+    CraOklab,
     /// Tiled LAB with overlapping blocks (color_correction_tiled.py)
     TiledLab,
+    /// Tiled Oklab with overlapping blocks (perceptually uniform)
+    TiledOklab,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+enum DitherMethod {
+    /// Floyd-Steinberg with standard left-to-right scanning
+    FsStandard,
+    /// Floyd-Steinberg with serpentine (alternating) scanning
+    FsSerpentine,
+    /// Jarvis-Judice-Ninke with standard scanning (larger kernel, smoother)
+    JjnStandard,
+    /// Jarvis-Judice-Ninke with serpentine scanning
+    JjnSerpentine,
+    /// Mixed: randomly selects FS or JJN per-pixel, standard scanning
+    MixedStandard,
+    /// Mixed: randomly selects FS or JJN per-pixel, serpentine scanning
+    MixedSerpentine,
+    /// Mixed: randomly selects kernel AND scan direction per-row
+    MixedRandom,
+}
+
+impl DitherMethod {
+    fn to_u8(self) -> u8 {
+        match self {
+            DitherMethod::FsStandard => 0,
+            DitherMethod::FsSerpentine => 1,
+            DitherMethod::JjnStandard => 2,
+            DitherMethod::JjnSerpentine => 3,
+            DitherMethod::MixedStandard => 4,
+            DitherMethod::MixedSerpentine => 5,
+            DitherMethod::MixedRandom => 6,
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -46,11 +85,11 @@ struct Args {
     #[arg(short, long, value_enum, default_value_t = Method::CraLab)]
     method: Method,
 
-    /// Preserve original luminosity (L channel) - applies to basic-lab and cra-lab
+    /// Preserve original luminosity (L channel) - applies to basic-lab, basic-oklab, cra-lab, cra-oklab
     #[arg(long)]
     keep_luminosity: bool,
 
-    /// Process L channel per-tile before global match - applies to tiled-lab
+    /// Process L channel per-tile before global match - applies to tiled-lab, tiled-oklab
     #[arg(long)]
     tiled_luminosity: bool,
 
@@ -61,6 +100,14 @@ struct Args {
     /// Use f32 sort-based histogram matching (no quantization artifacts)
     #[arg(long)]
     f32_histogram: bool,
+
+    /// Dithering method for final output quantization
+    #[arg(long, value_enum, default_value_t = DitherMethod::JjnStandard)]
+    output_dither: DitherMethod,
+
+    /// Dithering method for histogram processing (only used when not using --f32-histogram)
+    #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
+    histogram_dither: DitherMethod,
 
     /// Enable verbose output
     #[arg(short, long)]
@@ -111,8 +158,17 @@ fn save_image_rgb(
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
+    let histogram_dither = args.histogram_dither.to_u8();
+    let output_dither = args.output_dither.to_u8();
+
     if args.verbose {
         eprintln!("Method: {:?}", args.method);
+        eprintln!("Output dither: {:?}", args.output_dither);
+        if !args.f32_histogram {
+            eprintln!("Histogram dither: {:?}", args.histogram_dither);
+        } else {
+            eprintln!("Using f32 histogram (no quantization)");
+        }
     }
 
     // Load images
@@ -134,6 +190,8 @@ fn main() -> Result<(), String> {
             ref_height,
             args.keep_luminosity,
             args.f32_histogram,
+            histogram_dither,
+            output_dither,
         ),
         Method::BasicRgb => color_correct_basic_rgb(
             &input_data,
@@ -143,6 +201,20 @@ fn main() -> Result<(), String> {
             ref_width,
             ref_height,
             args.f32_histogram,
+            histogram_dither,
+            output_dither,
+        ),
+        Method::BasicOklab => color_correct_basic_oklab(
+            &input_data,
+            input_width,
+            input_height,
+            &ref_data,
+            ref_width,
+            ref_height,
+            args.keep_luminosity,
+            args.f32_histogram,
+            histogram_dither,
+            output_dither,
         ),
         Method::CraLab => color_correct_cra_lab(
             &input_data,
@@ -153,6 +225,8 @@ fn main() -> Result<(), String> {
             ref_height,
             args.keep_luminosity,
             args.f32_histogram,
+            histogram_dither,
+            output_dither,
         ),
         Method::CraRgb => color_correct_cra_rgb(
             &input_data,
@@ -163,6 +237,20 @@ fn main() -> Result<(), String> {
             ref_height,
             args.perceptual,
             args.f32_histogram,
+            histogram_dither,
+            output_dither,
+        ),
+        Method::CraOklab => color_correct_cra_oklab(
+            &input_data,
+            input_width,
+            input_height,
+            &ref_data,
+            ref_width,
+            ref_height,
+            args.keep_luminosity,
+            args.f32_histogram,
+            histogram_dither,
+            output_dither,
         ),
         Method::TiledLab => color_correct_tiled_lab(
             &input_data,
@@ -173,6 +261,20 @@ fn main() -> Result<(), String> {
             ref_height,
             args.tiled_luminosity,
             args.f32_histogram,
+            histogram_dither,
+            output_dither,
+        ),
+        Method::TiledOklab => color_correct_tiled_oklab(
+            &input_data,
+            input_width,
+            input_height,
+            &ref_data,
+            ref_width,
+            ref_height,
+            args.tiled_luminosity,
+            args.f32_histogram,
+            histogram_dither,
+            output_dither,
         ),
     };
 
