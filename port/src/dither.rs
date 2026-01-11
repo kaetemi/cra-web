@@ -125,6 +125,359 @@ pub enum DitherMode {
     MixedRandom,
 }
 
+// ============================================================================
+// Trait-based kernel abstraction
+// ============================================================================
+
+/// Trait for error diffusion dithering kernels.
+/// Implementations define the kernel shape (padding) and error distribution pattern.
+trait DitherKernel {
+    /// Padding required on the left side of the buffer
+    const PAD_LEFT: usize;
+    /// Padding required on the right side of the buffer
+    const PAD_RIGHT: usize;
+    /// Padding required on the bottom of the buffer
+    const PAD_BOTTOM: usize;
+
+    /// Apply the kernel for left-to-right scanning.
+    /// Distributes quantization error to neighboring pixels.
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
+
+    /// Apply the kernel for right-to-left scanning (mirrored).
+    /// Used for serpentine scanning on odd rows.
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
+}
+
+/// Floyd-Steinberg error diffusion kernel.
+/// Compact 2-row kernel with good speed/quality trade-off.
+///
+/// Kernel (divided by 16):
+///       * 7
+///     3 5 1
+struct FloydSteinberg;
+
+impl DitherKernel for FloydSteinberg {
+    const PAD_LEFT: usize = 1;
+    const PAD_RIGHT: usize = 1;
+    const PAD_BOTTOM: usize = 1;
+
+    #[inline]
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        buf[y][bx + 1] += err * (7.0 / 16.0);
+        buf[y + 1][bx - 1] += err * (3.0 / 16.0);
+        buf[y + 1][bx] += err * (5.0 / 16.0);
+        buf[y + 1][bx + 1] += err * (1.0 / 16.0);
+    }
+
+    #[inline]
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        buf[y][bx - 1] += err * (7.0 / 16.0);
+        buf[y + 1][bx + 1] += err * (3.0 / 16.0);
+        buf[y + 1][bx] += err * (5.0 / 16.0);
+        buf[y + 1][bx - 1] += err * (1.0 / 16.0);
+    }
+}
+
+/// Jarvis-Judice-Ninke error diffusion kernel.
+/// Larger 3-row kernel produces smoother gradients than Floyd-Steinberg.
+///
+/// Kernel (divided by 48):
+///         * 7 5
+///     3 5 7 5 3
+///     1 3 5 3 1
+struct JarvisJudiceNinke;
+
+impl DitherKernel for JarvisJudiceNinke {
+    const PAD_LEFT: usize = 2;
+    const PAD_RIGHT: usize = 2;
+    const PAD_BOTTOM: usize = 2;
+
+    #[inline]
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        // Row 0
+        buf[y][bx + 1] += err * (7.0 / 48.0);
+        buf[y][bx + 2] += err * (5.0 / 48.0);
+        // Row 1
+        buf[y + 1][bx - 2] += err * (3.0 / 48.0);
+        buf[y + 1][bx - 1] += err * (5.0 / 48.0);
+        buf[y + 1][bx] += err * (7.0 / 48.0);
+        buf[y + 1][bx + 1] += err * (5.0 / 48.0);
+        buf[y + 1][bx + 2] += err * (3.0 / 48.0);
+        // Row 2
+        buf[y + 2][bx - 2] += err * (1.0 / 48.0);
+        buf[y + 2][bx - 1] += err * (3.0 / 48.0);
+        buf[y + 2][bx] += err * (5.0 / 48.0);
+        buf[y + 2][bx + 1] += err * (3.0 / 48.0);
+        buf[y + 2][bx + 2] += err * (1.0 / 48.0);
+    }
+
+    #[inline]
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        // Row 0
+        buf[y][bx - 1] += err * (7.0 / 48.0);
+        buf[y][bx - 2] += err * (5.0 / 48.0);
+        // Row 1
+        buf[y + 1][bx + 2] += err * (3.0 / 48.0);
+        buf[y + 1][bx + 1] += err * (5.0 / 48.0);
+        buf[y + 1][bx] += err * (7.0 / 48.0);
+        buf[y + 1][bx - 1] += err * (5.0 / 48.0);
+        buf[y + 1][bx - 2] += err * (3.0 / 48.0);
+        // Row 2
+        buf[y + 2][bx + 2] += err * (1.0 / 48.0);
+        buf[y + 2][bx + 1] += err * (3.0 / 48.0);
+        buf[y + 2][bx] += err * (5.0 / 48.0);
+        buf[y + 2][bx - 1] += err * (3.0 / 48.0);
+        buf[y + 2][bx - 2] += err * (1.0 / 48.0);
+    }
+}
+
+// ============================================================================
+// Buffer helpers
+// ============================================================================
+
+/// Create a padded buffer and copy image data into it.
+/// Padding allows kernel application without bounds checks.
+#[inline]
+fn create_padded_buffer(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    pad_right: usize,
+    pad_bottom: usize,
+) -> Vec<Vec<f32>> {
+    let buf_width = width + pad_left + pad_right;
+    let buf_height = height + pad_bottom;
+    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
+    for y in 0..height {
+        for x in 0..width {
+            buf[y][x + pad_left] = img[y * width + x];
+        }
+    }
+    buf
+}
+
+/// Extract real pixels from padded buffer, clamp, and convert to u8.
+#[inline]
+fn extract_result(buf: &[Vec<f32>], width: usize, height: usize, pad_left: usize) -> Vec<u8> {
+    let mut result = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
+        }
+    }
+    result
+}
+
+// ============================================================================
+// Generic dithering implementations
+// ============================================================================
+
+/// Generic standard (left-to-right) dithering with any kernel.
+/// Processes all rows left-to-right.
+fn dither_standard<K: DitherKernel>(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    quant: QuantParams,
+) -> Vec<u8> {
+    let mut buf = create_padded_buffer(
+        img, width, height,
+        K::PAD_LEFT, K::PAD_RIGHT, K::PAD_BOTTOM,
+    );
+
+    for y in 0..height {
+        for x in 0..width {
+            let bx = x + K::PAD_LEFT;
+            let old = buf[y][bx];
+            let new = quant.quantize(old);
+            buf[y][bx] = new;
+            let err = old - new;
+            K::apply_ltr(&mut buf, bx, y, err);
+        }
+    }
+
+    extract_result(&buf, width, height, K::PAD_LEFT)
+}
+
+/// Generic serpentine dithering with any kernel.
+/// Alternates scan direction each row to reduce diagonal banding.
+fn dither_serpentine<K: DitherKernel>(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    quant: QuantParams,
+) -> Vec<u8> {
+    let mut buf = create_padded_buffer(
+        img, width, height,
+        K::PAD_LEFT, K::PAD_RIGHT, K::PAD_BOTTOM,
+    );
+
+    for y in 0..height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for x in (0..width).rev() {
+                let bx = x + K::PAD_LEFT;
+                let old = buf[y][bx];
+                let new = quant.quantize(old);
+                buf[y][bx] = new;
+                let err = old - new;
+                K::apply_rtl(&mut buf, bx, y, err);
+            }
+        } else {
+            // Left-to-right on even rows
+            for x in 0..width {
+                let bx = x + K::PAD_LEFT;
+                let old = buf[y][bx];
+                let new = quant.quantize(old);
+                buf[y][bx] = new;
+                let err = old - new;
+                K::apply_ltr(&mut buf, bx, y, err);
+            }
+        }
+    }
+
+    extract_result(&buf, width, height, K::PAD_LEFT)
+}
+
+// ============================================================================
+// Mixed dithering (runtime kernel selection)
+// ============================================================================
+
+/// Process a single pixel: quantize and return error.
+#[inline]
+fn process_pixel(buf: &mut [Vec<f32>], bx: usize, y: usize, quant: &QuantParams) -> f32 {
+    let old = buf[y][bx];
+    let new = quant.quantize(old);
+    buf[y][bx] = new;
+    old - new
+}
+
+/// Apply kernel based on runtime selection.
+#[inline]
+fn apply_mixed_kernel(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, use_jjn: bool, is_rtl: bool) {
+    match (use_jjn, is_rtl) {
+        (true, false) => JarvisJudiceNinke::apply_ltr(buf, bx, y, err),
+        (true, true) => JarvisJudiceNinke::apply_rtl(buf, bx, y, err),
+        (false, false) => FloydSteinberg::apply_ltr(buf, bx, y, err),
+        (false, true) => FloydSteinberg::apply_rtl(buf, bx, y, err),
+    }
+}
+
+/// Mixed dithering with standard left-to-right scanning.
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel.
+fn mixed_dither_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    // Use JJN padding (larger) to accommodate both kernels
+    let mut buf = create_padded_buffer(
+        img, width, height,
+        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
+    );
+
+    for y in 0..height {
+        for x in 0..width {
+            let bx = x + JarvisJudiceNinke::PAD_LEFT;
+            let err = process_pixel(&mut buf, bx, y, &quant);
+            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+            apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+        }
+    }
+
+    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+}
+
+/// Mixed dithering with serpentine scanning.
+/// Randomly selects kernel per pixel, alternates scan direction each row.
+fn mixed_dither_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    let mut buf = create_padded_buffer(
+        img, width, height,
+        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
+    );
+
+    for y in 0..height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for x in (0..width).rev() {
+                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
+            }
+        } else {
+            // Left-to-right on even rows
+            for x in 0..width {
+                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+            }
+        }
+    }
+
+    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+}
+
+/// Mixed dithering with random scan direction per row.
+/// Randomly selects kernel per pixel AND scan direction per row.
+fn mixed_dither_random(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    let mut buf = create_padded_buffer(
+        img, width, height,
+        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
+    );
+
+    for y in 0..height {
+        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        if row_hash & 1 == 1 {
+            // Right-to-left (randomly selected)
+            for x in (0..width).rev() {
+                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
+            }
+        } else {
+            // Left-to-right (randomly selected)
+            for x in 0..width {
+                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+            }
+        }
+    }
+
+    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
 /// Floyd-Steinberg dithering with linear buffer and overflow padding.
 ///
 /// Args:
@@ -205,544 +558,14 @@ pub fn dither_with_mode_bits(
     };
 
     match mode {
-        DitherMode::Standard => floyd_steinberg_standard(img, width, height, quant),
-        DitherMode::Serpentine => floyd_steinberg_serpentine(img, width, height, quant),
-        DitherMode::JarvisStandard => jarvis_judice_ninke_standard(img, width, height, quant),
-        DitherMode::JarvisSerpentine => jarvis_judice_ninke_serpentine(img, width, height, quant),
+        DitherMode::Standard => dither_standard::<FloydSteinberg>(img, width, height, quant),
+        DitherMode::Serpentine => dither_serpentine::<FloydSteinberg>(img, width, height, quant),
+        DitherMode::JarvisStandard => dither_standard::<JarvisJudiceNinke>(img, width, height, quant),
+        DitherMode::JarvisSerpentine => dither_serpentine::<JarvisJudiceNinke>(img, width, height, quant),
         DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed, quant),
         DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed, quant),
         DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant),
     }
-}
-
-/// Standard Floyd-Steinberg dithering with padded buffer (left-to-right on all rows)
-/// Uses padding to avoid bounds checks: 1 col left, 1 col right, 1 row bottom
-fn floyd_steinberg_standard(img: &[f32], width: usize, height: usize, quant: QuantParams) -> Vec<u8> {
-    // FS kernel needs: 1 pad left, 1 pad right, 1 pad bottom
-    let pad_left = 1;
-    let pad_right = 1;
-    let pad_bottom = 1;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    // Process only real pixels, error diffusion writes to padding are safe
-    for y in 0..height {
-        for x in 0..width {
-            let bx = x + pad_left;
-            let old = buf[y][bx];
-            let new = quant.quantize(old);
-            buf[y][bx] = new;
-            let err = old - new;
-
-            // FS kernel:   * 7
-            //            3 5 1
-            buf[y][bx + 1] += err * (7.0 / 16.0);
-            buf[y + 1][bx - 1] += err * (3.0 / 16.0);
-            buf[y + 1][bx] += err * (5.0 / 16.0);
-            buf[y + 1][bx + 1] += err * (1.0 / 16.0);
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Serpentine Floyd-Steinberg dithering (alternating direction each row)
-/// This reduces diagonal banding artifacts by reversing scan direction on odd rows
-fn floyd_steinberg_serpentine(img: &[f32], width: usize, height: usize, quant: QuantParams) -> Vec<u8> {
-    // FS kernel needs: 1 pad left, 1 pad right, 1 pad bottom
-    let pad_left = 1;
-    let pad_right = 1;
-    let pad_bottom = 1;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        let is_reverse = y % 2 == 1;
-
-        if is_reverse {
-            // Right-to-left scanning
-            for x in (0..width).rev() {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                // FS kernel mirrored: 7 *
-                //                     1 5 3
-                buf[y][bx - 1] += err * (7.0 / 16.0);
-                buf[y + 1][bx + 1] += err * (3.0 / 16.0);
-                buf[y + 1][bx] += err * (5.0 / 16.0);
-                buf[y + 1][bx - 1] += err * (1.0 / 16.0);
-            }
-        } else {
-            // Left-to-right scanning
-            for x in 0..width {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                // FS kernel:   * 7
-                //            3 5 1
-                buf[y][bx + 1] += err * (7.0 / 16.0);
-                buf[y + 1][bx - 1] += err * (3.0 / 16.0);
-                buf[y + 1][bx] += err * (5.0 / 16.0);
-                buf[y + 1][bx + 1] += err * (1.0 / 16.0);
-            }
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Jarvis-Judice-Ninke dithering (standard left-to-right scanning)
-/// Uses a larger 3-row kernel for smoother gradients than Floyd-Steinberg
-///
-/// Kernel (divided by 48):
-///         *   7   5
-///     3   5   7   5   3
-///     1   3   5   3   1
-fn jarvis_judice_ninke_standard(img: &[f32], width: usize, height: usize, quant: QuantParams) -> Vec<u8> {
-    // JJN kernel needs: 2 pad left, 2 pad right, 2 pad bottom
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        for x in 0..width {
-            let bx = x + pad_left;
-            let old = buf[y][bx];
-            let new = quant.quantize(old);
-            buf[y][bx] = new;
-            let err = old - new;
-
-            // JJN kernel:     * 7 5
-            //             3 5 7 5 3
-            //             1 3 5 3 1
-            // Row 0
-            buf[y][bx + 1] += err * (7.0 / 48.0);
-            buf[y][bx + 2] += err * (5.0 / 48.0);
-            // Row 1
-            buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-            buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-            buf[y + 1][bx] += err * (7.0 / 48.0);
-            buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-            buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-            // Row 2
-            buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-            buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-            buf[y + 2][bx] += err * (5.0 / 48.0);
-            buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-            buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Jarvis-Judice-Ninke dithering with serpentine scanning
-/// Alternates scan direction each row to reduce diagonal artifacts
-fn jarvis_judice_ninke_serpentine(img: &[f32], width: usize, height: usize, quant: QuantParams) -> Vec<u8> {
-    // JJN kernel needs: 2 pad left, 2 pad right, 2 pad bottom
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        let is_reverse = y % 2 == 1;
-
-        if is_reverse {
-            // Right-to-left scanning
-            for x in (0..width).rev() {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                // JJN kernel mirrored: 5 7 *
-                //                    3 5 7 5 3
-                //                    1 3 5 3 1
-                // Row 0
-                buf[y][bx - 1] += err * (7.0 / 48.0);
-                buf[y][bx - 2] += err * (5.0 / 48.0);
-                // Row 1
-                buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-                buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-                buf[y + 1][bx] += err * (7.0 / 48.0);
-                buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-                buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-                // Row 2
-                buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-                buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-                buf[y + 2][bx] += err * (5.0 / 48.0);
-                buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-                buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-            }
-        } else {
-            // Left-to-right scanning
-            for x in 0..width {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                // JJN kernel:     * 7 5
-                //             3 5 7 5 3
-                //             1 3 5 3 1
-                // Row 0
-                buf[y][bx + 1] += err * (7.0 / 48.0);
-                buf[y][bx + 2] += err * (5.0 / 48.0);
-                // Row 1
-                buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-                buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-                buf[y + 1][bx] += err * (7.0 / 48.0);
-                buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-                buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-                // Row 2
-                buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-                buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-                buf[y + 2][bx] += err * (5.0 / 48.0);
-                buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-                buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-            }
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Apply Floyd-Steinberg error diffusion kernel at buffer position (bx, y)
-/// For left-to-right scanning. Caller must ensure buffer has proper padding.
-#[inline]
-fn apply_fs_kernel_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-    // FS kernel:   * 7
-    //            3 5 1
-    buf[y][bx + 1] += err * (7.0 / 16.0);
-    buf[y + 1][bx - 1] += err * (3.0 / 16.0);
-    buf[y + 1][bx] += err * (5.0 / 16.0);
-    buf[y + 1][bx + 1] += err * (1.0 / 16.0);
-}
-
-/// Apply Floyd-Steinberg error diffusion kernel at buffer position (bx, y)
-/// For right-to-left scanning (mirrored). Caller must ensure buffer has proper padding.
-#[inline]
-fn apply_fs_kernel_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-    // FS kernel mirrored: 7 *
-    //                     1 5 3
-    buf[y][bx - 1] += err * (7.0 / 16.0);
-    buf[y + 1][bx + 1] += err * (3.0 / 16.0);
-    buf[y + 1][bx] += err * (5.0 / 16.0);
-    buf[y + 1][bx - 1] += err * (1.0 / 16.0);
-}
-
-/// Apply Jarvis-Judice-Ninke error diffusion kernel at buffer position (bx, y)
-/// For left-to-right scanning. Caller must ensure buffer has proper padding.
-#[inline]
-fn apply_jjn_kernel_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-    // JJN kernel:     * 7 5
-    //             3 5 7 5 3
-    //             1 3 5 3 1
-    // Row 0
-    buf[y][bx + 1] += err * (7.0 / 48.0);
-    buf[y][bx + 2] += err * (5.0 / 48.0);
-    // Row 1
-    buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-    buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-    buf[y + 1][bx] += err * (7.0 / 48.0);
-    buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-    buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-    // Row 2
-    buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-    buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-    buf[y + 2][bx] += err * (5.0 / 48.0);
-    buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-    buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-}
-
-/// Apply Jarvis-Judice-Ninke error diffusion kernel at buffer position (bx, y)
-/// For right-to-left scanning (mirrored). Caller must ensure buffer has proper padding.
-#[inline]
-fn apply_jjn_kernel_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-    // JJN kernel mirrored: 5 7 *
-    //                    3 5 7 5 3
-    //                    1 3 5 3 1
-    // Row 0
-    buf[y][bx - 1] += err * (7.0 / 48.0);
-    buf[y][bx - 2] += err * (5.0 / 48.0);
-    // Row 1
-    buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-    buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-    buf[y + 1][bx] += err * (7.0 / 48.0);
-    buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-    buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-    // Row 2
-    buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-    buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-    buf[y + 2][bx] += err * (5.0 / 48.0);
-    buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-    buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-}
-
-/// Mixed dithering with standard left-to-right scanning
-/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
-fn mixed_dither_standard(img: &[f32], width: usize, height: usize, seed: u32, quant: QuantParams) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
-
-    // JJN kernel needs: 2 pad left, 2 pad right, 2 pad bottom
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        for x in 0..width {
-            let bx = x + pad_left;
-            let old = buf[y][bx];
-            let new = quant.quantize(old);
-            buf[y][bx] = new;
-            let err = old - new;
-
-            // Deterministically choose kernel based on position and seed
-            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
-
-            if use_jjn {
-                apply_jjn_kernel_ltr(&mut buf, bx, y, err);
-            } else {
-                apply_fs_kernel_ltr(&mut buf, bx, y, err);
-            }
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Mixed dithering with serpentine scanning
-/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
-/// Alternates scan direction each row
-fn mixed_dither_serpentine(img: &[f32], width: usize, height: usize, seed: u32, quant: QuantParams) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
-
-    // JJN kernel needs: 2 pad left, 2 pad right, 2 pad bottom
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        let is_reverse = y % 2 == 1;
-
-        if is_reverse {
-            for x in (0..width).rev() {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-
-                if use_jjn {
-                    apply_jjn_kernel_rtl(&mut buf, bx, y, err);
-                } else {
-                    apply_fs_kernel_rtl(&mut buf, bx, y, err);
-                }
-            }
-        } else {
-            for x in 0..width {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-
-                if use_jjn {
-                    apply_jjn_kernel_ltr(&mut buf, bx, y, err);
-                } else {
-                    apply_fs_kernel_ltr(&mut buf, bx, y, err);
-                }
-            }
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
-}
-
-/// Mixed dithering with random scan direction
-/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
-/// AND randomly selects scan direction per row (instead of alternating)
-fn mixed_dither_random(img: &[f32], width: usize, height: usize, seed: u32, quant: QuantParams) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
-
-    // JJN kernel needs: 2 pad left, 2 pad right, 2 pad bottom
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
-
-    // Create padded buffer and copy image data
-    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
-    for y in 0..height {
-        for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
-        }
-    }
-
-    for y in 0..height {
-        // Randomly determine scan direction for this row
-        let row_hash = wang_hash((y as u32) ^ hashed_seed);
-        let is_reverse = row_hash & 1 == 1;
-
-        if is_reverse {
-            for x in (0..width).rev() {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-
-                if use_jjn {
-                    apply_jjn_kernel_rtl(&mut buf, bx, y, err);
-                } else {
-                    apply_fs_kernel_rtl(&mut buf, bx, y, err);
-                }
-            }
-        } else {
-            for x in 0..width {
-                let bx = x + pad_left;
-                let old = buf[y][bx];
-                let new = quant.quantize(old);
-                buf[y][bx] = new;
-                let err = old - new;
-
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-
-                if use_jjn {
-                    apply_jjn_kernel_ltr(&mut buf, bx, y, err);
-                } else {
-                    apply_fs_kernel_ltr(&mut buf, bx, y, err);
-                }
-            }
-        }
-    }
-
-    // Extract real pixels, clamp, and convert to u8
-    let mut result = Vec::with_capacity(width * height);
-    for y in 0..height {
-        for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
-        }
-    }
-    result
 }
 
 /// Dither multiple channels and interleave them
