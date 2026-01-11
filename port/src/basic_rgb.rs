@@ -4,7 +4,7 @@
 use crate::color::{
     interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
-use crate::dither::floyd_steinberg_dither;
+use crate::dither::{floyd_steinberg_dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 
 /// Basic RGB histogram matching
@@ -26,6 +26,7 @@ pub fn color_correct_basic_rgb(
     ref_width: usize,
     ref_height: usize,
     use_f32_histogram: bool,
+    dither_mode: DitherMode,
 ) -> Vec<u8> {
     // Convert to separate linear RGB channels
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
@@ -57,13 +58,13 @@ pub fn color_correct_basic_rgb(
         (r_linear, g_linear, b_linear)
     } else {
         // Use binned histogram matching with dithering
-        let in_r_u8 = floyd_steinberg_dither(&in_r_scaled, input_width, input_height);
-        let in_g_u8 = floyd_steinberg_dither(&in_g_scaled, input_width, input_height);
-        let in_b_u8 = floyd_steinberg_dither(&in_b_scaled, input_width, input_height);
+        let in_r_u8 = floyd_steinberg_dither_with_mode(&in_r_scaled, input_width, input_height, dither_mode);
+        let in_g_u8 = floyd_steinberg_dither_with_mode(&in_g_scaled, input_width, input_height, dither_mode);
+        let in_b_u8 = floyd_steinberg_dither_with_mode(&in_b_scaled, input_width, input_height, dither_mode);
 
-        let ref_r_u8 = floyd_steinberg_dither(&ref_r_scaled, ref_width, ref_height);
-        let ref_g_u8 = floyd_steinberg_dither(&ref_g_scaled, ref_width, ref_height);
-        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
+        let ref_r_u8 = floyd_steinberg_dither_with_mode(&ref_r_scaled, ref_width, ref_height, dither_mode);
+        let ref_g_u8 = floyd_steinberg_dither_with_mode(&ref_g_scaled, ref_width, ref_height, dither_mode);
+        let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode);
 
         let matched_r = match_histogram(&in_r_u8, &ref_r_u8);
         let matched_g = match_histogram(&in_g_u8, &ref_g_u8);
@@ -81,9 +82,9 @@ pub fn color_correct_basic_rgb(
         linear_to_srgb_scaled_channels(&matched_r_linear, &matched_g_linear, &matched_b_linear);
 
     // Dither each channel for final output
-    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
-    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
-    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+    let r_u8 = floyd_steinberg_dither_with_mode(&r_scaled, input_width, input_height, dither_mode);
+    let g_u8 = floyd_steinberg_dither_with_mode(&g_scaled, input_width, input_height, dither_mode);
+    let b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

@@ -2,7 +2,7 @@
 /// Corresponds to color_correction_cra_rgb.py
 
 use crate::color::{interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear};
-use crate::dither::floyd_steinberg_dither;
+use crate::dither::{floyd_steinberg_dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
@@ -72,6 +72,7 @@ fn process_rgb_iteration(
     rotation_angles: &[f32],
     perceptual_scale: Option<[f32; 3]>,
     use_f32_histogram: bool,
+    dither_mode: DitherMode,
 ) -> Vec<f32> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -123,7 +124,7 @@ fn process_rgb_iteration(
                     let ch: Vec<f32> = (0..input_pixels)
                         .map(|i| current_scaled[i * 3 + c])
                         .collect();
-                    floyd_steinberg_dither(&ch, input_width, input_height)
+                    floyd_steinberg_dither_with_mode(&ch, input_width, input_height, dither_mode)
                 })
                 .collect();
             let ref_u8: Vec<Vec<u8>> = (0..3)
@@ -131,7 +132,7 @@ fn process_rgb_iteration(
                     let ch: Vec<f32> = (0..ref_pixels)
                         .map(|i| ref_scaled[i * 3 + c])
                         .collect();
-                    floyd_steinberg_dither(&ch, ref_width, ref_height)
+                    floyd_steinberg_dither_with_mode(&ch, ref_width, ref_height, dither_mode)
                 })
                 .collect();
 
@@ -187,6 +188,7 @@ pub fn color_correct_cra_rgb(
     ref_height: usize,
     use_perceptual: bool,
     use_f32_histogram: bool,
+    dither_mode: DitherMode,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -226,6 +228,7 @@ pub fn color_correct_cra_rgb(
             &ROTATION_ANGLES,
             perceptual_scale,
             use_f32_histogram,
+            dither_mode,
         );
 
         // Blend with current
@@ -271,7 +274,7 @@ pub fn color_correct_cra_rgb(
                 let ch: Vec<f32> = (0..input_pixels)
                     .map(|i| current_scaled[i * 3 + c])
                     .collect();
-                floyd_steinberg_dither(&ch, input_width, input_height)
+                floyd_steinberg_dither_with_mode(&ch, input_width, input_height, dither_mode)
             })
             .collect();
         let ref_u8: Vec<Vec<u8>> = (0..3)
@@ -279,7 +282,7 @@ pub fn color_correct_cra_rgb(
                 let ch: Vec<f32> = (0..ref_pixels)
                     .map(|i| ref_scaled_final[i * 3 + c])
                     .collect();
-                floyd_steinberg_dither(&ch, ref_width, ref_height)
+                floyd_steinberg_dither_with_mode(&ch, ref_width, ref_height, dither_mode)
             })
             .collect();
 
@@ -311,9 +314,9 @@ pub fn color_correct_cra_rgb(
         linear_to_srgb_scaled_channels(&final_r, &final_g, &final_b);
 
     // Dither each channel for final output
-    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
-    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
-    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+    let r_u8 = floyd_steinberg_dither_with_mode(&r_scaled, input_width, input_height, dither_mode);
+    let g_u8 = floyd_steinberg_dither_with_mode(&g_scaled, input_width, input_height, dither_mode);
+    let b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

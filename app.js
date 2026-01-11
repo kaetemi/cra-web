@@ -239,6 +239,21 @@ function updateHistogramLabel() {
     }
 }
 
+// Update dither mode toggle label and description
+function updateDitherLabel() {
+    const useSerpentine = document.getElementById('use-serpentine-dither').checked;
+    const label = document.getElementById('dither-label');
+    const description = document.getElementById('dither-description');
+
+    if (useSerpentine) {
+        label.textContent = 'Serpentine';
+        description.textContent = 'Serpentine Floyd-Steinberg dithering (alternating left-to-right, right-to-left). Reduces diagonal banding artifacts.';
+    } else {
+        label.textContent = 'Standard';
+        description.textContent = 'Standard Floyd-Steinberg dithering (left-to-right scanning). Toggle for serpentine scanning which reduces diagonal banding artifacts.';
+    }
+}
+
 // Check if a WASM-only method is selected with Python mode
 function isWasmOnlyWithPython() {
     const method = document.getElementById('method-select').value;
@@ -302,6 +317,7 @@ function processImages() {
     const config = METHOD_CONFIG[method];
     const useWasm = document.getElementById('use-wasm').checked;
     const useF32Histogram = document.getElementById('use-f32-histogram')?.checked || false;
+    const useSerpentineDither = document.getElementById('use-serpentine-dither')?.checked || false;
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');
     const errorMessage = document.getElementById('error-message');
@@ -326,7 +342,8 @@ function processImages() {
         method: method,
         config: config,
         useWasm: useWasm,
-        useF32Histogram: useF32Histogram
+        useF32Histogram: useF32Histogram,
+        ditherMode: useSerpentineDither ? 1 : 0
     });
 }
 
@@ -345,6 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
     document.getElementById('use-f32-histogram').addEventListener('change', updateHistogramLabel);
+    document.getElementById('use-serpentine-dither').addEventListener('change', updateDitherLabel);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Load default images

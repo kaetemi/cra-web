@@ -1,6 +1,17 @@
 /// Floyd-Steinberg dithering implementation.
 /// Matches the existing WASM implementation for bit-perfect output.
 
+/// Dithering mode selection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DitherMode {
+    /// Standard left-to-right scanning on all rows (default)
+    #[default]
+    Standard,
+    /// Serpentine scanning: alternating direction each row
+    /// Reduces diagonal banding artifacts
+    Serpentine,
+}
+
 /// Floyd-Steinberg dithering with linear buffer and overflow padding.
 ///
 /// Args:
@@ -11,6 +22,33 @@
 /// Returns:
 ///     flat array of u8 values, same length as input
 pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u8> {
+    floyd_steinberg_dither_with_mode(img, width, height, DitherMode::Standard)
+}
+
+/// Floyd-Steinberg dithering with selectable scanning mode.
+///
+/// Args:
+///     img: flat array of f32 values in range [0, 255]
+///     width: image width
+///     height: image height
+///     mode: DitherMode::Standard or DitherMode::Serpentine
+///
+/// Returns:
+///     flat array of u8 values, same length as input
+pub fn floyd_steinberg_dither_with_mode(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    mode: DitherMode,
+) -> Vec<u8> {
+    match mode {
+        DitherMode::Standard => floyd_steinberg_standard(img, width, height),
+        DitherMode::Serpentine => floyd_steinberg_serpentine(img, width, height),
+    }
+}
+
+/// Standard Floyd-Steinberg dithering (left-to-right on all rows)
+fn floyd_steinberg_standard(img: &[f32], width: usize, height: usize) -> Vec<u8> {
     let len = width * height;
 
     // Allocate buffer with overflow padding
@@ -35,6 +73,83 @@ pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u
     buf[..len]
         .iter()
         .map(|&v| v.clamp(0.0, 255.0) as u8)
+        .collect()
+}
+
+/// Serpentine Floyd-Steinberg dithering (alternating direction each row)
+/// This reduces diagonal banding artifacts by reversing scan direction on odd rows
+fn floyd_steinberg_serpentine(img: &[f32], width: usize, height: usize) -> Vec<u8> {
+    let len = width * height;
+
+    // Use 2D buffer for easier coordinate handling
+    let mut buf: Vec<Vec<f32>> = (0..height)
+        .map(|y| {
+            let start = y * width;
+            img[start..start + width].to_vec()
+        })
+        .collect();
+
+    // Add a padding row at the bottom
+    buf.push(vec![0.0f32; width]);
+
+    for y in 0..height {
+        let is_reverse = y % 2 == 1;
+
+        if is_reverse {
+            // Right-to-left scanning
+            for x in (0..width).rev() {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                // Distribute error to neighbors (mirrored for reverse direction)
+                // Left neighbor (was right)
+                if x > 0 {
+                    buf[y][x - 1] += err * (7.0 / 16.0);
+                }
+                // Bottom-right (was bottom-left)
+                if x + 1 < width {
+                    buf[y + 1][x + 1] += err * (3.0 / 16.0);
+                }
+                // Bottom
+                buf[y + 1][x] += err * (5.0 / 16.0);
+                // Bottom-left (was bottom-right)
+                if x > 0 {
+                    buf[y + 1][x - 1] += err * (1.0 / 16.0);
+                }
+            }
+        } else {
+            // Left-to-right scanning (standard)
+            for x in 0..width {
+                let old = buf[y][x];
+                let new = old.round();
+                buf[y][x] = new;
+                let err = old - new;
+
+                // Distribute error to neighbors
+                // Right neighbor
+                if x + 1 < width {
+                    buf[y][x + 1] += err * (7.0 / 16.0);
+                }
+                // Bottom-left
+                if x > 0 {
+                    buf[y + 1][x - 1] += err * (3.0 / 16.0);
+                }
+                // Bottom
+                buf[y + 1][x] += err * (5.0 / 16.0);
+                // Bottom-right
+                if x + 1 < width {
+                    buf[y + 1][x + 1] += err * (1.0 / 16.0);
+                }
+            }
+        }
+    }
+
+    // Flatten, clamp, and convert to u8
+    buf[..height]
+        .iter()
+        .flat_map(|row| row.iter().map(|&v| v.clamp(0.0, 255.0) as u8))
         .collect()
 }
 
@@ -102,5 +217,29 @@ mod tests {
         let result = floyd_steinberg_dither(&img, 2, 1);
         assert_eq!(result[0], 0);
         assert_eq!(result[1], 255);
+    }
+
+    #[test]
+    fn test_serpentine_dither() {
+        // Test that serpentine mode produces valid output
+        let img = vec![127.5; 16]; // 4x4 gray image
+        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::Serpentine);
+        assert_eq!(result.len(), 16);
+        // All values should be valid uint8
+        for &v in &result {
+            assert!(v <= 255);
+        }
+    }
+
+    #[test]
+    fn test_serpentine_vs_standard() {
+        // Serpentine and standard should produce different results on larger images
+        let img: Vec<f32> = (0..100).map(|i| (i as f32 * 2.55)).collect(); // 10x10 gradient
+        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard);
+        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Serpentine);
+        assert_eq!(standard.len(), 100);
+        assert_eq!(serpentine.len(), 100);
+        // They should produce different results (not identical)
+        assert_ne!(standard, serpentine);
     }
 }

@@ -5,7 +5,7 @@ use crate::color::{
     interleave_rgb_u8, linear_rgb_to_oklab_channels, linear_to_srgb_scaled_channels,
     oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
-use crate::dither::floyd_steinberg_dither;
+use crate::dither::{floyd_steinberg_dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 use crate::rotation::{compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
@@ -98,6 +98,7 @@ fn process_block_iteration(
     rotation_angles: &[f32],
     use_f32_histogram: bool,
     block_seed: u32,
+    dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>) {
     let block_pixels = block_width * block_height;
 
@@ -128,10 +129,10 @@ fn process_block_iteration(
             scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
         } else {
             // Use binned histogram matching with dithering
-            let input_a_u8 = floyd_steinberg_dither(&a_scaled, block_width, block_height);
-            let input_b_u8 = floyd_steinberg_dither(&b_scaled, block_width, block_height);
-            let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_block_width, ref_block_height);
-            let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_block_width, ref_block_height);
+            let input_a_u8 = floyd_steinberg_dither_with_mode(&a_scaled, block_width, block_height, dither_mode);
+            let input_b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, block_width, block_height, dither_mode);
+            let ref_a_u8 = floyd_steinberg_dither_with_mode(&ref_a_scaled, ref_block_width, ref_block_height, dither_mode);
+            let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_block_width, ref_block_height, dither_mode);
 
             let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
@@ -172,6 +173,7 @@ fn process_block_iteration_with_l(
     rotation_angles: &[f32],
     use_f32_histogram: bool,
     block_seed: u32,
+    dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Process AB channels
     let (avg_a, avg_b) = process_block_iteration(
@@ -186,6 +188,7 @@ fn process_block_iteration_with_l(
         rotation_angles,
         use_f32_histogram,
         block_seed,
+        dither_mode,
     );
 
     // Process L channel
@@ -199,8 +202,8 @@ fn process_block_iteration_with_l(
             match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, l_seed);
         scale_255_to_l(&matched_l)
     } else {
-        let l_uint8 = floyd_steinberg_dither(&l_scaled, block_width, block_height);
-        let ref_l_uint8 = floyd_steinberg_dither(&ref_l_scaled, ref_block_width, ref_block_height);
+        let l_uint8 = floyd_steinberg_dither_with_mode(&l_scaled, block_width, block_height, dither_mode);
+        let ref_l_uint8 = floyd_steinberg_dither_with_mode(&ref_l_scaled, ref_block_width, ref_block_height, dither_mode);
         let matched_l = match_histogram(&l_uint8, &ref_l_uint8);
         scale_uint8_to_l(&matched_l)
     };
@@ -229,6 +232,7 @@ pub fn color_correct_tiled_oklab(
     ref_height: usize,
     tiled_luminosity: bool,
     use_f32_histogram: bool,
+    dither_mode: DitherMode,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
 
@@ -337,6 +341,7 @@ pub fn color_correct_tiled_oklab(
                     &ROTATION_ANGLES,
                     use_f32_histogram,
                     block_idx as u32,
+                    dither_mode,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -359,6 +364,7 @@ pub fn color_correct_tiled_oklab(
                     &ROTATION_ANGLES,
                     use_f32_histogram,
                     block_idx as u32,
+                    dither_mode,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -448,12 +454,12 @@ pub fn color_correct_tiled_oklab(
         (l_oklab, a_oklab, b_oklab)
     } else {
         // Use binned histogram matching with dithering
-        let current_l_u8 = floyd_steinberg_dither(&l_scaled, input_width, input_height);
-        let current_a_u8 = floyd_steinberg_dither(&a_scaled, input_width, input_height);
-        let current_b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
-        let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
-        let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
-        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
+        let current_l_u8 = floyd_steinberg_dither_with_mode(&l_scaled, input_width, input_height, dither_mode);
+        let current_a_u8 = floyd_steinberg_dither_with_mode(&a_scaled, input_width, input_height, dither_mode);
+        let current_b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode);
+        let ref_l_u8 = floyd_steinberg_dither_with_mode(&ref_l_scaled, ref_width, ref_height, dither_mode);
+        let ref_a_u8 = floyd_steinberg_dither_with_mode(&ref_a_scaled, ref_width, ref_height, dither_mode);
+        let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode);
 
         let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
         let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
@@ -470,9 +476,9 @@ pub fn color_correct_tiled_oklab(
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
     // Dither each channel for final output
-    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
-    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
-    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+    let r_u8 = floyd_steinberg_dither_with_mode(&r_scaled, input_width, input_height, dither_mode);
+    let g_u8 = floyd_steinberg_dither_with_mode(&g_scaled, input_width, input_height, dither_mode);
+    let b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

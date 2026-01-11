@@ -141,7 +141,7 @@ async function encodePng(rgbData, width, height) {
 }
 
 // Process images using WASM
-async function processImagesWasm(inputData, refData, method, config, useF32Histogram) {
+async function processImagesWasm(inputData, refData, method, config, useF32Histogram, ditherMode) {
     sendProgress('process', 'Decoding images...', 10);
     const inputImg = await decodeImage(inputData);
     const refImg = await decodeImage(refData);
@@ -156,6 +156,9 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
     if (useF32Histogram) {
         sendConsole('Using f32 histogram matching (no quantization)');
     }
+    if (ditherMode === 1) {
+        sendConsole('Using serpentine dithering');
+    }
 
     let resultRgb;
     const startTime = performance.now();
@@ -167,7 +170,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -176,7 +180,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
             resultRgb = craWasm.color_correct_basic_rgb(
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -186,7 +191,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -196,7 +202,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 true, // tiled_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -206,7 +213,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // tiled_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -216,7 +224,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // use_perceptual
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -226,7 +235,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 true, // use_perceptual
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -236,7 +246,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -246,7 +257,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // keep_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -256,7 +268,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 true, // tiled_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -266,7 +279,8 @@ async function processImagesWasm(inputData, refData, method, config, useF32Histo
                 inputRgb, inputImg.width, inputImg.height,
                 refRgb, refImg.width, refImg.height,
                 false, // tiled_luminosity
-                useF32Histogram
+                useF32Histogram,
+                ditherMode
             );
             break;
 
@@ -318,12 +332,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, useF32Histogram) {
+async function processImages(inputData, refData, method, config, useWasm, useF32Histogram, ditherMode) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, useF32Histogram);
+            outputData = await processImagesWasm(inputData, refData, method, config, useF32Histogram, ditherMode);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -344,7 +358,7 @@ self.onmessage = async function(e) {
             await initialize();
             break;
         case 'process':
-            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm, data.useF32Histogram);
+            await processImages(data.inputData, data.refData, data.method, data.config, data.useWasm, data.useF32Histogram, data.ditherMode || 0);
             break;
     }
 };

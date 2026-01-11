@@ -5,7 +5,7 @@ use crate::color::{
     interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
     linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
-use crate::dither::floyd_steinberg_dither;
+use crate::dither::{floyd_steinberg_dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 
 /// Scale L channel: 0-100 -> 0-255
@@ -54,6 +54,7 @@ pub fn color_correct_basic_lab(
     ref_height: usize,
     keep_luminosity: bool,
     use_f32_histogram: bool,
+    dither_mode: DitherMode,
 ) -> Vec<u8> {
     // Convert to separate linear RGB channels
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
@@ -95,12 +96,12 @@ pub fn color_correct_basic_lab(
         }
     } else {
         // Use binned histogram matching with dithering
-        let in_l_u8 = floyd_steinberg_dither(&in_l_scaled, input_width, input_height);
-        let in_a_u8 = floyd_steinberg_dither(&in_a_scaled, input_width, input_height);
-        let in_b_u8 = floyd_steinberg_dither(&in_b_scaled, input_width, input_height);
-        let ref_l_u8 = floyd_steinberg_dither(&ref_l_scaled, ref_width, ref_height);
-        let ref_a_u8 = floyd_steinberg_dither(&ref_a_scaled, ref_width, ref_height);
-        let ref_b_u8 = floyd_steinberg_dither(&ref_b_scaled, ref_width, ref_height);
+        let in_l_u8 = floyd_steinberg_dither_with_mode(&in_l_scaled, input_width, input_height, dither_mode);
+        let in_a_u8 = floyd_steinberg_dither_with_mode(&in_a_scaled, input_width, input_height, dither_mode);
+        let in_b_u8 = floyd_steinberg_dither_with_mode(&in_b_scaled, input_width, input_height, dither_mode);
+        let ref_l_u8 = floyd_steinberg_dither_with_mode(&ref_l_scaled, ref_width, ref_height, dither_mode);
+        let ref_a_u8 = floyd_steinberg_dither_with_mode(&ref_a_scaled, ref_width, ref_height, dither_mode);
+        let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode);
 
         if keep_luminosity {
             let matched_a = match_histogram(&in_a_u8, &ref_a_u8);
@@ -124,9 +125,9 @@ pub fn color_correct_basic_lab(
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
     // Dither each channel for final output
-    let r_u8 = floyd_steinberg_dither(&r_scaled, input_width, input_height);
-    let g_u8 = floyd_steinberg_dither(&g_scaled, input_width, input_height);
-    let b_u8 = floyd_steinberg_dither(&b_scaled, input_width, input_height);
+    let r_u8 = floyd_steinberg_dither_with_mode(&r_scaled, input_width, input_height, dither_mode);
+    let g_u8 = floyd_steinberg_dither_with_mode(&g_scaled, input_width, input_height, dither_mode);
+    let b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
