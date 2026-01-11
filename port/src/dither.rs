@@ -1,16 +1,6 @@
 /// Error diffusion dithering implementations.
 /// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
 
-use std::sync::atomic::{AtomicU32, Ordering};
-
-/// Global seed counter for generating unique seeds per dithering call
-static SEED_COUNTER: AtomicU32 = AtomicU32::new(0);
-
-/// Get a unique seed for this dithering operation
-fn get_next_seed() -> u32 {
-    SEED_COUNTER.fetch_add(1, Ordering::Relaxed)
-}
-
 /// Wang hash for deterministic randomization - excellent avalanche properties.
 /// Each bit of input affects all bits of output.
 #[inline]
@@ -59,7 +49,7 @@ pub enum DitherMode {
 /// Returns:
 ///     flat array of u8 values, same length as input
 pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u8> {
-    floyd_steinberg_dither_with_mode(img, width, height, DitherMode::Standard)
+    floyd_steinberg_dither_with_mode(img, width, height, DitherMode::Standard, 0)
 }
 
 /// Dithering with selectable algorithm and scanning mode.
@@ -69,6 +59,7 @@ pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u
 ///     width: image width
 ///     height: image height
 ///     mode: DitherMode variant selecting algorithm and scan pattern
+///     seed: random seed for mixed modes (ignored for non-mixed modes)
 ///
 /// Returns:
 ///     flat array of u8 values, same length as input
@@ -77,15 +68,16 @@ pub fn floyd_steinberg_dither_with_mode(
     width: usize,
     height: usize,
     mode: DitherMode,
+    seed: u32,
 ) -> Vec<u8> {
     match mode {
         DitherMode::Standard => floyd_steinberg_standard(img, width, height),
         DitherMode::Serpentine => floyd_steinberg_serpentine(img, width, height),
         DitherMode::JarvisStandard => jarvis_judice_ninke_standard(img, width, height),
         DitherMode::JarvisSerpentine => jarvis_judice_ninke_serpentine(img, width, height),
-        DitherMode::MixedStandard => mixed_dither_standard(img, width, height),
-        DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height),
-        DitherMode::MixedRandom => mixed_dither_random(img, width, height),
+        DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed),
+        DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed),
+        DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed),
     }
 }
 
@@ -517,8 +509,7 @@ fn apply_jjn_kernel_rtl(buf: &mut [Vec<f32>], x: usize, y: usize, err: f32, widt
 
 /// Mixed dithering with standard left-to-right scanning
 /// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
-fn mixed_dither_standard(img: &[f32], width: usize, height: usize) -> Vec<u8> {
-    let seed = get_next_seed();
+fn mixed_dither_standard(img: &[f32], width: usize, height: usize, seed: u32) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
 
     // Use 2D buffer with 2 padding rows for JJN kernel
@@ -559,8 +550,7 @@ fn mixed_dither_standard(img: &[f32], width: usize, height: usize) -> Vec<u8> {
 /// Mixed dithering with serpentine scanning
 /// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
 /// Alternates scan direction each row
-fn mixed_dither_serpentine(img: &[f32], width: usize, height: usize) -> Vec<u8> {
-    let seed = get_next_seed();
+fn mixed_dither_serpentine(img: &[f32], width: usize, height: usize, seed: u32) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
 
     let mut buf: Vec<Vec<f32>> = (0..height)
@@ -619,8 +609,7 @@ fn mixed_dither_serpentine(img: &[f32], width: usize, height: usize) -> Vec<u8> 
 /// Mixed dithering with random scan direction
 /// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel
 /// AND randomly selects scan direction per row (instead of alternating)
-fn mixed_dither_random(img: &[f32], width: usize, height: usize) -> Vec<u8> {
-    let seed = get_next_seed();
+fn mixed_dither_random(img: &[f32], width: usize, height: usize, seed: u32) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
 
     let mut buf: Vec<Vec<f32>> = (0..height)
@@ -748,7 +737,7 @@ mod tests {
     fn test_serpentine_dither() {
         // Test that serpentine mode produces valid output
         let img = vec![127.5; 16]; // 4x4 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::Serpentine);
+        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::Serpentine, 0);
         assert_eq!(result.len(), 16);
         // All values should be valid uint8
         for &v in &result {
@@ -760,8 +749,8 @@ mod tests {
     fn test_serpentine_vs_standard() {
         // Serpentine and standard should produce different results on larger images
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect(); // 10x10 gradient
-        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard);
-        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Serpentine);
+        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard, 0);
+        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Serpentine, 0);
         assert_eq!(standard.len(), 100);
         assert_eq!(serpentine.len(), 100);
         // They should produce different results (not identical)
@@ -772,7 +761,7 @@ mod tests {
     fn test_jarvis_standard() {
         // Test that JJN standard mode produces valid output
         let img = vec![127.5; 16]; // 4x4 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::JarvisStandard);
+        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::JarvisStandard, 0);
         assert_eq!(result.len(), 16);
         // All values should be valid uint8
         for &v in &result {
@@ -784,7 +773,7 @@ mod tests {
     fn test_jarvis_serpentine() {
         // Test that JJN serpentine mode produces valid output
         let img = vec![127.5; 16]; // 4x4 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::JarvisSerpentine);
+        let result = floyd_steinberg_dither_with_mode(&img, 4, 4, DitherMode::JarvisSerpentine, 0);
         assert_eq!(result.len(), 16);
         // All values should be valid uint8
         for &v in &result {
@@ -796,8 +785,8 @@ mod tests {
     fn test_jarvis_vs_floyd_steinberg() {
         // JJN and Floyd-Steinberg should produce different results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect(); // 10x10 gradient
-        let fs_standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard);
-        let jjn_standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard);
+        let fs_standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard, 0);
+        let jjn_standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard, 0);
         assert_eq!(fs_standard.len(), 100);
         assert_eq!(jjn_standard.len(), 100);
         // They should produce different results
@@ -808,8 +797,8 @@ mod tests {
     fn test_jarvis_serpentine_vs_standard() {
         // JJN serpentine and standard should produce different results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect(); // 10x10 gradient
-        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard);
-        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisSerpentine);
+        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard, 0);
+        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisSerpentine, 0);
         assert_eq!(standard.len(), 100);
         assert_eq!(serpentine.len(), 100);
         // They should produce different results
@@ -820,7 +809,7 @@ mod tests {
     fn test_mixed_standard() {
         // Test that mixed standard mode produces valid output
         let img = vec![127.5; 100]; // 10x10 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
         assert_eq!(result.len(), 100);
         // All values should be valid uint8
         for &v in &result {
@@ -832,7 +821,7 @@ mod tests {
     fn test_mixed_serpentine() {
         // Test that mixed serpentine mode produces valid output
         let img = vec![127.5; 100]; // 10x10 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine);
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine, 42);
         assert_eq!(result.len(), 100);
         for &v in &result {
             assert!(v == 127 || v == 128);
@@ -843,7 +832,7 @@ mod tests {
     fn test_mixed_random() {
         // Test that mixed random mode produces valid output
         let img = vec![127.5; 100]; // 10x10 gray image
-        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom);
+        let result = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom, 42);
         assert_eq!(result.len(), 100);
         for &v in &result {
             assert!(v == 127 || v == 128);
@@ -854,9 +843,9 @@ mod tests {
     fn test_mixed_vs_pure_algorithms() {
         // Mixed modes should produce different results from pure FS and JJN
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let fs = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard);
-        let jjn = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard);
-        let mixed = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        let fs = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::Standard, 0);
+        let jjn = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::JarvisStandard, 0);
+        let mixed = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
         assert_eq!(fs.len(), 100);
         assert_eq!(jjn.len(), 100);
         assert_eq!(mixed.len(), 100);
@@ -866,12 +855,23 @@ mod tests {
     }
 
     #[test]
-    fn test_mixed_deterministic_with_same_seed_counter() {
-        // Note: Since seed counter increments, consecutive calls will produce different results
-        // But the algorithm itself is deterministic given the same seed
+    fn test_mixed_deterministic_with_same_seed() {
+        // Same seed should produce identical results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result1 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
-        let result2 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
+        let result1 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
+        let result2 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
+        assert_eq!(result1.len(), 100);
+        assert_eq!(result2.len(), 100);
+        // Same seed should produce identical results
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_mixed_different_seeds_produce_different_results() {
+        // Different seeds should produce different results
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result1 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
+        let result2 = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 99);
         assert_eq!(result1.len(), 100);
         assert_eq!(result2.len(), 100);
         // Different seeds should produce different results
@@ -881,9 +881,9 @@ mod tests {
     #[test]
     fn test_mixed_all_modes_produce_different_results() {
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard);
-        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine);
-        let random = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom);
+        let standard = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedStandard, 42);
+        let serpentine = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedSerpentine, 42);
+        let random = floyd_steinberg_dither_with_mode(&img, 10, 10, DitherMode::MixedRandom, 42);
         // All three mixed modes should produce different results
         assert_ne!(standard, serpentine);
         assert_ne!(standard, random);
