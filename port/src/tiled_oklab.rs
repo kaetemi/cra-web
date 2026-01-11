@@ -5,7 +5,7 @@ use crate::color::{
     interleave_rgb_u8, linear_rgb_to_oklab_channels, linear_to_srgb_scaled_channels,
     oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
-use crate::dither::{floyd_steinberg_dither_with_mode, DitherMode};
+use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, InterpolationMode};
 use crate::rotation::{compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
@@ -131,10 +131,10 @@ fn process_block_iteration(
             // Use binned histogram matching with dithering
             // Each pass gets unique seeds: block_seed * 1000 + pass_idx * 4 + channel offset
             let pass_seed = block_seed.wrapping_mul(1000) + (pass_idx as u32) * 4;
-            let input_a_u8 = floyd_steinberg_dither_with_mode(&a_scaled, block_width, block_height, dither_mode, pass_seed);
-            let input_b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, block_width, block_height, dither_mode, pass_seed + 1);
-            let ref_a_u8 = floyd_steinberg_dither_with_mode(&ref_a_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 2);
-            let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 3);
+            let input_a_u8 = dither_with_mode(&a_scaled, block_width, block_height, dither_mode, pass_seed);
+            let input_b_u8 = dither_with_mode(&b_scaled, block_width, block_height, dither_mode, pass_seed + 1);
+            let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 2);
+            let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_block_width, ref_block_height, dither_mode, pass_seed + 3);
 
             let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
@@ -206,8 +206,8 @@ fn process_block_iteration_with_l(
     } else {
         // L channel seeds: block_seed * 1000 + 500 offset to avoid collision with AB passes
         let l_seed = block_seed.wrapping_mul(1000) + 500;
-        let l_uint8 = floyd_steinberg_dither_with_mode(&l_scaled, block_width, block_height, dither_mode, l_seed);
-        let ref_l_uint8 = floyd_steinberg_dither_with_mode(&ref_l_scaled, ref_block_width, ref_block_height, dither_mode, l_seed + 1);
+        let l_uint8 = dither_with_mode(&l_scaled, block_width, block_height, dither_mode, l_seed);
+        let ref_l_uint8 = dither_with_mode(&ref_l_scaled, ref_block_width, ref_block_height, dither_mode, l_seed + 1);
         let matched_l = match_histogram(&l_uint8, &ref_l_uint8);
         scale_uint8_to_l(&matched_l)
     };
@@ -459,12 +459,12 @@ pub fn color_correct_tiled_oklab(
     } else {
         // Use binned histogram matching with dithering
         // Final global pass uses 10000+ seeds to avoid collision with block passes
-        let current_l_u8 = floyd_steinberg_dither_with_mode(&l_scaled, input_width, input_height, dither_mode, 10000);
-        let current_a_u8 = floyd_steinberg_dither_with_mode(&a_scaled, input_width, input_height, dither_mode, 10001);
-        let current_b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10002);
-        let ref_l_u8 = floyd_steinberg_dither_with_mode(&ref_l_scaled, ref_width, ref_height, dither_mode, 10003);
-        let ref_a_u8 = floyd_steinberg_dither_with_mode(&ref_a_scaled, ref_width, ref_height, dither_mode, 10004);
-        let ref_b_u8 = floyd_steinberg_dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode, 10005);
+        let current_l_u8 = dither_with_mode(&l_scaled, input_width, input_height, dither_mode, 10000);
+        let current_a_u8 = dither_with_mode(&a_scaled, input_width, input_height, dither_mode, 10001);
+        let current_b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10002);
+        let ref_l_u8 = dither_with_mode(&ref_l_scaled, ref_width, ref_height, dither_mode, 10003);
+        let ref_a_u8 = dither_with_mode(&ref_a_scaled, ref_width, ref_height, dither_mode, 10004);
+        let ref_b_u8 = dither_with_mode(&ref_b_scaled, ref_width, ref_height, dither_mode, 10005);
 
         let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
         let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
@@ -481,9 +481,9 @@ pub fn color_correct_tiled_oklab(
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
     // Dither each channel for final output
-    let r_u8 = floyd_steinberg_dither_with_mode(&r_scaled, input_width, input_height, dither_mode, 10006);
-    let g_u8 = floyd_steinberg_dither_with_mode(&g_scaled, input_width, input_height, dither_mode, 10007);
-    let b_u8 = floyd_steinberg_dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10008);
+    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, dither_mode, 10006);
+    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, dither_mode, 10007);
+    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, dither_mode, 10008);
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
