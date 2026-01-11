@@ -5,10 +5,13 @@
 /// Pre-computed to avoid repeated calculations in the hot loop.
 #[derive(Debug, Clone, Copy)]
 struct QuantParams {
-    /// Step size between quantization levels (255 / (2^bits - 1))
-    step: f32,
-    /// Inverse of step for faster division
-    inv_step: f32,
+    /// Number of bits (1-8)
+    bits: u8,
+    /// Maximum level value (2^bits - 1), e.g., 31 for 5 bits, 255 for 8 bits
+    max_level: f32,
+    /// Pre-computed lookup table for bit-replicated values (only for non-8-bit)
+    /// Maps level index (0..=max_level) to the 8-bit extended value
+    lut: [f32; 256],
 }
 
 impl QuantParams {
@@ -19,27 +22,67 @@ impl QuantParams {
     fn new(bits: u8) -> Self {
         debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
         let levels = 1u32 << bits; // 2^bits
-        let step = 255.0 / (levels - 1) as f32;
-        Self {
-            step,
-            inv_step: 1.0 / step,
+        let max_level = (levels - 1) as f32;
+
+        // Pre-compute bit-replicated values for each level
+        let mut lut = [0.0f32; 256];
+        for v in 0..levels {
+            lut[v as usize] = Self::bit_replicate(v as u8, bits) as f32;
         }
+
+        Self { bits, max_level, lut }
     }
 
-    /// Quantize a value to the nearest level and return the quantized value.
+    /// Extend n-bit value to 8 bits by repeating the bit pattern.
+    /// e.g., 3-bit value ABC becomes ABCABCAB
+    #[inline]
+    fn bit_replicate(value: u8, bits: u8) -> u8 {
+        if bits == 8 {
+            return value;
+        }
+        let mut result: u16 = 0;
+        let mut shift = 8i8;
+        while shift > 0 {
+            shift -= bits as i8;
+            if shift >= 0 {
+                result |= (value as u16) << shift;
+            } else {
+                // Partial bits at the end
+                result |= (value as u16) >> (-shift);
+            }
+        }
+        result as u8
+    }
+
+    /// Quantize a value to the nearest level and return the bit-replicated value.
     /// Input and output are in 0-255 range.
+    ///
+    /// First finds the nearest n-bit level, then returns the 8-bit value with
+    /// bits extended by repetition (e.g., 3-bit ABC becomes ABCABCAB).
     #[inline]
     fn quantize(&self, value: f32) -> f32 {
-        // Convert to level space, round, convert back
-        (value * self.inv_step).round() * self.step
+        if self.bits == 8 {
+            // 8-bit: just round to nearest integer
+            value.round()
+        } else {
+            // Find nearest level: round(value * max_level / 255)
+            let level = (value * self.max_level / 255.0).round() as usize;
+            // Look up the bit-replicated value
+            self.lut[level.min(self.max_level as usize)]
+        }
     }
 
     /// Create default 8-bit quantization (standard rounding to integers)
     #[inline]
     fn default_8bit() -> Self {
+        let mut lut = [0.0f32; 256];
+        for i in 0..256 {
+            lut[i] = i as f32;
+        }
         Self {
-            step: 1.0,
-            inv_step: 1.0,
+            bits: 8,
+            max_level: 255.0,
+            lut,
         }
     }
 }
@@ -1020,15 +1063,74 @@ mod tests {
 
     #[test]
     fn test_quant_params_3bit() {
-        // 3-bit = 8 levels: 0, 36.43, 72.86, 109.29, 145.71, 182.14, 218.57, 255
+        // 3-bit = 8 levels with bit-replicated values:
+        // 000→00000000=0, 001→00100100=36, 010→01001001=73, 011→01101101=109
+        // 100→10010010=146, 101→10110110=182, 110→11011011=219, 111→11111111=255
         let quant = QuantParams::new(3);
-        let step: f32 = 255.0 / 7.0;
         assert_eq!(quant.quantize(0.0), 0.0);
-        // Use approximate comparison due to floating-point precision
-        assert!((quant.quantize(255.0) - 255.0).abs() < 0.001);
-        // Check that 127.5 quantizes to nearest level
-        let level_for_127 = (127.5_f32 / step).round() * step;
-        assert!((quant.quantize(127.5) - level_for_127).abs() < 0.001);
+        assert_eq!(quant.quantize(255.0), 255.0);
+        // Check that 127.5 quantizes to nearest level (level 3 or 4)
+        // 127.5 * 7 / 255 = 3.5, rounds to level 4
+        // Level 4 (100) → 10010010 = 146
+        assert_eq!(quant.quantize(127.5), 146.0);
+    }
+
+    #[test]
+    fn test_quantization_uses_bit_replication() {
+        // Verify that quantization produces correct bit-replicated values
+        // For 5 bits, value 3: should be 00011 → 00011000 = 24 (not 25 from linear scaling)
+        let quant_5bit = QuantParams::new(5);
+        // Input value that rounds to level 3: level = round(v * 31 / 255)
+        // For level 3: v ≈ 3 * 255 / 31 ≈ 24.68, so input around 24-25 should give level 3
+        let quantized = quant_5bit.quantize(24.68);
+        assert_eq!(quantized, 24.0, "5-bit level 3 should be 24 (bit replication), not 25");
+
+        // Verify some known bit replication values
+        // 3-bit: 101 (5) → 10110110 = 182
+        let quant_3bit = QuantParams::new(3);
+        let level_5_input = 5.0 * 255.0 / 7.0; // ≈ 182.14
+        assert_eq!(quant_3bit.quantize(level_5_input), 182.0);
+
+        // 2-bit: all values should match (2 divides 8 evenly)
+        let quant_2bit = QuantParams::new(2);
+        assert_eq!(quant_2bit.quantize(0.0), 0.0);     // 00 → 00000000
+        assert_eq!(quant_2bit.quantize(85.0), 85.0);   // 01 → 01010101
+        assert_eq!(quant_2bit.quantize(170.0), 170.0); // 10 → 10101010
+        assert_eq!(quant_2bit.quantize(255.0), 255.0); // 11 → 11111111
+
+        // 4-bit: all values should match (4 divides 8 evenly)
+        let quant_4bit = QuantParams::new(4);
+        assert_eq!(quant_4bit.quantize(0.0), 0.0);     // 0000 → 00000000
+        assert_eq!(quant_4bit.quantize(17.0), 17.0);   // 0001 → 00010001
+        assert_eq!(quant_4bit.quantize(255.0), 255.0); // 1111 → 11111111
+    }
+
+    #[test]
+    fn test_bit_replicate_correctness() {
+        // Verify the bit_replicate function produces correct values
+        // 1-bit
+        assert_eq!(QuantParams::bit_replicate(0, 1), 0b00000000);
+        assert_eq!(QuantParams::bit_replicate(1, 1), 0b11111111);
+
+        // 2-bit
+        assert_eq!(QuantParams::bit_replicate(0, 2), 0b00000000);
+        assert_eq!(QuantParams::bit_replicate(1, 2), 0b01010101); // 85
+        assert_eq!(QuantParams::bit_replicate(2, 2), 0b10101010); // 170
+        assert_eq!(QuantParams::bit_replicate(3, 2), 0b11111111); // 255
+
+        // 3-bit: ABC → ABCABCAB
+        assert_eq!(QuantParams::bit_replicate(0b000, 3), 0b00000000); // 0
+        assert_eq!(QuantParams::bit_replicate(0b001, 3), 0b00100100); // 36
+        assert_eq!(QuantParams::bit_replicate(0b101, 3), 0b10110110); // 182
+        assert_eq!(QuantParams::bit_replicate(0b111, 3), 0b11111111); // 255
+
+        // 4-bit: ABCD → ABCDABCD
+        assert_eq!(QuantParams::bit_replicate(0b0001, 4), 0b00010001); // 17
+        assert_eq!(QuantParams::bit_replicate(0b1010, 4), 0b10101010); // 170
+
+        // 5-bit: ABCDE → ABCDEABC
+        assert_eq!(QuantParams::bit_replicate(0b00011, 5), 0b00011000); // 24
+        assert_eq!(QuantParams::bit_replicate(0b11111, 5), 0b11111111); // 255
     }
 
     #[test]
@@ -1056,12 +1158,12 @@ mod tests {
 
     #[test]
     fn test_dither_3bit_produces_valid_levels() {
-        // With 3-bit depth, output should only contain 8 specific levels
+        // With 3-bit depth, output should only contain 8 specific levels (bit-replicated)
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
         let result = floyd_steinberg_dither_bits(&img, 10, 10, 3);
         assert_eq!(result.len(), 100);
-        // 3-bit = 8 levels, values are 0, 36, 73, 109, 146, 182, 219, 255 (rounded)
-        let valid_levels: Vec<u8> = (0..8).map(|i| (i as f32 * 255.0 / 7.0).round() as u8).collect();
+        // 3-bit = 8 levels with bit replication: 0, 36, 73, 109, 146, 182, 219, 255
+        let valid_levels: Vec<u8> = (0..8).map(|i| QuantParams::bit_replicate(i, 3)).collect();
         for &v in &result {
             assert!(valid_levels.contains(&v), "3-bit dither should only produce valid 3-bit levels, got {}", v);
         }
