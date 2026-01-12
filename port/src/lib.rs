@@ -16,6 +16,7 @@ mod cra_oklab;
 mod cra_rgb;
 mod dither;
 mod dither_colorspace_aware;
+mod dither_colorspace_luminosity;
 mod histogram;
 mod rotation;
 mod tiled_lab;
@@ -234,6 +235,101 @@ pub fn colorspace_aware_dither_with_mode_wasm(
         result[i * 3 + 2] = b_out[i];
     }
     result
+}
+
+/// Color space aware dithering for grayscale images (WASM export)
+///
+/// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation,
+/// with error diffusion in linear luminosity space.
+/// Input is sRGB gamma-encoded grayscale (0-255).
+///
+/// Uses Floyd-Steinberg algorithm with Standard (left-to-right) scanning.
+/// For other algorithms, use colorspace_aware_dither_gray_with_mode_wasm.
+///
+/// Args:
+///     gray_channel: Grayscale channel as f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     bits: output bit depth (1-8)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///
+/// Returns:
+///     Grayscale uint8 array
+#[wasm_bindgen]
+pub fn colorspace_aware_dither_gray_wasm(
+    gray_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits: u8,
+    space: u8,
+) -> Vec<u8> {
+    dither_colorspace_luminosity::colorspace_aware_dither_gray(
+        &gray_channel,
+        w,
+        h,
+        bits,
+        perceptual_space_from_u8(space),
+    )
+}
+
+/// Color space aware dithering for grayscale with selectable algorithm (WASM export)
+///
+/// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation,
+/// with error diffusion in linear luminosity space.
+/// Input is sRGB gamma-encoded grayscale (0-255).
+///
+/// Supports the same 7 dithering modes as the RGB version:
+/// - 0: Floyd-Steinberg Standard
+/// - 1: Floyd-Steinberg Serpentine
+/// - 2: Jarvis-Judice-Ninke Standard
+/// - 3: Jarvis-Judice-Ninke Serpentine
+/// - 4: Mixed Standard
+/// - 5: Mixed Serpentine
+/// - 6: Mixed Random
+///
+/// Args:
+///     gray_channel: Grayscale channel as f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     bits: output bit depth (1-8)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///     mode: dither mode (0-6, see above)
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Grayscale uint8 array
+#[wasm_bindgen]
+pub fn colorspace_aware_dither_gray_with_mode_wasm(
+    gray_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits: u8,
+    space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    colorspace_aware_dither_gray_with_mode(
+        &gray_channel,
+        w,
+        h,
+        bits,
+        perceptual_space_from_u8(space),
+        cs_mode,
+        seed,
+    )
 }
 
 /// Basic LAB histogram matching (WASM export)

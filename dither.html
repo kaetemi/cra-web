@@ -554,7 +554,7 @@
                     <option value="2">* CIELAB (CIE94)</option>
                     <option value="0">CIELAB (CIE76)</option>
                 </select>
-                <p class="perceptual-hint">Processes RGB channels jointly using perceptual distance for candidate selection and linear RGB for physically correct error diffusion. Supports all dither modes.</p>
+                <p class="perceptual-hint">Uses perceptual distance for candidate selection with linear error diffusion. For RGB, processes channels jointly. For grayscale, treats L as RGB=(L,L,L). Supports all dither modes.</p>
             </div>
 
             <div class="option-row" id="dither-mode-row">
@@ -671,7 +671,7 @@
     </div>
 
     <script type="module">
-        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm, colorspace_aware_dither_with_mode_wasm } from './wasm_cra/cra_wasm.js';
+        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm, colorspace_aware_dither_with_mode_wasm, colorspace_aware_dither_gray_with_mode_wasm } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
         function getSeeds() {
@@ -850,23 +850,39 @@
                 if (isGrayscale) {
                     // Grayscale mode: convert to luma using Rec.709 coefficients
                     const bitsGray = parseInt(document.getElementById('bits-gray').value);
-                    const grayChannel = new Uint8Array(pixelCount);
+                    const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
                     // Rec.709 luma coefficients (already normalized, sum to 1.0)
                     const rCoef = 0.2126;
                     const gCoef = 0.7152;
                     const bCoef = 0.0722;
 
+                    const grayChannel = new Float32Array(pixelCount);
                     for (let i = 0; i < pixelCount; i++) {
                         const r = data[i * 4];
                         const g = data[i * 4 + 1];
                         const b = data[i * 4 + 2];
-                        grayChannel[i] = Math.round(r * rCoef + g * gCoef + b * bCoef);
+                        grayChannel[i] = r * rCoef + g * gCoef + b * bCoef;
                     }
 
-                    // Dither the grayscale channel
+                    let grayDithered;
                     const seeds = getSeeds();
-                    const grayDithered = ditherChannel(grayChannel, processWidth, processHeight, mode, seeds.r, bitsGray);
+
+                    if (isPerceptual) {
+                        // Color space aware grayscale dithering
+                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                        grayDithered = colorspace_aware_dither_gray_with_mode_wasm(
+                            grayChannel,
+                            processWidth, processHeight,
+                            bitsGray,
+                            perceptualSpace,
+                            mode,
+                            seeds.r
+                        );
+                    } else {
+                        // Standard grayscale dithering
+                        grayDithered = ditherChannel(grayChannel, processWidth, processHeight, mode, seeds.r, bitsGray);
+                    }
 
                     // Output as grayscale (R=G=B)
                     for (let i = 0; i < pixelCount; i++) {
@@ -1034,11 +1050,7 @@
             const isGrayscale = document.getElementById('grayscale-toggle').checked;
             document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
             document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
-            // Disable color space aware mode when grayscale is enabled
-            if (isGrayscale) {
-                document.getElementById('perceptual-toggle').checked = false;
-                updatePerceptualMode();
-            }
+            // Grayscale now works with color space aware mode, no need to disable it
         }
 
         document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
@@ -1049,11 +1061,7 @@
             document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
             // Dither mode is now available for both basic and color-space aware modes
             updateSeedVisibility();
-            // Disable grayscale when color space aware is enabled
-            if (isPerceptual) {
-                document.getElementById('grayscale-toggle').checked = false;
-                updateGrayscaleMode();
-            }
+            // Color space aware now works with grayscale mode, no need to disable it
         }
 
         document.getElementById('perceptual-toggle').addEventListener('change', updatePerceptualMode);
