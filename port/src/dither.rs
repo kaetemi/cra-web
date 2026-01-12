@@ -1,6 +1,9 @@
 /// Error diffusion dithering implementations.
 /// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
 
+// Re-export perceptual dithering from dedicated module
+pub use crate::dither_perceptual::{perceptual_dither_rgb, PerceptualSpace};
+
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.
 #[derive(Debug, Clone, Copy)]

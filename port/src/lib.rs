@@ -15,6 +15,7 @@ mod cra_lab;
 mod cra_oklab;
 mod cra_rgb;
 mod dither;
+mod dither_perceptual;
 mod histogram;
 mod rotation;
 mod tiled_lab;
@@ -24,6 +25,7 @@ mod tiling;
 // Re-export dithering function for compatibility with existing WASM code
 pub use dither::floyd_steinberg_dither;
 use dither::DitherMode;
+use dither::PerceptualSpace;
 
 /// Convert u8 to DitherMode for WASM interface
 /// 0 = Floyd-Steinberg Standard
@@ -42,6 +44,16 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
         5 => DitherMode::MixedSerpentine,
         6 => DitherMode::MixedRandom,
         _ => DitherMode::Standard,
+    }
+}
+
+/// Convert u8 to PerceptualSpace for WASM interface
+/// 0 = CIELAB
+/// 1 = OKLab
+fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
+    match space {
+        1 => PerceptualSpace::OkLab,
+        _ => PerceptualSpace::Lab,
     }
 }
 
@@ -84,6 +96,60 @@ pub fn floyd_steinberg_dither_bits_wasm(img: Vec<f32>, w: usize, h: usize, bits:
 #[wasm_bindgen]
 pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: u32, bits: u8) -> Vec<u8> {
     dither::dither_with_mode_bits(&img, w, h, dither_mode_from_u8(mode), seed, bits)
+}
+
+/// Perceptual dithering with joint RGB processing (WASM export)
+///
+/// Uses perceptual color space (CIELAB or OKLab) for candidate selection,
+/// with error diffusion in linear RGB space. This produces better results
+/// than per-channel dithering by considering color relationships.
+///
+/// Note: Only Floyd-Steinberg algorithm is supported for perceptual dithering.
+///
+/// Args:
+///     r_channel: Red channel as f32 values in range [0, 255]
+///     g_channel: Green channel as f32 values in range [0, 255]
+///     b_channel: Blue channel as f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     space: perceptual space (0 = CIELAB, 1 = OKLab)
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn perceptual_dither_wasm(
+    r_channel: Vec<f32>,
+    g_channel: Vec<f32>,
+    b_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: u8,
+) -> Vec<u8> {
+    let (r_out, g_out, b_out) = dither::perceptual_dither_rgb(
+        &r_channel,
+        &g_channel,
+        &b_channel,
+        w,
+        h,
+        bits_r,
+        bits_g,
+        bits_b,
+        perceptual_space_from_u8(space),
+    );
+
+    // Interleave RGB channels
+    let pixels = w * h;
+    let mut result = vec![0u8; pixels * 3];
+    for i in 0..pixels {
+        result[i * 3] = r_out[i];
+        result[i * 3 + 1] = g_out[i];
+        result[i * 3 + 2] = b_out[i];
+    }
+    result
 }
 
 /// Basic LAB histogram matching (WASM export)

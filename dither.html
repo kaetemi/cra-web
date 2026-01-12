@@ -249,6 +249,43 @@
             display: block;
         }
 
+        .perceptual-options {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f3e5f5;
+            border-radius: 8px;
+            border: 1px solid #ce93d8;
+        }
+
+        .perceptual-options.visible {
+            display: block;
+        }
+
+        .perceptual-options label {
+            font-weight: 600;
+            color: #555;
+            margin-right: 10px;
+        }
+
+        .perceptual-options select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .perceptual-options .perceptual-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+
+        .option-row.hidden {
+            display: none;
+        }
+
         .seed-options label {
             font-weight: 600;
             color: #555;
@@ -501,7 +538,24 @@
         <div class="options-section">
             <h3>Dither Settings</h3>
 
-            <div class="option-row">
+            <div class="toggle-row">
+                <span>Perceptual Dithering:</span>
+                <label class="toggle-switch">
+                    <input type="checkbox" id="perceptual-toggle">
+                    <span class="toggle-slider"></span>
+                </label>
+            </div>
+
+            <div class="perceptual-options" id="perceptual-options">
+                <label for="perceptual-space">Color Space:</label>
+                <select id="perceptual-space">
+                    <option value="0" selected>CIELAB</option>
+                    <option value="1">OKLab</option>
+                </select>
+                <p class="perceptual-hint">Perceptual dithering uses color space distance for joint RGB quantization. Only Floyd-Steinberg is supported.</p>
+            </div>
+
+            <div class="option-row" id="dither-mode-row">
                 <label for="dither-mode">Dither Mode:</label>
                 <select id="dither-mode">
                     <option value="0">* Floyd-Steinberg (Standard)</option>
@@ -615,7 +669,7 @@
     </div>
 
     <script type="module">
-        import init, { dither_with_mode_wasm } from './wasm_cra/cra_wasm.js';
+        import init, { dither_with_mode_wasm, perceptual_dither_wasm } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
         function getSeeds() {
@@ -821,32 +875,65 @@
                         outputData[i * 4 + 3] = 255;
                     }
                 } else {
-                    // RGB mode: process each channel separately
+                    // RGB mode
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
                     const bitsB = parseInt(document.getElementById('bits-b').value);
+                    const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
-                    const rChannel = new Uint8Array(pixelCount);
-                    const gChannel = new Uint8Array(pixelCount);
-                    const bChannel = new Uint8Array(pixelCount);
+                    if (isPerceptual) {
+                        // Perceptual dithering: process all channels jointly
+                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
-                    for (let i = 0; i < pixelCount; i++) {
-                        rChannel[i] = data[i * 4];
-                        gChannel[i] = data[i * 4 + 1];
-                        bChannel[i] = data[i * 4 + 2];
-                    }
+                        // Extract channels as Float32Array
+                        const rChannel = new Float32Array(pixelCount);
+                        const gChannel = new Float32Array(pixelCount);
+                        const bChannel = new Float32Array(pixelCount);
 
-                    // Dither each channel with different seeds
-                    const seeds = getSeeds();
-                    const rDithered = ditherChannel(rChannel, processWidth, processHeight, mode, seeds.r, bitsR);
-                    const gDithered = ditherChannel(gChannel, processWidth, processHeight, mode, seeds.g, bitsG);
-                    const bDithered = ditherChannel(bChannel, processWidth, processHeight, mode, seeds.b, bitsB);
+                        for (let i = 0; i < pixelCount; i++) {
+                            rChannel[i] = data[i * 4];
+                            gChannel[i] = data[i * 4 + 1];
+                            bChannel[i] = data[i * 4 + 2];
+                        }
 
-                    for (let i = 0; i < pixelCount; i++) {
-                        outputData[i * 4] = rDithered[i];
-                        outputData[i * 4 + 1] = gDithered[i];
-                        outputData[i * 4 + 2] = bDithered[i];
-                        outputData[i * 4 + 3] = 255;
+                        // Call perceptual dither (returns interleaved RGB)
+                        const rgbDithered = perceptual_dither_wasm(
+                            rChannel, gChannel, bChannel,
+                            processWidth, processHeight,
+                            bitsR, bitsG, bitsB,
+                            perceptualSpace
+                        );
+
+                        for (let i = 0; i < pixelCount; i++) {
+                            outputData[i * 4] = rgbDithered[i * 3];
+                            outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
+                            outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
+                            outputData[i * 4 + 3] = 255;
+                        }
+                    } else {
+                        // Standard dithering: process each channel separately
+                        const rChannel = new Uint8Array(pixelCount);
+                        const gChannel = new Uint8Array(pixelCount);
+                        const bChannel = new Uint8Array(pixelCount);
+
+                        for (let i = 0; i < pixelCount; i++) {
+                            rChannel[i] = data[i * 4];
+                            gChannel[i] = data[i * 4 + 1];
+                            bChannel[i] = data[i * 4 + 2];
+                        }
+
+                        // Dither each channel with different seeds
+                        const seeds = getSeeds();
+                        const rDithered = ditherChannel(rChannel, processWidth, processHeight, mode, seeds.r, bitsR);
+                        const gDithered = ditherChannel(gChannel, processWidth, processHeight, mode, seeds.g, bitsG);
+                        const bDithered = ditherChannel(bChannel, processWidth, processHeight, mode, seeds.b, bitsB);
+
+                        for (let i = 0; i < pixelCount; i++) {
+                            outputData[i * 4] = rDithered[i];
+                            outputData[i * 4 + 1] = gDithered[i];
+                            outputData[i * 4 + 2] = bDithered[i];
+                            outputData[i * 4 + 3] = 255;
+                        }
                     }
                 }
 
@@ -942,9 +1029,29 @@
             const isGrayscale = document.getElementById('grayscale-toggle').checked;
             document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
             document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
+            // Disable perceptual dithering when grayscale is enabled
+            if (isGrayscale) {
+                document.getElementById('perceptual-toggle').checked = false;
+                updatePerceptualMode();
+            }
         }
 
         document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
+
+        // Perceptual toggle
+        function updatePerceptualMode() {
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
+            document.getElementById('dither-mode-row').classList.toggle('hidden', isPerceptual);
+            document.getElementById('seed-options').classList.toggle('visible', !isPerceptual && parseInt(document.getElementById('dither-mode').value) >= 4);
+            // Disable grayscale when perceptual is enabled
+            if (isPerceptual) {
+                document.getElementById('grayscale-toggle').checked = false;
+                updateGrayscaleMode();
+            }
+        }
+
+        document.getElementById('perceptual-toggle').addEventListener('change', updatePerceptualMode);
 
         // Downscale toggle
         function updateDownscaleVisibility() {
@@ -967,10 +1074,12 @@
         document.getElementById('scale-height').addEventListener('input', updateSizeFromHeight);
 
         // Show/hide seed options based on dither mode (only for mixed modes 4, 5, 6)
+        // Hide seed options when perceptual mode is enabled
         function updateSeedVisibility() {
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const mode = parseInt(document.getElementById('dither-mode').value);
             const isMixedMode = mode >= 4 && mode <= 6;
-            document.getElementById('seed-options').classList.toggle('visible', isMixedMode);
+            document.getElementById('seed-options').classList.toggle('visible', !isPerceptual && isMixedMode);
         }
 
         document.getElementById('dither-mode').addEventListener('change', updateSeedVisibility);
