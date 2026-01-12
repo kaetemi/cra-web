@@ -48,12 +48,16 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
 }
 
 /// Convert u8 to PerceptualSpace for WASM interface
-/// 0 = CIELAB
-/// 1 = OKLab
+/// 0 = CIELAB with CIE76 (simple Euclidean)
+/// 1 = OKLab (default, recommended)
+/// 2 = CIELAB with CIE94 (weighted distance)
+/// 3 = CIELAB with CIEDE2000 (most accurate)
 fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
     match space {
-        1 => PerceptualSpace::OkLab,
-        _ => PerceptualSpace::Lab,
+        0 => PerceptualSpace::LabCIE76,
+        2 => PerceptualSpace::LabCIE94,
+        3 => PerceptualSpace::LabCIEDE2000,
+        _ => PerceptualSpace::OkLab,  // 1 or any other value defaults to OkLab
     }
 }
 
@@ -114,7 +118,7 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 ///     w: image width
 ///     h: image height
 ///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
-///     space: perceptual space (0 = CIELAB, 1 = OKLab)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
 ///
 /// Returns:
 ///     Interleaved RGB uint8 array (RGBRGB...)
@@ -175,7 +179,7 @@ pub fn colorspace_aware_dither_wasm(
 ///     w: image width
 ///     h: image height
 ///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
-///     space: perceptual space (0 = CIELAB, 1 = OKLab)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
 ///     mode: dither mode (0-6, see above)
 ///     seed: random seed for mixed modes
 ///

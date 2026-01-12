@@ -18,13 +18,21 @@ use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
 
-/// Perceptual color space for distance calculations
+/// Perceptual color space and distance metric for candidate selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PerceptualSpace {
-    /// CIELAB color space (L*a*b*)
+    /// CIELAB with CIE76 (ΔE*ab): Simple Euclidean distance
+    /// Fast but perceptually non-uniform, over-weights chromaticity
+    LabCIE76,
+    /// CIELAB with CIE94: Weighted distance for perceptual uniformity
+    /// Down-weights chromatic differences for saturated colors
+    LabCIE94,
+    /// CIELAB with CIEDE2000: Most accurate perceptual distance
+    /// Includes corrections for blue region, lightness, and chroma
+    LabCIEDE2000,
+    /// OKLab color space with Euclidean distance (default)
+    /// Designed so Euclidean distance is perceptually uniform
     #[default]
-    Lab,
-    /// OKLab color space
     OkLab,
 }
 
@@ -85,6 +93,174 @@ pub fn bit_replicate(value: u8, bits: u8) -> u8 {
         }
     }
     result as u8
+}
+
+// ============================================================================
+// CIELAB Distance Formulas
+// ============================================================================
+
+/// CIE76 (ΔE*ab): Simple Euclidean distance squared in L*a*b* space
+/// This is the original CIELAB distance formula.
+#[inline]
+fn lab_distance_cie76_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+    let dl = l1 - l2;
+    let da = a1 - a2;
+    let db = b1 - b2;
+    dl * dl + da * da + db * db
+}
+
+/// CIE94 (ΔE*94): Weighted distance squared accounting for perceptual non-uniformity
+/// Uses graphic arts constants (kL=1, K1=0.045, K2=0.015)
+#[inline]
+fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+    let dl = l1 - l2;
+    let c1 = (a1 * a1 + b1 * b1).sqrt();
+    let c2 = (a2 * a2 + b2 * b2).sqrt();
+    let dc = c1 - c2;
+
+    // ΔH² = Δa² + Δb² - ΔC²
+    let da = a1 - a2;
+    let db = b1 - b2;
+    let dh_sq = (da * da + db * db - dc * dc).max(0.0);
+
+    // Weighting factors (graphic arts)
+    let sc = 1.0 + 0.045 * c1;
+    let sh = 1.0 + 0.015 * c1;
+
+    // ΔE94² = (ΔL/kL)² + (ΔC/SC)² + (ΔH/SH)²
+    // kL = 1 for graphic arts
+    let dl_term = dl;
+    let dc_term = dc / sc;
+    let dh_term = dh_sq.sqrt() / sh;
+
+    dl_term * dl_term + dc_term * dc_term + dh_term * dh_term
+}
+
+/// CIEDE2000 (ΔE00): Most accurate perceptual distance squared
+/// Includes lightness, chroma, and hue weighting plus rotation term for blue
+#[inline]
+fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+    use std::f32::consts::PI;
+
+    let c1_star = (a1 * a1 + b1 * b1).sqrt();
+    let c2_star = (a2 * a2 + b2 * b2).sqrt();
+    let c_bar = (c1_star + c2_star) / 2.0;
+
+    // G factor for a' adjustment
+    let c_bar_7 = c_bar.powi(7);
+    let g = 0.5 * (1.0 - (c_bar_7 / (c_bar_7 + 6103515625.0_f32)).sqrt()); // 25^7 = 6103515625
+
+    // Adjusted a' values
+    let a1_prime = a1 * (1.0 + g);
+    let a2_prime = a2 * (1.0 + g);
+
+    // Adjusted chroma
+    let c1_prime = (a1_prime * a1_prime + b1 * b1).sqrt();
+    let c2_prime = (a2_prime * a2_prime + b2 * b2).sqrt();
+
+    // Hue angles (in radians)
+    let h1_prime = if a1_prime == 0.0 && b1 == 0.0 {
+        0.0
+    } else {
+        let h = b1.atan2(a1_prime);
+        if h < 0.0 { h + 2.0 * PI } else { h }
+    };
+
+    let h2_prime = if a2_prime == 0.0 && b2 == 0.0 {
+        0.0
+    } else {
+        let h = b2.atan2(a2_prime);
+        if h < 0.0 { h + 2.0 * PI } else { h }
+    };
+
+    // Differences
+    let dl_prime = l2 - l1;
+    let dc_prime = c2_prime - c1_prime;
+
+    // Hue difference
+    let dh_prime = if c1_prime * c2_prime == 0.0 {
+        0.0
+    } else {
+        let diff = h2_prime - h1_prime;
+        if diff.abs() <= PI {
+            diff
+        } else if diff > PI {
+            diff - 2.0 * PI
+        } else {
+            diff + 2.0 * PI
+        }
+    };
+
+    // ΔH'
+    let dh_prime_big = 2.0 * (c1_prime * c2_prime).sqrt() * (dh_prime / 2.0).sin();
+
+    // Weighted mean values
+    let l_bar_prime = (l1 + l2) / 2.0;
+    let c_bar_prime = (c1_prime + c2_prime) / 2.0;
+
+    let h_bar_prime = if c1_prime * c2_prime == 0.0 {
+        h1_prime + h2_prime
+    } else if (h1_prime - h2_prime).abs() <= PI {
+        (h1_prime + h2_prime) / 2.0
+    } else if h1_prime + h2_prime < 2.0 * PI {
+        (h1_prime + h2_prime + 2.0 * PI) / 2.0
+    } else {
+        (h1_prime + h2_prime - 2.0 * PI) / 2.0
+    };
+
+    // T factor
+    let t = 1.0
+        - 0.17 * (h_bar_prime - PI / 6.0).cos()
+        + 0.24 * (2.0 * h_bar_prime).cos()
+        + 0.32 * (3.0 * h_bar_prime + PI / 30.0).cos()
+        - 0.20 * (4.0 * h_bar_prime - 63.0 * PI / 180.0).cos();
+
+    // SL, SC, SH
+    let l_bar_minus_50_sq = (l_bar_prime - 50.0) * (l_bar_prime - 50.0);
+    let sl = 1.0 + (0.015 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
+    let sc = 1.0 + 0.045 * c_bar_prime;
+    let sh = 1.0 + 0.015 * c_bar_prime * t;
+
+    // RT (rotation term for blue colors)
+    let h_bar_deg = h_bar_prime * 180.0 / PI;
+    let delta_theta = 30.0 * (-(((h_bar_deg - 275.0) / 25.0).powi(2))).exp();
+    let c_bar_prime_7 = c_bar_prime.powi(7);
+    let rc = 2.0 * (c_bar_prime_7 / (c_bar_prime_7 + 6103515625.0_f32)).sqrt();
+    let rt = -rc * (2.0 * delta_theta * PI / 180.0).sin();
+
+    // Final calculation (kL = kC = kH = 1)
+    let dl_term = dl_prime / sl;
+    let dc_term = dc_prime / sc;
+    let dh_term = dh_prime_big / sh;
+
+    dl_term * dl_term + dc_term * dc_term + dh_term * dh_term + rt * dc_term * dh_term
+}
+
+/// Compute perceptual distance squared based on the selected space/metric
+#[inline]
+fn perceptual_distance_sq(
+    space: PerceptualSpace,
+    l1: f32, a1: f32, b1: f32,
+    l2: f32, a2: f32, b2: f32,
+) -> f32 {
+    match space {
+        PerceptualSpace::LabCIE76 => lab_distance_cie76_sq(l1, a1, b1, l2, a2, b2),
+        PerceptualSpace::LabCIE94 => lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2),
+        PerceptualSpace::LabCIEDE2000 => lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2),
+        PerceptualSpace::OkLab => {
+            // OkLab uses simple Euclidean distance (it's designed for this)
+            let dl = l1 - l2;
+            let da = a1 - a2;
+            let db = b1 - b2;
+            dl * dl + da * da + db * db
+        }
+    }
+}
+
+/// Check if a PerceptualSpace variant uses CIELAB
+#[inline]
+fn is_lab_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000)
 }
 
 /// Perceptual quantization parameters for joint RGB dithering.
@@ -208,9 +384,10 @@ fn build_perceptual_lut(
                 let b_ext = quant.level_values[b_level];
                 let b_lin = linear_lut[b_ext as usize];
 
-                let (l, a, b_ch) = match space {
-                    PerceptualSpace::Lab => linear_rgb_to_lab(r_lin, g_lin, b_lin),
-                    PerceptualSpace::OkLab => linear_rgb_to_oklab(r_lin, g_lin, b_lin),
+                let (l, a, b_ch) = if is_lab_space(space) {
+                    linear_rgb_to_lab(r_lin, g_lin, b_lin)
+                } else {
+                    linear_rgb_to_oklab(r_lin, g_lin, b_lin)
                 };
 
                 let idx = r_level * n * n + g_level * n + b_level;
@@ -905,10 +1082,11 @@ fn process_pixel(
     let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to Lab (use unclamped for true distance)
-    let lab_target = match ctx.space {
-        PerceptualSpace::Lab => linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj),
-        PerceptualSpace::OkLab => linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj),
+    // 5. Convert target to Lab/OkLab (use unclamped for true distance)
+    let lab_target = if is_lab_space(ctx.space) {
+        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
+    } else {
+        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
     };
 
     // 6. Search candidates
@@ -935,17 +1113,19 @@ fn process_pixel(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = match ctx.space {
-                        PerceptualSpace::Lab => linear_rgb_to_lab(r_lin, g_lin, b_lin),
-                        PerceptualSpace::OkLab => linear_rgb_to_oklab(r_lin, g_lin, b_lin),
+                    let (l, a, b_ch) = if is_lab_space(ctx.space) {
+                        linear_rgb_to_lab(r_lin, g_lin, b_lin)
+                    } else {
+                        linear_rgb_to_oklab(r_lin, g_lin, b_lin)
                     };
                     LabValue { l, a, b: b_ch }
                 };
 
-                let dl = lab_target.0 - lab_candidate.l;
-                let da = lab_target.1 - lab_candidate.a;
-                let db = lab_target.2 - lab_candidate.b;
-                let dist = dl * dl + da * da + db * db;
+                let dist = perceptual_distance_sq(
+                    ctx.space,
+                    lab_target.0, lab_target.1, lab_target.2,
+                    lab_candidate.l, lab_candidate.a, lab_candidate.b,
+                );
 
                 if dist < best_dist {
                     best_dist = dist;
@@ -1154,7 +1334,7 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::LabCIE76);
 
         assert_eq!(r_out.len(), 100);
         assert_eq!(g_out.len(), 100);
@@ -1168,7 +1348,7 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::LabCIE76);
 
         let valid_levels = [0u8, 85, 170, 255];
         for &v in &r_out {
@@ -1189,7 +1369,7 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_lab, g_lab, b_lab) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_lab, g_lab, b_lab) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::LabCIE76);
         let (r_oklab, g_oklab, b_oklab) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::OkLab);
 
         // Results should differ (different perceptual spaces have different gamut mappings)
@@ -1206,7 +1386,7 @@ mod tests {
         let g: Vec<f32> = vec![gray_val; 100];
         let b: Vec<f32> = vec![gray_val; 100];
 
-        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76);
 
         // For neutral gray input, output should remain relatively neutral
         // (R, G, B should be similar for each pixel)
@@ -1228,7 +1408,7 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         // 5-bit R and B, 6-bit G (RGB565 format)
-        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::LabCIE76);
 
         // Check that outputs are valid for their respective bit depths
         let valid_5bit: Vec<u8> = (0..32).map(|l| bit_replicate(l, 5)).collect();
@@ -1267,7 +1447,7 @@ mod tests {
 
         for mode in modes {
             let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_with_mode(
-                &r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::Lab, mode, 42
+                &r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::LabCIE76, mode, 42
             );
 
             assert_eq!(r_out.len(), 100, "Mode {:?} produced wrong length", mode);
@@ -1287,10 +1467,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Serpentine, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Serpentine, 0
         );
 
         // Results should differ
@@ -1306,10 +1486,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
         );
         let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
         );
 
         // Results should differ
@@ -1325,13 +1505,13 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
         );
         let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
         );
         let (r_mix, g_mix, b_mix) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
         );
 
         // Mixed should differ from both pure algorithms
@@ -1350,10 +1530,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
         );
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
         );
 
         // Same seed should produce identical results
@@ -1369,10 +1549,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
         );
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 99
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 99
         );
 
         // Different seeds should produce different results
@@ -1388,13 +1568,13 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedSerpentine, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedSerpentine, 42
         );
         let (r_rand, g_rand, b_rand) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedRandom, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedRandom, 42
         );
 
         let std_combined: Vec<u8> = r_std.iter().chain(g_std.iter()).chain(b_std.iter()).copied().collect();
@@ -1414,10 +1594,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         // Original API
-        let (r1, g1, b1) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab);
+        let (r1, g1, b1) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76);
         // New API with Standard mode
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
         );
 
         // Should produce identical results
@@ -1433,10 +1613,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisSerpentine, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisSerpentine, 0
         );
 
         // JJN standard and serpentine should produce different results
