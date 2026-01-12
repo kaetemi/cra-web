@@ -17,6 +17,10 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
+use cra_wasm::binary_format::{
+    ColorFormat, encode_rgb_packed, encode_rgb_row_aligned,
+    encode_gray_packed, encode_gray_row_aligned,
+};
 use cra_wasm::dither::colorspace_aware_dither_rgb_with_mode;
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -138,124 +142,6 @@ struct Args {
     /// Enable verbose output
     #[arg(short, long)]
     verbose: bool,
-}
-
-// ============================================================================
-// Format Parsing
-// ============================================================================
-
-/// Parsed color format with bit depths per channel
-#[derive(Debug, Clone)]
-struct ColorFormat {
-    /// Format name (e.g., "RGB565", "L4")
-    name: String,
-    /// Whether this is a grayscale format
-    is_grayscale: bool,
-    /// Bits per red channel (or grayscale)
-    bits_r: u8,
-    /// Bits per green channel (0 for grayscale)
-    bits_g: u8,
-    /// Bits per blue channel (0 for grayscale)
-    bits_b: u8,
-    /// Total bits per pixel
-    total_bits: u8,
-}
-
-impl ColorFormat {
-    /// Parse a format string like "RGB565", "RGB111", "L4", "L8", etc.
-    fn parse(format: &str) -> Result<Self, String> {
-        let format_upper = format.to_uppercase();
-
-        // Grayscale formats: L1, L2, L4, L8
-        if format_upper.starts_with('L') {
-            let bits_str = &format_upper[1..];
-            let bits: u8 = bits_str
-                .parse()
-                .map_err(|_| format!("Invalid grayscale format '{}': expected L followed by bit count (1-8)", format))?;
-
-            if bits < 1 || bits > 8 {
-                return Err(format!("Grayscale bits must be 1-8, got {}", bits));
-            }
-
-            return Ok(ColorFormat {
-                name: format_upper,
-                is_grayscale: true,
-                bits_r: bits,
-                bits_g: 0,
-                bits_b: 0,
-                total_bits: bits,
-            });
-        }
-
-        // RGB formats: RGB565, RGB111, RGB332, RGB888, etc.
-        if format_upper.starts_with("RGB") {
-            let bits_str = &format_upper[3..];
-
-            if bits_str.len() != 3 {
-                return Err(format!(
-                    "Invalid RGB format '{}': expected RGB followed by 3 digits (e.g., RGB565)",
-                    format
-                ));
-            }
-
-            let bits_r: u8 = bits_str[0..1]
-                .parse()
-                .map_err(|_| format!("Invalid red bit count in '{}'", format))?;
-            let bits_g: u8 = bits_str[1..2]
-                .parse()
-                .map_err(|_| format!("Invalid green bit count in '{}'", format))?;
-            let bits_b: u8 = bits_str[2..3]
-                .parse()
-                .map_err(|_| format!("Invalid blue bit count in '{}'", format))?;
-
-            if bits_r < 1 || bits_r > 8 {
-                return Err(format!("Red bits must be 1-8, got {}", bits_r));
-            }
-            if bits_g < 1 || bits_g > 8 {
-                return Err(format!("Green bits must be 1-8, got {}", bits_g));
-            }
-            if bits_b < 1 || bits_b > 8 {
-                return Err(format!("Blue bits must be 1-8, got {}", bits_b));
-            }
-
-            let total_bits = bits_r + bits_g + bits_b;
-
-            return Ok(ColorFormat {
-                name: format_upper,
-                is_grayscale: false,
-                bits_r,
-                bits_g,
-                bits_b,
-                total_bits,
-            });
-        }
-
-        Err(format!(
-            "Unknown format '{}': expected RGB### (e.g., RGB565) or L# (e.g., L4)",
-            format
-        ))
-    }
-
-    /// Check if this format can be represented in a standard binary output
-    /// Binary output is supported for formats that fit within power-of-2 sizes
-    fn supports_binary(&self) -> bool {
-        // Supported: formats where total bits is 1, 2, 4, 8, 16, 24, or 32
-        matches!(self.total_bits, 1 | 2 | 4 | 8 | 16 | 24 | 32)
-    }
-
-    /// Get the number of bytes per pixel for binary output (rounded up)
-    fn bytes_per_pixel(&self) -> usize {
-        ((self.total_bits as usize) + 7) / 8
-    }
-
-    /// Get the number of pixels that fit in one byte (for sub-byte formats)
-    fn pixels_per_byte(&self) -> usize {
-        if self.total_bits >= 8 {
-            1
-        } else {
-            8 / (self.total_bits as usize)
-        }
-    }
 }
 
 // ============================================================================
@@ -396,160 +282,6 @@ fn dither_rgb(
 }
 
 // ============================================================================
-// Binary Output Encoding
-// ============================================================================
-
-/// Encode RGB pixel to packed binary format
-/// Returns the raw bits as a u32 (caller should mask to appropriate bit width)
-fn encode_rgb_pixel(r: u8, g: u8, b: u8, bits_r: u8, bits_g: u8, bits_b: u8) -> u32 {
-    // Extract the significant bits from each channel
-    // The dithered values are bit-replicated, so we need to extract the original N bits
-    let r_val = (r >> (8 - bits_r)) as u32;
-    let g_val = (g >> (8 - bits_g)) as u32;
-    let b_val = (b >> (8 - bits_b)) as u32;
-
-    // Pack as R,G,B from MSB to LSB
-    let g_shift = bits_b;
-    let r_shift = bits_b + bits_g;
-
-    (r_val << r_shift) | (g_val << g_shift) | b_val
-}
-
-/// Encode grayscale pixel to packed binary format
-fn encode_gray_pixel(l: u8, bits: u8) -> u32 {
-    (l >> (8 - bits)) as u32
-}
-
-/// Write packed binary output (continuous bit stream, no row padding)
-fn write_binary_packed(
-    output: &mut Vec<u8>,
-    dithered_data: &[u8],
-    format: &ColorFormat,
-    width: usize,
-    height: usize,
-) {
-    let total_bits = format.total_bits as usize;
-    let total_pixels = width * height;
-
-    if total_bits >= 8 {
-        // Byte-aligned or multi-byte pixels
-        let bytes_per_pixel = format.bytes_per_pixel();
-        output.reserve(total_pixels * bytes_per_pixel);
-
-        if format.is_grayscale {
-            for i in 0..total_pixels {
-                let val = encode_gray_pixel(dithered_data[i], format.bits_r);
-                // Write little-endian (LSB first) to match reference implementation
-                for b in 0..bytes_per_pixel {
-                    output.push(((val >> (b * 8)) & 0xFF) as u8);
-                }
-            }
-        } else {
-            for i in 0..total_pixels {
-                let r = dithered_data[i * 3];
-                let g = dithered_data[i * 3 + 1];
-                let b = dithered_data[i * 3 + 2];
-                let val = encode_rgb_pixel(r, g, b, format.bits_r, format.bits_g, format.bits_b);
-                // Write little-endian (LSB first) to match reference implementation
-                for byte_idx in 0..bytes_per_pixel {
-                    output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
-                }
-            }
-        }
-    } else {
-        // Sub-byte pixels - pack multiple pixels per byte
-        let pixels_per_byte = format.pixels_per_byte();
-        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
-        output.reserve(total_bytes);
-
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for i in 0..total_pixels {
-            let val = if format.is_grayscale {
-                encode_gray_pixel(dithered_data[i], format.bits_r)
-            } else {
-                let r = dithered_data[i * 3];
-                let g = dithered_data[i * 3 + 1];
-                let b = dithered_data[i * 3 + 2];
-                encode_rgb_pixel(r, g, b, format.bits_r, format.bits_g, format.bits_b)
-            };
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-}
-
-/// Write row-aligned binary output (each row padded to byte boundary)
-fn write_binary_row_aligned(
-    output: &mut Vec<u8>,
-    dithered_data: &[u8],
-    format: &ColorFormat,
-    width: usize,
-    height: usize,
-) {
-    let total_bits = format.total_bits as usize;
-
-    if total_bits >= 8 {
-        // For byte-aligned formats, row alignment is automatic
-        write_binary_packed(output, dithered_data, format, width, height);
-        return;
-    }
-
-    // Sub-byte pixels - pack each row separately with padding
-    let pixels_per_byte = format.pixels_per_byte();
-    let bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
-    output.reserve(bytes_per_row * height);
-
-    for y in 0..height {
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for x in 0..width {
-            let i = y * width + x;
-            let val = if format.is_grayscale {
-                encode_gray_pixel(dithered_data[i], format.bits_r)
-            } else {
-                let r = dithered_data[i * 3];
-                let g = dithered_data[i * 3 + 1];
-                let b = dithered_data[i * 3 + 2];
-                encode_rgb_pixel(r, g, b, format.bits_r, format.bits_g, format.bits_b)
-            };
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits at end of row
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-}
-
-// ============================================================================
 // PNG Output
 // ============================================================================
 
@@ -685,16 +417,22 @@ fn main() -> Result<(), String> {
     let height_usize = height as usize;
 
     // Perform dithering
-    let dithered_data: Vec<u8>;
     let perceptual_space = args.colorspace.to_perceptual_space();
     let cs_mode = args.method.to_cs_dither_mode();
+
+    // Store channel data for binary encoding
+    let dithered_gray: Option<Vec<u8>>;
+    let dithered_r: Option<Vec<u8>>;
+    let dithered_g: Option<Vec<u8>>;
+    let dithered_b: Option<Vec<u8>>;
+    let dithered_interleaved: Vec<u8>;
 
     if format.is_grayscale {
         if args.verbose {
             eprintln!("Converting to grayscale and dithering...");
         }
         let gray = rgb_to_grayscale(&data);
-        dithered_data = dither_grayscale(
+        let gray_out = dither_grayscale(
             &gray,
             width_usize,
             height_usize,
@@ -703,6 +441,11 @@ fn main() -> Result<(), String> {
             cs_mode,
             args.seed,
         );
+        dithered_interleaved = gray_out.clone();
+        dithered_gray = Some(gray_out);
+        dithered_r = None;
+        dithered_g = None;
+        dithered_b = None;
     } else {
         if args.verbose {
             eprintln!("Dithering RGB channels...");
@@ -722,9 +465,9 @@ fn main() -> Result<(), String> {
             args.seed,
         );
 
-        // Interleave channels
+        // Interleave channels for PNG output
         let pixels = width_usize * height_usize;
-        dithered_data = {
+        dithered_interleaved = {
             let mut out = Vec::with_capacity(pixels * 3);
             for i in 0..pixels {
                 out.push(r_out[i]);
@@ -733,6 +476,10 @@ fn main() -> Result<(), String> {
             }
             out
         };
+        dithered_gray = None;
+        dithered_r = Some(r_out);
+        dithered_g = Some(g_out);
+        dithered_b = Some(b_out);
     }
 
     // Track outputs for metadata
@@ -745,9 +492,9 @@ fn main() -> Result<(), String> {
         }
 
         if format.is_grayscale {
-            save_png_grayscale(png_path, &dithered_data, width, height)?;
+            save_png_grayscale(png_path, &dithered_interleaved, width, height)?;
         } else {
-            save_png_rgb(png_path, &dithered_data, width, height)?;
+            save_png_rgb(png_path, &dithered_interleaved, width, height)?;
         }
 
         let size = std::fs::metadata(png_path)
@@ -762,8 +509,17 @@ fn main() -> Result<(), String> {
             eprintln!("Writing binary (packed): {}", bin_path.display());
         }
 
-        let mut bin_data = Vec::new();
-        write_binary_packed(&mut bin_data, &dithered_data, &format, width_usize, height_usize);
+        let bin_data = if format.is_grayscale {
+            encode_gray_packed(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r)
+        } else {
+            encode_rgb_packed(
+                dithered_r.as_ref().unwrap(),
+                dithered_g.as_ref().unwrap(),
+                dithered_b.as_ref().unwrap(),
+                width_usize, height_usize,
+                format.bits_r, format.bits_g, format.bits_b
+            )
+        };
 
         let mut file = File::create(bin_path)
             .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
@@ -779,8 +535,17 @@ fn main() -> Result<(), String> {
             eprintln!("Writing binary (row-aligned): {}", bin_r_path.display());
         }
 
-        let mut bin_data = Vec::new();
-        write_binary_row_aligned(&mut bin_data, &dithered_data, &format, width_usize, height_usize);
+        let bin_data = if format.is_grayscale {
+            encode_gray_row_aligned(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r)
+        } else {
+            encode_rgb_row_aligned(
+                dithered_r.as_ref().unwrap(),
+                dithered_g.as_ref().unwrap(),
+                dithered_b.as_ref().unwrap(),
+                width_usize, height_usize,
+                format.bits_r, format.bits_g, format.bits_b
+            )
+        };
 
         let mut file = File::create(bin_r_path)
             .map_err(|e| format!("Failed to create {}: {}", bin_r_path.display(), e))?;

@@ -453,10 +453,72 @@
             border-radius: 8px;
             font-weight: 600;
             transition: background 0.3s ease;
+            cursor: pointer;
+            border: none;
+            font-size: 14px;
         }
 
         .download-btn:hover {
             background: #219a52;
+        }
+
+        .download-section {
+            margin-top: 25px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+
+        .download-section h4 {
+            margin: 0 0 15px 0;
+            color: #555;
+        }
+
+        .download-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+
+        .download-btn.secondary {
+            background: #3498db;
+        }
+
+        .download-btn.secondary:hover {
+            background: #2980b9;
+        }
+
+        .download-btn.tertiary {
+            background: #9b59b6;
+        }
+
+        .download-btn.tertiary:hover {
+            background: #8e44ad;
+        }
+
+        .download-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .format-info {
+            font-size: 12px;
+            color: #888;
+            margin-top: 10px;
+        }
+
+        .channel-downloads {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .channel-downloads h5 {
+            margin: 0 0 10px 0;
+            color: #666;
+            font-size: 13px;
         }
 
         .loading {
@@ -669,11 +731,43 @@
                 <p>Dithered</p>
             </div>
         </div>
-        <a class="download-btn" id="download-btn" download="dithered.png">Download Result</a>
+
+        <div class="download-section">
+            <h4>Downloads</h4>
+            <div class="download-row">
+                <a class="download-btn" id="download-btn" download="dithered.png">PNG Image</a>
+                <button class="download-btn secondary" id="download-bin-btn" disabled>Binary (packed)</button>
+                <button class="download-btn secondary" id="download-bin-r-btn" disabled>Binary (row-aligned)</button>
+                <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
+            </div>
+            <p class="format-info" id="format-info">Format: RGB565 (16 bits/pixel) - binary download available</p>
+
+            <div class="channel-downloads" id="channel-downloads">
+                <h5>Per-Channel Binary</h5>
+                <div class="download-row">
+                    <button class="download-btn secondary" id="download-r-btn" disabled>R Channel</button>
+                    <button class="download-btn secondary" id="download-g-btn" disabled>G Channel</button>
+                    <button class="download-btn secondary" id="download-b-btn" disabled>B Channel</button>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script type="module">
-        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm, colorspace_aware_dither_with_mode_wasm, colorspace_aware_dither_gray_with_mode_wasm } from './wasm_cra/cra_wasm.js';
+        import init, {
+            dither_with_mode_wasm,
+            colorspace_aware_dither_wasm,
+            colorspace_aware_dither_with_mode_wasm,
+            colorspace_aware_dither_gray_with_mode_wasm,
+            // Binary encoding functions
+            format_supports_binary_wasm,
+            format_total_bits_wasm,
+            encode_rgb_packed_wasm,
+            encode_rgb_row_aligned_wasm,
+            encode_gray_packed_wasm,
+            encode_gray_row_aligned_wasm,
+            encode_channel_packed_wasm
+        } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
         function getSeeds() {
@@ -693,6 +787,9 @@
         let originalHeight = 0;
         let aspectRatio = 1;
         let updatingSize = false; // Prevent recursive updates
+
+        // Store last dithered result for binary downloads
+        let lastDitherResult = null;
 
         // Initialize WASM
         async function initWasm() {
@@ -984,6 +1081,50 @@
                 document.getElementById('compare-output').src = outputUrl;
                 document.getElementById('download-btn').href = outputUrl;
 
+                // Store dither result for binary downloads
+                lastDitherResult = {
+                    width: processWidth,
+                    height: processHeight,
+                    isGrayscale,
+                    bitsR: isGrayscale ? parseInt(document.getElementById('bits-gray').value) : parseInt(document.getElementById('bits-r').value),
+                    bitsG: isGrayscale ? 0 : parseInt(document.getElementById('bits-g').value),
+                    bitsB: isGrayscale ? 0 : parseInt(document.getElementById('bits-b').value),
+                    mode: mode,
+                    perceptualSpace: document.getElementById('perceptual-toggle').checked ?
+                        parseInt(document.getElementById('perceptual-space').value) : null,
+                    seed: parseInt(document.getElementById('seed-input').value) || 0,
+                    // Store channel data
+                    rChannel: null,
+                    gChannel: null,
+                    bChannel: null,
+                    grayChannel: null
+                };
+
+                if (isGrayscale) {
+                    // Extract gray channel from output
+                    const grayData = new Uint8Array(pixelCount);
+                    for (let i = 0; i < pixelCount; i++) {
+                        grayData[i] = outputData[i * 4];
+                    }
+                    lastDitherResult.grayChannel = grayData;
+                } else {
+                    // Extract RGB channels from output
+                    const rData = new Uint8Array(pixelCount);
+                    const gData = new Uint8Array(pixelCount);
+                    const bData = new Uint8Array(pixelCount);
+                    for (let i = 0; i < pixelCount; i++) {
+                        rData[i] = outputData[i * 4];
+                        gData[i] = outputData[i * 4 + 1];
+                        bData[i] = outputData[i * 4 + 2];
+                    }
+                    lastDitherResult.rChannel = rData;
+                    lastDitherResult.gChannel = gData;
+                    lastDitherResult.bChannel = bData;
+                }
+
+                // Update download buttons
+                updateDownloadButtons();
+
                 outputSection.style.display = 'block';
             } catch (err) {
                 console.error('Processing error:', err);
@@ -992,6 +1133,94 @@
             } finally {
                 loading.classList.remove('active');
             }
+        }
+
+        // Get format string from current settings
+        function getFormatString() {
+            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            if (isGrayscale) {
+                const bits = parseInt(document.getElementById('bits-gray').value);
+                return `L${bits}`;
+            } else {
+                const bitsR = parseInt(document.getElementById('bits-r').value);
+                const bitsG = parseInt(document.getElementById('bits-g').value);
+                const bitsB = parseInt(document.getElementById('bits-b').value);
+                return `RGB${bitsR}${bitsG}${bitsB}`;
+            }
+        }
+
+        // Update download button states based on format
+        function updateDownloadButtons() {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            const totalBits = format_total_bits_wasm(format);
+            const supportsBinary = format_supports_binary_wasm(format);
+
+            // Update format info
+            const formatInfo = document.getElementById('format-info');
+            if (supportsBinary) {
+                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - binary download available`;
+            } else {
+                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - binary not supported (needs 1/2/4/8/16/24/32 bpp)`;
+            }
+
+            // Enable/disable binary download buttons
+            document.getElementById('download-bin-btn').disabled = !supportsBinary;
+            document.getElementById('download-bin-r-btn').disabled = !supportsBinary;
+
+            // Per-channel downloads
+            const channelDownloads = document.getElementById('channel-downloads');
+            if (lastDitherResult.isGrayscale) {
+                channelDownloads.style.display = 'none';
+            } else {
+                channelDownloads.style.display = 'block';
+                // Enable channel buttons based on individual bit depths
+                const rBits = lastDitherResult.bitsR;
+                const gBits = lastDitherResult.bitsG;
+                const bBits = lastDitherResult.bitsB;
+                document.getElementById('download-r-btn').disabled = ![1,2,4,8].includes(rBits);
+                document.getElementById('download-g-btn').disabled = ![1,2,4,8].includes(gBits);
+                document.getElementById('download-b-btn').disabled = ![1,2,4,8].includes(bBits);
+            }
+        }
+
+        // Download helper function
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Generate metadata JSON
+        function generateMetadata() {
+            if (!lastDitherResult) return null;
+
+            const format = getFormatString();
+            const modeNames = ['fs-standard', 'fs-serpentine', 'jjn-standard', 'jjn-serpentine',
+                               'mixed-standard', 'mixed-serpentine', 'mixed-random'];
+            const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
+
+            return {
+                format: format,
+                width: lastDitherResult.width,
+                height: lastDitherResult.height,
+                is_grayscale: lastDitherResult.isGrayscale,
+                bits_per_pixel: format_total_bits_wasm(format),
+                bits_r: lastDitherResult.bitsR,
+                bits_g: lastDitherResult.bitsG,
+                bits_b: lastDitherResult.bitsB,
+                dither_method: modeNames[lastDitherResult.mode] || 'unknown',
+                colorspace: lastDitherResult.perceptualSpace !== null ?
+                    spaceNames[lastDitherResult.perceptualSpace] || 'unknown' : 'none',
+                seed: lastDitherResult.seed,
+                generated_at: new Date().toISOString()
+            };
         }
 
         // Event handlers
@@ -1128,6 +1357,119 @@
                 input.files = dt.files;
                 input.dispatchEvent(new Event('change'));
             }
+        });
+
+        // Binary download handlers
+        document.getElementById('download-bin-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            let binaryData;
+
+            if (lastDitherResult.isGrayscale) {
+                binaryData = encode_gray_packed_wasm(
+                    lastDitherResult.grayChannel,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR
+                );
+            } else {
+                binaryData = encode_rgb_packed_wasm(
+                    lastDitherResult.rChannel,
+                    lastDitherResult.gChannel,
+                    lastDitherResult.bChannel,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR,
+                    lastDitherResult.bitsG,
+                    lastDitherResult.bitsB
+                );
+            }
+
+            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_${format}.bin`);
+        });
+
+        document.getElementById('download-bin-r-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            let binaryData;
+
+            if (lastDitherResult.isGrayscale) {
+                binaryData = encode_gray_row_aligned_wasm(
+                    lastDitherResult.grayChannel,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR
+                );
+            } else {
+                binaryData = encode_rgb_row_aligned_wasm(
+                    lastDitherResult.rChannel,
+                    lastDitherResult.gChannel,
+                    lastDitherResult.bChannel,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR,
+                    lastDitherResult.bitsG,
+                    lastDitherResult.bitsB
+                );
+            }
+
+            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_${format}_row.bin`);
+        });
+
+        document.getElementById('download-meta-btn').addEventListener('click', () => {
+            const metadata = generateMetadata();
+            if (!metadata) return;
+
+            const json = JSON.stringify(metadata, null, 2);
+            const blob = new Blob([json], { type: 'application/json' });
+            downloadBlob(blob, 'dither_metadata.json');
+        });
+
+        // Per-channel download handlers
+        document.getElementById('download-r-btn').addEventListener('click', () => {
+            if (!lastDitherResult || !lastDitherResult.rChannel) return;
+
+            const binaryData = encode_channel_packed_wasm(
+                lastDitherResult.rChannel,
+                lastDitherResult.width,
+                lastDitherResult.height,
+                lastDitherResult.bitsR
+            );
+
+            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_R${lastDitherResult.bitsR}.bin`);
+        });
+
+        document.getElementById('download-g-btn').addEventListener('click', () => {
+            if (!lastDitherResult || !lastDitherResult.gChannel) return;
+
+            const binaryData = encode_channel_packed_wasm(
+                lastDitherResult.gChannel,
+                lastDitherResult.width,
+                lastDitherResult.height,
+                lastDitherResult.bitsG
+            );
+
+            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_G${lastDitherResult.bitsG}.bin`);
+        });
+
+        document.getElementById('download-b-btn').addEventListener('click', () => {
+            if (!lastDitherResult || !lastDitherResult.bChannel) return;
+
+            const binaryData = encode_channel_packed_wasm(
+                lastDitherResult.bChannel,
+                lastDitherResult.width,
+                lastDitherResult.height,
+                lastDitherResult.bitsB
+            );
+
+            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_B${lastDitherResult.bitsB}.bin`);
         });
 
         // Initialize

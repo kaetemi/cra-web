@@ -8,6 +8,7 @@ use wasm_bindgen::prelude::*;
 mod basic_lab;
 mod basic_oklab;
 mod basic_rgb;
+pub mod binary_format;
 mod color;
 mod color_distance;
 pub mod colorspace_derived;
@@ -708,6 +709,137 @@ pub fn color_correct_tiled_oklab(
         dither_mode_from_u8(histogram_dither_mode),
         dither_mode_from_u8(output_dither_mode),
     )
+}
+
+// ============================================================================
+// Binary Format Encoding (WASM exports)
+// ============================================================================
+
+/// Check if a format string is valid (WASM export)
+/// Accepts formats like "RGB565", "RGB332", "L4", "L8", etc.
+#[wasm_bindgen]
+pub fn is_valid_format_wasm(format: &str) -> bool {
+    binary_format::is_valid_format(format)
+}
+
+/// Check if a format supports binary output (WASM export)
+/// Binary output requires 1, 2, 4, 8, 16, 24, or 32 bits per pixel
+#[wasm_bindgen]
+pub fn format_supports_binary_wasm(format: &str) -> bool {
+    binary_format::format_supports_binary(format)
+}
+
+/// Get total bits per pixel for a format (WASM export)
+/// Returns 0 if format is invalid
+#[wasm_bindgen]
+pub fn format_total_bits_wasm(format: &str) -> u8 {
+    binary_format::format_total_bits(format).unwrap_or(0)
+}
+
+/// Check if format is grayscale (WASM export)
+#[wasm_bindgen]
+pub fn format_is_grayscale_wasm(format: &str) -> bool {
+    binary_format::format_is_grayscale(format)
+}
+
+/// Encode RGB data to packed binary format (WASM export)
+///
+/// Takes separate R, G, B channels (uint8 arrays) and encodes to packed binary.
+/// Output is little-endian for multi-byte formats.
+///
+/// Args:
+///     r_data, g_data, b_data: Separate channel data as uint8 arrays
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b: Bits per channel
+///
+/// Returns:
+///     Packed binary data as uint8 array
+#[wasm_bindgen]
+pub fn encode_rgb_packed_wasm(
+    r_data: Vec<u8>,
+    g_data: Vec<u8>,
+    b_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+) -> Vec<u8> {
+    binary_format::encode_rgb_packed(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b)
+}
+
+/// Encode RGB data to row-aligned binary format (WASM export)
+///
+/// Each row is padded to a byte boundary.
+/// Output is little-endian for multi-byte formats.
+#[wasm_bindgen]
+pub fn encode_rgb_row_aligned_wasm(
+    r_data: Vec<u8>,
+    g_data: Vec<u8>,
+    b_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+) -> Vec<u8> {
+    binary_format::encode_rgb_row_aligned(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b)
+}
+
+/// Encode grayscale data to packed binary format (WASM export)
+///
+/// Args:
+///     gray_data: Grayscale data as uint8 array
+///     width, height: Image dimensions
+///     bits: Bits per pixel (1-8)
+///
+/// Returns:
+///     Packed binary data as uint8 array
+#[wasm_bindgen]
+pub fn encode_gray_packed_wasm(
+    gray_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+) -> Vec<u8> {
+    binary_format::encode_gray_packed(&gray_data, width, height, bits)
+}
+
+/// Encode grayscale data to row-aligned binary format (WASM export)
+///
+/// Each row is padded to a byte boundary.
+#[wasm_bindgen]
+pub fn encode_gray_row_aligned_wasm(
+    gray_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+) -> Vec<u8> {
+    binary_format::encode_gray_row_aligned(&gray_data, width, height, bits)
+}
+
+/// Encode a single channel to packed binary format (WASM export)
+///
+/// Useful for per-channel binary output (e.g., R channel only at 5 bits)
+#[wasm_bindgen]
+pub fn encode_channel_packed_wasm(
+    channel_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+) -> Vec<u8> {
+    binary_format::encode_channel_packed(&channel_data, width, height, bits)
+}
+
+/// Encode a single channel to row-aligned binary format (WASM export)
+#[wasm_bindgen]
+pub fn encode_channel_row_aligned_wasm(
+    channel_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+) -> Vec<u8> {
+    binary_format::encode_channel_row_aligned(&channel_data, width, height, bits)
 }
 
 #[cfg(test)]
