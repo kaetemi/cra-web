@@ -723,10 +723,18 @@ pub fn is_valid_format_wasm(format: &str) -> bool {
 }
 
 /// Check if a format supports binary output (WASM export)
-/// Binary output requires 1, 2, 4, 8, 16, 24, or 32 bits per pixel
+/// Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel
 #[wasm_bindgen]
 pub fn format_supports_binary_wasm(format: &str) -> bool {
     binary_format::format_supports_binary(format)
+}
+
+/// Check if a format is RGB666 (special 4-pixels-to-9-bytes packing) (WASM export)
+#[wasm_bindgen]
+pub fn format_is_rgb666_wasm(format: &str) -> bool {
+    binary_format::ColorFormat::parse(format)
+        .map(|f| f.is_rgb666())
+        .unwrap_or(false)
 }
 
 /// Get total bits per pixel for a format (WASM export)

@@ -9,7 +9,6 @@
 //! - Packed binary output (continuous bit stream)
 //! - Row-aligned binary output (each row padded to byte boundary)
 
-use crate::dither_common::bit_replicate;
 
 /// Parsed color format with bit depths per channel
 #[derive(Debug, Clone)]
@@ -128,10 +127,16 @@ impl ColorFormat {
     }
 
     /// Check if this format can be represented in a standard binary output
-    /// Binary output is supported for formats that fit within power-of-2 sizes
+    /// Binary output is supported for formats that fit within power-of-2 sizes,
+    /// plus special support for 18-bit RGB666 (4 pixels packed into 9 bytes)
     pub fn supports_binary(&self) -> bool {
-        // Supported: formats where total bits is 1, 2, 4, 8, 16, 24, or 32
-        matches!(self.total_bits, 1 | 2 | 4 | 8 | 16 | 24 | 32)
+        // Supported: formats where total bits is 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32
+        matches!(self.total_bits, 1 | 2 | 4 | 8 | 16 | 18 | 24 | 32)
+    }
+
+    /// Check if this format uses the special RGB666 packing (4 pixels -> 9 bytes)
+    pub fn is_rgb666(&self) -> bool {
+        !self.is_grayscale && self.bits_r == 6 && self.bits_g == 6 && self.bits_b == 6
     }
 
     /// Get the number of bytes per pixel for binary output (rounded up)
@@ -178,6 +183,105 @@ pub fn encode_channel_pixel(value: u8, bits: u8) -> u32 {
     (value >> (8 - bits)) as u32
 }
 
+/// Encode RGB666 data using 4-pixel-to-9-byte packing
+///
+/// This matches the reference implementation where 4 pixels (4 × 18 = 72 bits)
+/// are packed into 9 bytes as a continuous bit stream.
+///
+/// Each pixel is encoded as R6 G6 B6 (R in MSB, B in LSB = 18 bits)
+/// The 4 pixels are packed sequentially into the 72-bit block.
+pub fn encode_rgb666_packed(
+    r_data: &[u8],
+    g_data: &[u8],
+    b_data: &[u8],
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    let total_pixels = width * height;
+    // Calculate output size: each group of 4 pixels -> 9 bytes
+    // Round up to handle partial groups at end of image
+    let num_groups = (total_pixels + 3) / 4;
+    let mut output = Vec::with_capacity(num_groups * 9);
+
+    let mut pixel_idx = 0;
+    while pixel_idx < total_pixels {
+        // Process 4 pixels at a time into a 9-byte block
+        let mut block = [0u8; 9];
+
+        for i in 0..4 {
+            if pixel_idx + i >= total_pixels {
+                break; // Handle partial final group
+            }
+
+            let idx = pixel_idx + i;
+            let r = (r_data[idx] >> 2) as u32; // 6 bits
+            let g = (g_data[idx] >> 2) as u32; // 6 bits
+            let b = (b_data[idx] >> 2) as u32; // 6 bits
+
+            // Pack as B6 | G6<<6 | R6<<12 = 18 bits total
+            let first_byte = i * 2;
+            let bit_offset = i * 2; // 0, 2, 4, 6
+            let rgb6: u32 = (b | (g << 6) | (r << 12)) << bit_offset;
+
+            block[first_byte] |= (rgb6 & 0xFF) as u8;
+            block[first_byte + 1] = ((rgb6 >> 8) & 0xFF) as u8;
+            block[first_byte + 2] |= ((rgb6 >> 16) & 0xFF) as u8;
+        }
+
+        output.extend_from_slice(&block);
+        pixel_idx += 4;
+    }
+
+    output
+}
+
+/// Encode RGB666 data with row alignment (each row padded to 9-byte boundary for 4-pixel groups)
+pub fn encode_rgb666_row_aligned(
+    r_data: &[u8],
+    g_data: &[u8],
+    b_data: &[u8],
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    // Each row: groups of 4 pixels -> 9 bytes, padded
+    let groups_per_row = (width + 3) / 4;
+    let bytes_per_row = groups_per_row * 9;
+    let mut output = Vec::with_capacity(bytes_per_row * height);
+
+    for y in 0..height {
+        let row_start = y * width;
+        let mut x = 0;
+
+        while x < width {
+            let mut block = [0u8; 9];
+
+            for i in 0..4 {
+                if x + i >= width {
+                    break; // Handle partial final group in row
+                }
+
+                let idx = row_start + x + i;
+                let r = (r_data[idx] >> 2) as u32;
+                let g = (g_data[idx] >> 2) as u32;
+                let b = (b_data[idx] >> 2) as u32;
+
+                let first_byte = i * 2;
+                let bit_offset = i * 2;
+                let rgb6: u32 = (b | (g << 6) | (r << 12)) << bit_offset;
+
+                block[first_byte] |= (rgb6 & 0xFF) as u8;
+                block[first_byte + 1] = ((rgb6 >> 8) & 0xFF) as u8;
+                block[first_byte + 2] |= ((rgb6 >> 16) & 0xFF) as u8;
+            }
+
+            output.extend_from_slice(&block);
+            x += 4;
+        }
+    }
+
+    output
+}
+
 /// Write packed binary output for RGB data (continuous bit stream, no row padding)
 pub fn encode_rgb_packed(
     r_data: &[u8],
@@ -189,6 +293,11 @@ pub fn encode_rgb_packed(
     bits_g: u8,
     bits_b: u8,
 ) -> Vec<u8> {
+    // Special case: RGB666 uses 4-pixel-to-9-byte packing
+    if bits_r == 6 && bits_g == 6 && bits_b == 6 {
+        return encode_rgb666_packed(r_data, g_data, b_data, width, height);
+    }
+
     let total_bits = (bits_r + bits_g + bits_b) as usize;
     let total_pixels = width * height;
     let mut output = Vec::new();
@@ -249,6 +358,11 @@ pub fn encode_rgb_row_aligned(
     bits_g: u8,
     bits_b: u8,
 ) -> Vec<u8> {
+    // Special case: RGB666 uses 4-pixel-to-9-byte packing
+    if bits_r == 6 && bits_g == 6 && bits_b == 6 {
+        return encode_rgb666_row_aligned(r_data, g_data, b_data, width, height);
+    }
+
     let total_bits = (bits_r + bits_g + bits_b) as usize;
 
     if total_bits >= 8 {
@@ -485,5 +599,54 @@ mod tests {
         // L1: 0 -> 0
         let val = encode_gray_pixel(0, 1);
         assert_eq!(val, 0);
+    }
+
+    #[test]
+    fn test_rgb666_format() {
+        let rgb666 = ColorFormat::parse("RGB666").unwrap();
+        assert_eq!(rgb666.bits_r, 6);
+        assert_eq!(rgb666.bits_g, 6);
+        assert_eq!(rgb666.bits_b, 6);
+        assert_eq!(rgb666.total_bits, 18);
+        assert!(!rgb666.is_grayscale);
+        assert!(rgb666.supports_binary()); // 18-bit is special case
+        assert!(rgb666.is_rgb666());
+    }
+
+    #[test]
+    fn test_rgb666_packing() {
+        // Test RGB666 packing with 4 pixels -> 9 bytes
+        // Create simple test data: 4 pixels (minimum for one complete block)
+        let r = vec![255, 0, 128, 64];
+        let g = vec![0, 255, 128, 192];
+        let b = vec![128, 64, 255, 0];
+
+        let packed = encode_rgb666_packed(&r, &g, &b, 4, 1);
+        assert_eq!(packed.len(), 9); // 4 pixels -> 9 bytes
+
+        // Test encode_rgb_packed automatically routes to RGB666
+        let packed2 = encode_rgb_packed(&r, &g, &b, 4, 1, 6, 6, 6);
+        assert_eq!(packed2.len(), 9);
+        assert_eq!(packed, packed2);
+    }
+
+    #[test]
+    fn test_rgb666_size_calculation() {
+        // Test various image sizes for correct byte counts
+        // Formula: ceil(pixels / 4) * 9
+
+        // 64x64 = 4096 pixels -> 1024 groups -> 9216 bytes
+        let r = vec![128u8; 4096];
+        let g = vec![128u8; 4096];
+        let b = vec![128u8; 4096];
+        let packed = encode_rgb666_packed(&r, &g, &b, 64, 64);
+        assert_eq!(packed.len(), 9216);
+
+        // 5 pixels -> 2 groups (1 full, 1 partial) -> 18 bytes
+        let r5 = vec![128u8; 5];
+        let g5 = vec![128u8; 5];
+        let b5 = vec![128u8; 5];
+        let packed5 = encode_rgb666_packed(&r5, &g5, &b5, 5, 1);
+        assert_eq!(packed5.len(), 18); // ceil(5/4) * 9 = 2 * 9 = 18
     }
 }
