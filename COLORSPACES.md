@@ -410,3 +410,31 @@ CIE XYZ (empirical root)
 | Apple RGB | XYZ | Primaries, white point, γ=1.8 | XYZ matrices |
 | CIELAB | XYZ | Transform equations, reference white | — |
 | OKLab | Linear RGB | All matrices, cube root | — |
+
+---
+
+## Appendix: Bradford Chromatic Adaptation
+
+When converting between color spaces with different white points (e.g., ProPhoto RGB at D50 to sRGB at D65), a chromatic adaptation transform is required. The Bradford transform is the industry standard, used by ICC color profiles.
+
+**Bradford matrix (XYZ → LMS):**
+
+```
+| L |   |  0.8951   0.2664  -0.1614 |   | X |
+| M | = | -0.7502   1.7135   0.0367 | × | Y |
+| S |   |  0.0389  -0.0685   1.0296 |   | Z |
+```
+
+From Lam (1985) and Hunt (1994). This transforms XYZ to a "sharpened" cone-like response space optimized for chromatic adaptation.
+
+**Adaptation formula:**
+
+To adapt from source white point (Ws) to destination white point (Wd):
+
+```
+M_adapt = BRADFORD⁻¹ × diag(LMS_Wd / LMS_Ws) × BRADFORD
+```
+
+Where `LMS_W = BRADFORD × XYZ_W` for each white point.
+
+The resulting 3×3 matrix transforms XYZ coordinates directly from one illuminant to another. This can be precomposed with RGB↔XYZ matrices to create direct RGB-to-RGB conversions between spaces with different white points.
