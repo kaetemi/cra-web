@@ -23,13 +23,14 @@ mod primary {
         pub const Y: f64 = 0.3585;
     }
 
-    pub mod srgb_primaries {
-        pub const RED_X: f64 = 0.6400;
-        pub const RED_Y: f64 = 0.3300;
-        pub const GREEN_X: f64 = 0.3000;
-        pub const GREEN_Y: f64 = 0.6000;
-        pub const BLUE_X: f64 = 0.1500;
-        pub const BLUE_Y: f64 = 0.0600;
+    /// sRGB XYZ matrix - these 4-digit values are canonical per IEC 61966-2-1.
+    /// Chromaticities are derived from these, not vice versa.
+    pub mod srgb_xyz {
+        pub const TO_XYZ: [[f64; 3]; 3] = [
+            [0.4124, 0.3576, 0.1805],
+            [0.2126, 0.7152, 0.0722],
+            [0.0193, 0.1192, 0.9505],
+        ];
     }
 
     pub mod apple_rgb_primaries {
@@ -145,6 +146,18 @@ fn xy_to_xyz(x: f64, y: f64) -> [f64; 3] {
     [x / y, 1.0, (1.0 - x - y) / y]
 }
 
+/// Derive xy chromaticity from XYZ values.
+/// x = X/(X+Y+Z), y = Y/(X+Y+Z)
+fn xyz_to_xy(xyz: [f64; 3]) -> (f64, f64) {
+    let sum = xyz[0] + xyz[1] + xyz[2];
+    (xyz[0] / sum, xyz[1] / sum)
+}
+
+/// Extract column from a 3x3 matrix (for getting primary XYZ from RGB→XYZ matrix).
+fn matrix_column(m: &Mat3, col: usize) -> [f64; 3] {
+    [m[0][col], m[1][col], m[2][col]]
+}
+
 /// 3x3 matrix type for convenience
 type Mat3 = [[f64; 3]; 3];
 
@@ -257,9 +270,20 @@ fn compute_ycbcr_matrices(kr: f64, kg: f64, kb: f64) -> (Mat3, Mat3) {
     (forward_simplified, inverse)
 }
 
-/// Format a floating point number with maximum precision.
+/// Format a floating point number intelligently.
+/// If the value is very close to a short decimal, use that clean representation.
+/// Otherwise use full precision for derived values.
 fn fmt_f64(v: f64) -> String {
-    // Use enough precision to represent the value exactly in f64
+    // Try progressively shorter decimal representations
+    for precision in 1..=10 {
+        let formatted = format!("{:.prec$}", v, prec = precision);
+        let parsed: f64 = formatted.parse().unwrap();
+        // If parsing the short representation gives us back the same value, use it
+        if parsed == v {
+            return formatted;
+        }
+    }
+    // Fall back to full precision for truly derived values
     format!("{:.17}", v)
 }
 
@@ -281,14 +305,14 @@ fn main() -> io::Result<()> {
     let d65_xyz = xy_to_xyz(primary::d65::X, primary::d65::Y);
     let d50_xyz = xy_to_xyz(primary::d50::X, primary::d50::Y);
 
-    // sRGB / Rec.709 matrices
-    let srgb_to_xyz = compute_rgb_to_xyz_matrix(
-        (primary::srgb_primaries::RED_X, primary::srgb_primaries::RED_Y),
-        (primary::srgb_primaries::GREEN_X, primary::srgb_primaries::GREEN_Y),
-        (primary::srgb_primaries::BLUE_X, primary::srgb_primaries::BLUE_Y),
-        (primary::d65::X, primary::d65::Y),
-    );
+    // sRGB / Rec.709 matrices - use canonical 4-digit XYZ matrix directly
+    let srgb_to_xyz = primary::srgb_xyz::TO_XYZ;
     let xyz_to_srgb = invert_3x3(srgb_to_xyz);
+
+    // Derive sRGB chromaticities from XYZ matrix columns
+    let srgb_red_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 0));
+    let srgb_green_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 1));
+    let srgb_blue_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 2));
 
     // Apple RGB matrices
     let apple_to_xyz = compute_rgb_to_xyz_matrix(
@@ -396,11 +420,23 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "/// Linear sRGB → XYZ matrix.")?;
+    writeln!(out, "/// These 4-digit coefficients are canonical per IEC 61966-2-1.")?;
     writeln!(out, "/// Row-major: result[row] = dot(matrix[row], rgb)")?;
     writeln!(out, "pub const SRGB_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_xyz, ""))?;
     writeln!(out)?;
-    writeln!(out, "/// XYZ → Linear sRGB matrix.")?;
+    writeln!(out, "/// XYZ → Linear sRGB matrix (derived inverse).")?;
     writeln!(out, "pub const XYZ_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// sRGB chromaticities derived from XYZ matrix columns.")?;
+    writeln!(out, "/// x = X/(X+Y+Z), y = Y/(X+Y+Z) for each primary.")?;
+    writeln!(out, "pub mod srgb_chromaticity {{")?;
+    writeln!(out, "    pub const RED_X: f64 = {};", fmt_f64(srgb_red_xy.0))?;
+    writeln!(out, "    pub const RED_Y: f64 = {};", fmt_f64(srgb_red_xy.1))?;
+    writeln!(out, "    pub const GREEN_X: f64 = {};", fmt_f64(srgb_green_xy.0))?;
+    writeln!(out, "    pub const GREEN_Y: f64 = {};", fmt_f64(srgb_green_xy.1))?;
+    writeln!(out, "    pub const BLUE_X: f64 = {};", fmt_f64(srgb_blue_xy.0))?;
+    writeln!(out, "    pub const BLUE_Y: f64 = {};", fmt_f64(srgb_blue_xy.1))?;
+    writeln!(out, "}}")?;
     writeln!(out)?;
 
     // Apple RGB matrices
@@ -586,6 +622,14 @@ fn main() -> io::Result<()> {
 
     write_matrix_f32(&mut out, "SRGB_TO_XYZ", &srgb_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_SRGB", &xyz_to_srgb)?;
+    writeln!(out)?;
+    writeln!(out, "    /// sRGB chromaticities (derived from XYZ matrix)")?;
+    writeln!(out, "    pub const SRGB_RED_XY: [f32; 2] = [{} as f32, {} as f32];",
+        fmt_f64(srgb_red_xy.0), fmt_f64(srgb_red_xy.1))?;
+    writeln!(out, "    pub const SRGB_GREEN_XY: [f32; 2] = [{} as f32, {} as f32];",
+        fmt_f64(srgb_green_xy.0), fmt_f64(srgb_green_xy.1))?;
+    writeln!(out, "    pub const SRGB_BLUE_XY: [f32; 2] = [{} as f32, {} as f32];",
+        fmt_f64(srgb_blue_xy.0), fmt_f64(srgb_blue_xy.1))?;
     writeln!(out)?;
     write_matrix_f32(&mut out, "APPLE_RGB_TO_XYZ", &apple_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_APPLE_RGB", &xyz_to_apple)?;
@@ -801,13 +845,15 @@ fn main() -> io::Result<()> {
     writeln!(out)?;
     writeln!(out, "    #[test]")?;
     writeln!(out, "    fn test_white_point_maps_to_white() {{")?;
-    writeln!(out, "        // RGB (1,1,1) should map to the white point XYZ")?;
+    writeln!(out, "        // RGB (1,1,1) should map approximately to D65 white point XYZ.")?;
+    writeln!(out, "        // Tolerance is 1e-3 because the 4-digit canonical sRGB matrix")?;
+    writeln!(out, "        // is not perfectly consistent with D65 chromaticity.")?;
     writeln!(out, "        let x = SRGB_TO_XYZ[0][0] + SRGB_TO_XYZ[0][1] + SRGB_TO_XYZ[0][2];")?;
     writeln!(out, "        let y = SRGB_TO_XYZ[1][0] + SRGB_TO_XYZ[1][1] + SRGB_TO_XYZ[1][2];")?;
     writeln!(out, "        let z = SRGB_TO_XYZ[2][0] + SRGB_TO_XYZ[2][1] + SRGB_TO_XYZ[2][2];")?;
-    writeln!(out, "        assert!((x - d65_xyz::X).abs() < 1e-10);")?;
-    writeln!(out, "        assert!((y - d65_xyz::Y).abs() < 1e-10);")?;
-    writeln!(out, "        assert!((z - d65_xyz::Z).abs() < 1e-10);")?;
+    writeln!(out, "        assert!((x - d65_xyz::X).abs() < 1e-3, \"X: {{}} vs {{}}\", x, d65_xyz::X);")?;
+    writeln!(out, "        assert!((y - d65_xyz::Y).abs() < 1e-3, \"Y: {{}} vs {{}}\", y, d65_xyz::Y);")?;
+    writeln!(out, "        assert!((z - d65_xyz::Z).abs() < 1e-3, \"Z: {{}} vs {{}}\", z, d65_xyz::Z);")?;
     writeln!(out, "    }}")?;
     writeln!(out, "}}")?;
 

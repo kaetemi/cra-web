@@ -34,20 +34,26 @@ pub mod d50 {
 }
 
 // =============================================================================
-// COLOR SPACE PRIMARIES (CIE xy chromaticity)
+// sRGB / LINEAR RGB (XYZ matrix definition)
 // =============================================================================
 
-/// sRGB / Rec.709 primaries.
-/// From ITU-R BT.709-6 and IEC 61966-2-1.
+/// sRGB / Rec.709 XYZ conversion matrix.
+/// From IEC 61966-2-1:1999 - these 4-digit coefficients are canonical.
+/// The chromaticities are derived from these, not vice versa.
 /// White point: D65
-pub mod srgb_primaries {
-    pub const RED_X: f64 = 0.6400;
-    pub const RED_Y: f64 = 0.3300;
-    pub const GREEN_X: f64 = 0.3000;
-    pub const GREEN_Y: f64 = 0.6000;
-    pub const BLUE_X: f64 = 0.1500;
-    pub const BLUE_Y: f64 = 0.0600;
+pub mod srgb_xyz {
+    /// Linear sRGB → XYZ matrix (row-major).
+    /// These are the exact values from the specification.
+    pub const TO_XYZ: [[f64; 3]; 3] = [
+        [0.4124, 0.3576, 0.1805],
+        [0.2126, 0.7152, 0.0722],
+        [0.0193, 0.1192, 0.9505],
+    ];
 }
+
+// =============================================================================
+// COLOR SPACE PRIMARIES (CIE xy chromaticity)
+// =============================================================================
 
 /// Apple RGB primaries.
 /// From classic Macintosh CRT phosphor specifications.
@@ -294,12 +300,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_srgb_primaries_sum_to_white() {
-        // For any valid primaries, the white point should be achievable
-        // by some combination of R, G, B = 1.0 each
-        // This is a sanity check that primaries are reasonable
-        assert!(srgb_primaries::RED_X > 0.0 && srgb_primaries::RED_X < 1.0);
-        assert!(srgb_primaries::RED_Y > 0.0 && srgb_primaries::RED_Y < 1.0);
+    fn test_srgb_xyz_matrix_valid() {
+        // Sanity check that the sRGB XYZ matrix has reasonable values
+        // All elements should be positive or small negative (for inverse)
+        for row in &srgb_xyz::TO_XYZ {
+            for &val in row {
+                assert!(val >= 0.0 && val < 1.0, "Unexpected matrix value: {}", val);
+            }
+        }
+        // Row sums should approximately match D65 white point XYZ
+        let x_sum: f64 = srgb_xyz::TO_XYZ[0].iter().sum();
+        let y_sum: f64 = srgb_xyz::TO_XYZ[1].iter().sum();
+        let z_sum: f64 = srgb_xyz::TO_XYZ[2].iter().sum();
+        // Y should be 1.0 (luminance of white)
+        assert!((y_sum - 1.0).abs() < 0.001, "Y row sum: {}", y_sum);
+        // X and Z should be close to D65 white point
+        assert!((x_sum - 0.9505).abs() < 0.01, "X row sum: {}", x_sum);
+        assert!((z_sum - 1.089).abs() < 0.01, "Z row sum: {}", z_sum);
     }
 
     #[test]
