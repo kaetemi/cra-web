@@ -258,6 +258,26 @@ pub mod oklab {
 }
 
 // =============================================================================
+// BRADFORD CHROMATIC ADAPTATION
+// =============================================================================
+
+/// Bradford chromatic adaptation matrix.
+/// From Lam (1985) and Hunt (1994), widely adopted for ICC color management.
+/// Transforms XYZ to a "sharpened" cone-like response space for von Kries adaptation.
+///
+/// The adaptation from source white (Ws) to destination white (Wd) is:
+///   M_adapt = BRADFORD_INV × diag(LMS_Wd / LMS_Ws) × BRADFORD
+/// where LMS = BRADFORD × XYZ_white
+pub mod bradford {
+    /// Bradford matrix: XYZ → LMS (cone-like response)
+    pub const MATRIX: [[f64; 3]; 3] = [
+        [ 0.8951,  0.2664, -0.1614],
+        [-0.7502,  1.7135,  0.0367],
+        [ 0.0389, -0.0685,  1.0296],
+    ];
+}
+
+// =============================================================================
 // Y'CbCr CONSTANTS (BT.709)
 // =============================================================================
 

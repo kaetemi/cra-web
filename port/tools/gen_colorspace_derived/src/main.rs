@@ -142,6 +142,16 @@ mod primary {
             [1.0000000000, -0.0894841775, -1.2914855480],
         ];
     }
+
+    pub mod bradford {
+        /// Bradford matrix: XYZ → LMS (cone-like response)
+        /// From Lam (1985) and Hunt (1994).
+        pub const MATRIX: [[f64; 3]; 3] = [
+            [ 0.8951,  0.2664, -0.1614],
+            [-0.7502,  1.7135,  0.0367],
+            [ 0.0389, -0.0685,  1.0296],
+        ];
+    }
 }
 
 // =============================================================================
@@ -216,6 +226,19 @@ fn compute_rgb_to_xyz_matrix(
     ]
 }
 
+/// Multiply two 3x3 matrices.
+fn mat_mul(a: Mat3, b: Mat3) -> Mat3 {
+    let mut r = [[0.0; 3]; 3];
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                r[i][j] += a[i][k] * b[k][j];
+            }
+        }
+    }
+    r
+}
+
 /// Invert a 3x3 matrix using cofactor expansion.
 fn invert_3x3(m: Mat3) -> Mat3 {
     let det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
@@ -241,6 +264,48 @@ fn invert_3x3(m: Mat3) -> Mat3 {
             (m[0][0] * m[1][1] - m[0][1] * m[1][0]) * inv_det,
         ],
     ]
+}
+
+/// Multiply a matrix by a vector.
+fn mat_vec_mul(m: Mat3, v: [f64; 3]) -> [f64; 3] {
+    [
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    ]
+}
+
+/// Compute Bradford chromatic adaptation matrix from source to destination white point.
+///
+/// The adaptation uses von Kries scaling in the Bradford cone-like space:
+///   M_adapt = BRADFORD_INV × diag(LMS_dest / LMS_src) × BRADFORD
+///
+/// Both white points should be in XYZ with Y=1.
+fn compute_chromatic_adaptation(src_xyz: [f64; 3], dst_xyz: [f64; 3]) -> Mat3 {
+    let bradford = primary::bradford::MATRIX;
+    let bradford_inv = invert_3x3(bradford);
+
+    // Convert white points to LMS
+    let src_lms = mat_vec_mul(bradford, src_xyz);
+    let dst_lms = mat_vec_mul(bradford, dst_xyz);
+
+    // Compute diagonal scaling matrix (as ratios)
+    let scale = [
+        dst_lms[0] / src_lms[0],
+        dst_lms[1] / src_lms[1],
+        dst_lms[2] / src_lms[2],
+    ];
+
+    // Build diagonal matrix
+    let diag: Mat3 = [
+        [scale[0], 0.0, 0.0],
+        [0.0, scale[1], 0.0],
+        [0.0, 0.0, scale[2]],
+    ];
+
+    // M_adapt = BRADFORD_INV × diag × BRADFORD
+    let temp = mat_mul(diag, bradford);
+    mat_mul(bradford_inv, temp)
 }
 
 /// Compute Y'CbCr matrices from luma coefficients.
@@ -378,6 +443,43 @@ fn main() -> io::Result<()> {
         (primary::d65::X, primary::d65::Y),
     );
     let xyz_to_rec2020 = invert_3x3(rec2020_to_xyz);
+
+    // Bradford chromatic adaptation matrices
+    // All adaptations target D65_SRGB as the canonical working white point
+    let bradford_inv = invert_3x3(primary::bradford::MATRIX);
+
+    // D50 ↔ D65_SRGB (for ProPhoto RGB)
+    let adapt_d50_to_d65_srgb = compute_chromatic_adaptation(d50_xyz, d65_srgb_xyz);
+    let adapt_d65_srgb_to_d50 = compute_chromatic_adaptation(d65_srgb_xyz, d50_xyz);
+
+    // D65 (4-digit) ↔ D65_SRGB (for spaces using spec D65)
+    let adapt_d65_to_d65_srgb = compute_chromatic_adaptation(d65_xyz, d65_srgb_xyz);
+    let adapt_d65_srgb_to_d65 = compute_chromatic_adaptation(d65_srgb_xyz, d65_xyz);
+
+    // Direct RGB ↔ sRGB matrices
+    // For D65 spaces: includes micro-adaptation from D65(4-digit) to D65_SRGB for exactness
+    // For D50 spaces: includes full Bradford adaptation
+
+    // Apple RGB ↔ sRGB (D65 4-digit → D65 sRGB)
+    // APPLE_TO_SRGB = XYZ_TO_SRGB × ADAPT_D65_TO_D65_SRGB × APPLE_TO_XYZ
+    let apple_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, apple_to_xyz));
+    let srgb_to_apple = mat_mul(xyz_to_apple, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+
+    // Display P3 ↔ sRGB (D65 4-digit → D65 sRGB)
+    let p3_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, p3_to_xyz));
+    let srgb_to_p3 = mat_mul(xyz_to_p3, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+
+    // Adobe RGB ↔ sRGB (D65 4-digit → D65 sRGB)
+    let adobe_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, adobe_to_xyz));
+    let srgb_to_adobe = mat_mul(xyz_to_adobe, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+
+    // Rec.2020 ↔ sRGB (D65 4-digit → D65 sRGB)
+    let rec2020_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, rec2020_to_xyz));
+    let srgb_to_rec2020 = mat_mul(xyz_to_rec2020, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+
+    // ProPhoto RGB ↔ sRGB (D50 → D65 sRGB, full Bradford adaptation)
+    let prophoto_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d50_to_d65_srgb, prophoto_to_xyz));
+    let srgb_to_prophoto = mat_mul(xyz_to_prophoto, mat_mul(adapt_d65_srgb_to_d50, srgb_to_xyz));
 
     // CIELAB derived constants
     let delta = primary::cielab::DELTA_NUMERATOR as f64 / primary::cielab::DELTA_DENOMINATOR as f64;
@@ -548,6 +650,76 @@ fn main() -> io::Result<()> {
     writeln!(out, "pub const XYZ_TO_REC2020: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_rec2020, ""))?;
     writeln!(out)?;
 
+    // Bradford chromatic adaptation matrices
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out, "// BRADFORD CHROMATIC ADAPTATION MATRICES")?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out)?;
+    writeln!(out, "// Derived from the Bradford matrix using von Kries adaptation.")?;
+    writeln!(out, "// All adaptations use D65_SRGB (from sRGB matrix) as the canonical working white.")?;
+    writeln!(out)?;
+    writeln!(out, "/// Bradford matrix: XYZ → LMS (cone-like response).")?;
+    writeln!(out, "/// Primary constant from Lam (1985) and Hunt (1994).")?;
+    writeln!(out, "pub const BRADFORD: [[f64; 3]; 3] = {};", fmt_matrix(primary::bradford::MATRIX, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Bradford inverse: LMS → XYZ.")?;
+    writeln!(out, "pub const BRADFORD_INV: [[f64; 3]; 3] = {};", fmt_matrix(bradford_inv, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Chromatic adaptation: D50 → D65_SRGB (for ProPhoto RGB).")?;
+    writeln!(out, "pub const ADAPT_D50_TO_D65_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d50_to_d65_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Chromatic adaptation: D65_SRGB → D50.")?;
+    writeln!(out, "pub const ADAPT_D65_SRGB_TO_D50: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_srgb_to_d50, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Chromatic adaptation: D65 (4-digit) → D65_SRGB.")?;
+    writeln!(out, "/// Corrects the micro white point difference between spec D65 and sRGB's implied D65.")?;
+    writeln!(out, "pub const ADAPT_D65_TO_D65_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_to_d65_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Chromatic adaptation: D65_SRGB → D65 (4-digit).")?;
+    writeln!(out, "pub const ADAPT_D65_SRGB_TO_D65: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_srgb_to_d65, ""))?;
+    writeln!(out)?;
+
+    // Direct RGB ↔ sRGB matrices
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out, "// DIRECT RGB ↔ sRGB MATRICES")?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out)?;
+    writeln!(out, "// These matrices convert directly between linear RGB spaces.")?;
+    writeln!(out, "// All include appropriate chromatic adaptation to D65_SRGB:")?;
+    writeln!(out, "// - D65 spaces: micro-adaptation from D65(4-digit) to D65_SRGB")?;
+    writeln!(out, "// - D50 spaces (ProPhoto): full Bradford adaptation")?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear Apple RGB → Linear sRGB matrix.")?;
+    writeln!(out, "pub const APPLE_RGB_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(apple_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear sRGB → Linear Apple RGB matrix.")?;
+    writeln!(out, "pub const SRGB_TO_APPLE_RGB: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_apple, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear Display P3 → Linear sRGB matrix.")?;
+    writeln!(out, "pub const DISPLAY_P3_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(p3_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear sRGB → Linear Display P3 matrix.")?;
+    writeln!(out, "pub const SRGB_TO_DISPLAY_P3: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_p3, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear Adobe RGB → Linear sRGB matrix.")?;
+    writeln!(out, "pub const ADOBE_RGB_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(adobe_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear sRGB → Linear Adobe RGB matrix.")?;
+    writeln!(out, "pub const SRGB_TO_ADOBE_RGB: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_adobe, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear Rec.2020 → Linear sRGB matrix.")?;
+    writeln!(out, "pub const REC2020_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(rec2020_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear sRGB → Linear Rec.2020 matrix.")?;
+    writeln!(out, "pub const SRGB_TO_REC2020: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_rec2020, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear ProPhoto RGB → Linear sRGB matrix (includes D50→D65 adaptation).")?;
+    writeln!(out, "pub const PROPHOTO_RGB_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(prophoto_to_srgb, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear sRGB → Linear ProPhoto RGB matrix (includes D65→D50 adaptation).")?;
+    writeln!(out, "pub const SRGB_TO_PROPHOTO_RGB: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_prophoto, ""))?;
+    writeln!(out)?;
+
     // CIELAB derived constants
     writeln!(out, "// =============================================================================")?;
     writeln!(out, "// CIELAB DERIVED CONSTANTS")?;
@@ -701,6 +873,42 @@ fn main() -> io::Result<()> {
     writeln!(out)?;
     write_matrix_f32(&mut out, "REC2020_TO_XYZ", &rec2020_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_REC2020", &xyz_to_rec2020)?;
+    writeln!(out)?;
+
+    // Chromatic adaptation matrices
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // CHROMATIC ADAPTATION MATRICES")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "BRADFORD", &primary::bradford::MATRIX)?;
+    write_matrix_f32(&mut out, "BRADFORD_INV", &bradford_inv)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "ADAPT_D50_TO_D65_SRGB", &adapt_d50_to_d65_srgb)?;
+    write_matrix_f32(&mut out, "ADAPT_D65_SRGB_TO_D50", &adapt_d65_srgb_to_d50)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "ADAPT_D65_TO_D65_SRGB", &adapt_d65_to_d65_srgb)?;
+    write_matrix_f32(&mut out, "ADAPT_D65_SRGB_TO_D65", &adapt_d65_srgb_to_d65)?;
+    writeln!(out)?;
+
+    // Direct RGB ↔ sRGB matrices
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // DIRECT RGB <-> sRGB MATRICES")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "APPLE_RGB_TO_SRGB", &apple_to_srgb)?;
+    write_matrix_f32(&mut out, "SRGB_TO_APPLE_RGB", &srgb_to_apple)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "DISPLAY_P3_TO_SRGB", &p3_to_srgb)?;
+    write_matrix_f32(&mut out, "SRGB_TO_DISPLAY_P3", &srgb_to_p3)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "ADOBE_RGB_TO_SRGB", &adobe_to_srgb)?;
+    write_matrix_f32(&mut out, "SRGB_TO_ADOBE_RGB", &srgb_to_adobe)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "REC2020_TO_SRGB", &rec2020_to_srgb)?;
+    write_matrix_f32(&mut out, "SRGB_TO_REC2020", &srgb_to_rec2020)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "PROPHOTO_RGB_TO_SRGB", &prophoto_to_srgb)?;
+    write_matrix_f32(&mut out, "SRGB_TO_PROPHOTO_RGB", &srgb_to_prophoto)?;
     writeln!(out)?;
 
     // Transfer function constants
@@ -909,6 +1117,54 @@ fn main() -> io::Result<()> {
     writeln!(out, "        assert!((x - d65_srgb::XYZ_X).abs() < 1e-14, \"X: {{}} vs {{}}\", x, d65_srgb::XYZ_X);")?;
     writeln!(out, "        assert!((y - d65_srgb::XYZ_Y).abs() < 1e-14, \"Y: {{}} vs {{}}\", y, d65_srgb::XYZ_Y);")?;
     writeln!(out, "        assert!((z - d65_srgb::XYZ_Z).abs() < 1e-14, \"Z: {{}} vs {{}}\", z, d65_srgb::XYZ_Z);")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_apple_direct_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(APPLE_RGB_TO_SRGB, SRGB_TO_APPLE_RGB);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"Apple RGB direct matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_p3_direct_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(DISPLAY_P3_TO_SRGB, SRGB_TO_DISPLAY_P3);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"Display P3 direct matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_adobe_direct_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(ADOBE_RGB_TO_SRGB, SRGB_TO_ADOBE_RGB);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"Adobe RGB direct matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_rec2020_direct_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(REC2020_TO_SRGB, SRGB_TO_REC2020);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"Rec.2020 direct matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_prophoto_direct_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(PROPHOTO_RGB_TO_SRGB, SRGB_TO_PROPHOTO_RGB);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"ProPhoto RGB direct matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_bradford_matrices_are_inverses() {{")?;
+    writeln!(out, "        let product = mat_mul(BRADFORD, BRADFORD_INV);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"Bradford matrices not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_d50_d65_adaptation_roundtrip() {{")?;
+    writeln!(out, "        let product = mat_mul(ADAPT_D50_TO_D65_SRGB, ADAPT_D65_SRGB_TO_D50);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"D50<->D65 adaptation not inverse\");")?;
+    writeln!(out, "    }}")?;
+    writeln!(out)?;
+    writeln!(out, "    #[test]")?;
+    writeln!(out, "    fn test_d65_d65srgb_adaptation_roundtrip() {{")?;
+    writeln!(out, "        let product = mat_mul(ADAPT_D65_TO_D65_SRGB, ADAPT_D65_SRGB_TO_D65);")?;
+    writeln!(out, "        assert!(is_identity(product, 1e-10), \"D65<->D65_SRGB adaptation not inverse\");")?;
     writeln!(out, "    }}")?;
     writeln!(out, "}}")?;
 
