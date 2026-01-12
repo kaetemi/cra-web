@@ -55,16 +55,18 @@ A wider-gamut space designed for photography and print. Common in professional p
 | Green | 0.2100 | 0.7100 |
 | Blue | 0.1500 | 0.0600 |
 | White | D65 | |
-| γ | 2.2 | |
+| γ | 563/256 (≈2.199) | |
 
 Red and blue primaries are identical to sRGB. Only green differs (more saturated).
 
 **Transfer function:**
 
 ```
-encoded = linear^(1/2.2)
-linear = encoded^2.2
+encoded = linear^(256/563)
+linear = encoded^(563/256)
 ```
+
+Note: The gamma is often approximated as 2.2, but the precise value specified in IEC 61966-2-5 is 563/256 = 2.19921875. The difference is small but measurable.
 
 **Derived XYZ conversion:**
 
@@ -102,16 +104,30 @@ An extremely wide-gamut space used in high-end photography. Encompasses nearly a
 | Green | 0.1596 | 0.8404 |
 | Blue | 0.0366 | 0.0001 |
 | White | D50 | |
-| γ | 1.8 | |
 
 Note the D50 white point—different from the D65 spaces above.
 
-**Transfer function:**
+**Transfer function (encode: linear → ProPhoto):**
 
 ```
-encoded = linear^(1/1.8)
-linear = encoded^1.8
+Et = 1/512  (≈0.001953)
+
+if linear < Et:
+    encoded = 16 × linear
+else:
+    encoded = linear^(1/1.8)
 ```
+
+**Transfer function (decode: ProPhoto → linear):**
+
+```
+if encoded < 16 × Et:
+    linear = encoded / 16
+else:
+    linear = encoded^1.8
+```
+
+Note: The linear segment exists (similar to sRGB) to avoid numerical issues near black. Many implementations approximate this as a pure γ=1.8 power function, which is adequate for most purposes but technically incorrect per ISO 22028-2:2013 (ROMM RGB specification).
 
 **When you encounter it:** Lightroom internal processing, archival photography workflows.
 
@@ -216,8 +232,8 @@ The structure is:
 | Space | Based on | Gamut vs sRGB | When you encounter it |
 |-------|----------|---------------|----------------------|
 | Display P3 | Linear P3 + sRGB transfer | ~25% larger | Apple devices, modern web |
-| Adobe RGB | XYZ, γ=2.2 | ~40% larger | Photography, print |
-| ProPhoto RGB | XYZ (D50), γ=1.8 | ~90% of visible | Lightroom, archival |
+| Adobe RGB | XYZ, γ=563/256 | ~40% larger | Photography, print |
+| ProPhoto RGB | XYZ (D50), piecewise 1.8 | ~90% of visible | Lightroom, archival |
 | Rec.2020 | XYZ, sRGB transfer (SDR) | ~75% of visible | UHD/HDR video |
 | OKLch | OKLab (polar coords) | Same as sRGB | Hue-preserving ops |
 | HSL/HSV | sRGB (coordinate transform) | Same as sRGB | UI, color pickers |

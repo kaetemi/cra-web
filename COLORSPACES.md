@@ -28,8 +28,12 @@ The standard daylight white point used by most display-oriented color spaces.
 **Definition (CIE xy chromaticity):**
 
 | x | y |
-|---------|---------|
-| 0.31271 | 0.32902 |
+|--------|--------|
+| 0.3127 | 0.3290 |
+
+These are the values specified in ITU-R BT.709, sRGB (IEC 61966-2-1), and other 
+display standards. They are rounded from the CIE 15:2004 values (0.31272, 0.32903) 
+derived from the D65 spectral power distribution.
 
 **Derived XYZ (normalized to Y=1):**
 
