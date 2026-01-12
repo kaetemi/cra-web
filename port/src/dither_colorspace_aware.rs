@@ -262,6 +262,14 @@ trait RgbDitherKernel {
         err_g_val: f32,
         err_b_val: f32,
     );
+
+    /// Apply the kernel to a single channel (left-to-right).
+    /// Used for mixed modes where each channel may use a different kernel.
+    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
+
+    /// Apply the kernel to a single channel (right-to-left).
+    /// Used for mixed modes where each channel may use a different kernel.
+    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
 }
 
 /// Floyd-Steinberg error diffusion kernel for RGB.
@@ -339,6 +347,22 @@ impl RgbDitherKernel for FloydSteinberg {
         err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
         err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
         err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
+    }
+
+    #[inline]
+    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        err[y][bx + 1] += err_val * (7.0 / 16.0);
+        err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
+        err[y + 1][bx] += err_val * (5.0 / 16.0);
+        err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
+    }
+
+    #[inline]
+    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        err[y][bx - 1] += err_val * (7.0 / 16.0);
+        err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
+        err[y + 1][bx] += err_val * (5.0 / 16.0);
+        err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
     }
 }
 
@@ -481,13 +505,69 @@ impl RgbDitherKernel for JarvisJudiceNinke {
         err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
         err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
     }
+
+    #[inline]
+    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        // Row 0
+        err[y][bx + 1] += err_val * (7.0 / 48.0);
+        err[y][bx + 2] += err_val * (5.0 / 48.0);
+        // Row 1
+        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx] += err_val * (7.0 / 48.0);
+        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+        // Row 2
+        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx] += err_val * (5.0 / 48.0);
+        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+    }
+
+    #[inline]
+    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        // Row 0
+        err[y][bx - 1] += err_val * (7.0 / 48.0);
+        err[y][bx - 2] += err_val * (5.0 / 48.0);
+        // Row 1
+        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx] += err_val * (7.0 / 48.0);
+        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+        // Row 2
+        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx] += err_val * (5.0 / 48.0);
+        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+    }
+}
+
+/// Apply kernel for a single channel based on runtime selection.
+#[inline]
+fn apply_single_channel_kernel(
+    err: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_val: f32,
+    use_jjn: bool,
+    is_rtl: bool,
+) {
+    match (use_jjn, is_rtl) {
+        (true, false) => JarvisJudiceNinke::apply_single_ltr(err, bx, y, err_val),
+        (true, true) => JarvisJudiceNinke::apply_single_rtl(err, bx, y, err_val),
+        (false, false) => FloydSteinberg::apply_single_ltr(err, bx, y, err_val),
+        (false, true) => FloydSteinberg::apply_single_rtl(err, bx, y, err_val),
+    }
 }
 
 /// Apply kernel based on runtime selection (for mixed modes).
-/// Uses function pointers to avoid monomorphization bloat while
-/// maintaining flexibility for per-pixel kernel selection.
+/// Each channel can use a different kernel, selected by per-channel flags.
+/// Hash bits: bit 0 = R kernel, bit 1 = G kernel, bit 2 = B kernel
 #[inline]
-fn apply_mixed_kernel(
+fn apply_mixed_kernel_per_channel(
     err_r: &mut [Vec<f32>],
     err_g: &mut [Vec<f32>],
     err_b: &mut [Vec<f32>],
@@ -496,15 +576,14 @@ fn apply_mixed_kernel(
     err_r_val: f32,
     err_g_val: f32,
     err_b_val: f32,
-    use_jjn: bool,
+    use_jjn_r: bool,
+    use_jjn_g: bool,
+    use_jjn_b: bool,
     is_rtl: bool,
 ) {
-    match (use_jjn, is_rtl) {
-        (true, false) => JarvisJudiceNinke::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (true, true) => JarvisJudiceNinke::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (false, false) => FloydSteinberg::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (false, true) => FloydSteinberg::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-    }
+    apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
+    apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
+    apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
 }
 
 // ============================================================================
@@ -600,7 +679,8 @@ fn dither_serpentine_rgb<K: RgbDitherKernel>(
 }
 
 /// Mixed kernel dithering with standard (left-to-right) scanning.
-/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke per pixel.
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke per channel per pixel.
+/// Each channel uses a separate bit from the hash for kernel selection.
 #[inline]
 fn dither_mixed_standard_rgb(
     ctx: &DitherContext,
@@ -630,15 +710,18 @@ fn dither_mixed_standard_rgb(
             g_out[idx] = best_g;
             b_out[idx] = best_b;
 
+            // Extract 3 bits for per-channel kernel selection
             let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
-            apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+            let use_jjn_r = pixel_hash & 1 != 0;
+            let use_jjn_g = pixel_hash & 2 != 0;
+            let use_jjn_b = pixel_hash & 4 != 0;
+            apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
         }
     }
 }
 
 /// Mixed kernel dithering with serpentine scanning.
-/// Randomly selects kernel per pixel, alternates direction per row.
+/// Randomly selects kernel per channel per pixel, alternates direction per row.
 #[inline]
 fn dither_mixed_serpentine_rgb(
     ctx: &DitherContext,
@@ -670,8 +753,10 @@ fn dither_mixed_serpentine_rgb(
                 b_out[idx] = best_b;
 
                 let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+                let use_jjn_r = pixel_hash & 1 != 0;
+                let use_jjn_g = pixel_hash & 2 != 0;
+                let use_jjn_b = pixel_hash & 4 != 0;
+                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
             }
         } else {
             for x in 0..width {
@@ -686,15 +771,17 @@ fn dither_mixed_serpentine_rgb(
                 b_out[idx] = best_b;
 
                 let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+                let use_jjn_r = pixel_hash & 1 != 0;
+                let use_jjn_g = pixel_hash & 2 != 0;
+                let use_jjn_b = pixel_hash & 4 != 0;
+                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
         }
     }
 }
 
 /// Mixed kernel dithering with random direction per row.
-/// Randomly selects kernel per pixel and direction per row.
+/// Randomly selects kernel per channel per pixel and direction per row.
 #[inline]
 fn dither_mixed_random_rgb(
     ctx: &DitherContext,
@@ -729,8 +816,10 @@ fn dither_mixed_random_rgb(
                 b_out[idx] = best_b;
 
                 let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+                let use_jjn_r = pixel_hash & 1 != 0;
+                let use_jjn_g = pixel_hash & 2 != 0;
+                let use_jjn_b = pixel_hash & 4 != 0;
+                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
             }
         } else {
             for x in 0..width {
@@ -745,8 +834,10 @@ fn dither_mixed_random_rgb(
                 b_out[idx] = best_b;
 
                 let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
-                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+                let use_jjn_r = pixel_hash & 1 != 0;
+                let use_jjn_g = pixel_hash & 2 != 0;
+                let use_jjn_b = pixel_hash & 4 != 0;
+                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
         }
     }
