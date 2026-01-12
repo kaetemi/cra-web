@@ -280,11 +280,13 @@ Because the primaries differ, gamma adjustment alone is incorrect. The correct p
 
 CIE 1976 (L\*a\*b\*). A perceptual color space defined in terms of XYZ.
 
-CIELAB requires a reference white (Xn, Yn, Zn). The choice matters:
+CIELAB requires a reference white (Xn, Yn, Zn) but does not specify which illuminant to use—that is application-dependent. Common choices:
 - **D50** is standard for ICC profiles and print workflows
 - **D65** is used for display-oriented workflows
 
 Mixing reference whites produces incorrect results.
+
+**Implementation note:** This library uses **D65 (sRGB)** as the Lab reference white—the white point implied by the sRGB matrix (0.9505, 1.0, 1.089). This ensures sRGB neutrals map exactly to a\*=0, b\*=0, which is practical for display-oriented image processing. This differs slightly from CIE's authoritative D65 (0.95043, 1.0, 1.08883) but the difference is imperceptible.
 
 **Definition (XYZ → Lab):**
 

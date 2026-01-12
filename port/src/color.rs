@@ -62,9 +62,10 @@ fn lab_f_inv(t: f32) -> f32 {
 #[inline]
 pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     // RGB -> XYZ, normalized by white point
-    let x = (cs::SRGB_TO_XYZ[0][0] * r + cs::SRGB_TO_XYZ[0][1] * g + cs::SRGB_TO_XYZ[0][2] * b) / cs::D65_X;
-    let y = cs::SRGB_TO_XYZ[1][0] * r + cs::SRGB_TO_XYZ[1][1] * g + cs::SRGB_TO_XYZ[1][2] * b; // D65_Y = 1.0
-    let z = (cs::SRGB_TO_XYZ[2][0] * r + cs::SRGB_TO_XYZ[2][1] * g + cs::SRGB_TO_XYZ[2][2] * b) / cs::D65_Z;
+    // Use D65_SRGB (from sRGB matrix) to ensure sRGB white maps exactly to L*=100, a*=0, b*=0
+    let x = (cs::SRGB_TO_XYZ[0][0] * r + cs::SRGB_TO_XYZ[0][1] * g + cs::SRGB_TO_XYZ[0][2] * b) / cs::D65_SRGB_X;
+    let y = cs::SRGB_TO_XYZ[1][0] * r + cs::SRGB_TO_XYZ[1][1] * g + cs::SRGB_TO_XYZ[1][2] * b; // D65_SRGB_Y = 1.0
+    let z = (cs::SRGB_TO_XYZ[2][0] * r + cs::SRGB_TO_XYZ[2][1] * g + cs::SRGB_TO_XYZ[2][2] * b) / cs::D65_SRGB_Z;
 
     // Apply f(t)
     let fx = lab_f(x);
@@ -92,10 +93,10 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let y = lab_f_inv(fy);
     let z = lab_f_inv(fz);
 
-    // Denormalize by white point
-    let x = x * cs::D65_X;
-    // y = y * D65_Y where D65_Y = 1.0
-    let z = z * cs::D65_Z;
+    // Denormalize by white point (D65_SRGB to match forward conversion)
+    let x = x * cs::D65_SRGB_X;
+    // y = y * D65_SRGB_Y where D65_SRGB_Y = 1.0
+    let z = z * cs::D65_SRGB_Z;
 
     // XYZ -> linear RGB
     let r = cs::XYZ_TO_SRGB[0][0] * x + cs::XYZ_TO_SRGB[0][1] * y + cs::XYZ_TO_SRGB[0][2] * z;
@@ -339,6 +340,16 @@ mod tests {
             assert!((g - g2).abs() < 1e-4, "G failed: {} vs {}", g, g2);
             assert!((b - b2).abs() < 1e-4, "B failed: {} vs {}", b, b2);
         }
+    }
+
+    #[test]
+    fn test_lab_white_is_neutral() {
+        // sRGB white (1,1,1) should map to exactly L*=100, a*=0, b*=0
+        // This requires using D65_SRGB (from sRGB matrix) as reference white
+        let (l, a, b) = linear_rgb_to_lab(1.0, 1.0, 1.0);
+        assert!((l - 100.0).abs() < 1e-4, "L* should be 100, got {}", l);
+        assert!(a.abs() < 1e-4, "a* should be 0, got {}", a);
+        assert!(b.abs() < 1e-4, "b* should be 0, got {}", b);
     }
 
     #[test]
