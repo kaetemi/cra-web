@@ -24,6 +24,11 @@ name = "cra"
 path = "src/bin/cra.rs"
 required-features = ["cli"]
 
+[[bin]]
+name = "cra_dither"
+path = "src/bin/cra_dither.rs"
+required-features = ["cli"]
+
 [profile.release]
 opt-level = 3
 lto = true

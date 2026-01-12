@@ -50,17 +50,27 @@ echo ""
 echo "[5/5] Copying and stripping binaries..."
 mkdir -p "$SCRIPT_DIR/dist/bin"
 
+# Copy cra binaries
 cp target/release/cra "$SCRIPT_DIR/dist/bin/cra-dynamic"
 cp target/x86_64-unknown-linux-musl/release/cra "$SCRIPT_DIR/dist/bin/cra-static"
 cp target/x86_64-pc-windows-gnu/release/cra.exe "$SCRIPT_DIR/dist/bin/cra.exe"
 
+# Copy cra_dither binaries
+cp target/release/cra_dither "$SCRIPT_DIR/dist/bin/cra_dither-dynamic"
+cp target/x86_64-unknown-linux-musl/release/cra_dither "$SCRIPT_DIR/dist/bin/cra_dither-static"
+cp target/x86_64-pc-windows-gnu/release/cra_dither.exe "$SCRIPT_DIR/dist/bin/cra_dither.exe"
+
 # Strip binaries to reduce size
 strip "$SCRIPT_DIR/dist/bin/cra-dynamic"
 strip "$SCRIPT_DIR/dist/bin/cra-static"
+strip "$SCRIPT_DIR/dist/bin/cra_dither-dynamic"
+strip "$SCRIPT_DIR/dist/bin/cra_dither-static"
 x86_64-w64-mingw32-strip "$SCRIPT_DIR/dist/bin/cra.exe"
+x86_64-w64-mingw32-strip "$SCRIPT_DIR/dist/bin/cra_dither.exe"
 
-# Also create a convenience symlink/copy for the static one as the default
+# Also create a convenience symlink/copy for the static ones as the default
 cp "$SCRIPT_DIR/dist/bin/cra-static" "$SCRIPT_DIR/dist/bin/cra"
+cp "$SCRIPT_DIR/dist/bin/cra_dither-static" "$SCRIPT_DIR/dist/bin/cra_dither"
 
 echo ""
 echo "=========================================="
@@ -74,8 +84,11 @@ echo "Usage:"
 echo "  ./dist/bin/cra --help"
 echo "  ./dist/bin/cra -i input.jpg -r ref.jpg -o output.jpg"
 echo ""
-echo "The 'cra' and 'cra-static' binaries are fully portable"
-echo "(no dependencies, runs on any x86_64 Linux system)."
+echo "  ./dist/bin/cra_dither --help"
+echo "  ./dist/bin/cra_dither -i input.png -f RGB565 -o output.png --output-bin output.bin"
 echo ""
-echo "The 'cra.exe' binary runs on Windows x86_64."
+echo "The 'cra', 'cra-static', 'cra_dither', and 'cra_dither-static' binaries are"
+echo "fully portable (no dependencies, runs on any x86_64 Linux system)."
+echo ""
+echo "The '.exe' binaries run on Windows x86_64."
 echo "=========================================="
