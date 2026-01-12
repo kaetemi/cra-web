@@ -15,7 +15,8 @@
 /// - Random: Random direction per row (mixed modes only)
 
 use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_unclamped,
+    linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::colorspace_derived::f32 as cs;
 
@@ -35,6 +36,14 @@ pub enum PerceptualSpace {
     /// Designed so Euclidean distance is perceptually uniform
     #[default]
     OkLab,
+    /// Linear RGB with Euclidean distance (NOT RECOMMENDED)
+    /// Simple Euclidean distance in linear RGB space - not perceptually uniform,
+    /// provided for testing and comparison purposes only
+    LinearRGB,
+    /// Y'CbCr with Euclidean distance (NOT RECOMMENDED)
+    /// Luma-chroma separation using BT.709 coefficients on gamma-encoded values.
+    /// Not perceptually uniform - provided for testing and comparison purposes only
+    YCbCr,
 }
 
 /// Dithering mode selection for color-space aware dithering
@@ -241,6 +250,8 @@ pub(crate) fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: 
 }
 
 /// Compute perceptual distance squared based on the selected space/metric
+/// Note: For LinearRGB mode, l/a/b actually contain linear R/G/B values
+/// Note: For YCbCr mode, l/a/b actually contain Y'/Cb/Cr values
 #[inline]
 fn perceptual_distance_sq(
     space: PerceptualSpace,
@@ -251,8 +262,10 @@ fn perceptual_distance_sq(
         PerceptualSpace::LabCIE76 => lab_distance_cie76_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::LabCIE94 => lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::LabCIEDE2000 => lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2),
-        PerceptualSpace::OkLab => {
+        PerceptualSpace::OkLab | PerceptualSpace::LinearRGB | PerceptualSpace::YCbCr => {
             // OkLab uses simple Euclidean distance (it's designed for this)
+            // LinearRGB also uses simple Euclidean (l/a/b contain R/G/B in linear space)
+            // YCbCr also uses simple Euclidean (l/a/b contain Y'/Cb/Cr values)
             let dl = l1 - l2;
             let da = a1 - a2;
             let db = b1 - b2;
@@ -265,6 +278,18 @@ fn perceptual_distance_sq(
 #[inline]
 fn is_lab_space(space: PerceptualSpace) -> bool {
     matches!(space, PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000)
+}
+
+/// Check if a PerceptualSpace variant uses linear RGB (no perceptual conversion)
+#[inline]
+fn is_linear_rgb_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::LinearRGB)
+}
+
+/// Check if a PerceptualSpace variant uses Y'CbCr
+#[inline]
+fn is_ycbcr_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::YCbCr)
 }
 
 /// Perceptual quantization parameters for joint RGB dithering.
@@ -366,8 +391,9 @@ struct LabValue {
     b: f32,
 }
 
-/// Build Lab/OkLab LUT indexed by (r_level, g_level, b_level)
+/// Build Lab/OkLab/LinearRGB LUT indexed by (r_level, g_level, b_level)
 /// Returns a flat Vec where index = r_level * num_levels^2 + g_level * num_levels + b_level
+/// For LinearRGB mode, stores linear R/G/B values in the l/a/b fields
 fn build_perceptual_lut(
     quant: &PerceptualQuantParams,
     linear_lut: &[f32; 256],
@@ -388,7 +414,13 @@ fn build_perceptual_lut(
                 let b_ext = quant.level_values[b_level];
                 let b_lin = linear_lut[b_ext as usize];
 
-                let (l, a, b_ch) = if is_lab_space(space) {
+                let (l, a, b_ch) = if is_linear_rgb_space(space) {
+                    // Store linear RGB values directly (no perceptual conversion)
+                    (r_lin, g_lin, b_lin)
+                } else if is_ycbcr_space(space) {
+                    // Y'CbCr conversion (goes through sRGB internally)
+                    linear_rgb_to_ycbcr(r_lin, g_lin, b_lin)
+                } else if is_lab_space(space) {
                     linear_rgb_to_lab(r_lin, g_lin, b_lin)
                 } else {
                     linear_rgb_to_oklab(r_lin, g_lin, b_lin)
@@ -1086,8 +1118,14 @@ fn process_pixel(
     let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to Lab/OkLab (use unclamped for true distance)
-    let lab_target = if is_lab_space(ctx.space) {
+    // 5. Convert target to Lab/OkLab/LinearRGB/YCbCr (use unclamped for true distance)
+    let lab_target = if is_linear_rgb_space(ctx.space) {
+        // Linear RGB mode: use linear values directly
+        (lin_r_adj, lin_g_adj, lin_b_adj)
+    } else if is_ycbcr_space(ctx.space) {
+        // Y'CbCr mode: convert through sRGB (unclamped for out-of-gamut)
+        linear_rgb_to_ycbcr_unclamped(lin_r_adj, lin_g_adj, lin_b_adj)
+    } else if is_lab_space(ctx.space) {
         linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
     } else {
         linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
@@ -1117,7 +1155,11 @@ fn process_pixel(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = if is_lab_space(ctx.space) {
+                    let (l, a, b_ch) = if is_linear_rgb_space(ctx.space) {
+                        (r_lin, g_lin, b_lin)
+                    } else if is_ycbcr_space(ctx.space) {
+                        linear_rgb_to_ycbcr(r_lin, g_lin, b_lin)
+                    } else if is_lab_space(ctx.space) {
                         linear_rgb_to_lab(r_lin, g_lin, b_lin)
                     } else {
                         linear_rgb_to_oklab(r_lin, g_lin, b_lin)

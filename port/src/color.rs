@@ -240,6 +240,46 @@ pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     (r, g, b_out)
 }
 
+// ============== Y'CbCr color space ==============
+// Y'CbCr is a luma-chroma separation, traditionally applied to gamma-encoded (sRGB) values.
+// BT.709 coefficients are used (matching sRGB primaries).
+// Y': 0-1, Cb/Cr: roughly -0.5 to +0.5
+
+/// Convert linear RGB (0-1) to Y'CbCr
+/// Internally converts to sRGB first, then applies the Y'CbCr matrix.
+/// Returns (Y', Cb, Cr) where Y' is 0-1 and Cb,Cr are roughly -0.5 to +0.5
+#[inline]
+pub fn linear_rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Convert linear to sRGB (gamma-encoded)
+    let r_srgb = linear_to_srgb_single(r.clamp(0.0, 1.0));
+    let g_srgb = linear_to_srgb_single(g.clamp(0.0, 1.0));
+    let b_srgb = linear_to_srgb_single(b.clamp(0.0, 1.0));
+
+    // Apply RGB to Y'CbCr matrix (BT.709)
+    let y = cs::RGB_TO_YCBCR[0][0] * r_srgb + cs::RGB_TO_YCBCR[0][1] * g_srgb + cs::RGB_TO_YCBCR[0][2] * b_srgb;
+    let cb = cs::RGB_TO_YCBCR[1][0] * r_srgb + cs::RGB_TO_YCBCR[1][1] * g_srgb + cs::RGB_TO_YCBCR[1][2] * b_srgb;
+    let cr = cs::RGB_TO_YCBCR[2][0] * r_srgb + cs::RGB_TO_YCBCR[2][1] * g_srgb + cs::RGB_TO_YCBCR[2][2] * b_srgb;
+
+    (y, cb, cr)
+}
+
+/// Convert linear RGB to Y'CbCr without clamping (for out-of-gamut values during dithering)
+/// Uses signed sRGB conversion to handle negative values from error accumulation.
+#[inline]
+pub fn linear_rgb_to_ycbcr_unclamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Convert linear to sRGB, preserving sign for out-of-gamut values
+    let r_srgb = if r >= 0.0 { linear_to_srgb_single(r) } else { -linear_to_srgb_single(-r) };
+    let g_srgb = if g >= 0.0 { linear_to_srgb_single(g) } else { -linear_to_srgb_single(-g) };
+    let b_srgb = if b >= 0.0 { linear_to_srgb_single(b) } else { -linear_to_srgb_single(-b) };
+
+    // Apply RGB to Y'CbCr matrix (BT.709)
+    let y = cs::RGB_TO_YCBCR[0][0] * r_srgb + cs::RGB_TO_YCBCR[0][1] * g_srgb + cs::RGB_TO_YCBCR[0][2] * b_srgb;
+    let cb = cs::RGB_TO_YCBCR[1][0] * r_srgb + cs::RGB_TO_YCBCR[1][1] * g_srgb + cs::RGB_TO_YCBCR[1][2] * b_srgb;
+    let cr = cs::RGB_TO_YCBCR[2][0] * r_srgb + cs::RGB_TO_YCBCR[2][1] * g_srgb + cs::RGB_TO_YCBCR[2][2] * b_srgb;
+
+    (y, cb, cr)
+}
+
 // ============== Channel-separated processing ==============
 
 /// Convert interleaved sRGB (0-1) to separate linear RGB channels

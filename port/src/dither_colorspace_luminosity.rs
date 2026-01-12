@@ -33,6 +33,19 @@
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
+
+/// Convert linear luminosity to Y'CbCr Y' component for grayscale.
+/// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
+/// since KR + KG + KB = 1, so Y' = KR*v + KG*v + KB*v = v.
+/// Preserves sign for out-of-gamut values during error diffusion.
+#[inline]
+fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
+    if lin_gray >= 0.0 {
+        linear_to_srgb_single(lin_gray)
+    } else {
+        -linear_to_srgb_single(-lin_gray)
+    }
+}
 use crate::dither_colorspace_aware::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
@@ -74,7 +87,11 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
         // CIEDE2000 uses SL weighting based on average lightness
         PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
         // OKLab uses simple Euclidean distance, which reduces to ΔL² for grays
-        PerceptualSpace::OkLab => lightness_distance_sq(l1, l2),
+        // LinearRGB also uses simple Euclidean distance in linear space
+        // YCbCr uses simple distance in gamma-encoded (sRGB) space
+        PerceptualSpace::OkLab | PerceptualSpace::LinearRGB | PerceptualSpace::YCbCr => {
+            lightness_distance_sq(l1, l2)
+        }
     }
 }
 
@@ -82,6 +99,18 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
 #[inline]
 fn is_lab_space(space: PerceptualSpace) -> bool {
     matches!(space, PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000)
+}
+
+/// Check if a PerceptualSpace variant uses linear RGB (no perceptual conversion)
+#[inline]
+fn is_linear_rgb_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::LinearRGB)
+}
+
+/// Check if a PerceptualSpace variant uses Y'CbCr
+#[inline]
+fn is_ycbcr_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::YCbCr)
 }
 
 /// Quantization parameters for grayscale dithering
@@ -167,6 +196,7 @@ fn build_linear_lut() -> [f32; 256] {
 
 /// Build perceptual lightness LUT for grayscale levels.
 /// Each level is converted to perceptual lightness (L* for CIELAB, L for OKLab).
+/// For LinearRGB, stores the linear luminosity value directly.
 /// We only store L since a* = b* = 0 for all neutral grays.
 fn build_gray_lightness_lut(
     quant: &GrayQuantParams,
@@ -182,7 +212,14 @@ fn build_gray_lightness_lut(
 
         // Treat as RGB = (gray, gray, gray)
         // Only extract L component since a, b are always 0 for neutral grays
-        let l = if is_lab_space(space) {
+        let l = if is_linear_rgb_space(space) {
+            // Linear RGB: use linear luminosity value directly (no perceptual conversion)
+            gray_lin
+        } else if is_ycbcr_space(space) {
+            // Y'CbCr: use sRGB (gamma-encoded) value as Y'
+            // For grayscale R=G=B, Y' = sRGB value since luma coefficients sum to 1
+            linear_to_srgb_single(gray_lin)
+        } else if is_lab_space(space) {
             let (l, _, _) = linear_rgb_to_lab(gray_lin, gray_lin, gray_lin);
             l
         } else {
@@ -334,7 +371,13 @@ fn process_pixel(
 
     // 5. Convert target to perceptual lightness (use unclamped for true distance)
     // For grayscale, we only need L since a* = b* = 0 for neutral grays
-    let l_target = if is_lab_space(ctx.space) {
+    let l_target = if is_linear_rgb_space(ctx.space) {
+        // Linear RGB: use linear value directly (no perceptual conversion)
+        lin_gray_adj
+    } else if is_ycbcr_space(ctx.space) {
+        // Y'CbCr: convert to sRGB (gamma-encoded) with sign preservation
+        linear_gray_to_ycbcr_y(lin_gray_adj)
+    } else if is_lab_space(ctx.space) {
         let (l, _, _) = linear_rgb_to_lab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
         l
     } else {
@@ -906,6 +949,67 @@ mod tests {
 
                 assert!((simple_dist - full_dist).abs() < 1e-10,
                     "OkLab mismatch: simple={} full={}", simple_dist, full_dist);
+            }
+        }
+
+        // Test LinearRGB: grayscale uses linear value directly
+        for &lin1 in &test_grays {
+            for &lin2 in &test_grays {
+                // Grayscale: just the linear value
+                let gray_dist = lightness_distance_sq(lin1, lin2);
+
+                // Full RGB: Euclidean distance with R=G=B
+                let dr = lin1 - lin2;
+                let dg = lin1 - lin2;
+                let db = lin1 - lin2;
+                let full_dist = dr * dr + dg * dg + db * db;
+
+                // For R=G=B, full distance = 3 * (Δv)², grayscale uses just (Δv)²
+                // This is intentional - grayscale optimization uses single channel
+                // but the ratio should be consistent (3:1)
+                let expected_ratio = 3.0;
+                if gray_dist > 1e-10 {
+                    let actual_ratio = full_dist / gray_dist;
+                    assert!((actual_ratio - expected_ratio).abs() < 1e-6,
+                        "LinearRGB ratio mismatch: expected {} got {} (lin1={}, lin2={})",
+                        expected_ratio, actual_ratio, lin1, lin2);
+                }
+            }
+        }
+
+        // Test YCbCr: grayscale uses sRGB value, Cb=Cr=0 for neutral grays
+        use crate::color::{linear_rgb_to_ycbcr, linear_to_srgb_single};
+        for &lin1 in &test_grays {
+            for &lin2 in &test_grays {
+                // Full YCbCr conversion
+                let (y1, cb1, cr1) = linear_rgb_to_ycbcr(lin1, lin1, lin1);
+                let (y2, cb2, cr2) = linear_rgb_to_ycbcr(lin2, lin2, lin2);
+
+                // Verify Cb and Cr are ~0 for neutral grays
+                assert!(cb1.abs() < 1e-6, "YCbCr Cb1 should be ~0 for gray, got {}", cb1);
+                assert!(cr1.abs() < 1e-6, "YCbCr Cr1 should be ~0 for gray, got {}", cr1);
+                assert!(cb2.abs() < 1e-6, "YCbCr Cb2 should be ~0 for gray, got {}", cb2);
+                assert!(cr2.abs() < 1e-6, "YCbCr Cr2 should be ~0 for gray, got {}", cr2);
+
+                // Verify Y' equals sRGB value for neutral grays
+                let srgb1 = linear_to_srgb_single(lin1);
+                let srgb2 = linear_to_srgb_single(lin2);
+                assert!((y1 - srgb1).abs() < 1e-6,
+                    "YCbCr Y1 should equal sRGB for gray: Y'={} sRGB={}", y1, srgb1);
+                assert!((y2 - srgb2).abs() < 1e-6,
+                    "YCbCr Y2 should equal sRGB for gray: Y'={} sRGB={}", y2, srgb2);
+
+                // Grayscale distance uses sRGB values
+                let gray_dist = lightness_distance_sq(srgb1, srgb2);
+
+                // Full YCbCr Euclidean distance (should equal gray since Cb=Cr=0)
+                let dy = y1 - y2;
+                let dcb = cb1 - cb2;
+                let dcr = cr1 - cr2;
+                let full_dist = dy * dy + dcb * dcb + dcr * dcr;
+
+                assert!((gray_dist - full_dist).abs() < 1e-6,
+                    "YCbCr mismatch: gray={} full={}", gray_dist, full_dist);
             }
         }
     }

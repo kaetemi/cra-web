@@ -53,11 +53,15 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
 /// 1 = OKLab (default, recommended)
 /// 2 = CIELAB with CIE94 (weighted distance)
 /// 3 = CIELAB with CIEDE2000 (most accurate)
+/// 4 = Linear RGB (NOT RECOMMENDED - for testing only)
+/// 5 = Y'CbCr (NOT RECOMMENDED - for testing only)
 fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
     match space {
         0 => PerceptualSpace::LabCIE76,
         2 => PerceptualSpace::LabCIE94,
         3 => PerceptualSpace::LabCIEDE2000,
+        4 => PerceptualSpace::LinearRGB,
+        5 => PerceptualSpace::YCbCr,
         _ => PerceptualSpace::OkLab,  // 1 or any other value defaults to OkLab
     }
 }
@@ -119,7 +123,7 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 ///     w: image width
 ///     h: image height
 ///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
-///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000, 4 = LinearRGB, 5 = YCbCr)
 ///
 /// Returns:
 ///     Interleaved RGB uint8 array (RGBRGB...)
@@ -180,7 +184,7 @@ pub fn colorspace_aware_dither_wasm(
 ///     w: image width
 ///     h: image height
 ///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
-///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000, 4 = LinearRGB, 5 = YCbCr)
 ///     mode: dither mode (0-6, see above)
 ///     seed: random seed for mixed modes
 ///
@@ -251,7 +255,7 @@ pub fn colorspace_aware_dither_with_mode_wasm(
 ///     w: image width
 ///     h: image height
 ///     bits: output bit depth (1-8)
-///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000, 4 = LinearRGB, 5 = YCbCr)
 ///
 /// Returns:
 ///     Grayscale uint8 array
@@ -292,7 +296,7 @@ pub fn colorspace_aware_dither_gray_wasm(
 ///     w: image width
 ///     h: image height
 ///     bits: output bit depth (1-8)
-///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000)
+///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000, 4 = LinearRGB, 5 = YCbCr)
 ///     mode: dither mode (0-6, see above)
 ///     seed: random seed for mixed modes
 ///
