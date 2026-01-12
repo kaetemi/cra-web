@@ -685,18 +685,18 @@
             <div class="channel-options rgb-options" id="rgb-options">
                 <div class="channel-box red">
                     <h4>Red Channel</h4>
-                    <input type="range" id="bits-r" min="1" max="8" value="5">
-                    <p class="bit-value" id="bits-r-label">5 bits (32 levels)</p>
+                    <input type="range" id="bits-r" min="1" max="8" value="3">
+                    <p class="bit-value" id="bits-r-label">3 bits (8 levels)</p>
                 </div>
                 <div class="channel-box green">
                     <h4>Green Channel</h4>
-                    <input type="range" id="bits-g" min="1" max="8" value="6">
-                    <p class="bit-value" id="bits-g-label">6 bits (64 levels)</p>
+                    <input type="range" id="bits-g" min="1" max="8" value="3">
+                    <p class="bit-value" id="bits-g-label">3 bits (8 levels)</p>
                 </div>
                 <div class="channel-box blue">
                     <h4>Blue Channel</h4>
-                    <input type="range" id="bits-b" min="1" max="8" value="5">
-                    <p class="bit-value" id="bits-b-label">5 bits (32 levels)</p>
+                    <input type="range" id="bits-b" min="1" max="8" value="2">
+                    <p class="bit-value" id="bits-b-label">2 bits (4 levels)</p>
                 </div>
             </div>
 
@@ -740,7 +740,7 @@
                 <button class="download-btn secondary" id="download-bin-r-btn" disabled>Binary (row-aligned)</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
             </div>
-            <p class="format-info" id="format-info">Format: RGB565 (16 bits/pixel) - binary download available</p>
+            <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - binary download available</p>
 
             <div class="channel-downloads" id="channel-downloads">
                 <h5>Per-Channel Binary</h5>

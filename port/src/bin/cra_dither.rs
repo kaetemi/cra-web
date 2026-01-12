@@ -99,8 +99,8 @@ struct Args {
     #[arg(short, long)]
     input: PathBuf,
 
-    /// Output format: RGB with bit counts (e.g., RGB565, RGB111, RGB888) or L with bits (e.g., L4, L8)
-    #[arg(short, long, default_value = "RGB565")]
+    /// Output format: RGB with bit counts (e.g., RGB332, RGB565, RGB888) or L with bits (e.g., L4, L8)
+    #[arg(short, long, default_value = "RGB332")]
     format: String,
 
     /// Output PNG image path (optional)
