@@ -1,0 +1,373 @@
+# Color Space Specification
+
+## CIE 1931 XYZ
+
+XYZ is the root of colorimetry. It is defined empirically from the CIE 1931 color matching experiments, where human observers matched spectral colors to mixtures of three primaries. The resulting color matching functions x̄(λ), ȳ(λ), z̄(λ) define how to convert any spectral power distribution to a tristimulus value:
+
+```
+X = ∫ S(λ) × x̄(λ) dλ
+Y = ∫ S(λ) × ȳ(λ) dλ
+Z = ∫ S(λ) × z̄(λ) dλ
+```
+
+Y corresponds directly to luminance. Chromaticity coordinates project out the brightness:
+
+```
+x = X / (X + Y + Z)
+y = Y / (X + Y + Z)
+```
+
+Everything else in this document ultimately derives from XYZ.
+
+---
+
+## D65 Illuminant
+
+The standard daylight white point used by most display-oriented color spaces.
+
+**Definition (CIE xy chromaticity):**
+
+| x | y |
+|---------|---------|
+| 0.31271 | 0.32902 |
+
+**Derived XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|---------|---------|---------|
+| 0.95047 | 1.00000 | 1.08883 |
+
+---
+
+## Linear RGB
+
+No formal standard exists. This is the implicit intermediate state in the sRGB specification (IEC 61966-2-1) before the transfer function is applied. In practice, "Linear RGB" universally means: Rec.709 primaries, D65 white point, linear transfer.
+
+**Definition:**
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.6400 | 0.3300 |
+| Green | 0.3000 | 0.6000 |
+| Blue | 0.1500 | 0.0600 |
+| White | D65 | |
+
+**Transfer function:** None (identity).
+
+**Derived XYZ conversion:**
+
+```
+Linear RGB → XYZ:
+
+| X |   | 0.4124564  0.3575761  0.1804375 |   | R |
+| Y | = | 0.2126729  0.7151522  0.0721750 | × | G |
+| Z |   | 0.0193339  0.1191920  0.9503041 |   | B |
+```
+
+```
+XYZ → Linear RGB:
+
+| R |   |  3.2404542 -1.5371385 -0.4985314 |   | X |
+| G | = | -0.9692660  1.8760108  0.0415560 | × | Y |
+| B |   |  0.0556434 -0.2040259  1.0572252 |   | Z |
+```
+
+The second row of the first matrix gives the luminance coefficients: Y = 0.2126729R + 0.7151522G + 0.0721750B.
+
+---
+
+## sRGB
+
+IEC 61966-2-1:1999. The standard color space for the web and consumer displays.
+
+The formal specification defines sRGB directly in terms of CIE XYZ. However, since Linear RGB already captures the XYZ relationship via the same primaries and white point, we define sRGB here as Linear RGB plus a transfer function. This is equivalent and more practical for implementation.
+
+**Definition:** Linear RGB with the following transfer function.
+
+**Transfer function (encode: linear → sRGB):**
+
+```
+if linear ≤ 0.0031308:
+    srgb = 12.92 × linear
+else:
+    srgb = 1.055 × linear^(1/2.4) − 0.055
+```
+
+**Transfer function (decode: sRGB → linear):**
+
+```
+if srgb ≤ 0.04045:
+    linear = srgb / 12.92
+else:
+    linear = ((srgb + 0.055) / 1.055)^2.4
+```
+
+The linear segment exists because a pure power curve has infinite slope at zero, which would amplify noise in darks. The piecewise function is continuous with continuous first derivative at the junction.
+
+---
+
+## Gamma 2.2 RGB
+
+No formal standard. Often conflated with sRGB but technically distinct—the same encoded value decodes to slightly different linear values between the two, primarily in darks.
+
+**Definition:** Linear RGB with γ=2.2.
+
+**Transfer function:**
+
+```
+encoded = linear^(1/2.2)
+linear = encoded^2.2
+```
+
+---
+
+## Y'CbCr (Rec.709)
+
+A luma-chroma color space used for video transmission and compression. Separates a brightness-like channel (Y') from two color difference channels (Cb, Cr).
+
+**Definition:** Operates on gamma-encoded sRGB values, not linear light.
+
+The prime notation (Y') indicates gamma-encoded. This is not a linear luminance measurement.
+
+**Forward transform (sRGB → Y'CbCr):**
+
+```
+Y'  =  0.2126 R' + 0.7152 G' + 0.0722 B'
+Cb  = (B' - Y') / 1.8556
+Cr  = (R' - Y') / 1.5748
+```
+
+Or as a matrix:
+
+```
+| Y' |   |  0.2126    0.7152    0.0722  |   | R' |
+| Cb | = | -0.1146   -0.3854    0.5000  | × | G' |
+| Cr |   |  0.5000   -0.4542   -0.0458  |   | B' |
+```
+
+Y' ranges [0, 1], Cb and Cr range [−0.5, 0.5].
+
+**Inverse transform (Y'CbCr → sRGB):**
+
+```
+R'  = Y' + 1.5748 Cr
+G'  = Y' - 0.1874 Cb - 0.4681 Cr
+B'  = Y' + 1.8556 Cb
+```
+
+**On the coefficients:**
+
+The coefficients (0.2126, 0.7152, 0.0722) are the second row of the Linear RGB → XYZ matrix. When applied to Linear RGB, they yield true CIE luminance—the Y in XYZ:
+
+```
+Y = 0.2126 R + 0.7152 G + 0.0722 B
+```
+
+This is correct for linear light. Y'CbCr takes these coefficients and applies them to gamma-encoded values instead, which is physically incorrect but was standardized for video.
+
+**Caveats:**
+
+CRT gamma is a physical property of electron guns, not a perceptual encoding. The fact that γ≈2.2 vaguely resembles perceptual response is coincidence. Actual perceptual lightness uses curves like CIELAB's L* or OKLab's cube root, derived from psychophysical experiments.
+
+Y'CbCr exists because video signals were always gamma-encoded for CRT displays, and the standards were built around that. There is no linear-light variant of YCbCr. If you need actual luminance, linearize first or use XYZ's Y channel.
+
+**Note on Rec.601 coefficients:**
+
+Older video (NTSC/PAL) uses different coefficients based on different primaries:
+
+```
+Y' = 0.299 R' + 0.587 G' + 0.114 B'
+```
+
+This is the classic "30/59/11" formula. It is frequently misapplied to sRGB content.
+
+---
+
+## Apple RGB
+
+A legacy color space from classic Macintosh systems (pre-OS X era). The primaries were based on the phosphors in Macintosh CRT monitors. The γ=1.8 transfer function was chosen to approximate the dot gain of Apple LaserWriter printers.
+
+**Definition:**
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.6250 | 0.3400 |
+| Green | 0.2800 | 0.5950 |
+| Blue | 0.1550 | 0.0700 |
+| White | D65 | |
+| γ | 1.8 | |
+
+**Transfer function:**
+
+```
+encoded = linear^(1/1.8)
+linear = encoded^1.8
+```
+
+**Derived XYZ conversion:**
+
+```
+[linearized] Apple RGB → XYZ:
+
+| X |   | 0.4497288  0.3162486  0.1844926 |   | R |
+| Y | = | 0.2446525  0.6720283  0.0833192 | × | G |
+| Z |   | 0.0251848  0.1411824  0.9224628 |   | B |
+```
+
+```
+XYZ → [linearized] Apple RGB:
+
+| R |   |  2.9515373 -1.2894116 -0.4738445 |   | X |
+| G | = | -1.0851093  1.9908566  0.0372026 | × | Y |
+| B |   |  0.0854934 -0.2694964  1.0912975 |   | Z |
+```
+
+**Full conversion (Apple RGB → XYZ):**
+1. Decode: linear = encoded^1.8
+2. Matrix multiply
+
+**Converting Apple RGB to sRGB:**
+
+Because the primaries differ, gamma adjustment alone is incorrect. The correct path:
+
+1. Decode Apple RGB (γ=1.8)
+2. Matrix: linearized Apple RGB → XYZ
+3. Matrix: XYZ → Linear RGB
+4. Encode sRGB (piecewise function)
+
+---
+
+## CIELAB
+
+CIE 1976 (L\*a\*b\*). A perceptual color space defined in terms of XYZ.
+
+CIELAB requires a reference white (Xn, Yn, Zn). The choice matters:
+- **D50** is standard for ICC profiles and print workflows
+- **D65** is used for display-oriented workflows
+
+Mixing reference whites produces incorrect results.
+
+**Definition (XYZ → Lab):**
+
+```
+L* = 116 × f(Y/Yn) − 16
+a* = 500 × (f(X/Xn) − f(Y/Yn))
+b* = 200 × (f(Y/Yn) − f(Z/Zn))
+```
+
+where:
+
+```
+f(t) = t^(1/3)                      if t > (6/29)³
+f(t) = (1/3)(29/6)²t + 4/29         otherwise
+```
+
+The constants:
+- Threshold: (6/29)³ ≈ 0.008856
+- Linear slope: (1/3)(29/6)² ≈ 7.787
+- Linear offset: 4/29 ≈ 0.137931
+
+**Inverse (Lab → XYZ):**
+
+```
+Y = Yn × f⁻¹((L* + 16) / 116)
+X = Xn × f⁻¹((L* + 16) / 116 + a*/500)
+Z = Zn × f⁻¹((L* + 16) / 116 − b*/200)
+```
+
+where:
+
+```
+f⁻¹(t) = t³                         if t > 6/29
+f⁻¹(t) = 3(6/29)²(t − 4/29)         otherwise
+```
+
+---
+
+## OKLab
+
+Designed by Björn Ottosson (2020). A perceptual color space optimized for uniformity using modern perceptual data.
+
+OKLab is defined directly in terms of Linear RGB, bypassing XYZ. The matrices were numerically optimized for perceptual uniformity rather than derived from colorimetric principles. All three matrices and the cube root are the definition—none are derived.
+
+**Definition (Linear RGB → OKLab):**
+
+Step 1 — Approximate cone response:
+```
+| l |   | 0.4122214708  0.5363325363  0.0514459929 |   | R |
+| m | = | 0.2119034982  0.6806995451  0.1073969566 | × | G |
+| s |   | 0.0883024619  0.2817188376  0.6299787005 |   | B |
+```
+
+Step 2 — Cube root:
+```
+l' = ∛l
+m' = ∛m
+s' = ∛s
+```
+
+Step 3 — Opponent channels:
+```
+| L |   | 0.2104542553  0.7936177850 -0.0040720468 |   | l' |
+| a | = | 1.9779984951 -2.4285922050  0.4505937099 | × | m' |
+| b |   | 0.0259040371  0.7827717662 -0.8086757660 |   | s' |
+```
+
+**Inverse (OKLab → Linear RGB):**
+
+Step 1:
+```
+| l' |   | 1.0000000000  0.3963377774  0.2158037573 |   | L |
+| m' | = | 1.0000000000 -0.1055613458 -0.0638541728 | × | a |
+| s' |   | 1.0000000000 -0.0894841775 -1.2914855480 |   | b |
+```
+
+Step 2:
+```
+l = l'³
+m = m'³
+s = s'³
+```
+
+Step 3:
+```
+| R |   |  4.0767416621 -3.3077115913  0.2309699292 |   | l |
+| G | = | -1.2684380046  2.6097574011 -0.3413193965 | × | m |
+| B |   | -0.0041960863 -0.7034186147  1.7076147010 |   | s |
+```
+
+---
+
+## Dependency Graph
+
+```
+CIE XYZ (empirical root)
+    │
+    ├── CIELAB
+    │
+    ├── Linear RGB
+    │       │
+    │       ├── sRGB
+    │       │     │
+    │       │     └── Y'CbCr
+    │       │
+    │       ├── Gamma 2.2 RGB
+    │       └── OKLab
+    │
+    └── Apple RGB
+```
+
+---
+
+## Summary
+
+| Space | Defined in terms of | Definitional components | Derived |
+|-------|---------------------|------------------------|---------|
+| CIE XYZ | Empirical | Color matching functions | — |
+| Linear RGB | XYZ | Primaries, white point | XYZ matrices |
+| sRGB | Linear RGB | Piecewise transfer function | — |
+| Gamma 2.2 RGB | Linear RGB | γ=2.2 | — |
+| Y'CbCr | sRGB | Matrix transform | — |
+| Apple RGB | XYZ | Primaries, white point, γ=1.8 | XYZ matrices |
+| CIELAB | XYZ | Transform equations, reference white | — |
+| OKLab | Linear RGB | All matrices, cube root | — |
