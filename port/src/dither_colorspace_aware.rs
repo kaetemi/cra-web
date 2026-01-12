@@ -103,7 +103,7 @@ pub fn bit_replicate(value: u8, bits: u8) -> u8 {
 /// CIE76 (ΔE*ab): Simple Euclidean distance squared in L*a*b* space
 /// This is the original CIELAB distance formula.
 #[inline]
-fn lab_distance_cie76_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+pub(crate) fn lab_distance_cie76_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
     let dl = l1 - l2;
     let da = a1 - a2;
     let db = b1 - b2;
@@ -113,7 +113,7 @@ fn lab_distance_cie76_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -
 /// CIE94 (ΔE*94): Weighted distance squared accounting for perceptual non-uniformity
 /// Uses graphic arts constants (kL=1, K1=0.045, K2=0.015)
 #[inline]
-fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+pub(crate) fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
     let dl = l1 - l2;
     let c1 = (a1 * a1 + b1 * b1).sqrt();
     let c2 = (a2 * a2 + b2 * b2).sqrt();
@@ -140,7 +140,7 @@ fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -
 /// CIEDE2000 (ΔE00): Most accurate perceptual distance squared
 /// Includes lightness, chroma, and hue weighting plus rotation term for blue
 #[inline]
-fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+pub(crate) fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
     use std::f32::consts::PI;
     const TWO_PI: f32 = 2.0 * PI;
 

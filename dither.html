@@ -554,7 +554,7 @@
                     <option value="2">* CIELAB (CIE94)</option>
                     <option value="0">CIELAB (CIE76)</option>
                 </select>
-                <p class="perceptual-hint">Uses perceptual distance for candidate selection with linear error diffusion. For RGB, processes channels jointly. For grayscale, treats L as RGB=(L,L,L). Supports all dither modes.</p>
+                <p class="perceptual-hint">Uses perceptual distance for candidate selection with linear error diffusion. For RGB, processes channels jointly. For grayscale: CIE76=CIE94 (simple ΔL²), CIEDE2000 uses lightness-dependent weighting, OKLab uses different L curve.</p>
             </div>
 
             <div class="option-row" id="dither-mode-row">

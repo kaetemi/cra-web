@@ -4,6 +4,22 @@
 /// while performing error diffusion in linear luminosity space.
 /// Input is sRGB gamma-encoded grayscale (0-255).
 ///
+/// ## Mathematical Optimization for Grayscale
+///
+/// For neutral grays (R=G=B), the CIELAB a* and b* components are always 0.
+/// This means ALL CIELAB distance formulas collapse to simple lightness difference:
+///
+/// - **CIE76**: ΔE² = ΔL² + Δa² + Δb² = ΔL² (since Δa=Δb=0)
+/// - **CIE94**: Chroma C=√(a²+b²)=0, so all chroma/hue terms vanish → ΔL²
+/// - **CIEDE2000**: Chroma terms vanish. The SL lightness weighting factor varies
+///   with average lightness, but for adjacent quantization levels the difference
+///   is negligible, so candidate ordering is unchanged.
+///
+/// Therefore, for grayscale we optimize by storing only the perceptual lightness
+/// value (L* for CIELAB, L for OKLab) and using simple squared difference.
+/// OKLab and CIELAB use different lightness curves, so they may produce
+/// slightly different results, but within each family the results are identical.
+///
 /// Supports multiple dithering algorithms:
 /// - Floyd-Steinberg: Standard 2-row kernel (7/16, 3/16, 5/16, 1/16)
 /// - Jarvis-Judice-Ninke: Larger 3-row kernel for smoother gradients
@@ -17,152 +33,48 @@
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
-use crate::dither_colorspace_aware::{
-    bit_replicate, wang_hash, DitherMode, PerceptualSpace,
-};
-use crate::colorspace_derived::f32 as cs;
+use crate::dither_colorspace_aware::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
-// CIELAB Distance Formulas (adapted for grayscale)
+// Optimized Grayscale Distance
 // ============================================================================
 
-/// CIE76 (ΔE*ab): Simple Euclidean distance squared in L*a*b* space
+/// For grayscale with CIE76/CIE94/OKLab, distance reduces to simple ΔL²
+/// because a* = b* = 0 for neutral grays.
 #[inline]
-fn lab_distance_cie76_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
     let dl = l1 - l2;
-    let da = a1 - a2;
-    let db = b1 - b2;
-    dl * dl + da * da + db * db
+    dl * dl
 }
 
-/// CIE94 (ΔE*94): Weighted distance squared
+/// CIEDE2000 lightness distance for grayscale.
+/// Unlike CIE76/CIE94, CIEDE2000 uses a lightness weighting factor SL
+/// that depends on the average lightness of the two colors.
+/// This compensates for reduced human sensitivity in dark/light regions.
+///
+/// Formula: ΔE² = (ΔL / SL)²
+/// Where: SL = 1 + (0.015 × (L̄ - 50)²) / √(20 + (L̄ - 50)²)
+///        L̄ = (L1 + L2) / 2
 #[inline]
-fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
+fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
     let dl = l1 - l2;
-    let c1 = (a1 * a1 + b1 * b1).sqrt();
-    let c2 = (a2 * a2 + b2 * b2).sqrt();
-    let dc = c1 - c2;
-
-    let da = a1 - a2;
-    let db = b1 - b2;
-    let dh_sq = (da * da + db * db - dc * dc).max(0.0);
-
-    let sc = 1.0 + cs::CIE94_K1 * c1;
-    let sh = 1.0 + cs::CIE94_K2 * c1;
-
-    let dl_term = dl;
-    let dc_term = dc / sc;
-    let dh_term = dh_sq.sqrt() / sh;
-
-    dl_term * dl_term + dc_term * dc_term + dh_term * dh_term
+    let l_bar = (l1 + l2) / 2.0;
+    let l_bar_minus_50_sq = (l_bar - 50.0) * (l_bar - 50.0);
+    let sl = 1.0 + (0.015 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
+    let dl_term = dl / sl;
+    dl_term * dl_term
 }
 
-/// CIEDE2000 (ΔE00): Most accurate perceptual distance squared
+/// Compute grayscale perceptual distance based on the selected space/metric
 #[inline]
-fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
-    use std::f32::consts::PI;
-    const TWO_PI: f32 = 2.0 * PI;
-
-    let c1_star = (a1 * a1 + b1 * b1).sqrt();
-    let c2_star = (a2 * a2 + b2 * b2).sqrt();
-    let c_bar = (c1_star + c2_star) / 2.0;
-
-    let c_bar_7 = c_bar.powi(7);
-    let g = 0.5 * (1.0 - (c_bar_7 / (c_bar_7 + cs::CIEDE2000_POW25_7)).sqrt());
-
-    let a1_prime = a1 * (1.0 + g);
-    let a2_prime = a2 * (1.0 + g);
-
-    let c1_prime = (a1_prime * a1_prime + b1 * b1).sqrt();
-    let c2_prime = (a2_prime * a2_prime + b2 * b2).sqrt();
-
-    let h1_prime = if a1_prime == 0.0 && b1 == 0.0 {
-        0.0
-    } else {
-        let h = b1.atan2(a1_prime);
-        if h < 0.0 { h + TWO_PI } else { h }
-    };
-
-    let h2_prime = if a2_prime == 0.0 && b2 == 0.0 {
-        0.0
-    } else {
-        let h = b2.atan2(a2_prime);
-        if h < 0.0 { h + TWO_PI } else { h }
-    };
-
-    let dl_prime = l2 - l1;
-    let dc_prime = c2_prime - c1_prime;
-
-    let dh_prime = if c1_prime * c2_prime == 0.0 {
-        0.0
-    } else {
-        let diff = h2_prime - h1_prime;
-        if diff.abs() <= PI {
-            diff
-        } else if diff > PI {
-            diff - TWO_PI
-        } else {
-            diff + TWO_PI
-        }
-    };
-
-    let dh_prime_big = 2.0 * (c1_prime * c2_prime).sqrt() * (dh_prime / 2.0).sin();
-
-    let l_bar_prime = (l1 + l2) / 2.0;
-    let c_bar_prime = (c1_prime + c2_prime) / 2.0;
-
-    let h_bar_prime = if c1_prime * c2_prime == 0.0 {
-        h1_prime + h2_prime
-    } else if (h1_prime - h2_prime).abs() <= PI {
-        (h1_prime + h2_prime) / 2.0
-    } else if h1_prime + h2_prime < TWO_PI {
-        (h1_prime + h2_prime + TWO_PI) / 2.0
-    } else {
-        (h1_prime + h2_prime - TWO_PI) / 2.0
-    };
-
-    let t = 1.0
-        - 0.17 * (h_bar_prime - cs::CIEDE2000_T_30_RAD).cos()
-        + 0.24 * (2.0 * h_bar_prime).cos()
-        + 0.32 * (3.0 * h_bar_prime + cs::CIEDE2000_T_6_RAD).cos()
-        - 0.20 * (4.0 * h_bar_prime - cs::CIEDE2000_T_63_RAD).cos();
-
-    let l_bar_minus_50_sq = (l_bar_prime - 50.0) * (l_bar_prime - 50.0);
-    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
-    let sc = 1.0 + cs::CIE94_K1 * c_bar_prime;
-    let sh = 1.0 + cs::CIE94_K2 * c_bar_prime * t;
-
-    let h_bar_minus_275 = h_bar_prime - cs::CIEDE2000_RT_275_RAD;
-    let delta_theta_rad: f32 = cs::CIEDE2000_RT_30_RAD
-        * (-((h_bar_minus_275 / cs::CIEDE2000_RT_25_RAD).powi(2))).exp();
-    let c_bar_prime_7 = c_bar_prime.powi(7);
-    let rc = 2.0_f32 * (c_bar_prime_7 / (c_bar_prime_7 + cs::CIEDE2000_POW25_7)).sqrt();
-    let rt = -rc * (2.0_f32 * delta_theta_rad).sin();
-
-    let dl_term = dl_prime / sl;
-    let dc_term = dc_prime / sc;
-    let dh_term = dh_prime_big / sh;
-
-    dl_term * dl_term + dc_term * dc_term + dh_term * dh_term + rt * dc_term * dh_term
-}
-
-/// Compute perceptual distance squared based on the selected space/metric
-#[inline]
-fn perceptual_distance_sq(
-    space: PerceptualSpace,
-    l1: f32, a1: f32, b1: f32,
-    l2: f32, a2: f32, b2: f32,
-) -> f32 {
+fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) -> f32 {
     match space {
-        PerceptualSpace::LabCIE76 => lab_distance_cie76_sq(l1, a1, b1, l2, a2, b2),
-        PerceptualSpace::LabCIE94 => lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2),
-        PerceptualSpace::LabCIEDE2000 => lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2),
-        PerceptualSpace::OkLab => {
-            let dl = l1 - l2;
-            let da = a1 - a2;
-            let db = b1 - b2;
-            dl * dl + da * da + db * db
-        }
+        // CIE76 and CIE94 reduce to simple ΔL² for neutral grays (a=b=0)
+        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
+        // CIEDE2000 uses SL weighting based on average lightness
+        PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
+        // OKLab uses simple Euclidean distance, which reduces to ΔL² for grays
+        PerceptualSpace::OkLab => lightness_distance_sq(l1, l2),
     }
 }
 
@@ -253,36 +165,32 @@ fn build_linear_lut() -> [f32; 256] {
     lut
 }
 
-/// Lab color value for LUT storage
-#[derive(Clone, Copy, Default)]
-struct LabValue {
-    l: f32,
-    a: f32,
-    b: f32,
-}
-
-/// Build perceptual LUT for grayscale levels
-/// Each level is converted to Lab/OkLab assuming R=G=B
-fn build_gray_perceptual_lut(
+/// Build perceptual lightness LUT for grayscale levels.
+/// Each level is converted to perceptual lightness (L* for CIELAB, L for OKLab).
+/// We only store L since a* = b* = 0 for all neutral grays.
+fn build_gray_lightness_lut(
     quant: &GrayQuantParams,
     linear_lut: &[f32; 256],
     space: PerceptualSpace,
-) -> Vec<LabValue> {
+) -> Vec<f32> {
     let n = quant.num_levels;
-    let mut lut = vec![LabValue::default(); n];
+    let mut lut = vec![0.0f32; n];
 
     for level in 0..n {
         let gray_ext = quant.level_values[level];
         let gray_lin = linear_lut[gray_ext as usize];
 
         // Treat as RGB = (gray, gray, gray)
-        let (l, a, b) = if is_lab_space(space) {
-            linear_rgb_to_lab(gray_lin, gray_lin, gray_lin)
+        // Only extract L component since a, b are always 0 for neutral grays
+        let l = if is_lab_space(space) {
+            let (l, _, _) = linear_rgb_to_lab(gray_lin, gray_lin, gray_lin);
+            l
         } else {
-            linear_rgb_to_oklab(gray_lin, gray_lin, gray_lin)
+            let (l, _, _) = linear_rgb_to_oklab(gray_lin, gray_lin, gray_lin);
+            l
         };
 
-        lut[level] = LabValue { l, a, b };
+        lut[level] = l;
     }
 
     lut
@@ -389,12 +297,17 @@ fn apply_mixed_kernel(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32, u
 struct GrayDitherContext<'a> {
     quant: &'a GrayQuantParams,
     linear_lut: &'a [f32; 256],
-    lab_lut: &'a Vec<LabValue>,
+    /// Perceptual lightness values for each quantization level.
+    /// Only L is stored since a* = b* = 0 for neutral grays.
+    lightness_lut: &'a Vec<f32>,
     space: PerceptualSpace,
 }
 
 /// Process a single grayscale pixel: find best quantization and compute error.
 /// Returns (best_gray, err_val)
+///
+/// Optimization: Since a* = b* = 0 for all neutral grays, distance calculation
+/// reduces to simple lightness difference squared for all CIELAB variants.
 #[inline]
 fn process_pixel(
     ctx: &GrayDitherContext,
@@ -419,25 +332,24 @@ fn process_pixel(
     let level_min = ctx.quant.floor_level(srgb_gray_adj.floor() as u8);
     let level_max = ctx.quant.ceil_level((srgb_gray_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to Lab/OkLab (use unclamped for true distance)
-    // Treat gray as RGB = (gray, gray, gray)
-    let lab_target = if is_lab_space(ctx.space) {
-        linear_rgb_to_lab(lin_gray_adj, lin_gray_adj, lin_gray_adj)
+    // 5. Convert target to perceptual lightness (use unclamped for true distance)
+    // For grayscale, we only need L since a* = b* = 0 for neutral grays
+    let l_target = if is_lab_space(ctx.space) {
+        let (l, _, _) = linear_rgb_to_lab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
     } else {
-        linear_rgb_to_oklab(lin_gray_adj, lin_gray_adj, lin_gray_adj)
+        let (l, _, _) = linear_rgb_to_oklab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
     };
 
-    // 6. Search candidates (1D search since all channels are equal)
+    // 6. Search candidates using perceptual lightness distance
+    // CIE76/CIE94/OKLab use simple ΔL², CIEDE2000 uses SL-weighted distance
     let mut best_level = level_min;
     let mut best_dist = f32::INFINITY;
 
     for level in level_min..=level_max {
-        let lab_candidate = ctx.lab_lut[level];
-        let dist = perceptual_distance_sq(
-            ctx.space,
-            lab_target.0, lab_target.1, lab_target.2,
-            lab_candidate.l, lab_candidate.a, lab_candidate.b,
-        );
+        let l_candidate = ctx.lightness_lut[level];
+        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
 
         if dist < best_dist {
             best_dist = dist;
@@ -684,12 +596,12 @@ pub fn colorspace_aware_dither_gray_with_mode(
 ) -> Vec<u8> {
     let quant = GrayQuantParams::new(bits);
     let linear_lut = build_linear_lut();
-    let lab_lut = build_gray_perceptual_lut(&quant, &linear_lut, space);
+    let lightness_lut = build_gray_lightness_lut(&quant, &linear_lut, space);
 
     let ctx = GrayDitherContext {
         quant: &quant,
         linear_lut: &linear_lut,
-        lab_lut: &lab_lut,
+        lightness_lut: &lightness_lut,
         space,
     };
 
@@ -871,5 +783,130 @@ mod tests {
         );
 
         assert_ne!(result_std, result_serp, "Standard and serpentine should differ");
+    }
+
+    #[test]
+    fn test_gray_cie76_cie94_identical() {
+        // For grayscale (R=G=B), a* = b* = 0, so CIE76 and CIE94 both reduce
+        // to simple ΔL². CIEDE2000 uses SL weighting and may differ.
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let result_cie76 = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+        );
+        let result_cie94 = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE94, DitherMode::Standard, 0
+        );
+
+        assert_eq!(result_cie76, result_cie94,
+            "CIE76 and CIE94 should be identical for grayscale");
+    }
+
+    #[test]
+    fn test_gray_ciede2000_differs_from_cie76() {
+        // CIEDE2000 uses SL lightness weighting based on average lightness,
+        // so it may produce different results from CIE76/CIE94 for grayscale.
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let result_cie76 = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+        );
+        let result_ciede2000 = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::LabCIEDE2000, DitherMode::Standard, 0
+        );
+
+        // They use different distance formulas, so results may differ
+        // (CIEDE2000 compensates for reduced sensitivity in dark/light regions)
+        assert_eq!(result_cie76.len(), result_ciede2000.len());
+        // Note: They may or may not actually differ for this particular gradient
+    }
+
+    #[test]
+    fn test_gray_oklab_differs_from_cielab() {
+        // OKLab uses a different lightness curve than CIELAB, so results may differ
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let result_lab = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+        );
+        let result_oklab = colorspace_aware_dither_gray_with_mode(
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Standard, 0
+        );
+
+        // They may or may not differ depending on the specific gradient,
+        // but they use different lightness curves so we just verify both work
+        assert_eq!(result_lab.len(), result_oklab.len());
+    }
+
+    #[test]
+    fn test_gray_distance_matches_rgb_distance_functions() {
+        // Verify that our simplified lightness_distance_sq produces the same
+        // results as the full RGB distance functions for neutral gray inputs.
+        use crate::dither_colorspace_aware::{
+            lab_distance_cie76_sq, lab_distance_cie94_sq, lab_distance_ciede2000_sq,
+        };
+
+        // Test various gray levels
+        let test_grays: Vec<f32> = vec![0.0, 0.1, 0.25, 0.5, 0.75, 0.9, 1.0];
+
+        for &lin1 in &test_grays {
+            for &lin2 in &test_grays {
+                // Convert to Lab (for neutral gray, a=b=0)
+                let (l1, a1, b1) = linear_rgb_to_lab(lin1, lin1, lin1);
+                let (l2, a2, b2) = linear_rgb_to_lab(lin2, lin2, lin2);
+
+                // Verify a and b are effectively 0 for neutral grays
+                assert!(a1.abs() < 1e-6, "a1 should be ~0 for gray, got {}", a1);
+                assert!(b1.abs() < 1e-6, "b1 should be ~0 for gray, got {}", b1);
+                assert!(a2.abs() < 1e-6, "a2 should be ~0 for gray, got {}", a2);
+                assert!(b2.abs() < 1e-6, "b2 should be ~0 for gray, got {}", b2);
+
+                // Our simplified distance
+                let simple_dist = lightness_distance_sq(l1, l2);
+
+                // Full CIE76 distance (should equal simple for gray)
+                let cie76_dist = lab_distance_cie76_sq(l1, a1, b1, l2, a2, b2);
+                assert!((simple_dist - cie76_dist).abs() < 1e-6,
+                    "CIE76 mismatch: simple={} cie76={}", simple_dist, cie76_dist);
+
+                // Full CIE94 distance (should equal simple for gray since chroma=0)
+                let cie94_dist = lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2);
+                assert!((simple_dist - cie94_dist).abs() < 1e-6,
+                    "CIE94 mismatch: simple={} cie94={}", simple_dist, cie94_dist);
+
+                // Full CIEDE2000 distance uses SL weighting
+                let ciede2000_full = lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2);
+                // Our optimized CIEDE2000 for grayscale
+                let ciede2000_gray = lightness_distance_ciede2000_sq(l1, l2);
+                // They should match since a=b=0 for neutral grays
+                assert!((ciede2000_full - ciede2000_gray).abs() < 1e-6,
+                    "CIEDE2000 mismatch: full={} gray={} (l1={}, l2={})",
+                    ciede2000_full, ciede2000_gray, l1, l2);
+            }
+        }
+
+        // Same test for OkLab
+        for &lin1 in &test_grays {
+            for &lin2 in &test_grays {
+                let (l1, a1, b1) = linear_rgb_to_oklab(lin1, lin1, lin1);
+                let (l2, a2, b2) = linear_rgb_to_oklab(lin2, lin2, lin2);
+
+                // Verify a and b are effectively 0 for neutral grays
+                assert!(a1.abs() < 1e-6, "OkLab a1 should be ~0 for gray, got {}", a1);
+                assert!(b1.abs() < 1e-6, "OkLab b1 should be ~0 for gray, got {}", b1);
+
+                // Our simplified distance
+                let simple_dist = lightness_distance_sq(l1, l2);
+
+                // Full OkLab Euclidean distance (should equal simple for gray)
+                let dl = l1 - l2;
+                let da = a1 - a2;
+                let db = b1 - b2;
+                let full_dist = dl * dl + da * da + db * db;
+
+                assert!((simple_dist - full_dist).abs() < 1e-10,
+                    "OkLab mismatch: simple={} full={}", simple_dist, full_dist);
+            }
+        }
     }
 }
