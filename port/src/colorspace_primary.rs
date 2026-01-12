@@ -214,6 +214,60 @@ pub mod cielab {
 }
 
 // =============================================================================
+// CIELAB COLOR DIFFERENCE FORMULA CONSTANTS
+// =============================================================================
+
+/// CIE94 (ΔE*94) color difference formula constants.
+/// From CIE 116-1995.
+/// Graphic arts application constants (kL=1). For textiles, use kL=2.
+pub mod cie94 {
+    /// Lightness weighting factor (1 for graphic arts, 2 for textiles).
+    pub const KL: f64 = 1.0;
+
+    /// Chroma weighting factor.
+    pub const KC: f64 = 1.0;
+
+    /// Hue weighting factor.
+    pub const KH: f64 = 1.0;
+
+    /// Chroma scaling coefficient for SC = 1 + K1*C.
+    pub const K1: f64 = 0.045;
+
+    /// Hue scaling coefficient for SH = 1 + K2*C.
+    pub const K2: f64 = 0.015;
+}
+
+/// CIEDE2000 (ΔE00) color difference formula constants.
+/// From CIE 142-2001.
+/// The most accurate perceptual color difference metric.
+pub mod ciede2000 {
+    /// Lightness parametric factor.
+    pub const KL: f64 = 1.0;
+
+    /// Chroma parametric factor.
+    pub const KC: f64 = 1.0;
+
+    /// Hue parametric factor.
+    pub const KH: f64 = 1.0;
+
+    /// 25^7 - chroma correction threshold.
+    /// Used in G factor and RC calculation.
+    /// Exact integer: 25 × 25 × 25 × 25 × 25 × 25 × 25 = 6,103,515,625
+    pub const POW25_7: f64 = 6103515625.0;
+
+    /// Angle constants in degrees (converted to radians in colorspace_derived.rs).
+    /// T factor angles:
+    pub const T_ANGLE_30_DEG: f64 = 30.0;
+    pub const T_ANGLE_6_DEG: f64 = 6.0;
+    pub const T_ANGLE_63_DEG: f64 = 63.0;
+
+    /// RT rotation term angles:
+    pub const RT_ANGLE_275_DEG: f64 = 275.0;
+    pub const RT_ANGLE_25_DEG: f64 = 25.0;
+    pub const RT_ANGLE_30_DEG: f64 = 30.0;
+}
+
+// =============================================================================
 // OKLAB CONSTANTS
 // =============================================================================
 

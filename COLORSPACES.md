@@ -329,6 +329,219 @@ f⁻¹(t) = 3(6/29)²(t − 4/29)         otherwise
 
 ---
 
+## CIELAB Color Difference Formulas
+
+CIELAB defines a color space, but measuring the "distance" between two colors requires a separate formula. Three standard formulas exist, each improving on the previous:
+
+### CIE76 (ΔE\*ab)
+
+The original CIELAB color difference formula (CIE 1976). Simple Euclidean distance in L\*a\*b\* space.
+
+**Definition:**
+
+```
+ΔE*ab = √((L₂* - L₁*)² + (a₂* - a₁*)² + (b₂* - b₁*)²)
+```
+
+**Constants:** None. This is pure Euclidean distance.
+
+**Limitations:** CIELAB is not perfectly perceptually uniform. CIE76 over-weights chromatic differences relative to lightness differences, especially for saturated colors. Equal ΔE values do not represent equal perceptual differences across the color space.
+
+---
+
+### CIE94 (ΔE\*94)
+
+CIE 1994 color difference formula. Introduces weighting factors that scale chromatic differences based on chroma magnitude, improving perceptual uniformity.
+
+**Definition:**
+
+```
+ΔE*94 = √((ΔL*/kL·SL)² + (ΔC*/kC·SC)² + (ΔH*/kH·SH)²)
+```
+
+Where:
+- ΔL\* = L₂\* - L₁\*
+- C₁\* = √(a₁\*² + b₁\*²)
+- C₂\* = √(a₂\*² + b₂\*²)
+- ΔC\* = C₂\* - C₁\*
+- ΔH\* = √((a₂\* - a₁\*)² + (b₂\* - b₁\*)² - ΔC\*²)
+
+**Primary constants (graphic arts application):**
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| kL | 1 | Lightness weighting (2 for textiles) |
+| kC | 1 | Chroma weighting |
+| kH | 1 | Hue weighting |
+| K₁ | 0.045 | Chroma scaling coefficient |
+| K₂ | 0.015 | Hue scaling coefficient |
+
+**Derived weighting functions:**
+
+```
+SL = 1
+SC = 1 + K₁ × C₁* = 1 + 0.045 × C₁*
+SH = 1 + K₂ × C₁* = 1 + 0.015 × C₁*
+```
+
+**Note:** CIE94 uses the first color's chroma (C₁\*) as the reference for weighting. This makes the formula asymmetric—swapping the two colors may yield a different result. For consistent results, use the reference/standard color as color 1.
+
+---
+
+### CIEDE2000 (ΔE₀₀)
+
+CIE 2000 color difference formula. The most accurate perceptual color difference metric, incorporating corrections for:
+- Lightness dependence
+- Chroma dependence
+- Hue dependence
+- Interaction between chroma and hue differences
+- Hue rotation term for the blue region
+
+**Definition:**
+
+```
+ΔE₀₀ = √((ΔL'/(kL·SL))² + (ΔC'/(kC·SC))² + (ΔH'/(kH·SH))² + RT·(ΔC'/(kC·SC))·(ΔH'/(kH·SH)))
+```
+
+**Primary constants:**
+
+| Constant | Value | Description |
+|----------|-------|-------------|
+| kL | 1 | Lightness parametric factor |
+| kC | 1 | Chroma parametric factor |
+| kH | 1 | Hue parametric factor |
+| 25⁷ | 6103515625 | Chroma correction threshold (exact) |
+
+**Step 1 — Calculate CIELAB chroma and mean chroma:**
+
+```
+C₁* = √(a₁*² + b₁*²)
+C₂* = √(a₂*² + b₂*²)
+C̄* = (C₁* + C₂*) / 2
+```
+
+**Step 2 — Calculate G factor (a\* axis adjustment):**
+
+The G factor stretches the a\* axis to improve uniformity for low-chroma colors.
+
+```
+G = 0.5 × (1 - √(C̄*⁷ / (C̄*⁷ + 25⁷)))
+```
+
+**Step 3 — Adjusted a' values and chroma:**
+
+```
+a₁' = a₁* × (1 + G)
+a₂' = a₂* × (1 + G)
+
+C₁' = √(a₁'² + b₁*²)
+C₂' = √(a₂'² + b₂*²)
+```
+
+**Step 4 — Hue angles (in degrees, 0-360):**
+
+```
+h₁' = atan2(b₁*, a₁') mod 360°    (undefined if C₁' = 0)
+h₂' = atan2(b₂*, a₂') mod 360°    (undefined if C₂' = 0)
+```
+
+**Step 5 — Differences:**
+
+```
+ΔL' = L₂* - L₁*
+ΔC' = C₂' - C₁'
+```
+
+For Δh' (hue difference):
+```
+If C₁'×C₂' = 0:     Δh' = 0
+Else if |h₂'-h₁'| ≤ 180°:  Δh' = h₂' - h₁'
+Else if h₂'-h₁' > 180°:    Δh' = h₂' - h₁' - 360°
+Else:                       Δh' = h₂' - h₁' + 360°
+```
+
+```
+ΔH' = 2 × √(C₁'×C₂') × sin(Δh'/2)
+```
+
+**Step 6 — Mean values:**
+
+```
+L̄' = (L₁* + L₂*) / 2
+C̄' = (C₁' + C₂') / 2
+```
+
+For h̄' (mean hue):
+```
+If C₁'×C₂' = 0:            h̄' = h₁' + h₂'
+Else if |h₁'-h₂'| ≤ 180°:  h̄' = (h₁' + h₂') / 2
+Else if h₁'+h₂' < 360°:    h̄' = (h₁' + h₂' + 360°) / 2
+Else:                       h̄' = (h₁' + h₂' - 360°) / 2
+```
+
+**Step 7 — T factor (hue-dependent weighting):**
+
+```
+T = 1 - 0.17×cos(h̄' - 30°) + 0.24×cos(2h̄') + 0.32×cos(3h̄' + 6°) - 0.20×cos(4h̄' - 63°)
+```
+
+**Derived constants in T factor:**
+
+| Angle (degrees) | Radians (derived) |
+|-----------------|-------------------|
+| 30° | π/6 = 0.52359877559829887307... |
+| 6° | π/30 = 0.10471975511965977461... |
+| 63° | 7π/20 = 1.09955742875642894663... |
+
+**Step 8 — SL, SC, SH weighting functions:**
+
+```
+SL = 1 + (0.015 × (L̄' - 50)²) / √(20 + (L̄' - 50)²)
+SC = 1 + 0.045 × C̄'
+SH = 1 + 0.015 × C̄' × T
+```
+
+**Step 9 — RT rotation term (blue region correction):**
+
+```
+Δθ = 30° × exp(-((h̄' - 275°)/25°)²)
+RC = 2 × √(C̄'⁷ / (C̄'⁷ + 25⁷))
+RT = -sin(2Δθ) × RC
+```
+
+**Derived constants:**
+
+| Expression | Value (maximum precision) |
+|------------|---------------------------|
+| 25⁷ | 6103515625 (exact) |
+| 275° in formula | 275 (exact, degrees) |
+| 25° in formula | 25 (exact, degrees) |
+| 30° in Δθ | 30 (exact, degrees) |
+
+**Step 10 — Final calculation:**
+
+With kL = kC = kH = 1:
+
+```
+ΔE₀₀ = √((ΔL'/SL)² + (ΔC'/SC)² + (ΔH'/SH)² + RT×(ΔC'/SC)×(ΔH'/SH))
+```
+
+**Implementation note:** The RT term can be negative, and the expression under the square root can theoretically become slightly negative due to floating-point error. Implementations should clamp to zero before taking the square root.
+
+---
+
+### Comparison of CIELAB Distance Formulas
+
+| Formula | Year | Complexity | Perceptual Accuracy | Use Case |
+|---------|------|------------|---------------------|----------|
+| CIE76 | 1976 | O(1), trivial | Poor for saturated colors | Fast approximation |
+| CIE94 | 1994 | O(1), simple | Good | General purpose |
+| CIEDE2000 | 2000 | O(1), complex | Best available | Color-critical applications |
+
+For dithering applications, CIE94 offers a good balance of accuracy and computational cost. CIEDE2000 is more expensive due to trigonometric functions but provides the most accurate perceptual distance. OKLab with Euclidean distance is an alternative that achieves similar perceptual uniformity with simpler computation.
+
+---
+
 ## OKLab
 
 Designed by Björn Ottosson (2020). A perceptual color space optimized for uniformity using modern perceptual data.
@@ -388,7 +601,9 @@ Step 3:
 ```
 CIE XYZ (empirical root)
     │
-    ├── CIELAB
+    ├── CIELAB ─────────┬── CIE76 (ΔE*ab)
+    │                   ├── CIE94 (ΔE*94)
+    │                   └── CIEDE2000 (ΔE₀₀)
     │
     ├── Linear RGB
     │       │
@@ -406,8 +621,8 @@ CIE XYZ (empirical root)
 
 ## Summary
 
-| Space | Defined in terms of | Definitional components | Derived |
-|-------|---------------------|------------------------|---------|
+| Space/Formula | Defined in terms of | Definitional components | Derived |
+|---------------|---------------------|------------------------|---------|
 | CIE XYZ | Empirical | Color matching functions | — |
 | Linear RGB | XYZ | Primaries, white point | XYZ matrices |
 | sRGB | Linear RGB | Piecewise transfer function | — |
@@ -415,6 +630,9 @@ CIE XYZ (empirical root)
 | Y'CbCr | sRGB | Matrix transform | — |
 | Apple RGB | XYZ | Primaries, white point, γ=1.8 | XYZ matrices |
 | CIELAB | XYZ | Transform equations, reference white | — |
+| CIE76 | CIELAB | Euclidean distance | — |
+| CIE94 | CIELAB | kL, kC, kH, K₁=0.045, K₂=0.015 | SC, SH |
+| CIEDE2000 | CIELAB | kL, kC, kH, 25⁷ | G, T, SL, SC, SH, RT |
 | OKLab | Linear RGB | All matrices, cube root | — |
 
 ---

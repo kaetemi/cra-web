@@ -624,6 +624,34 @@ pub mod f32 {
     pub const CIELAB_B_SCALE: f32 = 200.0;
 
     // -------------------------------------------------------------------------
+    // CIE94 COLOR DIFFERENCE CONSTANTS
+    // -------------------------------------------------------------------------
+
+    /// CIE94 K1 coefficient for SC = 1 + K1*C
+    pub const CIE94_K1: f32 = 0.045 as f32;
+    /// CIE94 K2 coefficient for SH = 1 + K2*C
+    pub const CIE94_K2: f32 = 0.015 as f32;
+
+    // -------------------------------------------------------------------------
+    // CIEDE2000 COLOR DIFFERENCE CONSTANTS
+    // -------------------------------------------------------------------------
+
+    /// 25^7 - chroma correction threshold (exact integer)
+    pub const CIEDE2000_POW25_7: f32 = 6103515625.0 as f32;
+    /// T factor: 30° in radians (derived: π/6)
+    pub const CIEDE2000_T_30_RAD: f32 = 0.52359877559829882 as f32;
+    /// T factor: 6° in radians (derived: π/30)
+    pub const CIEDE2000_T_6_RAD: f32 = 0.10471975511965977 as f32;
+    /// T factor: 63° in radians (derived: 7π/20)
+    pub const CIEDE2000_T_63_RAD: f32 = 1.09955742875642759 as f32;
+    /// RT term: 275° in radians (derived: 55π/36)
+    pub const CIEDE2000_RT_275_RAD: f32 = 4.79965544298440605 as f32;
+    /// RT term: 25° in radians (derived: 5π/36)
+    pub const CIEDE2000_RT_25_RAD: f32 = 0.43633231299858238 as f32;
+    /// RT term: 30° for Δθ in radians (derived: π/6)
+    pub const CIEDE2000_RT_30_RAD: f32 = 0.52359877559829882 as f32;
+
+    // -------------------------------------------------------------------------
     // OKLAB MATRICES (from primary constants)
     // -------------------------------------------------------------------------
 

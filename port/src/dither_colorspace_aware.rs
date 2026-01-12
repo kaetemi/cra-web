@@ -17,6 +17,7 @@
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
+use crate::colorspace_derived::f32 as cs;
 
 /// Perceptual color space and distance metric for candidate selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -123,9 +124,9 @@ fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -
     let db = b1 - b2;
     let dh_sq = (da * da + db * db - dc * dc).max(0.0);
 
-    // Weighting factors (graphic arts)
-    let sc = 1.0 + 0.045 * c1;
-    let sh = 1.0 + 0.015 * c1;
+    // Weighting factors (graphic arts): SC = 1 + K1*C, SH = 1 + K2*C
+    let sc = 1.0 + cs::CIE94_K1 * c1;
+    let sh = 1.0 + cs::CIE94_K2 * c1;
 
     // ΔE94² = (ΔL/kL)² + (ΔC/SC)² + (ΔH/SH)²
     // kL = 1 for graphic arts
@@ -141,6 +142,7 @@ fn lab_distance_cie94_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -
 #[inline]
 fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f32) -> f32 {
     use std::f32::consts::PI;
+    const TWO_PI: f32 = 2.0 * PI;
 
     let c1_star = (a1 * a1 + b1 * b1).sqrt();
     let c2_star = (a2 * a2 + b2 * b2).sqrt();
@@ -148,7 +150,7 @@ fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f3
 
     // G factor for a' adjustment
     let c_bar_7 = c_bar.powi(7);
-    let g = 0.5 * (1.0 - (c_bar_7 / (c_bar_7 + 6103515625.0_f32)).sqrt()); // 25^7 = 6103515625
+    let g = 0.5 * (1.0 - (c_bar_7 / (c_bar_7 + cs::CIEDE2000_POW25_7)).sqrt());
 
     // Adjusted a' values
     let a1_prime = a1 * (1.0 + g);
@@ -158,19 +160,19 @@ fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f3
     let c1_prime = (a1_prime * a1_prime + b1 * b1).sqrt();
     let c2_prime = (a2_prime * a2_prime + b2 * b2).sqrt();
 
-    // Hue angles (in radians)
+    // Hue angles (in radians, 0 to 2π)
     let h1_prime = if a1_prime == 0.0 && b1 == 0.0 {
         0.0
     } else {
         let h = b1.atan2(a1_prime);
-        if h < 0.0 { h + 2.0 * PI } else { h }
+        if h < 0.0 { h + TWO_PI } else { h }
     };
 
     let h2_prime = if a2_prime == 0.0 && b2 == 0.0 {
         0.0
     } else {
         let h = b2.atan2(a2_prime);
-        if h < 0.0 { h + 2.0 * PI } else { h }
+        if h < 0.0 { h + TWO_PI } else { h }
     };
 
     // Differences
@@ -185,9 +187,9 @@ fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f3
         if diff.abs() <= PI {
             diff
         } else if diff > PI {
-            diff - 2.0 * PI
+            diff - TWO_PI
         } else {
-            diff + 2.0 * PI
+            diff + TWO_PI
         }
     };
 
@@ -202,31 +204,33 @@ fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2: f3
         h1_prime + h2_prime
     } else if (h1_prime - h2_prime).abs() <= PI {
         (h1_prime + h2_prime) / 2.0
-    } else if h1_prime + h2_prime < 2.0 * PI {
-        (h1_prime + h2_prime + 2.0 * PI) / 2.0
+    } else if h1_prime + h2_prime < TWO_PI {
+        (h1_prime + h2_prime + TWO_PI) / 2.0
     } else {
-        (h1_prime + h2_prime - 2.0 * PI) / 2.0
+        (h1_prime + h2_prime - TWO_PI) / 2.0
     };
 
-    // T factor
+    // T factor (using pre-computed radian constants)
     let t = 1.0
-        - 0.17 * (h_bar_prime - PI / 6.0).cos()
+        - 0.17 * (h_bar_prime - cs::CIEDE2000_T_30_RAD).cos()
         + 0.24 * (2.0 * h_bar_prime).cos()
-        + 0.32 * (3.0 * h_bar_prime + PI / 30.0).cos()
-        - 0.20 * (4.0 * h_bar_prime - 63.0 * PI / 180.0).cos();
+        + 0.32 * (3.0 * h_bar_prime + cs::CIEDE2000_T_6_RAD).cos()
+        - 0.20 * (4.0 * h_bar_prime - cs::CIEDE2000_T_63_RAD).cos();
 
-    // SL, SC, SH
+    // SL, SC, SH (using same K1/K2 as CIE94 for SC/SH base)
     let l_bar_minus_50_sq = (l_bar_prime - 50.0) * (l_bar_prime - 50.0);
-    let sl = 1.0 + (0.015 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
-    let sc = 1.0 + 0.045 * c_bar_prime;
-    let sh = 1.0 + 0.015 * c_bar_prime * t;
+    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
+    let sc = 1.0 + cs::CIE94_K1 * c_bar_prime;
+    let sh = 1.0 + cs::CIE94_K2 * c_bar_prime * t;
 
-    // RT (rotation term for blue colors)
-    let h_bar_deg = h_bar_prime * 180.0 / PI;
-    let delta_theta = 30.0 * (-(((h_bar_deg - 275.0) / 25.0).powi(2))).exp();
+    // RT (rotation term for blue colors) - work in radians throughout
+    // Δθ = 30° × exp(-((h̄' - 275°)/25°)²) but we compute in radians
+    let h_bar_minus_275 = h_bar_prime - cs::CIEDE2000_RT_275_RAD;
+    let delta_theta_rad: f32 = cs::CIEDE2000_RT_30_RAD
+        * (-((h_bar_minus_275 / cs::CIEDE2000_RT_25_RAD).powi(2))).exp();
     let c_bar_prime_7 = c_bar_prime.powi(7);
-    let rc = 2.0 * (c_bar_prime_7 / (c_bar_prime_7 + 6103515625.0_f32)).sqrt();
-    let rt = -rc * (2.0 * delta_theta * PI / 180.0).sin();
+    let rc = 2.0_f32 * (c_bar_prime_7 / (c_bar_prime_7 + cs::CIEDE2000_POW25_7)).sqrt();
+    let rt = -rc * (2.0_f32 * delta_theta_rad).sin();
 
     // Final calculation (kL = kC = kH = 1)
     let dl_term = dl_prime / sl;

@@ -111,6 +111,27 @@ mod primary {
         pub const DELTA_DENOMINATOR: u32 = 29;
     }
 
+    /// CIE94 color difference formula constants (graphic arts)
+    /// Mirror of colorspace_primary::cie94
+    pub mod cie94 {
+        pub const K1: f64 = 0.045;
+        pub const K2: f64 = 0.015;
+    }
+
+    /// CIEDE2000 color difference formula constants
+    /// Mirror of colorspace_primary::ciede2000
+    pub mod ciede2000 {
+        /// 25^7 - chroma correction threshold (exact integer)
+        pub const POW25_7: f64 = 6103515625.0;
+        // Angle constants in degrees (primary)
+        pub const T_ANGLE_30_DEG: f64 = 30.0;
+        pub const T_ANGLE_6_DEG: f64 = 6.0;
+        pub const T_ANGLE_63_DEG: f64 = 63.0;
+        pub const RT_ANGLE_275_DEG: f64 = 275.0;
+        pub const RT_ANGLE_25_DEG: f64 = 25.0;
+        pub const RT_ANGLE_30_DEG: f64 = 30.0;
+    }
+
     pub mod ycbcr_bt709 {
         pub const KR: f64 = 0.2126;
         pub const KG: f64 = 0.7152;
@@ -969,6 +990,46 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const CIELAB_L_OFFSET: f32 = 16.0;")?;
     writeln!(out, "    pub const CIELAB_A_SCALE: f32 = 500.0;")?;
     writeln!(out, "    pub const CIELAB_B_SCALE: f32 = 200.0;")?;
+    writeln!(out)?;
+
+    // CIE94 color difference constants
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // CIE94 COLOR DIFFERENCE CONSTANTS")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    /// CIE94 K1 coefficient for SC = 1 + K1*C")?;
+    writeln!(out, "    pub const CIE94_K1: f32 = {} as f32;", fmt_f64(primary::cie94::K1))?;
+    writeln!(out, "    /// CIE94 K2 coefficient for SH = 1 + K2*C")?;
+    writeln!(out, "    pub const CIE94_K2: f32 = {} as f32;", fmt_f64(primary::cie94::K2))?;
+    writeln!(out)?;
+
+    // CIEDE2000 color difference constants
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // CIEDE2000 COLOR DIFFERENCE CONSTANTS")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    /// 25^7 - chroma correction threshold (exact integer)")?;
+    writeln!(out, "    pub const CIEDE2000_POW25_7: f32 = {} as f32;", fmt_f64(primary::ciede2000::POW25_7))?;
+    // Derived angle constants in radians (from degree primaries)
+    let pi = std::f64::consts::PI;
+    let t_angle_30_rad = primary::ciede2000::T_ANGLE_30_DEG * pi / 180.0;
+    let t_angle_6_rad = primary::ciede2000::T_ANGLE_6_DEG * pi / 180.0;
+    let t_angle_63_rad = primary::ciede2000::T_ANGLE_63_DEG * pi / 180.0;
+    let rt_angle_275_rad = primary::ciede2000::RT_ANGLE_275_DEG * pi / 180.0;
+    let rt_angle_25_rad = primary::ciede2000::RT_ANGLE_25_DEG * pi / 180.0;
+    let rt_angle_30_rad = primary::ciede2000::RT_ANGLE_30_DEG * pi / 180.0;
+    writeln!(out, "    /// T factor: 30° in radians (derived: π/6)")?;
+    writeln!(out, "    pub const CIEDE2000_T_30_RAD: f32 = {} as f32;", fmt_f64(t_angle_30_rad))?;
+    writeln!(out, "    /// T factor: 6° in radians (derived: π/30)")?;
+    writeln!(out, "    pub const CIEDE2000_T_6_RAD: f32 = {} as f32;", fmt_f64(t_angle_6_rad))?;
+    writeln!(out, "    /// T factor: 63° in radians (derived: 7π/20)")?;
+    writeln!(out, "    pub const CIEDE2000_T_63_RAD: f32 = {} as f32;", fmt_f64(t_angle_63_rad))?;
+    writeln!(out, "    /// RT term: 275° in radians (derived: 55π/36)")?;
+    writeln!(out, "    pub const CIEDE2000_RT_275_RAD: f32 = {} as f32;", fmt_f64(rt_angle_275_rad))?;
+    writeln!(out, "    /// RT term: 25° in radians (derived: 5π/36)")?;
+    writeln!(out, "    pub const CIEDE2000_RT_25_RAD: f32 = {} as f32;", fmt_f64(rt_angle_25_rad))?;
+    writeln!(out, "    /// RT term: 30° for Δθ in radians (derived: π/6)")?;
+    writeln!(out, "    pub const CIEDE2000_RT_30_RAD: f32 = {} as f32;", fmt_f64(rt_angle_30_rad))?;
     writeln!(out)?;
 
     // OKLab matrices (from primary constants)
