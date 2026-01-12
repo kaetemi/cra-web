@@ -4,6 +4,30 @@ These color spaces are not foundationally distinct but may appear in practical w
 
 ---
 
+## D50 Illuminant
+
+The standard daylight white point for print-oriented color spaces. Represents ~5000K daylight, intended to match typical indoor viewing conditions with artificial illumination.
+
+**CIE xy chromaticity:**
+
+| x | y |
+|--------|--------|
+| 0.3457 | 0.3585 |
+
+From CIE 15:2004.
+
+**Derived XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|--------|--------|--------|
+| 0.9643 | 1.0000 | 0.8251 |
+
+**Used by:** ProPhoto RGB (ISO 22028-2), ICC color profiles.
+
+**Note:** Converting between D50 and D65 color spaces requires chromatic adaptation (Bradford transform). See the main specification for details.
+
+---
+
 ## Display P3
 
 Apple's wide-gamut color space, used on modern iPhones, iPads, and Macs since ~2016. Common in photos from iOS devices.
