@@ -1,48 +1,24 @@
 /// Color conversion utilities for sRGB, Linear RGB, Lab, and Oklab color spaces.
 
-// RGB to XYZ matrix (sRGB/Rec.709 primaries, D65 illuminant)
-const RGB_TO_XYZ: [[f32; 3]; 3] = [
-    [0.412453, 0.357580, 0.180423],
-    [0.212671, 0.715160, 0.072169],
-    [0.019334, 0.119193, 0.950227],
-];
-
-// XYZ to RGB matrix (inverse of above)
-const XYZ_TO_RGB: [[f32; 3]; 3] = [
-    [3.240479, -1.537150, -0.498535],
-    [-0.969256, 1.875991, 0.041556],
-    [0.055648, -0.204043, 1.057311],
-];
-
-// D65 white point
-const X_N: f32 = 0.950456;
-#[allow(dead_code)]
-const Y_N: f32 = 1.0;
-const Z_N: f32 = 1.088754;
-
-// Lab threshold: (6/29)^3
-const EPSILON: f32 = 0.008856;
-
-// Lab linear segment slope: used for f(t) linear segment
-const KAPPA_INV: f32 = 7.787;
+use crate::colorspace_derived::f32 as cs;
 
 /// Convert sRGB value (0-1) to linear RGB
 #[inline]
 pub fn srgb_to_linear_single(srgb: f32) -> f32 {
-    if srgb <= 0.04045 {
-        srgb / 12.92
+    if srgb <= cs::SRGB_DECODE_THRESHOLD {
+        srgb / cs::SRGB_LINEAR_SLOPE
     } else {
-        ((srgb + 0.055) / 1.055).powf(2.4)
+        ((srgb + cs::SRGB_OFFSET) / cs::SRGB_SCALE).powf(cs::SRGB_GAMMA)
     }
 }
 
 /// Convert linear RGB value (0-1) to sRGB
 #[inline]
 pub fn linear_to_srgb_single(linear: f32) -> f32 {
-    if linear <= 0.04045 / 12.92 {
-        linear * 12.92
+    if linear <= cs::SRGB_THRESHOLD {
+        linear * cs::SRGB_LINEAR_SLOPE
     } else {
-        1.055 * linear.max(0.0).powf(1.0 / 2.4) - 0.055
+        cs::SRGB_SCALE * linear.max(0.0).powf(1.0 / cs::SRGB_GAMMA) - cs::SRGB_OFFSET
     }
 }
 
@@ -64,21 +40,20 @@ pub fn linear_to_srgb(data: &mut [f32]) {
 /// Lab f(t) function - attempt to linearize cube root near zero
 #[inline]
 fn lab_f(t: f32) -> f32 {
-    if t > EPSILON {
+    if t > cs::CIELAB_EPSILON {
         t.cbrt()
     } else {
-        KAPPA_INV * t + 16.0 / 116.0
+        cs::CIELAB_KAPPA * t + cs::CIELAB_OFFSET
     }
 }
 
 /// Inverse of lab_f
 #[inline]
 fn lab_f_inv(t: f32) -> f32 {
-    // Threshold in f-space: f(EPSILON) ≈ 0.206893
-    if t > 0.206893 {
+    if t > cs::CIELAB_F_THRESHOLD {
         t * t * t
     } else {
-        (t - 16.0 / 116.0) / KAPPA_INV
+        (t - cs::CIELAB_OFFSET) / cs::CIELAB_KAPPA
     }
 }
 
@@ -87,9 +62,9 @@ fn lab_f_inv(t: f32) -> f32 {
 #[inline]
 pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     // RGB -> XYZ, normalized by white point
-    let x = (RGB_TO_XYZ[0][0] * r + RGB_TO_XYZ[0][1] * g + RGB_TO_XYZ[0][2] * b) / X_N;
-    let y = RGB_TO_XYZ[1][0] * r + RGB_TO_XYZ[1][1] * g + RGB_TO_XYZ[1][2] * b; // Y_N = 1.0
-    let z = (RGB_TO_XYZ[2][0] * r + RGB_TO_XYZ[2][1] * g + RGB_TO_XYZ[2][2] * b) / Z_N;
+    let x = (cs::SRGB_TO_XYZ[0][0] * r + cs::SRGB_TO_XYZ[0][1] * g + cs::SRGB_TO_XYZ[0][2] * b) / cs::D65_X;
+    let y = cs::SRGB_TO_XYZ[1][0] * r + cs::SRGB_TO_XYZ[1][1] * g + cs::SRGB_TO_XYZ[1][2] * b; // D65_Y = 1.0
+    let z = (cs::SRGB_TO_XYZ[2][0] * r + cs::SRGB_TO_XYZ[2][1] * g + cs::SRGB_TO_XYZ[2][2] * b) / cs::D65_Z;
 
     // Apply f(t)
     let fx = lab_f(x);
@@ -97,9 +72,9 @@ pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let fz = lab_f(z);
 
     // XYZ -> Lab
-    let l = 116.0 * fy - 16.0;
-    let a = 500.0 * (fx - fy);
-    let b_ch = 200.0 * (fy - fz);
+    let l = cs::CIELAB_L_SCALE * fy - cs::CIELAB_L_OFFSET;
+    let a = cs::CIELAB_A_SCALE * (fx - fy);
+    let b_ch = cs::CIELAB_B_SCALE * (fy - fz);
 
     (l, a, b_ch)
 }
@@ -108,9 +83,9 @@ pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 #[inline]
 pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     // Lab -> f values
-    let fy = (l + 16.0) / 116.0;
-    let fx = a / 500.0 + fy;
-    let fz = fy - b / 200.0;
+    let fy = (l + cs::CIELAB_L_OFFSET) / cs::CIELAB_L_SCALE;
+    let fx = a / cs::CIELAB_A_SCALE + fy;
+    let fz = fy - b / cs::CIELAB_B_SCALE;
 
     // Invert f(t) to get XYZ (normalized)
     let x = lab_f_inv(fx);
@@ -118,14 +93,14 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let z = lab_f_inv(fz);
 
     // Denormalize by white point
-    let x = x * X_N;
-    // y = y * Y_N where Y_N = 1.0
-    let z = z * Z_N;
+    let x = x * cs::D65_X;
+    // y = y * D65_Y where D65_Y = 1.0
+    let z = z * cs::D65_Z;
 
     // XYZ -> linear RGB
-    let r = XYZ_TO_RGB[0][0] * x + XYZ_TO_RGB[0][1] * y + XYZ_TO_RGB[0][2] * z;
-    let g = XYZ_TO_RGB[1][0] * x + XYZ_TO_RGB[1][1] * y + XYZ_TO_RGB[1][2] * z;
-    let b_out = XYZ_TO_RGB[2][0] * x + XYZ_TO_RGB[2][1] * y + XYZ_TO_RGB[2][2] * z;
+    let r = cs::XYZ_TO_SRGB[0][0] * x + cs::XYZ_TO_SRGB[0][1] * y + cs::XYZ_TO_SRGB[0][2] * z;
+    let g = cs::XYZ_TO_SRGB[1][0] * x + cs::XYZ_TO_SRGB[1][1] * y + cs::XYZ_TO_SRGB[1][2] * z;
+    let b_out = cs::XYZ_TO_SRGB[2][0] * x + cs::XYZ_TO_SRGB[2][1] * y + cs::XYZ_TO_SRGB[2][2] * z;
 
     (r, g, b_out)
 }
@@ -186,9 +161,9 @@ pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize,
 #[inline]
 pub fn linear_rgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     // Linear sRGB to LMS
-    let l = 0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b;
-    let m = 0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b;
-    let s = 0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b;
+    let l = cs::OKLAB_M1[0][0] * r + cs::OKLAB_M1[0][1] * g + cs::OKLAB_M1[0][2] * b;
+    let m = cs::OKLAB_M1[1][0] * r + cs::OKLAB_M1[1][1] * g + cs::OKLAB_M1[1][2] * b;
+    let s = cs::OKLAB_M1[2][0] * r + cs::OKLAB_M1[2][1] * g + cs::OKLAB_M1[2][2] * b;
 
     // Cube root (with sign handling for out-of-gamut values)
     let l_ = l.max(0.0).cbrt();
@@ -196,9 +171,9 @@ pub fn linear_rgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let s_ = s.max(0.0).cbrt();
 
     // LMS' to Oklab
-    let ok_l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
-    let ok_a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
-    let ok_b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+    let ok_l = cs::OKLAB_M2[0][0] * l_ + cs::OKLAB_M2[0][1] * m_ + cs::OKLAB_M2[0][2] * s_;
+    let ok_a = cs::OKLAB_M2[1][0] * l_ + cs::OKLAB_M2[1][1] * m_ + cs::OKLAB_M2[1][2] * s_;
+    let ok_b = cs::OKLAB_M2[2][0] * l_ + cs::OKLAB_M2[2][1] * m_ + cs::OKLAB_M2[2][2] * s_;
 
     (ok_l, ok_a, ok_b)
 }
@@ -207,9 +182,9 @@ pub fn linear_rgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
 #[inline]
 pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     // Oklab to LMS'
-    let l_ = l + 0.3963377774 * a + 0.2158037573 * b;
-    let m_ = l - 0.1055613458 * a - 0.0638541728 * b;
-    let s_ = l - 0.0894841775 * a - 1.2914855480 * b;
+    let l_ = cs::OKLAB_M2_INV[0][0] * l + cs::OKLAB_M2_INV[0][1] * a + cs::OKLAB_M2_INV[0][2] * b;
+    let m_ = cs::OKLAB_M2_INV[1][0] * l + cs::OKLAB_M2_INV[1][1] * a + cs::OKLAB_M2_INV[1][2] * b;
+    let s_ = cs::OKLAB_M2_INV[2][0] * l + cs::OKLAB_M2_INV[2][1] * a + cs::OKLAB_M2_INV[2][2] * b;
 
     // Cube LMS'
     let lms_l = l_ * l_ * l_;
@@ -217,9 +192,9 @@ pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let lms_s = s_ * s_ * s_;
 
     // LMS to linear sRGB
-    let r = 4.0767416621 * lms_l - 3.3077115913 * lms_m + 0.2309699292 * lms_s;
-    let g = -1.2684380046 * lms_l + 2.6097574011 * lms_m - 0.3413193965 * lms_s;
-    let b_out = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
+    let r = cs::OKLAB_M1_INV[0][0] * lms_l + cs::OKLAB_M1_INV[0][1] * lms_m + cs::OKLAB_M1_INV[0][2] * lms_s;
+    let g = cs::OKLAB_M1_INV[1][0] * lms_l + cs::OKLAB_M1_INV[1][1] * lms_m + cs::OKLAB_M1_INV[1][2] * lms_s;
+    let b_out = cs::OKLAB_M1_INV[2][0] * lms_l + cs::OKLAB_M1_INV[2][1] * lms_m + cs::OKLAB_M1_INV[2][2] * lms_s;
 
     (r, g, b_out)
 }
