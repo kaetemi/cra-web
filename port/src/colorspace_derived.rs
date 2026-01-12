@@ -614,6 +614,10 @@ pub mod f32 {
     pub const CIELAB_KAPPA: f32 = 7.78703703703703631 as f32;
     pub const CIELAB_OFFSET: f32 = 0.13793103448275862 as f32;
     pub const CIELAB_F_THRESHOLD: f32 = 0.20689655172413793 as f32;
+    /// Negative threshold: where linear segment meets cbrt for t < 0
+    pub const CIELAB_NEG_EPSILON: f32 = 0.07085161343228505 as f32;
+    /// f(-NEG_EPSILON) threshold in f-space for inverse
+    pub const CIELAB_NEG_F_THRESHOLD: f32 = -0.41379310344827586 as f32;
     pub const CIELAB_L_SCALE: f32 = 116.0;
     pub const CIELAB_L_OFFSET: f32 = 16.0;
     pub const CIELAB_A_SCALE: f32 = 500.0;

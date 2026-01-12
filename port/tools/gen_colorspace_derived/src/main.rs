@@ -488,6 +488,19 @@ fn main() -> io::Result<()> {
     let lab_offset = 4.0 / 29.0; // 4/29 = 16/116
     let lab_f_threshold = delta; // threshold in f-space for inverse
 
+    // Negative epsilon: solve KAPPA * x - cbrt(x) = OFFSET for x > 0
+    // This is where the linear segment meets cbrt on the negative side (at t = -x)
+    // Using Newton's method: g(x) = KAPPA * x - x^(1/3) - OFFSET, g'(x) = KAPPA - 1/(3*x^(2/3))
+    let mut x = 0.07_f64; // Initial guess
+    for _ in 0..20 {
+        let cbrt_x = x.cbrt();
+        let g = lab_kappa * x - cbrt_x - lab_offset;
+        let g_prime = lab_kappa - 1.0 / (3.0 * cbrt_x * cbrt_x);
+        x = x - g / g_prime;
+    }
+    let lab_neg_epsilon = x; // ~0.0709 - threshold magnitude for negative values
+    let lab_neg_f_threshold = -x.cbrt(); // f(-neg_epsilon) = cbrt(-neg_epsilon)
+
     // Transfer function derived constants
     let adobe_gamma = primary::adobe_rgb_transfer::GAMMA_NUMERATOR as f64
         / primary::adobe_rgb_transfer::GAMMA_DENOMINATOR as f64;
@@ -948,6 +961,10 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const CIELAB_KAPPA: f32 = {} as f32;", fmt_f64(lab_kappa))?;
     writeln!(out, "    pub const CIELAB_OFFSET: f32 = {} as f32;", fmt_f64(lab_offset))?;
     writeln!(out, "    pub const CIELAB_F_THRESHOLD: f32 = {} as f32;", fmt_f64(lab_f_threshold))?;
+    writeln!(out, "    /// Negative threshold: where linear segment meets cbrt for t < 0")?;
+    writeln!(out, "    pub const CIELAB_NEG_EPSILON: f32 = {} as f32;", fmt_f64(lab_neg_epsilon))?;
+    writeln!(out, "    /// f(-NEG_EPSILON) threshold in f-space for inverse")?;
+    writeln!(out, "    pub const CIELAB_NEG_F_THRESHOLD: f32 = {} as f32;", fmt_f64(lab_neg_f_threshold))?;
     writeln!(out, "    pub const CIELAB_L_SCALE: f32 = 116.0;")?;
     writeln!(out, "    pub const CIELAB_L_OFFSET: f32 = 16.0;")?;
     writeln!(out, "    pub const CIELAB_A_SCALE: f32 = 500.0;")?;

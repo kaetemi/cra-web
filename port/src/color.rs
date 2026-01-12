@@ -37,22 +37,55 @@ pub fn linear_to_srgb(data: &mut [f32]) {
     }
 }
 
-/// Lab f(t) function - attempt to linearize cube root near zero
+/// Lab f(t) function - attempt to linearize cube root near zero.
+///
+/// The standard CIELAB f(t) function uses a linear segment near zero to avoid
+/// the infinite slope of the cube root at t=0. This is defined only for t >= 0
+/// in the official specification, since XYZ values are non-negative for in-gamut colors.
+///
+/// However, during error-diffusion dithering, accumulated quantization error can
+/// push adjusted linear RGB values negative, resulting in negative XYZ components.
+/// We extend the linear segment symmetrically into negative territory, ensuring
+/// continuity at both boundaries:
+///   - At t = EPSILON (~0.0089): linear meets cbrt from above
+///   - At t = -NEG_EPSILON (~-0.0709): linear meets cbrt from below
+///
+/// This continuous extension is important for aggressive quantization (e.g., 1-bit)
+/// where large errors can accumulate. Without continuity, incorrect Lab distances
+/// could cause wrong quantization candidates and visible artifacts.
 #[inline]
 fn lab_f(t: f32) -> f32 {
     if t > cs::CIELAB_EPSILON {
+        // Standard cube root region for normal positive values
         t.cbrt()
-    } else {
+    } else if t >= -cs::CIELAB_NEG_EPSILON {
+        // Linear segment for values near zero (both positive and negative).
+        // This avoids the infinite derivative of cbrt at t=0 and ensures
+        // continuity at both EPSILON and -NEG_EPSILON boundaries.
         cs::CIELAB_KAPPA * t + cs::CIELAB_OFFSET
+    } else {
+        // Very negative out-of-gamut values: use cube root for correct behavior.
+        // Continuous with linear segment at t = -NEG_EPSILON.
+        t.cbrt()
     }
 }
 
-/// Inverse of lab_f
+/// Inverse of lab_f - converts from f(t) space back to linear XYZ-normalized space.
+///
+/// This mirrors the three regions defined in lab_f:
+/// - Very negative f-values (< NEG_F_THRESHOLD): came from cbrt of t < -NEG_EPSILON
+/// - Middle range [NEG_F_THRESHOLD, F_THRESHOLD]: came from linear segment
+/// - Positive f-values (> F_THRESHOLD): came from cbrt of t > EPSILON
 #[inline]
 fn lab_f_inv(t: f32) -> f32 {
-    if t > cs::CIELAB_F_THRESHOLD {
+    if t < cs::CIELAB_NEG_F_THRESHOLD {
+        // Very negative: originated from cbrt of value < -NEG_EPSILON
+        t * t * t
+    } else if t > cs::CIELAB_F_THRESHOLD {
+        // Above positive threshold: originated from cbrt region
         t * t * t
     } else {
+        // Linear region: invert the linear approximation
         (t - cs::CIELAB_OFFSET) / cs::CIELAB_KAPPA
     }
 }
@@ -369,5 +402,63 @@ mod tests {
             assert!((g - g2).abs() < 1e-4, "G failed: {} vs {}", g, g2);
             assert!((b - b2).abs() < 1e-4, "B failed: {} vs {}", b, b2);
         }
+    }
+
+    #[test]
+    fn test_lab_f_roundtrip_negative() {
+        // Verify that lab_f and lab_f_inv are proper inverses for negative values
+        // (out-of-gamut colors that can occur during error diffusion)
+        let test_values = [-1.0, -0.5, -0.1, -0.01, -0.001];
+        for &t in &test_values {
+            let f_t = lab_f(t);
+            let back = lab_f_inv(f_t);
+            assert!(
+                (t - back).abs() < 1e-6,
+                "lab_f roundtrip failed for {}: f({}) = {}, inv = {}",
+                t, t, f_t, back
+            );
+        }
+    }
+
+    #[test]
+    fn test_lab_f_continuity() {
+        // Verify continuity at the positive boundary (EPSILON ≈ 0.0089)
+        let eps = cs::CIELAB_EPSILON;
+        let f_below = lab_f(eps - 1e-6);
+        let f_at = lab_f(eps);
+        let f_above = lab_f(eps + 1e-6);
+        assert!(
+            (f_below - f_at).abs() < 1e-4,
+            "Discontinuity at EPSILON: below={}, at={}",
+            f_below, f_at
+        );
+        assert!(
+            (f_above - f_at).abs() < 1e-4,
+            "Discontinuity at EPSILON: at={}, above={}",
+            f_at, f_above
+        );
+
+        // Verify continuity at the negative boundary (-NEG_EPSILON ≈ -0.0709)
+        let neg_eps = -cs::CIELAB_NEG_EPSILON;
+        let f_below_neg = lab_f(neg_eps - 1e-6);
+        let f_at_neg = lab_f(neg_eps);
+        let f_above_neg = lab_f(neg_eps + 1e-6);
+        assert!(
+            (f_below_neg - f_at_neg).abs() < 1e-4,
+            "Discontinuity at -NEG_EPSILON: below={}, at={}",
+            f_below_neg, f_at_neg
+        );
+        assert!(
+            (f_above_neg - f_at_neg).abs() < 1e-4,
+            "Discontinuity at -NEG_EPSILON: at={}, above={}",
+            f_at_neg, f_above_neg
+        );
+
+        // Verify very negative values use cbrt
+        let f_very_neg = lab_f(-0.5);
+        assert!(
+            (f_very_neg + (0.5_f32).cbrt()).abs() < 1e-6,
+            "lab_f(-0.5) should equal -cbrt(0.5)"
+        );
     }
 }
