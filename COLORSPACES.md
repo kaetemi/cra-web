@@ -21,28 +21,6 @@ Everything else in this document ultimately derives from XYZ.
 
 ---
 
-## D65 Illuminant
-
-The standard daylight white point used by most display-oriented color spaces.
-
-**Definition (CIE xy chromaticity):**
-
-| x | y |
-|--------|--------|
-| 0.3127 | 0.3290 |
-
-These are the values specified in ITU-R BT.709, sRGB (IEC 61966-2-1), and other 
-display standards. They are rounded from the CIE 15:2004 values (0.31272, 0.32903) 
-derived from the D65 spectral power distribution.
-
-**Derived XYZ (normalized to Y=1):**
-
-| X | Y | Z |
-|---------|---------|---------|
-| 0.95046 | 1.00000 | 1.08906 |
-
----
-
 ## Linear RGB
 
 No formal standard exists. This is the implicit intermediate state in the sRGB specification (IEC 61966-2-1) before the transfer function is applied. In practice, "Linear RGB" universally means: Rec.709 primaries, D65 white point, linear transfer.
@@ -59,7 +37,7 @@ Linear RGB → XYZ:
 | Z |   | 0.0193  0.1192  0.9505 |   | B |
 ```
 
-**White point:** D65
+**White point:** D65 (see below for the distinction between CIE D65 and the sRGB-implied white point)
 
 **Transfer function:** None (identity).
 
@@ -69,7 +47,7 @@ Each matrix column gives the XYZ of that primary. Projecting to xy via x = X/(X+
 
 | Primary | x | y |
 |---------|--------|--------|
-| Red | 0.6401 | 0.3300 |
+| Red | 0.6400 | 0.3300 |
 | Green | 0.3000 | 0.6000 |
 | Blue | 0.1500 | 0.0600 |
 
@@ -84,6 +62,56 @@ XYZ → Linear RGB:
 ```
 
 The second row of the forward matrix gives the luminance coefficients: Y = 0.2126R + 0.7152G + 0.0722B.
+
+---
+
+## D65 Illuminant
+
+The standard daylight white point used by most display-oriented color spaces. Multiple representations exist due to rounding at different stages of standardization.
+
+### D65 (CIE)
+
+The authoritative definition from CIE 15:2004, derived from the D65 spectral power distribution.
+
+**CIE xy chromaticity (5 decimal places):**
+
+| x | y |
+|---------|---------|
+| 0.31272 | 0.32903 |
+
+### D65 (sRGB)
+
+The white point implicitly defined by the sRGB/Rec.709 RGB→XYZ matrix. Since IEC 61966-2-1 treats that matrix as exact, this is the operative D65 for sRGB workflows.
+
+**Derivation:** Sum each column of the Linear RGB → XYZ matrix to get white XYZ, then compute chromaticity.
+
+```
+X = 0.4124 + 0.3576 + 0.1805 = 0.9505
+Y = 0.2126 + 0.7152 + 0.0722 = 1.0000
+Z = 0.0193 + 0.1192 + 0.9505 = 1.0890
+```
+
+**Derived xy chromaticity:**
+
+| x | y |
+|-----------------|-----------------|
+| 0.31272661468101208 | 0.32902313032606195 |
+
+**XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|---------|---------|---------|
+| 0.9505 | 1.0000 | 1.0890 |
+
+### D65 (4-digit)
+
+The rounded values quoted in ITU-R BT.709, sRGB (IEC 61966-2-1), and Adobe RGB (1998). These are the values typically cited in specifications but do not precisely match either the CIE definition or the sRGB-implied white point.
+
+| x | y |
+|--------|--------|
+| 0.3127 | 0.3290 |
+
+**Practical impact:** When deriving matrices for color spaces defined by primaries + "D65 white point" (e.g., Adobe RGB, Apple RGB), the choice of which D65 affects the 5th+ decimal place of the resulting matrices. For round-trip consistency with sRGB, use the sRGB-implied values. Adobe RGB's specification explicitly uses the 4-digit values.
 
 ---
 
