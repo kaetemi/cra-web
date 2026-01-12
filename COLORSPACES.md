@@ -220,6 +220,10 @@ Y' = 0.299 R' + 0.587 G' + 0.114 B'
 
 This is the classic "30/59/11" formula. It is frequently misapplied to sRGB content.
 
+**Y'CbCr and JPEG:**
+
+JPEG (JFIF) always uses BT.601 Y'CbCr for compression—same transform, same coefficients—but the input RGB can come from different color spaces (sRGB, ProPhoto, Display P3, etc.). The ICC profile declares which RGB space to interpret the decoded values as, while the Y'CbCr compression stage remains BT.601 throughout. This effectively creates non-standard Y'CbCr color spaces: the BT.601 transform applied to a different RGB base than it was designed for.
+
 ---
 
 ## Apple RGB
