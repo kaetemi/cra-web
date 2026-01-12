@@ -73,9 +73,9 @@ Note: The gamma is often approximated as 2.2, but the precise value specified in
 ```
 [linearized] Adobe RGB → XYZ:
 
-| X |   | 0.5767309  0.1855540  0.1881852 |   | R |
-| Y | = | 0.2973769  0.6273491  0.0752741 | × | G |
-| Z |   | 0.0270343  0.0706872  0.9911085 |   | B |
+| X |   | 0.5766690  0.1855582  0.1882286 |   | R |
+| Y | = | 0.2973450  0.6273636  0.0752915 | × | G |
+| Z |   | 0.0270314  0.0706889  0.9913375 |   | B |
 ```
 
 ```
@@ -83,7 +83,7 @@ XYZ → [linearized] Adobe RGB:
 
 | R |   |  2.0415879 -0.5650070 -0.3447314 |   | X |
 | G | = | -0.9692436  1.8759675  0.0415551 | × | Y |
-| B |   |  0.0134442 -0.1183624  1.0151750 |   | Z |
+| B |   |  0.0134443 -0.1183624  1.0151750 |   | Z |
 ```
 
 **When you encounter it:** DSLR cameras, Photoshop workflows, print-oriented photography.
