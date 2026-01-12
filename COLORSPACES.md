@@ -47,36 +47,43 @@ derived from the D65 spectral power distribution.
 
 No formal standard exists. This is the implicit intermediate state in the sRGB specification (IEC 61966-2-1) before the transfer function is applied. In practice, "Linear RGB" universally means: Rec.709 primaries, D65 white point, linear transfer.
 
-**Definition:**
+**Definition (XYZ relationship):**
 
-| Primary | x | y |
-|---------|--------|--------|
-| Red | 0.6400 | 0.3300 |
-| Green | 0.3000 | 0.6000 |
-| Blue | 0.1500 | 0.0600 |
-| White | D65 | |
-
-**Transfer function:** None (identity).
-
-**Derived XYZ conversion:**
+Per IEC 61966-2-1, these coefficients are considered exact:
 
 ```
 Linear RGB → XYZ:
 
-| X |   | 0.4123908  0.3575843  0.1804808 |   | R |
-| Y | = | 0.2126390  0.7151687  0.0721923 | × | G |
-| Z |   | 0.0193308  0.1191948  0.9505322 |   | B |
+| X |   | 0.4124  0.3576  0.1805 |   | R |
+| Y | = | 0.2126  0.7152  0.0722 | × | G |
+| Z |   | 0.0193  0.1192  0.9505 |   | B |
 ```
+
+**White point:** D65
+
+**Transfer function:** None (identity).
+
+**Derived chromaticities:**
+
+Each matrix column gives the XYZ of that primary. Projecting to xy via x = X/(X+Y+Z), y = Y/(X+Y+Z):
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.6401 | 0.3300 |
+| Green | 0.3000 | 0.6000 |
+| Blue | 0.1500 | 0.0600 |
+
+**Derived inverse:**
 
 ```
 XYZ → Linear RGB:
 
-| R |   |  3.2409699 -1.5373832 -0.4986108 |   | X |
-| G | = | -0.9692436  1.8759675  0.0415551 | × | Y |
-| B |   |  0.0556301 -0.2039770  1.0569715 |   | Z |
+| R |   |  3.2406255 -1.5372080 -0.4986286 |   | X |
+| G | = | -0.9689307  1.8757561  0.0415175 | × | Y |
+| B |   |  0.0557101 -0.2040211  1.0569959 |   | Z |
 ```
 
-The second row of the first matrix gives the luminance coefficients: Y = 0.2126390R + 0.7151687G + 0.0721923B.
+The second row of the forward matrix gives the luminance coefficients: Y = 0.2126R + 0.7152G + 0.0722B.
 
 ---
 
