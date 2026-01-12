@@ -9,6 +9,7 @@ mod basic_lab;
 mod basic_oklab;
 mod basic_rgb;
 mod color;
+mod color_distance;
 pub mod colorspace_derived;
 pub mod colorspace_primary;
 mod cra_lab;
@@ -17,6 +18,7 @@ mod cra_rgb;
 mod dither;
 mod dither_colorspace_aware;
 mod dither_colorspace_luminosity;
+mod dither_common;
 mod histogram;
 mod rotation;
 mod tiled_lab;
@@ -25,8 +27,8 @@ mod tiling;
 
 // Re-export dithering function for compatibility with existing WASM code
 pub use dither::floyd_steinberg_dither;
-use dither::DitherMode;
-use dither::PerceptualSpace;
+use dither_common::DitherMode;
+use dither_common::PerceptualSpace;
 
 /// Convert u8 to DitherMode for WASM interface
 /// 0 = Floyd-Steinberg Standard

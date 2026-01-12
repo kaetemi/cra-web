@@ -33,6 +33,8 @@
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
+use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
+use crate::dither_common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
 /// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
@@ -46,7 +48,6 @@ fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
         -linear_to_srgb_single(-lin_gray)
     }
 }
-use crate::dither_colorspace_aware::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
 // Optimized Grayscale Distance
@@ -93,24 +94,6 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
             lightness_distance_sq(l1, l2)
         }
     }
-}
-
-/// Check if a PerceptualSpace variant uses CIELAB
-#[inline]
-fn is_lab_space(space: PerceptualSpace) -> bool {
-    matches!(space, PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000)
-}
-
-/// Check if a PerceptualSpace variant uses linear RGB (no perceptual conversion)
-#[inline]
-fn is_linear_rgb_space(space: PerceptualSpace) -> bool {
-    matches!(space, PerceptualSpace::LinearRGB)
-}
-
-/// Check if a PerceptualSpace variant uses Y'CbCr
-#[inline]
-fn is_ycbcr_space(space: PerceptualSpace) -> bool {
-    matches!(space, PerceptualSpace::YCbCr)
 }
 
 /// Quantization parameters for grayscale dithering
@@ -885,7 +868,7 @@ mod tests {
     fn test_gray_distance_matches_rgb_distance_functions() {
         // Verify that our simplified lightness_distance_sq produces the same
         // results as the full RGB distance functions for neutral gray inputs.
-        use crate::dither_colorspace_aware::{
+        use crate::color_distance::{
             lab_distance_cie76_sq, lab_distance_cie94_sq, lab_distance_ciede2000_sq,
         };
 

@@ -5,11 +5,13 @@
 pub use crate::dither_colorspace_aware::{
     colorspace_aware_dither_rgb,
     colorspace_aware_dither_rgb_with_mode,
-    PerceptualSpace,
 };
 
-// Import shared utilities from dither_colorspace_aware
-use crate::dither_colorspace_aware::{bit_replicate, wang_hash};
+// Re-export common types for backwards compatibility
+pub use crate::dither_common::DitherMode;
+
+// Import shared utilities from dither_common
+use crate::dither_common::{bit_replicate, wang_hash};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.
@@ -125,32 +127,6 @@ impl QuantParams {
 }
 
 // wang_hash is imported from dither_colorspace_aware
-
-/// Dithering mode selection
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum DitherMode {
-    /// Floyd-Steinberg: Standard left-to-right scanning (default)
-    #[default]
-    Standard,
-    /// Floyd-Steinberg: Serpentine scanning (alternating direction each row)
-    /// Reduces diagonal banding artifacts
-    Serpentine,
-    /// Jarvis-Judice-Ninke: Standard left-to-right scanning
-    /// Larger kernel (3 rows) produces smoother results but slower
-    JarvisStandard,
-    /// Jarvis-Judice-Ninke: Serpentine scanning
-    /// Combines larger kernel with alternating scan direction
-    JarvisSerpentine,
-    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
-    /// Standard left-to-right scanning
-    MixedStandard,
-    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
-    /// Serpentine scanning (alternating direction each row)
-    MixedSerpentine,
-    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
-    /// AND randomly selects scan direction per row
-    MixedRandom,
-}
 
 // ============================================================================
 // Trait-based kernel abstraction
