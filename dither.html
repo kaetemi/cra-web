@@ -306,6 +306,34 @@
             margin-top: 8px;
         }
 
+        .stride-options {
+            margin-top: 15px;
+            padding: 15px;
+            background: #e8f4fd;
+            border-radius: 8px;
+            border: 1px solid #90caf9;
+        }
+
+        .stride-options label {
+            font-weight: 600;
+            color: #555;
+            margin-right: 10px;
+        }
+
+        .stride-options select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .stride-options .stride-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+
         .scale-options {
             display: none;
             margin-top: 15px;
@@ -640,6 +668,21 @@
                 <p class="seed-hint">Controls random kernel selection in Mixed modes. Each channel uses a different derived seed.</p>
             </div>
 
+            <div class="stride-options">
+                <label for="stride-select">Binary Row Stride:</label>
+                <select id="stride-select">
+                    <option value="1" selected>1 byte (no padding)</option>
+                    <option value="2">2 bytes</option>
+                    <option value="4">4 bytes</option>
+                    <option value="8">8 bytes</option>
+                    <option value="16">16 bytes</option>
+                    <option value="32">32 bytes</option>
+                    <option value="64">64 bytes</option>
+                    <option value="128">128 bytes</option>
+                </select>
+                <p class="stride-hint">Row alignment for binary (row-aligned) output. Each row is padded to this boundary.</p>
+            </div>
+
             <div class="toggle-row">
                 <span>Grayscale:</span>
                 <label class="toggle-switch">
@@ -764,9 +807,12 @@
             format_total_bits_wasm,
             encode_rgb_packed_wasm,
             encode_rgb_row_aligned_wasm,
+            encode_rgb_row_aligned_stride_wasm,
             encode_gray_packed_wasm,
             encode_gray_row_aligned_wasm,
-            encode_channel_packed_wasm
+            encode_gray_row_aligned_stride_wasm,
+            encode_channel_packed_wasm,
+            encode_channel_row_aligned_stride_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
@@ -1202,6 +1248,7 @@
             if (!lastDitherResult) return null;
 
             const format = getFormatString();
+            const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const modeNames = ['fs-standard', 'fs-serpentine', 'jjn-standard', 'jjn-serpentine',
                                'mixed-standard', 'mixed-serpentine', 'mixed-random'];
             const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
@@ -1219,6 +1266,7 @@
                 colorspace: lastDitherResult.perceptualSpace !== null ?
                     spaceNames[lastDitherResult.perceptualSpace] || 'unknown' : 'none',
                 seed: lastDitherResult.seed,
+                stride: stride,
                 generated_at: new Date().toISOString()
             };
         }
@@ -1394,17 +1442,19 @@
             if (!lastDitherResult) return;
 
             const format = getFormatString();
+            const stride = parseInt(document.getElementById('stride-select').value) || 1;
             let binaryData;
 
             if (lastDitherResult.isGrayscale) {
-                binaryData = encode_gray_row_aligned_wasm(
+                binaryData = encode_gray_row_aligned_stride_wasm(
                     lastDitherResult.grayChannel,
                     lastDitherResult.width,
                     lastDitherResult.height,
-                    lastDitherResult.bitsR
+                    lastDitherResult.bitsR,
+                    stride
                 );
             } else {
-                binaryData = encode_rgb_row_aligned_wasm(
+                binaryData = encode_rgb_row_aligned_stride_wasm(
                     lastDitherResult.rChannel,
                     lastDitherResult.gChannel,
                     lastDitherResult.bChannel,
@@ -1412,12 +1462,14 @@
                     lastDitherResult.height,
                     lastDitherResult.bitsR,
                     lastDitherResult.bitsG,
-                    lastDitherResult.bitsB
+                    lastDitherResult.bitsB,
+                    stride
                 );
             }
 
             const blob = new Blob([binaryData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_${format}_row.bin`);
+            const strideSuffix = stride > 1 ? `_stride${stride}` : '';
+            downloadBlob(blob, `dithered_${format}_row${strideSuffix}.bin`);
         });
 
         document.getElementById('download-meta-btn').addEventListener('click', () => {

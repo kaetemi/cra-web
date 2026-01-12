@@ -154,6 +154,18 @@ impl ColorFormat {
     }
 }
 
+/// Align a byte count up to the specified stride (must be power of 2)
+#[inline]
+pub fn align_to_stride(bytes: usize, stride: usize) -> usize {
+    debug_assert!(stride.is_power_of_two(), "stride must be power of 2");
+    (bytes + stride - 1) & !(stride - 1)
+}
+
+/// Validate stride alignment value (must be power of 2, 1-128)
+pub fn is_valid_stride(stride: usize) -> bool {
+    stride.is_power_of_two() && stride >= 1 && stride <= 128
+}
+
 /// Encode RGB pixel to packed binary format
 /// Returns the raw bits as a u32 (caller should mask to appropriate bit width)
 #[inline]
@@ -235,18 +247,23 @@ pub fn encode_rgb666_packed(
     output
 }
 
-/// Encode RGB666 data with row alignment (each row padded to 9-byte boundary for 4-pixel groups)
-pub fn encode_rgb666_row_aligned(
+/// Encode RGB666 data with row alignment and configurable stride
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+pub fn encode_rgb666_row_aligned_stride(
     r_data: &[u8],
     g_data: &[u8],
     b_data: &[u8],
     width: usize,
     height: usize,
+    stride: usize,
 ) -> Vec<u8> {
-    // Each row: groups of 4 pixels -> 9 bytes, padded
+    // Each row: groups of 4 pixels -> 9 bytes
     let groups_per_row = (width + 3) / 4;
-    let bytes_per_row = groups_per_row * 9;
-    let mut output = Vec::with_capacity(bytes_per_row * height);
+    let raw_bytes_per_row = groups_per_row * 9;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
 
     for y in 0..height {
         let row_start = y * width;
@@ -277,9 +294,26 @@ pub fn encode_rgb666_row_aligned(
             output.extend_from_slice(&block);
             x += 4;
         }
+
+        // Add padding bytes to align row to stride
+        for _ in 0..padding {
+            output.push(0);
+        }
     }
 
     output
+}
+
+/// Encode RGB666 data with row alignment (each row padded to 9-byte boundary for 4-pixel groups)
+/// This is a convenience wrapper with stride=1 (no additional alignment)
+pub fn encode_rgb666_row_aligned(
+    r_data: &[u8],
+    g_data: &[u8],
+    b_data: &[u8],
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    encode_rgb666_row_aligned_stride(r_data, g_data, b_data, width, height, 1)
 }
 
 /// Write packed binary output for RGB data (continuous bit stream, no row padding)
@@ -347,8 +381,10 @@ pub fn encode_rgb_packed(
     output
 }
 
-/// Write row-aligned binary output for RGB data (each row padded to byte boundary)
-pub fn encode_rgb_row_aligned(
+/// Write row-aligned binary output for RGB data with configurable stride
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+pub fn encode_rgb_row_aligned_stride(
     r_data: &[u8],
     g_data: &[u8],
     b_data: &[u8],
@@ -357,23 +393,46 @@ pub fn encode_rgb_row_aligned(
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
+    stride: usize,
 ) -> Vec<u8> {
     // Special case: RGB666 uses 4-pixel-to-9-byte packing
     if bits_r == 6 && bits_g == 6 && bits_b == 6 {
-        return encode_rgb666_row_aligned(r_data, g_data, b_data, width, height);
+        return encode_rgb666_row_aligned_stride(r_data, g_data, b_data, width, height, stride);
     }
 
     let total_bits = (bits_r + bits_g + bits_b) as usize;
 
     if total_bits >= 8 {
-        // For byte-aligned formats, row alignment is automatic
-        return encode_rgb_packed(r_data, g_data, b_data, width, height, bits_r, bits_g, bits_b);
+        // Byte-aligned or multi-byte pixels
+        let bytes_per_pixel = (total_bits + 7) / 8;
+        let raw_bytes_per_row = width * bytes_per_pixel;
+        let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+        let padding = aligned_bytes_per_row - raw_bytes_per_row;
+        let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+        for y in 0..height {
+            for x in 0..width {
+                let i = y * width + x;
+                let val = encode_rgb_pixel(r_data[i], g_data[i], b_data[i], bits_r, bits_g, bits_b);
+                // Write little-endian (LSB first)
+                for byte_idx in 0..bytes_per_pixel {
+                    output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
+                }
+            }
+            // Add padding bytes to align row to stride
+            for _ in 0..padding {
+                output.push(0);
+            }
+        }
+        return output;
     }
 
     // Sub-byte pixels - pack each row separately with padding
     let pixels_per_byte = 8 / total_bits;
-    let bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
-    let mut output = Vec::with_capacity(bytes_per_row * height);
+    let raw_bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
 
     for y in 0..height {
         let mut current_byte: u8 = 0;
@@ -399,9 +458,29 @@ pub fn encode_rgb_row_aligned(
         if bits_in_byte > 0 {
             output.push(current_byte);
         }
+
+        // Add padding bytes to align row to stride
+        for _ in 0..padding {
+            output.push(0);
+        }
     }
 
     output
+}
+
+/// Write row-aligned binary output for RGB data (each row padded to byte boundary)
+/// This is a convenience wrapper with stride=1 (no additional alignment beyond byte boundary)
+pub fn encode_rgb_row_aligned(
+    r_data: &[u8],
+    g_data: &[u8],
+    b_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+) -> Vec<u8> {
+    encode_rgb_row_aligned_stride(r_data, g_data, b_data, width, height, bits_r, bits_g, bits_b, 1)
 }
 
 /// Write packed binary output for grayscale data
@@ -454,24 +533,42 @@ pub fn encode_gray_packed(
     output
 }
 
-/// Write row-aligned binary output for grayscale data
-pub fn encode_gray_row_aligned(
+/// Write row-aligned binary output for grayscale data with configurable stride
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+pub fn encode_gray_row_aligned_stride(
     gray_data: &[u8],
     width: usize,
     height: usize,
     bits: u8,
+    stride: usize,
 ) -> Vec<u8> {
     let total_bits = bits as usize;
 
     if total_bits >= 8 {
-        // For byte-aligned formats, row alignment is automatic
-        return encode_gray_packed(gray_data, width, height, bits);
+        // Byte-aligned pixels (L8)
+        let raw_bytes_per_row = width;
+        let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+        let padding = aligned_bytes_per_row - raw_bytes_per_row;
+        let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+        for y in 0..height {
+            for x in 0..width {
+                output.push(gray_data[y * width + x]);
+            }
+            for _ in 0..padding {
+                output.push(0);
+            }
+        }
+        return output;
     }
 
     // Sub-byte pixels - pack each row separately with padding
     let pixels_per_byte = 8 / total_bits;
-    let bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
-    let mut output = Vec::with_capacity(bytes_per_row * height);
+    let raw_bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
 
     for y in 0..height {
         let mut current_byte: u8 = 0;
@@ -497,9 +594,25 @@ pub fn encode_gray_row_aligned(
         if bits_in_byte > 0 {
             output.push(current_byte);
         }
+
+        // Add padding bytes to align row to stride
+        for _ in 0..padding {
+            output.push(0);
+        }
     }
 
     output
+}
+
+/// Write row-aligned binary output for grayscale data
+/// This is a convenience wrapper with stride=1 (no additional alignment beyond byte boundary)
+pub fn encode_gray_row_aligned(
+    gray_data: &[u8],
+    width: usize,
+    height: usize,
+    bits: u8,
+) -> Vec<u8> {
+    encode_gray_row_aligned_stride(gray_data, width, height, bits, 1)
 }
 
 /// Write packed binary output for a single channel
@@ -513,15 +626,27 @@ pub fn encode_channel_packed(
     encode_gray_packed(channel_data, width, height, bits)
 }
 
+/// Write row-aligned binary output for a single channel with configurable stride
+pub fn encode_channel_row_aligned_stride(
+    channel_data: &[u8],
+    width: usize,
+    height: usize,
+    bits: u8,
+    stride: usize,
+) -> Vec<u8> {
+    // Single channel encoding is identical to grayscale
+    encode_gray_row_aligned_stride(channel_data, width, height, bits, stride)
+}
+
 /// Write row-aligned binary output for a single channel
+/// This is a convenience wrapper with stride=1 (no additional alignment beyond byte boundary)
 pub fn encode_channel_row_aligned(
     channel_data: &[u8],
     width: usize,
     height: usize,
     bits: u8,
 ) -> Vec<u8> {
-    // Single channel encoding is identical to grayscale
-    encode_gray_row_aligned(channel_data, width, height, bits)
+    encode_gray_row_aligned_stride(channel_data, width, height, bits, 1)
 }
 
 /// Check if a format string is valid

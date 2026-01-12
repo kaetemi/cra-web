@@ -18,8 +18,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
-    ColorFormat, encode_rgb_packed, encode_rgb_row_aligned,
-    encode_gray_packed, encode_gray_row_aligned,
+    ColorFormat, encode_rgb_packed, encode_rgb_row_aligned_stride,
+    encode_gray_packed, encode_gray_row_aligned_stride, is_valid_stride,
 };
 use cra_wasm::dither::colorspace_aware_dither_rgb_with_mode;
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
@@ -111,9 +111,13 @@ struct Args {
     #[arg(long)]
     output_bin: Option<PathBuf>,
 
-    /// Output row-aligned binary file path (optional) - each row padded to byte boundary
+    /// Output row-aligned binary file path (optional) - each row padded to stride boundary
     #[arg(long)]
     output_bin_r: Option<PathBuf>,
+
+    /// Row stride alignment in bytes for row-aligned binary output (power of 2, 1-128)
+    #[arg(long, default_value_t = 1)]
+    stride: usize,
 
     /// Output metadata JSON file path (optional)
     #[arg(long)]
@@ -339,6 +343,7 @@ fn write_metadata(
     json.push_str(&format!("  \"dither_method\": \"{:?}\",\n", args.method));
     json.push_str(&format!("  \"colorspace\": \"{:?}\",\n", args.colorspace));
     json.push_str(&format!("  \"seed\": {},\n", args.seed));
+    json.push_str(&format!("  \"stride\": {},\n", args.stride));
 
     json.push_str("  \"outputs\": [\n");
     for (i, (output_type, output_path, size)) in outputs.iter().enumerate() {
@@ -401,8 +406,16 @@ fn main() -> Result<(), String> {
     // Check binary output compatibility
     if (args.output_bin.is_some() || args.output_bin_r.is_some()) && !format.supports_binary() {
         return Err(format!(
-            "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 24, or 32 bits per pixel.",
+            "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
             format.name, format.total_bits
+        ));
+    }
+
+    // Validate stride
+    if !is_valid_stride(args.stride) {
+        return Err(format!(
+            "Invalid stride {}. Must be a power of 2 between 1 and 128.",
+            args.stride
         ));
     }
 
@@ -532,18 +545,19 @@ fn main() -> Result<(), String> {
     // Write row-aligned binary output
     if let Some(ref bin_r_path) = args.output_bin_r {
         if args.verbose {
-            eprintln!("Writing binary (row-aligned): {}", bin_r_path.display());
+            eprintln!("Writing binary (row-aligned, stride={}): {}", args.stride, bin_r_path.display());
         }
 
         let bin_data = if format.is_grayscale {
-            encode_gray_row_aligned(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r)
+            encode_gray_row_aligned_stride(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r, args.stride)
         } else {
-            encode_rgb_row_aligned(
+            encode_rgb_row_aligned_stride(
                 dithered_r.as_ref().unwrap(),
                 dithered_g.as_ref().unwrap(),
                 dithered_b.as_ref().unwrap(),
                 width_usize, height_usize,
-                format.bits_r, format.bits_g, format.bits_b
+                format.bits_r, format.bits_g, format.bits_b,
+                args.stride
             )
         };
 

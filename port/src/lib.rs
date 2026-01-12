@@ -850,6 +850,63 @@ pub fn encode_channel_row_aligned_wasm(
     binary_format::encode_channel_row_aligned(&channel_data, width, height, bits)
 }
 
+// ============================================================================
+// Stride-aligned Binary Format Encoding (WASM exports)
+// ============================================================================
+
+/// Validate stride alignment value (WASM export)
+/// Valid values are powers of 2 from 1 to 128
+#[wasm_bindgen]
+pub fn is_valid_stride_wasm(stride: usize) -> bool {
+    binary_format::is_valid_stride(stride)
+}
+
+/// Encode RGB data to row-aligned binary format with configurable stride (WASM export)
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+#[wasm_bindgen]
+pub fn encode_rgb_row_aligned_stride_wasm(
+    r_data: Vec<u8>,
+    g_data: Vec<u8>,
+    b_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    stride: usize,
+) -> Vec<u8> {
+    binary_format::encode_rgb_row_aligned_stride(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b, stride)
+}
+
+/// Encode grayscale data to row-aligned binary format with configurable stride (WASM export)
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+#[wasm_bindgen]
+pub fn encode_gray_row_aligned_stride_wasm(
+    gray_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+    stride: usize,
+) -> Vec<u8> {
+    binary_format::encode_gray_row_aligned_stride(&gray_data, width, height, bits, stride)
+}
+
+/// Encode a single channel to row-aligned binary format with configurable stride (WASM export)
+///
+/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+#[wasm_bindgen]
+pub fn encode_channel_row_aligned_stride_wasm(
+    channel_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits: u8,
+    stride: usize,
+) -> Vec<u8> {
+    binary_format::encode_channel_row_aligned_stride(&channel_data, width, height, bits, stride)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
