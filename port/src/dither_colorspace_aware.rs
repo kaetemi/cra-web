@@ -223,216 +223,269 @@ fn build_perceptual_lut(
 }
 
 // ============================================================================
-// Error diffusion kernels for RGB channels
+// Trait-based kernel abstraction for RGB error diffusion
 // ============================================================================
 
-/// Floyd-Steinberg kernel: Left-to-right scanning
-/// Distributes error to neighboring pixels (works on all 3 channels)
+/// Trait for RGB error diffusion dithering kernels.
+/// Implementations define the kernel shape (padding) and error distribution pattern.
+/// Unlike single-channel kernels, these operate on all three RGB error buffers jointly.
+trait RgbDitherKernel {
+    /// Padding required on the left side of the buffer
+    const PAD_LEFT: usize;
+    /// Padding required on the right side of the buffer
+    const PAD_RIGHT: usize;
+    /// Padding required on the bottom of the buffer
+    const PAD_BOTTOM: usize;
+
+    /// Apply the kernel for left-to-right scanning.
+    /// Distributes quantization error to neighboring pixels in all three channels.
+    fn apply_ltr(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    );
+
+    /// Apply the kernel for right-to-left scanning (mirrored).
+    /// Used for serpentine scanning on odd rows.
+    fn apply_rtl(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    );
+}
+
+/// Floyd-Steinberg error diffusion kernel for RGB.
+/// Compact 2-row kernel with good speed/quality trade-off.
 ///
 /// Kernel (divided by 16):
 ///       * 7
 ///     3 5 1
-#[inline]
-fn apply_fs_ltr(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-) {
-    // Right: 7/16
-    err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
-    err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
-    err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
+struct FloydSteinberg;
 
-    // Bottom-left: 3/16
-    err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
-    err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
-    err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
+impl RgbDitherKernel for FloydSteinberg {
+    const PAD_LEFT: usize = 1;
+    const PAD_RIGHT: usize = 1;
+    const PAD_BOTTOM: usize = 1;
 
-    // Bottom: 5/16
-    err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-    err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-    err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+    #[inline]
+    fn apply_ltr(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Right: 7/16
+        err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
+        err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
+        err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
 
-    // Bottom-right: 1/16
-    err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
-    err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
-    err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
+        // Bottom-left: 3/16
+        err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
+        err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
+        err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
+
+        // Bottom: 5/16
+        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
+        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
+        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+
+        // Bottom-right: 1/16
+        err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
+        err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
+        err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
+    }
+
+    #[inline]
+    fn apply_rtl(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Left: 7/16
+        err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
+        err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
+        err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
+
+        // Bottom-right: 3/16
+        err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
+        err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
+        err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
+
+        // Bottom: 5/16
+        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
+        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
+        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+
+        // Bottom-left: 1/16
+        err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
+        err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
+        err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
+    }
 }
 
-/// Floyd-Steinberg kernel: Right-to-left scanning (mirrored)
-/// Used for serpentine scanning on odd rows
-#[inline]
-fn apply_fs_rtl(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-) {
-    // Left: 7/16
-    err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
-    err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
-    err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
-
-    // Bottom-right: 3/16
-    err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
-    err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
-    err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
-
-    // Bottom: 5/16
-    err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-    err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-    err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-
-    // Bottom-left: 1/16
-    err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
-    err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
-    err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
-}
-
-/// Jarvis-Judice-Ninke kernel: Left-to-right scanning
-/// Larger kernel produces smoother gradients
+/// Jarvis-Judice-Ninke error diffusion kernel for RGB.
+/// Larger 3-row kernel produces smoother gradients than Floyd-Steinberg.
 ///
 /// Kernel (divided by 48):
 ///         * 7 5
 ///     3 5 7 5 3
 ///     1 3 5 3 1
-#[inline]
-fn apply_jjn_ltr(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-) {
-    // Row 0
-    err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
-    err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
-    err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
+struct JarvisJudiceNinke;
 
-    err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
-    err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
-    err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
+impl RgbDitherKernel for JarvisJudiceNinke {
+    const PAD_LEFT: usize = 2;
+    const PAD_RIGHT: usize = 2;
+    const PAD_BOTTOM: usize = 2;
 
-    // Row 1
-    err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-    err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-    err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
+    #[inline]
+    fn apply_ltr(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Row 0
+        err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
+        err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
+        err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
 
-    err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-    err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-    err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
+        err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
+        err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
+        err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
 
-    err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-    err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-    err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
+        // Row 1
+        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
+        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
+        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
 
-    err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-    err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-    err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
+        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
+        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
+        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
 
-    err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-    err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-    err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
+        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
+        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
+        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
 
-    // Row 2
-    err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-    err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-    err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
+        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
+        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
+        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
 
-    err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-    err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-    err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
+        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
+        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
+        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
 
-    err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-    err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-    err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
+        // Row 2
+        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
+        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
+        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
 
-    err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-    err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-    err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
+        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
+        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
+        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
 
-    err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-    err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-    err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
+        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
+        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
+        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
+
+        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
+        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
+        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
+
+        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
+        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
+        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
+    }
+
+    #[inline]
+    fn apply_rtl(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Row 0
+        err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
+        err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
+        err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
+
+        err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
+        err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
+        err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
+
+        // Row 1
+        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
+        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
+        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
+
+        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
+        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
+        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
+
+        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
+        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
+        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
+
+        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
+        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
+        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
+
+        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
+        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
+        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
+
+        // Row 2
+        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
+        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
+        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
+
+        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
+        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
+        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
+
+        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
+        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
+        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
+
+        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
+        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
+        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
+
+        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
+        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
+        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
+    }
 }
 
-/// Jarvis-Judice-Ninke kernel: Right-to-left scanning (mirrored)
-#[inline]
-fn apply_jjn_rtl(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-) {
-    // Row 0
-    err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
-    err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
-    err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
-
-    err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
-    err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
-    err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
-
-    // Row 1
-    err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-    err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-    err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-
-    err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-    err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-    err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-
-    err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-    err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-    err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-
-    err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-    err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-    err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-
-    err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-    err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-    err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-
-    // Row 2
-    err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-    err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-    err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-
-    err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-    err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-    err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-
-    err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-    err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-    err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-
-    err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-    err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-    err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-
-    err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-    err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-    err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-}
-
-/// Apply kernel based on runtime selection (for mixed modes)
+/// Apply kernel based on runtime selection (for mixed modes).
+/// Uses function pointers to avoid monomorphization bloat while
+/// maintaining flexibility for per-pixel kernel selection.
 #[inline]
 fn apply_mixed_kernel(
     err_r: &mut [Vec<f32>],
@@ -447,10 +500,255 @@ fn apply_mixed_kernel(
     is_rtl: bool,
 ) {
     match (use_jjn, is_rtl) {
-        (true, false) => apply_jjn_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (true, true) => apply_jjn_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (false, false) => apply_fs_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
-        (false, true) => apply_fs_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (true, false) => JarvisJudiceNinke::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (true, true) => JarvisJudiceNinke::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (false, false) => FloydSteinberg::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (false, true) => FloydSteinberg::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+    }
+}
+
+// ============================================================================
+// Generic scan pattern implementations
+// ============================================================================
+
+/// Generic standard (left-to-right) dithering with any RGB kernel.
+/// Processes all rows left-to-right.
+#[inline]
+fn dither_standard_rgb<K: RgbDitherKernel>(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+) {
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let bx = x + pad_left;
+
+            let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+            r_out[idx] = best_r;
+            g_out[idx] = best_g;
+            b_out[idx] = best_b;
+
+            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+        }
+    }
+}
+
+/// Generic serpentine dithering with any RGB kernel.
+/// Alternates scan direction each row to reduce diagonal banding.
+#[inline]
+fn dither_serpentine_rgb<K: RgbDitherKernel>(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+) {
+    for y in 0..height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+            }
+        } else {
+            // Left-to-right on even rows
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+            }
+        }
+    }
+}
+
+/// Mixed kernel dithering with standard (left-to-right) scanning.
+/// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke per pixel.
+#[inline]
+fn dither_mixed_standard_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+) {
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let bx = x + pad_left;
+
+            let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+            r_out[idx] = best_r;
+            g_out[idx] = best_g;
+            b_out[idx] = best_b;
+
+            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+            apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+        }
+    }
+}
+
+/// Mixed kernel dithering with serpentine scanning.
+/// Randomly selects kernel per pixel, alternates direction per row.
+#[inline]
+fn dither_mixed_serpentine_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+) {
+    for y in 0..height {
+        if y % 2 == 1 {
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+            }
+        } else {
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+            }
+        }
+    }
+}
+
+/// Mixed kernel dithering with random direction per row.
+/// Randomly selects kernel per pixel and direction per row.
+#[inline]
+fn dither_mixed_random_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+) {
+    for y in 0..height {
+        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let is_rtl = row_hash & 1 == 1;
+
+        if is_rtl {
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+            }
+        } else {
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+            }
+        }
     }
 }
 
@@ -673,10 +971,10 @@ pub fn colorspace_aware_dither_rgb_with_mode(
 
     let pixels = width * height;
 
-    // Use JJN padding (2) for all modes to accommodate both kernels
-    let pad_left = 2usize;
-    let pad_right = 2usize;
-    let pad_bottom = 2usize;
+    // Use JJN padding for all modes to accommodate both kernels (JJN is larger)
+    let pad_left = JarvisJudiceNinke::PAD_LEFT;
+    let pad_right = JarvisJudiceNinke::PAD_RIGHT;
+    let pad_bottom = JarvisJudiceNinke::PAD_BOTTOM;
     let buf_width = width + pad_left + pad_right;
 
     // Error buffers in linear RGB space
@@ -691,217 +989,63 @@ pub fn colorspace_aware_dither_rgb_with_mode(
 
     let hashed_seed = wang_hash(seed);
 
+    // Dispatch to appropriate generic scan function
     match mode {
         DitherMode::Standard => {
-            // Floyd-Steinberg, left-to-right
-            for y in 0..height {
-                for x in 0..width {
-                    let idx = y * width + x;
-                    let bx = x + pad_left;
-
-                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-
-                    apply_fs_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                }
-            }
+            dither_standard_rgb::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left,
+            );
         }
-
         DitherMode::Serpentine => {
-            // Floyd-Steinberg, alternating direction
-            for y in 0..height {
-                if y % 2 == 1 {
-                    // Right-to-left on odd rows
-                    for x in (0..width).rev() {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        apply_fs_rtl(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                    }
-                } else {
-                    // Left-to-right on even rows
-                    for x in 0..width {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        apply_fs_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                    }
-                }
-            }
+            dither_serpentine_rgb::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left,
+            );
         }
-
         DitherMode::JarvisStandard => {
-            // Jarvis-Judice-Ninke, left-to-right
-            for y in 0..height {
-                for x in 0..width {
-                    let idx = y * width + x;
-                    let bx = x + pad_left;
-
-                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-
-                    apply_jjn_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                }
-            }
+            dither_standard_rgb::<JarvisJudiceNinke>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left,
+            );
         }
-
         DitherMode::JarvisSerpentine => {
-            // Jarvis-Judice-Ninke, alternating direction
-            for y in 0..height {
-                if y % 2 == 1 {
-                    for x in (0..width).rev() {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        apply_jjn_rtl(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                    }
-                } else {
-                    for x in 0..width {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        apply_jjn_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
-                    }
-                }
-            }
+            dither_serpentine_rgb::<JarvisJudiceNinke>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left,
+            );
         }
-
         DitherMode::MixedStandard => {
-            // Mixed kernel, left-to-right
-            for y in 0..height {
-                for x in 0..width {
-                    let idx = y * width + x;
-                    let bx = x + pad_left;
-
-                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-
-                    let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                    let use_jjn = pixel_hash & 1 == 1;
-                    apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
-                }
-            }
+            dither_mixed_standard_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left, hashed_seed,
+            );
         }
-
         DitherMode::MixedSerpentine => {
-            // Mixed kernel, alternating direction
-            for y in 0..height {
-                if y % 2 == 1 {
-                    for x in (0..width).rev() {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                        let use_jjn = pixel_hash & 1 == 1;
-                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
-                    }
-                } else {
-                    for x in 0..width {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                        let use_jjn = pixel_hash & 1 == 1;
-                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
-                    }
-                }
-            }
+            dither_mixed_serpentine_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left, hashed_seed,
+            );
         }
-
         DitherMode::MixedRandom => {
-            // Mixed kernel, random direction per row
-            for y in 0..height {
-                let row_hash = wang_hash((y as u32) ^ hashed_seed);
-                let is_rtl = row_hash & 1 == 1;
-
-                if is_rtl {
-                    for x in (0..width).rev() {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                        let use_jjn = pixel_hash & 1 == 1;
-                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
-                    }
-                } else {
-                    for x in 0..width {
-                        let idx = y * width + x;
-                        let bx = x + pad_left;
-
-                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
-
-                        r_out[idx] = best_r;
-                        g_out[idx] = best_g;
-                        b_out[idx] = best_b;
-
-                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                        let use_jjn = pixel_hash & 1 == 1;
-                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
-                    }
-                }
-            }
+            dither_mixed_random_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left, hashed_seed,
+            );
         }
     }
 
