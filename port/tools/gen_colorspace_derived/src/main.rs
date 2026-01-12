@@ -87,10 +87,15 @@ mod primary {
         pub const GAMMA_DENOMINATOR: u32 = 256;
     }
 
+    pub mod apple_rgb_transfer {
+        pub const GAMMA: f64 = 1.8;
+    }
+
     pub mod prophoto_transfer {
         pub const THRESHOLD_NUMERATOR: u32 = 1;
         pub const THRESHOLD_DENOMINATOR: u32 = 512;
         pub const LINEAR_MULTIPLIER: f64 = 16.0;
+        pub const GAMMA: f64 = 1.8;
     }
 
     pub mod cielab {
@@ -102,6 +107,32 @@ mod primary {
         pub const KR: f64 = 0.2126;
         pub const KG: f64 = 0.7152;
         pub const KB: f64 = 0.0722;
+    }
+
+    pub mod oklab {
+        pub const M1: [[f64; 3]; 3] = [
+            [0.4122214708, 0.5363325363, 0.0514459929],
+            [0.2119034982, 0.6806995451, 0.1073969566],
+            [0.0883024619, 0.2817188376, 0.6299787005],
+        ];
+
+        pub const M2: [[f64; 3]; 3] = [
+            [0.2104542553, 0.7936177850, -0.0040720468],
+            [1.9779984951, -2.4285922050, 0.4505937099],
+            [0.0259040371, 0.7827717662, -0.8086757660],
+        ];
+
+        pub const M1_INV: [[f64; 3]; 3] = [
+            [4.0767416621, -3.3077115913, 0.2309699292],
+            [-1.2684380046, 2.6097574011, -0.3413193965],
+            [-0.0041960863, -0.7034186147, 1.7076147010],
+        ];
+
+        pub const M2_INV: [[f64; 3]; 3] = [
+            [1.0000000000, 0.3963377774, 0.2158037573],
+            [1.0000000000, -0.1055613458, -0.0638541728],
+            [1.0000000000, -0.0894841775, -1.2914855480],
+        ];
     }
 }
 
@@ -505,35 +536,180 @@ fn main() -> io::Result<()> {
     writeln!(out, "// f32 VERSIONS FOR RUNTIME USE")?;
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
-    writeln!(out, "/// sRGB → XYZ matrix as f32.")?;
-    writeln!(out, "pub const SRGB_TO_XYZ_F32: [[f32; 3]; 3] = [")?;
-    for row in &srgb_to_xyz {
-        writeln!(out, "    [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
+    writeln!(out, "/// f32 module for runtime use. All values derived from f64 constants.")?;
+    writeln!(out, "pub mod f32 {{")?;
+    writeln!(out)?;
+
+    // Illuminant XYZ
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // ILLUMINANT XYZ")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const D65_X: f32 = {} as f32;", fmt_f64(d65_xyz[0]))?;
+    writeln!(out, "    pub const D65_Y: f32 = {} as f32;", fmt_f64(d65_xyz[1]))?;
+    writeln!(out, "    pub const D65_Z: f32 = {} as f32;", fmt_f64(d65_xyz[2]))?;
+    writeln!(out, "    pub const D65_XYZ: [f32; 3] = [D65_X, D65_Y, D65_Z];")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const D50_X: f32 = {} as f32;", fmt_f64(d50_xyz[0]))?;
+    writeln!(out, "    pub const D50_Y: f32 = {} as f32;", fmt_f64(d50_xyz[1]))?;
+    writeln!(out, "    pub const D50_Z: f32 = {} as f32;", fmt_f64(d50_xyz[2]))?;
+    writeln!(out, "    pub const D50_XYZ: [f32; 3] = [D50_X, D50_Y, D50_Z];")?;
+    writeln!(out)?;
+
+    // Primary chromaticity (from primary constants)
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // ILLUMINANT CHROMATICITY (from primary constants)")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const D65_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
+        fmt_f64(primary::d65::X), fmt_f64(primary::d65::Y))?;
+    writeln!(out, "    pub const D50_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
+        fmt_f64(primary::d50::X), fmt_f64(primary::d50::Y))?;
+    writeln!(out)?;
+
+    // RGB↔XYZ matrices
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // RGB <-> XYZ MATRICES")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+
+    // Helper to write matrix as f32
+    let write_matrix_f32 = |out: &mut std::io::StdoutLock, name: &str, m: &Mat3| -> io::Result<()> {
+        writeln!(out, "    pub const {}: [[f32; 3]; 3] = [", name)?;
+        for row in m {
+            writeln!(out, "        [{} as f32, {} as f32, {} as f32],",
+                fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
+        }
+        writeln!(out, "    ];")?;
+        Ok(())
+    };
+
+    write_matrix_f32(&mut out, "SRGB_TO_XYZ", &srgb_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_SRGB", &xyz_to_srgb)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "APPLE_RGB_TO_XYZ", &apple_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_APPLE_RGB", &xyz_to_apple)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "DISPLAY_P3_TO_XYZ", &p3_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_DISPLAY_P3", &xyz_to_p3)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "ADOBE_RGB_TO_XYZ", &adobe_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_ADOBE_RGB", &xyz_to_adobe)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "PROPHOTO_RGB_TO_XYZ", &prophoto_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_PROPHOTO_RGB", &xyz_to_prophoto)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "REC2020_TO_XYZ", &rec2020_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_REC2020", &xyz_to_rec2020)?;
+    writeln!(out)?;
+
+    // Transfer function constants
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // TRANSFER FUNCTION CONSTANTS")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    /// sRGB encode threshold (linear space)")?;
+    writeln!(out, "    pub const SRGB_THRESHOLD: f32 = {} as f32;", fmt_f64(primary::srgb_transfer::THRESHOLD))?;
+    writeln!(out, "    /// sRGB decode threshold (encoded space)")?;
+    writeln!(out, "    pub const SRGB_DECODE_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_decode_threshold))?;
+    writeln!(out, "    pub const SRGB_LINEAR_SLOPE: f32 = {} as f32;", fmt_f64(primary::srgb_transfer::LINEAR_SLOPE))?;
+    writeln!(out, "    pub const SRGB_GAMMA: f32 = 2.4;")?;
+    writeln!(out, "    pub const SRGB_SCALE: f32 = 1.055;")?;
+    writeln!(out, "    pub const SRGB_OFFSET: f32 = 0.055;")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const ADOBE_RGB_GAMMA: f32 = {} as f32;", fmt_f64(adobe_gamma))?;
+    writeln!(out, "    pub const APPLE_RGB_GAMMA: f32 = {} as f32;", fmt_f64(primary::apple_rgb_transfer::GAMMA))?;
+    writeln!(out)?;
+    writeln!(out, "    pub const PROPHOTO_THRESHOLD: f32 = {} as f32;", fmt_f64(prophoto_threshold))?;
+    writeln!(out, "    pub const PROPHOTO_DECODE_THRESHOLD: f32 = {} as f32;",
+        fmt_f64(prophoto_threshold * primary::prophoto_transfer::LINEAR_MULTIPLIER))?;
+    writeln!(out, "    pub const PROPHOTO_LINEAR_MULTIPLIER: f32 = {} as f32;",
+        fmt_f64(primary::prophoto_transfer::LINEAR_MULTIPLIER))?;
+    writeln!(out, "    pub const PROPHOTO_GAMMA: f32 = {} as f32;", fmt_f64(primary::prophoto_transfer::GAMMA))?;
+    writeln!(out)?;
+    writeln!(out, "    pub const GAMMA_22: f32 = 2.2;")?;
+    writeln!(out)?;
+
+    // CIELAB constants
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // CIELAB CONSTANTS")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const CIELAB_DELTA: f32 = {} as f32;", fmt_f64(delta))?;
+    writeln!(out, "    pub const CIELAB_EPSILON: f32 = {} as f32;", fmt_f64(lab_epsilon))?;
+    writeln!(out, "    pub const CIELAB_KAPPA: f32 = {} as f32;", fmt_f64(lab_kappa))?;
+    writeln!(out, "    pub const CIELAB_OFFSET: f32 = {} as f32;", fmt_f64(lab_offset))?;
+    writeln!(out, "    pub const CIELAB_F_THRESHOLD: f32 = {} as f32;", fmt_f64(lab_f_threshold))?;
+    writeln!(out, "    pub const CIELAB_L_SCALE: f32 = 116.0;")?;
+    writeln!(out, "    pub const CIELAB_L_OFFSET: f32 = 16.0;")?;
+    writeln!(out, "    pub const CIELAB_A_SCALE: f32 = 500.0;")?;
+    writeln!(out, "    pub const CIELAB_B_SCALE: f32 = 200.0;")?;
+    writeln!(out)?;
+
+    // OKLab matrices (from primary constants)
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // OKLAB MATRICES (from primary constants)")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    /// OKLab M1: Linear sRGB → LMS")?;
+    writeln!(out, "    pub const OKLAB_M1: [[f32; 3]; 3] = [")?;
+    for row in &primary::oklab::M1 {
+        writeln!(out, "        [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
     }
-    writeln!(out, "];")?;
+    writeln!(out, "    ];")?;
     writeln!(out)?;
-    writeln!(out, "/// XYZ → sRGB matrix as f32.")?;
-    writeln!(out, "pub const XYZ_TO_SRGB_F32: [[f32; 3]; 3] = [")?;
-    for row in &xyz_to_srgb {
-        writeln!(out, "    [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
+    writeln!(out, "    /// OKLab M2: LMS' → Lab")?;
+    writeln!(out, "    pub const OKLAB_M2: [[f32; 3]; 3] = [")?;
+    for row in &primary::oklab::M2 {
+        writeln!(out, "        [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
     }
-    writeln!(out, "];")?;
+    writeln!(out, "    ];")?;
     writeln!(out)?;
-    writeln!(out, "/// D65 white point XYZ as f32.")?;
-    writeln!(out, "pub const D65_XYZ_F32: [f32; 3] = [{} as f32, {} as f32, {} as f32];",
-        fmt_f64(d65_xyz[0]), fmt_f64(d65_xyz[1]), fmt_f64(d65_xyz[2]))?;
+    writeln!(out, "    /// OKLab M1_inv: LMS → Linear sRGB")?;
+    writeln!(out, "    pub const OKLAB_M1_INV: [[f32; 3]; 3] = [")?;
+    for row in &primary::oklab::M1_INV {
+        writeln!(out, "        [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
+    }
+    writeln!(out, "    ];")?;
     writeln!(out)?;
-    writeln!(out, "/// CIELAB epsilon as f32.")?;
-    writeln!(out, "pub const CIELAB_EPSILON_F32: f32 = {} as f32;", fmt_f64(lab_epsilon))?;
+    writeln!(out, "    /// OKLab M2_inv: Lab → LMS'")?;
+    writeln!(out, "    pub const OKLAB_M2_INV: [[f32; 3]; 3] = [")?;
+    for row in &primary::oklab::M2_INV {
+        writeln!(out, "        [{} as f32, {} as f32, {} as f32],", fmt_f64(row[0]), fmt_f64(row[1]), fmt_f64(row[2]))?;
+    }
+    writeln!(out, "    ];")?;
     writeln!(out)?;
-    writeln!(out, "/// CIELAB kappa as f32.")?;
-    writeln!(out, "pub const CIELAB_KAPPA_F32: f32 = {} as f32;", fmt_f64(lab_kappa))?;
+
+    // Y'CbCr constants
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // Y'CbCr CONSTANTS")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "/// CIELAB offset (16/116) as f32.")?;
-    writeln!(out, "pub const CIELAB_OFFSET_F32: f32 = {} as f32;", fmt_f64(lab_offset))?;
+    writeln!(out, "    /// BT.709 luma coefficients")?;
+    writeln!(out, "    pub const YCBCR_KR: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KR))?;
+    writeln!(out, "    pub const YCBCR_KG: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KG))?;
+    writeln!(out, "    pub const YCBCR_KB: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KB))?;
+    writeln!(out, "    pub const YCBCR_CB_SCALE: f32 = {} as f32;", fmt_f64(cb_scale))?;
+    writeln!(out, "    pub const YCBCR_CR_SCALE: f32 = {} as f32;", fmt_f64(cr_scale))?;
     writeln!(out)?;
-    writeln!(out, "/// CIELAB f-threshold (6/29) as f32.")?;
-    writeln!(out, "pub const CIELAB_F_THRESHOLD_F32: f32 = {} as f32;", fmt_f64(lab_f_threshold))?;
+    write_matrix_f32(&mut out, "RGB_TO_YCBCR", &ycbcr_forward)?;
+    write_matrix_f32(&mut out, "YCBCR_TO_RGB", &ycbcr_inverse)?;
+    writeln!(out)?;
+    writeln!(out, "    /// BT.601 luma coefficients")?;
+    writeln!(out, "    pub const YCBCR_601_KR: f32 = 0.299;")?;
+    writeln!(out, "    pub const YCBCR_601_KG: f32 = 0.587;")?;
+    writeln!(out, "    pub const YCBCR_601_KB: f32 = 0.114;")?;
+    writeln!(out)?;
+
+    // Bit depth
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // BIT DEPTH")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    pub const UINT8_MAX: f32 = 255.0;")?;
+    writeln!(out, "    pub const UINT16_MAX: f32 = 65535.0;")?;
+
+    writeln!(out, "}}")?;
     writeln!(out)?;
 
     // Tests
