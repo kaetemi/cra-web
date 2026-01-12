@@ -19,7 +19,7 @@ use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
     ColorFormat, encode_rgb_packed, encode_rgb_row_aligned_stride,
-    encode_gray_packed, encode_gray_row_aligned_stride, is_valid_stride,
+    encode_gray_packed, encode_gray_row_aligned_stride, is_valid_stride, StrideFill,
 };
 use cra_wasm::dither::colorspace_aware_dither_rgb_with_mode;
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
@@ -91,6 +91,24 @@ impl ColorSpace {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum StrideFillArg {
+    /// Fill padding with black (zeros)
+    #[default]
+    Black,
+    /// Repeat the last pixel to fill padding
+    Repeat,
+}
+
+impl StrideFillArg {
+    fn to_stride_fill(self) -> StrideFill {
+        match self {
+            StrideFillArg::Black => StrideFill::Black,
+            StrideFillArg::Repeat => StrideFill::Repeat,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "cra_dither")]
 #[command(author, version, about = "CRA Dithering Tool - Error diffusion dithering with configurable bit depth", long_about = None)]
@@ -118,6 +136,10 @@ struct Args {
     /// Row stride alignment in bytes for row-aligned binary output (power of 2, 1-128)
     #[arg(long, default_value_t = 1)]
     stride: usize,
+
+    /// How to fill stride padding bytes
+    #[arg(long, value_enum, default_value_t = StrideFillArg::Black)]
+    stride_fill: StrideFillArg,
 
     /// Output metadata JSON file path (optional)
     #[arg(long)]
@@ -344,6 +366,7 @@ fn write_metadata(
     json.push_str(&format!("  \"colorspace\": \"{:?}\",\n", args.colorspace));
     json.push_str(&format!("  \"seed\": {},\n", args.seed));
     json.push_str(&format!("  \"stride\": {},\n", args.stride));
+    json.push_str(&format!("  \"stride_fill\": \"{:?}\",\n", args.stride_fill));
 
     json.push_str("  \"outputs\": [\n");
     for (i, (output_type, output_path, size)) in outputs.iter().enumerate() {
@@ -545,11 +568,12 @@ fn main() -> Result<(), String> {
     // Write row-aligned binary output
     if let Some(ref bin_r_path) = args.output_bin_r {
         if args.verbose {
-            eprintln!("Writing binary (row-aligned, stride={}): {}", args.stride, bin_r_path.display());
+            eprintln!("Writing binary (row-aligned, stride={}, fill={:?}): {}", args.stride, args.stride_fill, bin_r_path.display());
         }
 
+        let fill = args.stride_fill.to_stride_fill();
         let bin_data = if format.is_grayscale {
-            encode_gray_row_aligned_stride(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r, args.stride)
+            encode_gray_row_aligned_stride(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r, args.stride, fill)
         } else {
             encode_rgb_row_aligned_stride(
                 dithered_r.as_ref().unwrap(),
@@ -557,7 +581,7 @@ fn main() -> Result<(), String> {
                 dithered_b.as_ref().unwrap(),
                 width_usize, height_usize,
                 format.bits_r, format.bits_g, format.bits_b,
-                args.stride
+                args.stride, fill
             )
         };
 

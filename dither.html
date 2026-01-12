@@ -334,6 +334,19 @@
             margin-top: 8px;
         }
 
+        .stride-options .stride-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+
+        .stride-options .stride-select-group,
+        .stride-options .stride-fill-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
         .scale-options {
             display: none;
             margin-top: 15px;
@@ -669,17 +682,28 @@
             </div>
 
             <div class="stride-options">
-                <label for="stride-select">Binary Row Stride:</label>
-                <select id="stride-select">
-                    <option value="1" selected>1 byte (no padding)</option>
-                    <option value="2">2 bytes</option>
-                    <option value="4">4 bytes</option>
-                    <option value="8">8 bytes</option>
-                    <option value="16">16 bytes</option>
-                    <option value="32">32 bytes</option>
-                    <option value="64">64 bytes</option>
-                    <option value="128">128 bytes</option>
-                </select>
+                <div class="stride-row">
+                    <div class="stride-select-group">
+                        <label for="stride-select">Binary Row Stride:</label>
+                        <select id="stride-select">
+                            <option value="1" selected>1 byte (no padding)</option>
+                            <option value="2">2 bytes</option>
+                            <option value="4">4 bytes</option>
+                            <option value="8">8 bytes</option>
+                            <option value="16">16 bytes</option>
+                            <option value="32">32 bytes</option>
+                            <option value="64">64 bytes</option>
+                            <option value="128">128 bytes</option>
+                        </select>
+                    </div>
+                    <div class="stride-fill-group">
+                        <label for="stride-fill-select">Padding Fill:</label>
+                        <select id="stride-fill-select">
+                            <option value="0" selected>Black (zeros)</option>
+                            <option value="1">Repeat last pixel</option>
+                        </select>
+                    </div>
+                </div>
                 <p class="stride-hint">Row alignment for binary (row-aligned) output. Each row is padded to this boundary.</p>
             </div>
 
@@ -1249,6 +1273,8 @@
 
             const format = getFormatString();
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
+            const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
+            const fillNames = ['Black', 'Repeat'];
             const modeNames = ['fs-standard', 'fs-serpentine', 'jjn-standard', 'jjn-serpentine',
                                'mixed-standard', 'mixed-serpentine', 'mixed-random'];
             const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
@@ -1267,6 +1293,7 @@
                     spaceNames[lastDitherResult.perceptualSpace] || 'unknown' : 'none',
                 seed: lastDitherResult.seed,
                 stride: stride,
+                stride_fill: fillNames[fill] || 'Black',
                 generated_at: new Date().toISOString()
             };
         }
@@ -1443,6 +1470,7 @@
 
             const format = getFormatString();
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
+            const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
             let binaryData;
 
             if (lastDitherResult.isGrayscale) {
@@ -1451,7 +1479,8 @@
                     lastDitherResult.width,
                     lastDitherResult.height,
                     lastDitherResult.bitsR,
-                    stride
+                    stride,
+                    fill
                 );
             } else {
                 binaryData = encode_rgb_row_aligned_stride_wasm(
@@ -1463,7 +1492,8 @@
                     lastDitherResult.bitsR,
                     lastDitherResult.bitsG,
                     lastDitherResult.bitsB,
-                    stride
+                    stride,
+                    fill
                 );
             }
 

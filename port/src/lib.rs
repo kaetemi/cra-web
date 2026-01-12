@@ -864,6 +864,7 @@ pub fn is_valid_stride_wasm(stride: usize) -> bool {
 /// Encode RGB data to row-aligned binary format with configurable stride (WASM export)
 ///
 /// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+/// fill: How to fill padding (0 = black/zeros, 1 = repeat last pixel)
 #[wasm_bindgen]
 pub fn encode_rgb_row_aligned_stride_wasm(
     r_data: Vec<u8>,
@@ -875,13 +876,15 @@ pub fn encode_rgb_row_aligned_stride_wasm(
     bits_g: u8,
     bits_b: u8,
     stride: usize,
+    fill: u8,
 ) -> Vec<u8> {
-    binary_format::encode_rgb_row_aligned_stride(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b, stride)
+    binary_format::encode_rgb_row_aligned_stride(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b, stride, binary_format::StrideFill::from_u8(fill))
 }
 
 /// Encode grayscale data to row-aligned binary format with configurable stride (WASM export)
 ///
 /// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+/// fill: How to fill padding (0 = black/zeros, 1 = repeat last pixel)
 #[wasm_bindgen]
 pub fn encode_gray_row_aligned_stride_wasm(
     gray_data: Vec<u8>,
@@ -889,13 +892,15 @@ pub fn encode_gray_row_aligned_stride_wasm(
     height: usize,
     bits: u8,
     stride: usize,
+    fill: u8,
 ) -> Vec<u8> {
-    binary_format::encode_gray_row_aligned_stride(&gray_data, width, height, bits, stride)
+    binary_format::encode_gray_row_aligned_stride(&gray_data, width, height, bits, stride, binary_format::StrideFill::from_u8(fill))
 }
 
 /// Encode a single channel to row-aligned binary format with configurable stride (WASM export)
 ///
 /// stride: Row stride alignment in bytes (must be power of 2, 1-128)
+/// fill: How to fill padding (0 = black/zeros, 1 = repeat last pixel)
 #[wasm_bindgen]
 pub fn encode_channel_row_aligned_stride_wasm(
     channel_data: Vec<u8>,
@@ -903,8 +908,9 @@ pub fn encode_channel_row_aligned_stride_wasm(
     height: usize,
     bits: u8,
     stride: usize,
+    fill: u8,
 ) -> Vec<u8> {
-    binary_format::encode_channel_row_aligned_stride(&channel_data, width, height, bits, stride)
+    binary_format::encode_channel_row_aligned_stride(&channel_data, width, height, bits, stride, binary_format::StrideFill::from_u8(fill))
 }
 
 #[cfg(test)]
