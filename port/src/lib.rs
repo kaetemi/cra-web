@@ -15,7 +15,7 @@ mod cra_lab;
 mod cra_oklab;
 mod cra_rgb;
 mod dither;
-mod dither_perceptual;
+mod dither_colorspace_aware;
 mod histogram;
 mod rotation;
 mod tiled_lab;
@@ -98,13 +98,13 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
     dither::dither_with_mode_bits(&img, w, h, dither_mode_from_u8(mode), seed, bits)
 }
 
-/// Perceptual dithering with joint RGB processing (WASM export)
+/// Color space aware dithering with joint RGB processing (WASM export)
 ///
 /// Uses perceptual color space (CIELAB or OKLab) for candidate selection,
-/// with error diffusion in linear RGB space. This produces better results
-/// than per-channel dithering by considering color relationships.
+/// with error diffusion in linear RGB space for physically correct light mixing.
+/// Processes all three channels jointly rather than independently.
 ///
-/// Note: Only Floyd-Steinberg algorithm is supported for perceptual dithering.
+/// Note: Only Floyd-Steinberg algorithm is currently supported.
 ///
 /// Args:
 ///     r_channel: Red channel as f32 values in range [0, 255]
@@ -118,7 +118,7 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 /// Returns:
 ///     Interleaved RGB uint8 array (RGBRGB...)
 #[wasm_bindgen]
-pub fn perceptual_dither_wasm(
+pub fn colorspace_aware_dither_wasm(
     r_channel: Vec<f32>,
     g_channel: Vec<f32>,
     b_channel: Vec<f32>,
@@ -129,7 +129,7 @@ pub fn perceptual_dither_wasm(
     bits_b: u8,
     space: u8,
 ) -> Vec<u8> {
-    let (r_out, g_out, b_out) = dither::perceptual_dither_rgb(
+    let (r_out, g_out, b_out) = dither::colorspace_aware_dither_rgb(
         &r_channel,
         &g_channel,
         &b_channel,

@@ -539,7 +539,7 @@
             <h3>Dither Settings</h3>
 
             <div class="toggle-row">
-                <span>Perceptual Dithering:</span>
+                <span>Color Space Aware:</span>
                 <label class="toggle-switch">
                     <input type="checkbox" id="perceptual-toggle">
                     <span class="toggle-slider"></span>
@@ -547,12 +547,12 @@
             </div>
 
             <div class="perceptual-options" id="perceptual-options">
-                <label for="perceptual-space">Color Space:</label>
+                <label for="perceptual-space">Distance Metric:</label>
                 <select id="perceptual-space">
                     <option value="0" selected>CIELAB</option>
                     <option value="1">OKLab</option>
                 </select>
-                <p class="perceptual-hint">Perceptual dithering uses color space distance for joint RGB quantization. Only Floyd-Steinberg is supported.</p>
+                <p class="perceptual-hint">Processes RGB channels jointly using perceptual distance for candidate selection and linear RGB for physically correct error diffusion.</p>
             </div>
 
             <div class="option-row" id="dither-mode-row">
@@ -669,7 +669,7 @@
     </div>
 
     <script type="module">
-        import init, { dither_with_mode_wasm, perceptual_dither_wasm } from './wasm_cra/cra_wasm.js';
+        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
         function getSeeds() {
@@ -882,7 +882,7 @@
                     const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
                     if (isPerceptual) {
-                        // Perceptual dithering: process all channels jointly
+                        // Color space aware dithering: process all channels jointly
                         const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
                         // Extract channels as Float32Array
@@ -896,8 +896,8 @@
                             bChannel[i] = data[i * 4 + 2];
                         }
 
-                        // Call perceptual dither (returns interleaved RGB)
-                        const rgbDithered = perceptual_dither_wasm(
+                        // Call color space aware dither (returns interleaved RGB)
+                        const rgbDithered = colorspace_aware_dither_wasm(
                             rChannel, gChannel, bChannel,
                             processWidth, processHeight,
                             bitsR, bitsG, bitsB,
@@ -1029,7 +1029,7 @@
             const isGrayscale = document.getElementById('grayscale-toggle').checked;
             document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
             document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
-            // Disable perceptual dithering when grayscale is enabled
+            // Disable color space aware mode when grayscale is enabled
             if (isGrayscale) {
                 document.getElementById('perceptual-toggle').checked = false;
                 updatePerceptualMode();
@@ -1038,13 +1038,13 @@
 
         document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
 
-        // Perceptual toggle
+        // Color space aware toggle
         function updatePerceptualMode() {
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
             document.getElementById('dither-mode-row').classList.toggle('hidden', isPerceptual);
             document.getElementById('seed-options').classList.toggle('visible', !isPerceptual && parseInt(document.getElementById('dither-mode').value) >= 4);
-            // Disable grayscale when perceptual is enabled
+            // Disable grayscale when color space aware is enabled
             if (isPerceptual) {
                 document.getElementById('grayscale-toggle').checked = false;
                 updateGrayscaleMode();
@@ -1074,7 +1074,7 @@
         document.getElementById('scale-height').addEventListener('input', updateSizeFromHeight);
 
         // Show/hide seed options based on dither mode (only for mixed modes 4, 5, 6)
-        // Hide seed options when perceptual mode is enabled
+        // Hide seed options when color space aware mode is enabled
         function updateSeedVisibility() {
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const mode = parseInt(document.getElementById('dither-mode').value);

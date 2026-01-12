@@ -1,7 +1,8 @@
-/// Perceptual dithering implementation.
+/// Color space aware dithering implementation.
 ///
-/// Uses perceptual color space (CIELAB or OKLab) for distance calculations
-/// with error diffusion in linear RGB space.
+/// Uses perceptual color space (CIELAB or OKLab) for candidate selection
+/// with error diffusion in linear RGB space for physically correct light mixing.
+/// Processes all RGB channels jointly rather than independently.
 
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
@@ -173,10 +174,11 @@ fn build_perceptual_lut(
     lut
 }
 
-/// Perceptual Floyd-Steinberg dithering.
+/// Color space aware Floyd-Steinberg dithering.
 ///
 /// Uses perceptual color space (Lab or OkLab) for finding the best quantization
-/// candidate, but accumulates and diffuses error in linear RGB space.
+/// candidate, and accumulates/diffuses error in linear RGB space for physically
+/// correct light mixing. Processes all three channels jointly.
 ///
 /// Args:
 ///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
@@ -186,7 +188,7 @@ fn build_perceptual_lut(
 ///
 /// Returns:
 ///     (r_out, g_out, b_out): Output channels as u8
-pub fn perceptual_dither_rgb(
+pub fn colorspace_aware_dither_rgb(
     r_channel: &[f32],
     g_channel: &[f32],
     b_channel: &[f32],
@@ -378,7 +380,7 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_out, g_out, b_out) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
 
         assert_eq!(r_out.len(), 100);
         assert_eq!(g_out.len(), 100);
@@ -392,7 +394,7 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_out, g_out, b_out) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::Lab);
 
         let valid_levels = [0u8, 85, 170, 255];
         for &v in &r_out {
@@ -413,8 +415,8 @@ mod tests {
         let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
-        let (r_lab, g_lab, b_lab) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
-        let (r_oklab, g_oklab, b_oklab) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::OkLab);
+        let (r_lab, g_lab, b_lab) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_oklab, g_oklab, b_oklab) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::OkLab);
 
         // Results should differ (different perceptual spaces have different gamut mappings)
         let lab_combined: Vec<u8> = r_lab.iter().chain(g_lab.iter()).chain(b_lab.iter()).copied().collect();
@@ -430,7 +432,7 @@ mod tests {
         let g: Vec<f32> = vec![gray_val; 100];
         let b: Vec<f32> = vec![gray_val; 100];
 
-        let (r_out, g_out, b_out) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab);
 
         // For neutral gray input, output should remain relatively neutral
         // (R, G, B should be similar for each pixel)
@@ -452,7 +454,7 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         // 5-bit R and B, 6-bit G (RGB565 format)
-        let (r_out, g_out, b_out) = perceptual_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
+        let (r_out, g_out, b_out) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 6, 5, PerceptualSpace::Lab);
 
         // Check that outputs are valid for their respective bit depths
         let valid_5bit: Vec<u8> = (0..32).map(|l| bit_replicate(l, 5)).collect();
