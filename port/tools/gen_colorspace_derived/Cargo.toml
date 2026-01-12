@@ -1,0 +1,7 @@
+[package]
+name = "gen_colorspace_derived"
+version = "0.1.0"
+edition = "2021"
+description = "Generates colorspace_derived.rs from primary constants"
+
+[dependencies]

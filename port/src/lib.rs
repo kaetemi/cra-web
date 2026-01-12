@@ -9,6 +9,8 @@ mod basic_lab;
 mod basic_oklab;
 mod basic_rgb;
 mod color;
+pub mod colorspace_derived;
+pub mod colorspace_primary;
 mod cra_lab;
 mod cra_oklab;
 mod cra_rgb;
