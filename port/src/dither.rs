@@ -2,7 +2,12 @@
 /// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
 
 // Re-export color space aware dithering from dedicated module
-pub use crate::dither_colorspace_aware::{colorspace_aware_dither_rgb, PerceptualSpace};
+pub use crate::dither_colorspace_aware::{
+    colorspace_aware_dither_rgb,
+    colorspace_aware_dither_rgb_with_mode,
+    DitherMode as ColorspaceAwareDitherMode,
+    PerceptualSpace,
+};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.

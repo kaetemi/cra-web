@@ -104,7 +104,8 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 /// with error diffusion in linear RGB space for physically correct light mixing.
 /// Processes all three channels jointly rather than independently.
 ///
-/// Note: Only Floyd-Steinberg algorithm is currently supported.
+/// Uses Floyd-Steinberg algorithm with Standard (left-to-right) scanning.
+/// For other algorithms, use colorspace_aware_dither_with_mode_wasm.
 ///
 /// Args:
 ///     r_channel: Red channel as f32 values in range [0, 255]
@@ -139,6 +140,85 @@ pub fn colorspace_aware_dither_wasm(
         bits_g,
         bits_b,
         perceptual_space_from_u8(space),
+    );
+
+    // Interleave RGB channels
+    let pixels = w * h;
+    let mut result = vec![0u8; pixels * 3];
+    for i in 0..pixels {
+        result[i * 3] = r_out[i];
+        result[i * 3 + 1] = g_out[i];
+        result[i * 3 + 2] = b_out[i];
+    }
+    result
+}
+
+/// Color space aware dithering with selectable algorithm (WASM export)
+///
+/// Uses perceptual color space (CIELAB or OKLab) for candidate selection,
+/// with error diffusion in linear RGB space for physically correct light mixing.
+/// Processes all three channels jointly rather than independently.
+///
+/// Supports the same 7 dithering modes as the basic dither:
+/// - 0: Floyd-Steinberg Standard
+/// - 1: Floyd-Steinberg Serpentine
+/// - 2: Jarvis-Judice-Ninke Standard
+/// - 3: Jarvis-Judice-Ninke Serpentine
+/// - 4: Mixed Standard
+/// - 5: Mixed Serpentine
+/// - 6: Mixed Random
+///
+/// Args:
+///     r_channel: Red channel as f32 values in range [0, 255]
+///     g_channel: Green channel as f32 values in range [0, 255]
+///     b_channel: Blue channel as f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     space: perceptual space (0 = CIELAB, 1 = OKLab)
+///     mode: dither mode (0-6, see above)
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn colorspace_aware_dither_with_mode_wasm(
+    r_channel: Vec<f32>,
+    g_channel: Vec<f32>,
+    b_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    let (r_out, g_out, b_out) = dither::colorspace_aware_dither_rgb_with_mode(
+        &r_channel,
+        &g_channel,
+        &b_channel,
+        w,
+        h,
+        bits_r,
+        bits_g,
+        bits_b,
+        perceptual_space_from_u8(space),
+        cs_mode,
+        seed,
     );
 
     // Interleave RGB channels

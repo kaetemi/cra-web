@@ -552,7 +552,7 @@
                     <option value="0" selected>CIELAB</option>
                     <option value="1">OKLab</option>
                 </select>
-                <p class="perceptual-hint">Processes RGB channels jointly using perceptual distance for candidate selection and linear RGB for physically correct error diffusion.</p>
+                <p class="perceptual-hint">Processes RGB channels jointly using perceptual distance for candidate selection and linear RGB for physically correct error diffusion. Supports all dither modes.</p>
             </div>
 
             <div class="option-row" id="dither-mode-row">
@@ -669,7 +669,7 @@
     </div>
 
     <script type="module">
-        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm } from './wasm_cra/cra_wasm.js';
+        import init, { dither_with_mode_wasm, colorspace_aware_dither_wasm, colorspace_aware_dither_with_mode_wasm } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
         function getSeeds() {
@@ -884,6 +884,7 @@
                     if (isPerceptual) {
                         // Color space aware dithering: process all channels jointly
                         const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                        const seeds = getSeeds();
 
                         // Extract channels as Float32Array
                         const rChannel = new Float32Array(pixelCount);
@@ -896,12 +897,14 @@
                             bChannel[i] = data[i * 4 + 2];
                         }
 
-                        // Call color space aware dither (returns interleaved RGB)
-                        const rgbDithered = colorspace_aware_dither_wasm(
+                        // Call color space aware dither with mode (returns interleaved RGB)
+                        const rgbDithered = colorspace_aware_dither_with_mode_wasm(
                             rChannel, gChannel, bChannel,
                             processWidth, processHeight,
                             bitsR, bitsG, bitsB,
-                            perceptualSpace
+                            perceptualSpace,
+                            mode,
+                            seeds.r
                         );
 
                         for (let i = 0; i < pixelCount; i++) {
@@ -1042,8 +1045,8 @@
         function updatePerceptualMode() {
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
-            document.getElementById('dither-mode-row').classList.toggle('hidden', isPerceptual);
-            document.getElementById('seed-options').classList.toggle('visible', !isPerceptual && parseInt(document.getElementById('dither-mode').value) >= 4);
+            // Dither mode is now available for both basic and color-space aware modes
+            updateSeedVisibility();
             // Disable grayscale when color space aware is enabled
             if (isPerceptual) {
                 document.getElementById('grayscale-toggle').checked = false;
@@ -1074,12 +1077,11 @@
         document.getElementById('scale-height').addEventListener('input', updateSizeFromHeight);
 
         // Show/hide seed options based on dither mode (only for mixed modes 4, 5, 6)
-        // Hide seed options when color space aware mode is enabled
+        // Now works for both basic and color-space aware modes
         function updateSeedVisibility() {
-            const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const mode = parseInt(document.getElementById('dither-mode').value);
             const isMixedMode = mode >= 4 && mode <= 6;
-            document.getElementById('seed-options').classList.toggle('visible', !isPerceptual && isMixedMode);
+            document.getElementById('seed-options').classList.toggle('visible', isMixedMode);
         }
 
         document.getElementById('dither-mode').addEventListener('change', updateSeedVisibility);

@@ -3,6 +3,16 @@
 /// Uses perceptual color space (CIELAB or OKLab) for candidate selection
 /// with error diffusion in linear RGB space for physically correct light mixing.
 /// Processes all RGB channels jointly rather than independently.
+///
+/// Supports multiple dithering algorithms:
+/// - Floyd-Steinberg: Standard 2-row kernel (7/16, 3/16, 5/16, 1/16)
+/// - Jarvis-Judice-Ninke: Larger 3-row kernel for smoother gradients
+/// - Mixed: Random kernel selection per-pixel for reduced pattern visibility
+///
+/// And multiple scanning modes:
+/// - Standard: Left-to-right for all rows
+/// - Serpentine: Alternating direction each row
+/// - Random: Random direction per row (mixed modes only)
 
 use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
@@ -16,6 +26,44 @@ pub enum PerceptualSpace {
     Lab,
     /// OKLab color space
     OkLab,
+}
+
+/// Dithering mode selection for color-space aware dithering
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DitherMode {
+    /// Floyd-Steinberg: Standard left-to-right scanning (default)
+    #[default]
+    Standard,
+    /// Floyd-Steinberg: Serpentine scanning (alternating direction each row)
+    /// Reduces diagonal banding artifacts
+    Serpentine,
+    /// Jarvis-Judice-Ninke: Standard left-to-right scanning
+    /// Larger kernel (3 rows) produces smoother results but slower
+    JarvisStandard,
+    /// Jarvis-Judice-Ninke: Serpentine scanning
+    /// Combines larger kernel with alternating scan direction
+    JarvisSerpentine,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// Standard left-to-right scanning
+    MixedStandard,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// Serpentine scanning (alternating direction each row)
+    MixedSerpentine,
+    /// Mixed: Randomly selects between FS and JJN kernels per-pixel
+    /// AND randomly selects scan direction per row
+    MixedRandom,
+}
+
+/// Wang hash for deterministic randomization - excellent avalanche properties.
+/// Each bit of input affects all bits of output.
+#[inline]
+fn wang_hash(mut x: u32) -> u32 {
+    x = (x ^ 61) ^ (x >> 16);
+    x = x.wrapping_mul(9);
+    x = x ^ (x >> 4);
+    x = x.wrapping_mul(0x27d4eb2d);
+    x = x ^ (x >> 15);
+    x
 }
 
 /// Extend n-bit value to 8 bits by repeating the bit pattern.
@@ -174,11 +222,373 @@ fn build_perceptual_lut(
     lut
 }
 
-/// Color space aware Floyd-Steinberg dithering.
+// ============================================================================
+// Error diffusion kernels for RGB channels
+// ============================================================================
+
+/// Floyd-Steinberg kernel: Left-to-right scanning
+/// Distributes error to neighboring pixels (works on all 3 channels)
 ///
-/// Uses perceptual color space (Lab or OkLab) for finding the best quantization
-/// candidate, and accumulates/diffuses error in linear RGB space for physically
-/// correct light mixing. Processes all three channels jointly.
+/// Kernel (divided by 16):
+///       * 7
+///     3 5 1
+#[inline]
+fn apply_fs_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+) {
+    // Right: 7/16
+    err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
+    err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
+    err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
+
+    // Bottom-left: 3/16
+    err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
+    err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
+    err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
+
+    // Bottom: 5/16
+    err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
+    err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
+    err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+
+    // Bottom-right: 1/16
+    err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
+    err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
+    err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
+}
+
+/// Floyd-Steinberg kernel: Right-to-left scanning (mirrored)
+/// Used for serpentine scanning on odd rows
+#[inline]
+fn apply_fs_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+) {
+    // Left: 7/16
+    err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
+    err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
+    err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
+
+    // Bottom-right: 3/16
+    err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
+    err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
+    err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
+
+    // Bottom: 5/16
+    err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
+    err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
+    err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+
+    // Bottom-left: 1/16
+    err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
+    err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
+    err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
+}
+
+/// Jarvis-Judice-Ninke kernel: Left-to-right scanning
+/// Larger kernel produces smoother gradients
+///
+/// Kernel (divided by 48):
+///         * 7 5
+///     3 5 7 5 3
+///     1 3 5 3 1
+#[inline]
+fn apply_jjn_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+) {
+    // Row 0
+    err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
+    err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
+    err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
+
+    err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
+    err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
+    err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
+
+    // Row 1
+    err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
+    err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
+    err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
+    err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
+    err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
+    err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
+    err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
+
+    err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
+    err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
+    err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
+    err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
+    err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
+
+    // Row 2
+    err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
+    err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
+    err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
+
+    err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
+    err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
+    err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
+    err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
+    err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
+    err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
+    err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
+    err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
+    err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
+}
+
+/// Jarvis-Judice-Ninke kernel: Right-to-left scanning (mirrored)
+#[inline]
+fn apply_jjn_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+) {
+    // Row 0
+    err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
+    err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
+    err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
+
+    err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
+    err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
+    err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
+
+    // Row 1
+    err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
+    err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
+    err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
+    err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
+    err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
+    err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
+    err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
+
+    err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
+    err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
+    err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
+    err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
+    err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
+
+    // Row 2
+    err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
+    err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
+    err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
+
+    err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
+    err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
+    err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
+    err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
+    err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
+
+    err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
+    err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
+    err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
+
+    err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
+    err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
+    err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
+}
+
+/// Apply kernel based on runtime selection (for mixed modes)
+#[inline]
+fn apply_mixed_kernel(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    use_jjn: bool,
+    is_rtl: bool,
+) {
+    match (use_jjn, is_rtl) {
+        (true, false) => apply_jjn_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (true, true) => apply_jjn_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (false, false) => apply_fs_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+        (false, true) => apply_fs_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val),
+    }
+}
+
+// ============================================================================
+// Main dithering implementation
+// ============================================================================
+
+/// Context for pixel processing, containing pre-computed values
+struct DitherContext<'a> {
+    quant_r: &'a PerceptualQuantParams,
+    quant_g: &'a PerceptualQuantParams,
+    quant_b: &'a PerceptualQuantParams,
+    linear_lut: &'a [f32; 256],
+    lab_lut: &'a Option<Vec<LabValue>>,
+    space: PerceptualSpace,
+}
+
+/// Process a single pixel: find best quantization and compute error.
+/// Returns (best_r, best_g, best_b, err_r, err_g, err_b)
+#[inline]
+fn process_pixel(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &[Vec<f32>],
+    err_g: &[Vec<f32>],
+    err_b: &[Vec<f32>],
+    idx: usize,
+    bx: usize,
+    y: usize,
+) -> (u8, u8, u8, f32, f32, f32) {
+    // 1. Read input, convert to Linear RGB
+    let srgb_r = r_channel[idx] / 255.0;
+    let srgb_g = g_channel[idx] / 255.0;
+    let srgb_b = b_channel[idx] / 255.0;
+
+    let lin_r_orig = srgb_to_linear_single(srgb_r);
+    let lin_g_orig = srgb_to_linear_single(srgb_g);
+    let lin_b_orig = srgb_to_linear_single(srgb_b);
+
+    // 2. Add accumulated error
+    let lin_r_adj = lin_r_orig + err_r[y][bx];
+    let lin_g_adj = lin_g_orig + err_g[y][bx];
+    let lin_b_adj = lin_b_orig + err_b[y][bx];
+
+    // 3. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
+    let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
+    let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
+    let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
+
+    let srgb_r_adj = (linear_to_srgb_single(lin_r_clamped) * 255.0).clamp(0.0, 255.0);
+    let srgb_g_adj = (linear_to_srgb_single(lin_g_clamped) * 255.0).clamp(0.0, 255.0);
+    let srgb_b_adj = (linear_to_srgb_single(lin_b_clamped) * 255.0).clamp(0.0, 255.0);
+
+    // 4. Get level index bounds
+    let r_min = ctx.quant_r.floor_level(srgb_r_adj.floor() as u8);
+    let r_max = ctx.quant_r.ceil_level((srgb_r_adj.ceil() as u8).min(255));
+
+    let g_min = ctx.quant_g.floor_level(srgb_g_adj.floor() as u8);
+    let g_max = ctx.quant_g.ceil_level((srgb_g_adj.ceil() as u8).min(255));
+
+    let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
+    let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
+
+    // 5. Convert target to Lab (use unclamped for true distance)
+    let lab_target = match ctx.space {
+        PerceptualSpace::Lab => linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj),
+        PerceptualSpace::OkLab => linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj),
+    };
+
+    // 6. Search candidates
+    let mut best_r_level = r_min;
+    let mut best_g_level = g_min;
+    let mut best_b_level = b_min;
+    let mut best_dist = f32::INFINITY;
+
+    for r_level in r_min..=r_max {
+        for g_level in g_min..=g_max {
+            for b_level in b_min..=b_max {
+                let lab_candidate = if let Some(ref lut) = ctx.lab_lut {
+                    // Same bit depths: use LUT
+                    let n = ctx.quant_r.num_levels;
+                    let lut_idx = r_level * n * n + g_level * n + b_level;
+                    lut[lut_idx]
+                } else {
+                    // Different bit depths: compute on-the-fly
+                    let r_ext = ctx.quant_r.level_to_srgb(r_level);
+                    let g_ext = ctx.quant_g.level_to_srgb(g_level);
+                    let b_ext = ctx.quant_b.level_to_srgb(b_level);
+
+                    let r_lin = ctx.linear_lut[r_ext as usize];
+                    let g_lin = ctx.linear_lut[g_ext as usize];
+                    let b_lin = ctx.linear_lut[b_ext as usize];
+
+                    let (l, a, b_ch) = match ctx.space {
+                        PerceptualSpace::Lab => linear_rgb_to_lab(r_lin, g_lin, b_lin),
+                        PerceptualSpace::OkLab => linear_rgb_to_oklab(r_lin, g_lin, b_lin),
+                    };
+                    LabValue { l, a, b: b_ch }
+                };
+
+                let dl = lab_target.0 - lab_candidate.l;
+                let da = lab_target.1 - lab_candidate.a;
+                let db = lab_target.2 - lab_candidate.b;
+                let dist = dl * dl + da * da + db * db;
+
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_r_level = r_level;
+                    best_g_level = g_level;
+                    best_b_level = b_level;
+                }
+            }
+        }
+    }
+
+    // 7. Get extended values for output and error calculation
+    let best_r = ctx.quant_r.level_to_srgb(best_r_level);
+    let best_g = ctx.quant_g.level_to_srgb(best_g_level);
+    let best_b = ctx.quant_b.level_to_srgb(best_b_level);
+
+    // 8. Compute error in Linear RGB
+    let best_lin_r = ctx.linear_lut[best_r as usize];
+    let best_lin_g = ctx.linear_lut[best_g as usize];
+    let best_lin_b = ctx.linear_lut[best_b as usize];
+
+    let err_r_val = lin_r_adj - best_lin_r;
+    let err_g_val = lin_g_adj - best_lin_g;
+    let err_b_val = lin_b_adj - best_lin_b;
+
+    (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val)
+}
+
+/// Color space aware dithering with Floyd-Steinberg algorithm (default).
+///
+/// This is the original API that uses Floyd-Steinberg with standard (left-to-right) scanning.
+/// For other algorithms and scan patterns, use `colorspace_aware_dither_rgb_with_mode`.
 ///
 /// Args:
 ///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
@@ -199,29 +609,74 @@ pub fn colorspace_aware_dither_rgb(
     bits_b: u8,
     space: PerceptualSpace,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    colorspace_aware_dither_rgb_with_mode(
+        r_channel, g_channel, b_channel,
+        width, height,
+        bits_r, bits_g, bits_b,
+        space,
+        DitherMode::Standard,
+        0, // seed not used for Standard mode
+    )
+}
+
+/// Color space aware dithering with selectable algorithm and scanning mode.
+///
+/// Uses perceptual color space (Lab or OkLab) for finding the best quantization
+/// candidate, and accumulates/diffuses error in linear RGB space for physically
+/// correct light mixing. Processes all three channels jointly.
+///
+/// Args:
+///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b: Bit depth for each channel (1-8)
+///     space: Perceptual color space for distance calculation
+///     mode: Dithering algorithm and scanning mode
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///
+/// Returns:
+///     (r_out, g_out, b_out): Output channels as u8
+pub fn colorspace_aware_dither_rgb_with_mode(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let quant_r = PerceptualQuantParams::new(bits_r);
     let quant_g = PerceptualQuantParams::new(bits_g);
     let quant_b = PerceptualQuantParams::new(bits_b);
 
     let linear_lut = build_linear_lut();
 
-    // Build combined perceptual LUT
-    // Since we may have different bit depths, we need to handle this carefully
-    // For simplicity, build a LUT for each possible combination within the search bounds
-    // We'll compute perceptual values on-the-fly for mixed bit depths
+    // Build combined perceptual LUT if all channels have same bit depth
     let same_bits = bits_r == bits_g && bits_g == bits_b;
-
-    // If all channels have same bit depth, use a pre-built LUT
     let lab_lut = if same_bits {
         Some(build_perceptual_lut(&quant_r, &linear_lut, space))
     } else {
         None
     };
 
+    let ctx = DitherContext {
+        quant_r: &quant_r,
+        quant_g: &quant_g,
+        quant_b: &quant_b,
+        linear_lut: &linear_lut,
+        lab_lut: &lab_lut,
+        space,
+    };
+
     let pixels = width * height;
-    let pad_left = 1usize;
-    let pad_right = 1usize;
-    let pad_bottom = 1usize;
+
+    // Use JJN padding (2) for all modes to accommodate both kernels
+    let pad_left = 2usize;
+    let pad_right = 2usize;
+    let pad_bottom = 2usize;
     let buf_width = width + pad_left + pad_right;
 
     // Error buffers in linear RGB space
@@ -234,135 +689,219 @@ pub fn colorspace_aware_dither_rgb(
     let mut g_out = vec![0u8; pixels];
     let mut b_out = vec![0u8; pixels];
 
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+    let hashed_seed = wang_hash(seed);
 
-            // 1. Read input, convert to Linear RGB
-            let srgb_r = r_channel[idx] / 255.0;
-            let srgb_g = g_channel[idx] / 255.0;
-            let srgb_b = b_channel[idx] / 255.0;
+    match mode {
+        DitherMode::Standard => {
+            // Floyd-Steinberg, left-to-right
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = y * width + x;
+                    let bx = x + pad_left;
 
-            let lin_r_orig = srgb_to_linear_single(srgb_r);
-            let lin_g_orig = srgb_to_linear_single(srgb_g);
-            let lin_b_orig = srgb_to_linear_single(srgb_b);
+                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
 
-            // 2. Add accumulated error
-            let lin_r_adj = lin_r_orig + err_r[y][bx];
-            let lin_g_adj = lin_g_orig + err_g[y][bx];
-            let lin_b_adj = lin_b_orig + err_b[y][bx];
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
 
-            // 3. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
-            let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
-            let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
-            let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
+                    apply_fs_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                }
+            }
+        }
 
-            let srgb_r_adj = (linear_to_srgb_single(lin_r_clamped) * 255.0).clamp(0.0, 255.0);
-            let srgb_g_adj = (linear_to_srgb_single(lin_g_clamped) * 255.0).clamp(0.0, 255.0);
-            let srgb_b_adj = (linear_to_srgb_single(lin_b_clamped) * 255.0).clamp(0.0, 255.0);
+        DitherMode::Serpentine => {
+            // Floyd-Steinberg, alternating direction
+            for y in 0..height {
+                if y % 2 == 1 {
+                    // Right-to-left on odd rows
+                    for x in (0..width).rev() {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
 
-            // 4. Get level index bounds
-            let r_min = quant_r.floor_level(srgb_r_adj.floor() as u8);
-            let r_max = quant_r.ceil_level((srgb_r_adj.ceil() as u8).min(255));
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
 
-            let g_min = quant_g.floor_level(srgb_g_adj.floor() as u8);
-            let g_max = quant_g.ceil_level((srgb_g_adj.ceil() as u8).min(255));
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
 
-            let b_min = quant_b.floor_level(srgb_b_adj.floor() as u8);
-            let b_max = quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
+                        apply_fs_rtl(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                    }
+                } else {
+                    // Left-to-right on even rows
+                    for x in 0..width {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
 
-            // 5. Convert target to Lab (use unclamped for true distance)
-            let lab_target = match space {
-                PerceptualSpace::Lab => linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj),
-                PerceptualSpace::OkLab => linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj),
-            };
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
 
-            // 6. Search candidates
-            let mut best_r_level = r_min;
-            let mut best_g_level = g_min;
-            let mut best_b_level = b_min;
-            let mut best_dist = f32::INFINITY;
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
 
-            for r_level in r_min..=r_max {
-                for g_level in g_min..=g_max {
-                    for b_level in b_min..=b_max {
-                        let lab_candidate = if let Some(ref lut) = lab_lut {
-                            // Same bit depths: use LUT
-                            let n = quant_r.num_levels;
-                            let lut_idx = r_level * n * n + g_level * n + b_level;
-                            lut[lut_idx]
-                        } else {
-                            // Different bit depths: compute on-the-fly
-                            let r_ext = quant_r.level_to_srgb(r_level);
-                            let g_ext = quant_g.level_to_srgb(g_level);
-                            let b_ext = quant_b.level_to_srgb(b_level);
-
-                            let r_lin = linear_lut[r_ext as usize];
-                            let g_lin = linear_lut[g_ext as usize];
-                            let b_lin = linear_lut[b_ext as usize];
-
-                            let (l, a, b_ch) = match space {
-                                PerceptualSpace::Lab => linear_rgb_to_lab(r_lin, g_lin, b_lin),
-                                PerceptualSpace::OkLab => linear_rgb_to_oklab(r_lin, g_lin, b_lin),
-                            };
-                            LabValue { l, a, b: b_ch }
-                        };
-
-                        let dl = lab_target.0 - lab_candidate.l;
-                        let da = lab_target.1 - lab_candidate.a;
-                        let db = lab_target.2 - lab_candidate.b;
-                        let dist = dl * dl + da * da + db * db;
-
-                        if dist < best_dist {
-                            best_dist = dist;
-                            best_r_level = r_level;
-                            best_g_level = g_level;
-                            best_b_level = b_level;
-                        }
+                        apply_fs_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
                     }
                 }
             }
+        }
 
-            // 7. Get extended values for output and error calculation
-            let best_r = quant_r.level_to_srgb(best_r_level);
-            let best_g = quant_g.level_to_srgb(best_g_level);
-            let best_b = quant_b.level_to_srgb(best_b_level);
+        DitherMode::JarvisStandard => {
+            // Jarvis-Judice-Ninke, left-to-right
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = y * width + x;
+                    let bx = x + pad_left;
 
-            // 8. Write output
-            r_out[idx] = best_r;
-            g_out[idx] = best_g;
-            b_out[idx] = best_b;
+                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
 
-            // 9. Compute error in Linear RGB
-            let best_lin_r = linear_lut[best_r as usize];
-            let best_lin_g = linear_lut[best_g as usize];
-            let best_lin_b = linear_lut[best_b as usize];
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
 
-            let err_r_val = lin_r_adj - best_lin_r;
-            let err_g_val = lin_g_adj - best_lin_g;
-            let err_b_val = lin_b_adj - best_lin_b;
+                    apply_jjn_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                }
+            }
+        }
 
-            // 10. Diffuse error (Floyd-Steinberg kernel)
-            // Right: 7/16
-            err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
-            err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
-            err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
+        DitherMode::JarvisSerpentine => {
+            // Jarvis-Judice-Ninke, alternating direction
+            for y in 0..height {
+                if y % 2 == 1 {
+                    for x in (0..width).rev() {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
 
-            // Bottom-left: 3/16
-            err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
-            err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
-            err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
 
-            // Bottom: 5/16
-            err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-            err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-            err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
 
-            // Bottom-right: 1/16
-            err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
-            err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
-            err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
+                        apply_jjn_rtl(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                    }
+                } else {
+                    for x in 0..width {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
+
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
+
+                        apply_jjn_ltr(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                    }
+                }
+            }
+        }
+
+        DitherMode::MixedStandard => {
+            // Mixed kernel, left-to-right
+            for y in 0..height {
+                for x in 0..width {
+                    let idx = y * width + x;
+                    let bx = x + pad_left;
+
+                    let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                        process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+
+                    let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                    let use_jjn = pixel_hash & 1 == 1;
+                    apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+                }
+            }
+        }
+
+        DitherMode::MixedSerpentine => {
+            // Mixed kernel, alternating direction
+            for y in 0..height {
+                if y % 2 == 1 {
+                    for x in (0..width).rev() {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
+
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
+
+                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                        let use_jjn = pixel_hash & 1 == 1;
+                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+                    }
+                } else {
+                    for x in 0..width {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
+
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
+
+                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                        let use_jjn = pixel_hash & 1 == 1;
+                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+                    }
+                }
+            }
+        }
+
+        DitherMode::MixedRandom => {
+            // Mixed kernel, random direction per row
+            for y in 0..height {
+                let row_hash = wang_hash((y as u32) ^ hashed_seed);
+                let is_rtl = row_hash & 1 == 1;
+
+                if is_rtl {
+                    for x in (0..width).rev() {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
+
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
+
+                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                        let use_jjn = pixel_hash & 1 == 1;
+                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, true);
+                    }
+                } else {
+                    for x in 0..width {
+                        let idx = y * width + x;
+                        let bx = x + pad_left;
+
+                        let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                            process_pixel(&ctx, r_channel, g_channel, b_channel, &err_r, &err_g, &err_b, idx, bx, y);
+
+                        r_out[idx] = best_r;
+                        g_out[idx] = best_g;
+                        b_out[idx] = best_b;
+
+                        let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                        let use_jjn = pixel_hash & 1 == 1;
+                        apply_mixed_kernel(&mut err_r, &mut err_g, &mut err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn, false);
+                    }
+                }
+            }
         }
     }
 
@@ -469,5 +1008,205 @@ mod tests {
         for &v in &b_out {
             assert!(valid_5bit.contains(&v), "B channel produced invalid 5-bit value: {}", v);
         }
+    }
+
+    // Tests for different dithering modes
+
+    #[test]
+    fn test_all_modes_produce_valid_output() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let modes = [
+            DitherMode::Standard,
+            DitherMode::Serpentine,
+            DitherMode::JarvisStandard,
+            DitherMode::JarvisSerpentine,
+            DitherMode::MixedStandard,
+            DitherMode::MixedSerpentine,
+            DitherMode::MixedRandom,
+        ];
+
+        let valid_levels = [0u8, 85, 170, 255]; // 2-bit levels
+
+        for mode in modes {
+            let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_with_mode(
+                &r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::Lab, mode, 42
+            );
+
+            assert_eq!(r_out.len(), 100, "Mode {:?} produced wrong length", mode);
+            assert_eq!(g_out.len(), 100, "Mode {:?} produced wrong length", mode);
+            assert_eq!(b_out.len(), 100, "Mode {:?} produced wrong length", mode);
+
+            for &v in &r_out {
+                assert!(valid_levels.contains(&v), "Mode {:?} produced invalid 2-bit value: {}", mode, v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_serpentine_vs_standard() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+        );
+        let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Serpentine, 0
+        );
+
+        // Results should differ
+        let std_combined: Vec<u8> = r_std.iter().chain(g_std.iter()).chain(b_std.iter()).copied().collect();
+        let serp_combined: Vec<u8> = r_serp.iter().chain(g_serp.iter()).chain(b_serp.iter()).copied().collect();
+        assert_ne!(std_combined, serp_combined);
+    }
+
+    #[test]
+    fn test_jarvis_vs_floyd_steinberg() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+        );
+        let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+        );
+
+        // Results should differ
+        let fs_combined: Vec<u8> = r_fs.iter().chain(g_fs.iter()).chain(b_fs.iter()).copied().collect();
+        let jjn_combined: Vec<u8> = r_jjn.iter().chain(g_jjn.iter()).chain(b_jjn.iter()).copied().collect();
+        assert_ne!(fs_combined, jjn_combined);
+    }
+
+    #[test]
+    fn test_mixed_mode_produces_different_result() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+        );
+        let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+        );
+        let (r_mix, g_mix, b_mix) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+        );
+
+        // Mixed should differ from both pure algorithms
+        let fs_combined: Vec<u8> = r_fs.iter().chain(g_fs.iter()).chain(b_fs.iter()).copied().collect();
+        let jjn_combined: Vec<u8> = r_jjn.iter().chain(g_jjn.iter()).chain(b_jjn.iter()).copied().collect();
+        let mix_combined: Vec<u8> = r_mix.iter().chain(g_mix.iter()).chain(b_mix.iter()).copied().collect();
+
+        assert_ne!(fs_combined, mix_combined);
+        assert_ne!(jjn_combined, mix_combined);
+    }
+
+    #[test]
+    fn test_mixed_deterministic_with_same_seed() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+        );
+        let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+        );
+
+        // Same seed should produce identical results
+        assert_eq!(r1, r2);
+        assert_eq!(g1, g2);
+        assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn test_mixed_different_seeds_produce_different_results() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+        );
+        let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 99
+        );
+
+        // Different seeds should produce different results
+        let combined1: Vec<u8> = r1.iter().chain(g1.iter()).chain(b1.iter()).copied().collect();
+        let combined2: Vec<u8> = r2.iter().chain(g2.iter()).chain(b2.iter()).copied().collect();
+        assert_ne!(combined1, combined2);
+    }
+
+    #[test]
+    fn test_all_mixed_modes_produce_different_results() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedStandard, 42
+        );
+        let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedSerpentine, 42
+        );
+        let (r_rand, g_rand, b_rand) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::MixedRandom, 42
+        );
+
+        let std_combined: Vec<u8> = r_std.iter().chain(g_std.iter()).chain(b_std.iter()).copied().collect();
+        let serp_combined: Vec<u8> = r_serp.iter().chain(g_serp.iter()).chain(b_serp.iter()).copied().collect();
+        let rand_combined: Vec<u8> = r_rand.iter().chain(g_rand.iter()).chain(b_rand.iter()).copied().collect();
+
+        // All three mixed modes should produce different results
+        assert_ne!(std_combined, serp_combined);
+        assert_ne!(std_combined, rand_combined);
+        assert_ne!(serp_combined, rand_combined);
+    }
+
+    #[test]
+    fn test_default_mode_matches_original_api() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        // Original API
+        let (r1, g1, b1) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab);
+        // New API with Standard mode
+        let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::Standard, 0
+        );
+
+        // Should produce identical results
+        assert_eq!(r1, r2);
+        assert_eq!(g1, g2);
+        assert_eq!(b1, b2);
+    }
+
+    #[test]
+    fn test_jarvis_serpentine_vs_standard() {
+        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
+        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+
+        let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisStandard, 0
+        );
+        let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::Lab, DitherMode::JarvisSerpentine, 0
+        );
+
+        // JJN standard and serpentine should produce different results
+        let std_combined: Vec<u8> = r_std.iter().chain(g_std.iter()).chain(b_std.iter()).copied().collect();
+        let serp_combined: Vec<u8> = r_serp.iter().chain(g_serp.iter()).chain(b_serp.iter()).copied().collect();
+        assert_ne!(std_combined, serp_combined);
     }
 }
