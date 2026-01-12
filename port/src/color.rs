@@ -157,6 +157,13 @@ pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize,
 // Oklab is a perceptually uniform color space developed by Björn Ottosson (2020)
 // L: 0-1, a/b: roughly -0.4 to +0.4
 
+/// Signed cube root - preserves sign for negative values.
+/// Required for out-of-gamut colors in OkLab.
+#[inline]
+fn signed_cbrt(x: f32) -> f32 {
+    x.signum() * x.abs().cbrt()
+}
+
 /// Convert linear RGB (0-1) to Oklab
 /// Returns (L, a, b) where L is 0-1 and a,b are roughly -0.4 to +0.4
 #[inline]
@@ -166,10 +173,10 @@ pub fn linear_rgb_to_oklab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let m = cs::OKLAB_M1[1][0] * r + cs::OKLAB_M1[1][1] * g + cs::OKLAB_M1[1][2] * b;
     let s = cs::OKLAB_M1[2][0] * r + cs::OKLAB_M1[2][1] * g + cs::OKLAB_M1[2][2] * b;
 
-    // Cube root (with sign handling for out-of-gamut values)
-    let l_ = l.max(0.0).cbrt();
-    let m_ = m.max(0.0).cbrt();
-    let s_ = s.max(0.0).cbrt();
+    // Signed cube root (preserves sign for out-of-gamut values)
+    let l_ = signed_cbrt(l);
+    let m_ = signed_cbrt(m);
+    let s_ = signed_cbrt(s);
 
     // LMS' to Oklab
     let ok_l = cs::OKLAB_M2[0][0] * l_ + cs::OKLAB_M2[0][1] * m_ + cs::OKLAB_M2[0][2] * s_;

@@ -57,7 +57,7 @@ pub enum DitherMode {
 /// Wang hash for deterministic randomization - excellent avalanche properties.
 /// Each bit of input affects all bits of output.
 #[inline]
-fn wang_hash(mut x: u32) -> u32 {
+pub fn wang_hash(mut x: u32) -> u32 {
     x = (x ^ 61) ^ (x >> 16);
     x = x.wrapping_mul(9);
     x = x ^ (x >> 4);

@@ -5,9 +5,11 @@
 pub use crate::dither_colorspace_aware::{
     colorspace_aware_dither_rgb,
     colorspace_aware_dither_rgb_with_mode,
-    DitherMode as ColorspaceAwareDitherMode,
     PerceptualSpace,
 };
+
+// Import shared utilities from dither_colorspace_aware
+use crate::dither_colorspace_aware::{bit_replicate, wang_hash};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.
@@ -39,7 +41,7 @@ impl QuantParams {
 
         // Pre-compute bit-replicated values for each level
         let level_values: Vec<u8> = (0..levels)
-            .map(|l| Self::bit_replicate(l as u8, bits))
+            .map(|l| Self::bit_replicate_local(l as u8, bits))
             .collect();
 
         let mut lut_nearest = [0.0f32; 256];
@@ -78,23 +80,10 @@ impl QuantParams {
 
     /// Extend n-bit value to 8 bits by repeating the bit pattern.
     /// e.g., 3-bit value ABC becomes ABCABCAB
+    /// Delegates to the shared bit_replicate function from dither_colorspace_aware.
     #[inline]
-    fn bit_replicate(value: u8, bits: u8) -> u8 {
-        if bits == 8 {
-            return value;
-        }
-        let mut result: u16 = 0;
-        let mut shift = 8i8;
-        while shift > 0 {
-            shift -= bits as i8;
-            if shift >= 0 {
-                result |= (value as u16) << shift;
-            } else {
-                // Partial bits at the end
-                result |= (value as u16) >> (-shift);
-            }
-        }
-        result as u8
+    fn bit_replicate_local(value: u8, bits: u8) -> u8 {
+        bit_replicate(value, bits)
     }
 
     /// Quantize a value to the nearest level and return the bit-replicated value.
@@ -135,17 +124,7 @@ impl QuantParams {
     }
 }
 
-/// Wang hash for deterministic randomization - excellent avalanche properties.
-/// Each bit of input affects all bits of output.
-#[inline]
-fn wang_hash(mut x: u32) -> u32 {
-    x = (x ^ 61) ^ (x >> 16);
-    x = x.wrapping_mul(9);
-    x = x ^ (x >> 4);
-    x = x.wrapping_mul(0x27d4eb2d);
-    x = x ^ (x >> 15);
-    x
-}
+// wang_hash is imported from dither_colorspace_aware
 
 /// Dithering mode selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -926,28 +905,28 @@ mod tests {
     fn test_bit_replicate_correctness() {
         // Verify the bit_replicate function produces correct values
         // 1-bit
-        assert_eq!(QuantParams::bit_replicate(0, 1), 0b00000000);
-        assert_eq!(QuantParams::bit_replicate(1, 1), 0b11111111);
+        assert_eq!(bit_replicate(0, 1), 0b00000000);
+        assert_eq!(bit_replicate(1, 1), 0b11111111);
 
         // 2-bit
-        assert_eq!(QuantParams::bit_replicate(0, 2), 0b00000000);
-        assert_eq!(QuantParams::bit_replicate(1, 2), 0b01010101); // 85
-        assert_eq!(QuantParams::bit_replicate(2, 2), 0b10101010); // 170
-        assert_eq!(QuantParams::bit_replicate(3, 2), 0b11111111); // 255
+        assert_eq!(bit_replicate(0, 2), 0b00000000);
+        assert_eq!(bit_replicate(1, 2), 0b01010101); // 85
+        assert_eq!(bit_replicate(2, 2), 0b10101010); // 170
+        assert_eq!(bit_replicate(3, 2), 0b11111111); // 255
 
         // 3-bit: ABC → ABCABCAB
-        assert_eq!(QuantParams::bit_replicate(0b000, 3), 0b00000000); // 0
-        assert_eq!(QuantParams::bit_replicate(0b001, 3), 0b00100100); // 36
-        assert_eq!(QuantParams::bit_replicate(0b101, 3), 0b10110110); // 182
-        assert_eq!(QuantParams::bit_replicate(0b111, 3), 0b11111111); // 255
+        assert_eq!(bit_replicate(0b000, 3), 0b00000000); // 0
+        assert_eq!(bit_replicate(0b001, 3), 0b00100100); // 36
+        assert_eq!(bit_replicate(0b101, 3), 0b10110110); // 182
+        assert_eq!(bit_replicate(0b111, 3), 0b11111111); // 255
 
         // 4-bit: ABCD → ABCDABCD
-        assert_eq!(QuantParams::bit_replicate(0b0001, 4), 0b00010001); // 17
-        assert_eq!(QuantParams::bit_replicate(0b1010, 4), 0b10101010); // 170
+        assert_eq!(bit_replicate(0b0001, 4), 0b00010001); // 17
+        assert_eq!(bit_replicate(0b1010, 4), 0b10101010); // 170
 
         // 5-bit: ABCDE → ABCDEABC
-        assert_eq!(QuantParams::bit_replicate(0b00011, 5), 0b00011000); // 24
-        assert_eq!(QuantParams::bit_replicate(0b11111, 5), 0b11111111); // 255
+        assert_eq!(bit_replicate(0b00011, 5), 0b00011000); // 24
+        assert_eq!(bit_replicate(0b11111, 5), 0b11111111); // 255
     }
 
     #[test]
@@ -980,7 +959,7 @@ mod tests {
         let result = floyd_steinberg_dither_bits(&img, 10, 10, 3);
         assert_eq!(result.len(), 100);
         // 3-bit = 8 levels with bit replication: 0, 36, 73, 109, 146, 182, 219, 255
-        let valid_levels: Vec<u8> = (0..8).map(|i| QuantParams::bit_replicate(i, 3)).collect();
+        let valid_levels: Vec<u8> = (0..8).map(|i| bit_replicate(i, 3)).collect();
         for &v in &result {
             assert!(valid_levels.contains(&v), "3-bit dither should only produce valid 3-bit levels, got {}", v);
         }
