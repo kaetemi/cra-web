@@ -13,6 +13,13 @@ use std::io::{self, Write};
 // =============================================================================
 
 mod primary {
+    /// D65 CIE - authoritative definition from CIE 15:2004.
+    pub mod d65_cie {
+        pub const X: f64 = 0.31272;
+        pub const Y: f64 = 0.32903;
+    }
+
+    /// D65 4-digit - rounded values from ITU-R BT.709 / sRGB / Adobe RGB specs.
     pub mod d65 {
         pub const X: f64 = 0.3127;
         pub const Y: f64 = 0.3290;
@@ -24,7 +31,7 @@ mod primary {
     }
 
     /// sRGB XYZ matrix - these 4-digit values are canonical per IEC 61966-2-1.
-    /// Chromaticities are derived from these, not vice versa.
+    /// Chromaticities and D65 sRGB are derived from these, not vice versa.
     pub mod srgb_xyz {
         pub const TO_XYZ: [[f64; 3]; 3] = [
             [0.4124, 0.3576, 0.1805],
@@ -302,12 +309,25 @@ fn main() -> io::Result<()> {
     let mut out = stdout.lock();
 
     // Compute all derived constants
-    let d65_xyz = xy_to_xyz(primary::d65::X, primary::d65::Y);
+
+    // D65 variants
+    let d65_cie_xyz = xy_to_xyz(primary::d65_cie::X, primary::d65_cie::Y);
+    let d65_xyz = xy_to_xyz(primary::d65::X, primary::d65::Y); // 4-digit
+
+    // D50
     let d50_xyz = xy_to_xyz(primary::d50::X, primary::d50::Y);
 
     // sRGB / Rec.709 matrices - use canonical 4-digit XYZ matrix directly
     let srgb_to_xyz = primary::srgb_xyz::TO_XYZ;
     let xyz_to_srgb = invert_3x3(srgb_to_xyz);
+
+    // D65 sRGB - derived from matrix row sums (white = R+G+B)
+    let d65_srgb_xyz = [
+        srgb_to_xyz[0][0] + srgb_to_xyz[0][1] + srgb_to_xyz[0][2],
+        srgb_to_xyz[1][0] + srgb_to_xyz[1][1] + srgb_to_xyz[1][2],
+        srgb_to_xyz[2][0] + srgb_to_xyz[2][1] + srgb_to_xyz[2][2],
+    ];
+    let d65_srgb_xy = xyz_to_xy(d65_srgb_xyz);
 
     // Derive sRGB chromaticities from XYZ matrix columns
     let srgb_red_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 0));
@@ -394,23 +414,51 @@ fn main() -> io::Result<()> {
 
     // Illuminant XYZ
     writeln!(out, "// =============================================================================")?;
-    writeln!(out, "// ILLUMINANT XYZ (derived from xy chromaticity, Y=1)")?;
+    writeln!(out, "// D65 ILLUMINANT VARIANTS")?;
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
-    writeln!(out, "/// D65 standard illuminant XYZ (Y=1).")?;
-    writeln!(out, "/// Derived from D65 xy chromaticity (0.3127, 0.3290).")?;
-    writeln!(out, "pub mod d65_xyz {{")?;
-    writeln!(out, "    pub const X: f64 = {};", fmt_f64(d65_xyz[0]))?;
-    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(d65_xyz[1]))?;
-    writeln!(out, "    pub const Z: f64 = {};", fmt_f64(d65_xyz[2]))?;
+    writeln!(out, "/// D65 CIE - authoritative definition from CIE 15:2004.")?;
+    writeln!(out, "/// Derived from xy chromaticity (0.31272, 0.32903).")?;
+    writeln!(out, "pub mod d65_cie {{")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d65_cie::X))?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d65_cie::Y))?;
+    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_cie_xyz[0]))?;
+    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_cie_xyz[1]))?;
+    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_cie_xyz[2]))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
-    writeln!(out, "/// D50 standard illuminant XYZ (Y=1).")?;
-    writeln!(out, "/// Derived from D50 xy chromaticity (0.3457, 0.3585).")?;
-    writeln!(out, "pub mod d50_xyz {{")?;
-    writeln!(out, "    pub const X: f64 = {};", fmt_f64(d50_xyz[0]))?;
-    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(d50_xyz[1]))?;
-    writeln!(out, "    pub const Z: f64 = {};", fmt_f64(d50_xyz[2]))?;
+    writeln!(out, "/// D65 sRGB - derived from the canonical sRGB matrix row sums.")?;
+    writeln!(out, "/// This is the operative white point for sRGB workflows.")?;
+    writeln!(out, "pub mod d65_srgb {{")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(d65_srgb_xy.0))?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(d65_srgb_xy.1))?;
+    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_srgb_xyz[0]))?;
+    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_srgb_xyz[1]))?;
+    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_srgb_xyz[2]))?;
+    writeln!(out, "}}")?;
+    writeln!(out)?;
+    writeln!(out, "/// D65 4-digit - rounded values from ITU-R BT.709 / Adobe RGB specs.")?;
+    writeln!(out, "/// Derived from xy chromaticity (0.3127, 0.3290).")?;
+    writeln!(out, "pub mod d65 {{")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d65::X))?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d65::Y))?;
+    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_xyz[0]))?;
+    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_xyz[1]))?;
+    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_xyz[2]))?;
+    writeln!(out, "}}")?;
+    writeln!(out)?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out, "// D50 ILLUMINANT")?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out)?;
+    writeln!(out, "/// D50 standard illuminant.")?;
+    writeln!(out, "/// Derived from xy chromaticity (0.3457, 0.3585).")?;
+    writeln!(out, "pub mod d50 {{")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d50::X))?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d50::Y))?;
+    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d50_xyz[0]))?;
+    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d50_xyz[1]))?;
+    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d50_xyz[2]))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
 
@@ -576,15 +624,22 @@ fn main() -> io::Result<()> {
     writeln!(out, "pub mod f32 {{")?;
     writeln!(out)?;
 
-    // Illuminant XYZ
+    // Illuminant XYZ (4-digit D65)
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out, "    // ILLUMINANT XYZ")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
+    writeln!(out, "    /// D65 XYZ (4-digit variant, from specs)")?;
     writeln!(out, "    pub const D65_X: f32 = {} as f32;", fmt_f64(d65_xyz[0]))?;
     writeln!(out, "    pub const D65_Y: f32 = {} as f32;", fmt_f64(d65_xyz[1]))?;
     writeln!(out, "    pub const D65_Z: f32 = {} as f32;", fmt_f64(d65_xyz[2]))?;
     writeln!(out, "    pub const D65_XYZ: [f32; 3] = [D65_X, D65_Y, D65_Z];")?;
+    writeln!(out)?;
+    writeln!(out, "    /// D65 sRGB XYZ (derived from sRGB matrix row sums)")?;
+    writeln!(out, "    pub const D65_SRGB_X: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[0]))?;
+    writeln!(out, "    pub const D65_SRGB_Y: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[1]))?;
+    writeln!(out, "    pub const D65_SRGB_Z: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[2]))?;
+    writeln!(out, "    pub const D65_SRGB_XYZ: [f32; 3] = [D65_SRGB_X, D65_SRGB_Y, D65_SRGB_Z];")?;
     writeln!(out)?;
     writeln!(out, "    pub const D50_X: f32 = {} as f32;", fmt_f64(d50_xyz[0]))?;
     writeln!(out, "    pub const D50_Y: f32 = {} as f32;", fmt_f64(d50_xyz[1]))?;
@@ -592,11 +647,12 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const D50_XYZ: [f32; 3] = [D50_X, D50_Y, D50_Z];")?;
     writeln!(out)?;
 
-    // Primary chromaticity (from primary constants)
+    // Illuminant chromaticity
     writeln!(out, "    // -------------------------------------------------------------------------")?;
-    writeln!(out, "    // ILLUMINANT CHROMATICITY (from primary constants)")?;
+    writeln!(out, "    // ILLUMINANT CHROMATICITY")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
+    writeln!(out, "    /// D65 chromaticity (4-digit variant)")?;
     writeln!(out, "    pub const D65_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
         fmt_f64(primary::d65::X), fmt_f64(primary::d65::Y))?;
     writeln!(out, "    pub const D50_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
@@ -844,16 +900,15 @@ fn main() -> io::Result<()> {
     writeln!(out, "    }}")?;
     writeln!(out)?;
     writeln!(out, "    #[test]")?;
-    writeln!(out, "    fn test_white_point_maps_to_white() {{")?;
-    writeln!(out, "        // RGB (1,1,1) should map approximately to D65 white point XYZ.")?;
-    writeln!(out, "        // Tolerance is 1e-3 because the 4-digit canonical sRGB matrix")?;
-    writeln!(out, "        // is not perfectly consistent with D65 chromaticity.")?;
+    writeln!(out, "    fn test_srgb_white_matches_d65_srgb() {{")?;
+    writeln!(out, "        // RGB (1,1,1) maps to white XYZ via matrix row sums.")?;
+    writeln!(out, "        // This should exactly match d65_srgb since both are derived from the same matrix.")?;
     writeln!(out, "        let x = SRGB_TO_XYZ[0][0] + SRGB_TO_XYZ[0][1] + SRGB_TO_XYZ[0][2];")?;
     writeln!(out, "        let y = SRGB_TO_XYZ[1][0] + SRGB_TO_XYZ[1][1] + SRGB_TO_XYZ[1][2];")?;
     writeln!(out, "        let z = SRGB_TO_XYZ[2][0] + SRGB_TO_XYZ[2][1] + SRGB_TO_XYZ[2][2];")?;
-    writeln!(out, "        assert!((x - d65_xyz::X).abs() < 1e-3, \"X: {{}} vs {{}}\", x, d65_xyz::X);")?;
-    writeln!(out, "        assert!((y - d65_xyz::Y).abs() < 1e-3, \"Y: {{}} vs {{}}\", y, d65_xyz::Y);")?;
-    writeln!(out, "        assert!((z - d65_xyz::Z).abs() < 1e-3, \"Z: {{}} vs {{}}\", z, d65_xyz::Z);")?;
+    writeln!(out, "        assert!((x - d65_srgb::XYZ_X).abs() < 1e-14, \"X: {{}} vs {{}}\", x, d65_srgb::XYZ_X);")?;
+    writeln!(out, "        assert!((y - d65_srgb::XYZ_Y).abs() < 1e-14, \"Y: {{}} vs {{}}\", y, d65_srgb::XYZ_Y);")?;
+    writeln!(out, "        assert!((z - d65_srgb::XYZ_Z).abs() < 1e-14, \"Z: {{}} vs {{}}\", z, d65_srgb::XYZ_Z);")?;
     writeln!(out, "    }}")?;
     writeln!(out, "}}")?;
 

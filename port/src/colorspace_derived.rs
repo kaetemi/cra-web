@@ -7,23 +7,51 @@
 //! All constants are computed from primary constants at f64 precision.
 
 // =============================================================================
-// ILLUMINANT XYZ (derived from xy chromaticity, Y=1)
+// D65 ILLUMINANT VARIANTS
 // =============================================================================
 
-/// D65 standard illuminant XYZ (Y=1).
-/// Derived from D65 xy chromaticity (0.3127, 0.3290).
-pub mod d65_xyz {
-    pub const X: f64 = 0.95045592705167159;
-    pub const Y: f64 = 1.0;
-    pub const Z: f64 = 1.08905775075987843;
+/// D65 CIE - authoritative definition from CIE 15:2004.
+/// Derived from xy chromaticity (0.31272, 0.32903).
+pub mod d65_cie {
+    pub const X: f64 = 0.31272;
+    pub const Y: f64 = 0.32903;
+    pub const XYZ_X: f64 = 0.95043005197094488;
+    pub const XYZ_Y: f64 = 1.0;
+    pub const XYZ_Z: f64 = 1.08880649180925748;
 }
 
-/// D50 standard illuminant XYZ (Y=1).
-/// Derived from D50 xy chromaticity (0.3457, 0.3585).
-pub mod d50_xyz {
-    pub const X: f64 = 0.96429567642956771;
-    pub const Y: f64 = 1.0;
-    pub const Z: f64 = 0.82510460251046025;
+/// D65 sRGB - derived from the canonical sRGB matrix row sums.
+/// This is the operative white point for sRGB workflows.
+pub mod d65_srgb {
+    pub const X: f64 = 0.31271590722158249;
+    pub const Y: f64 = 0.32900148050666228;
+    pub const XYZ_X: f64 = 0.9505;
+    pub const XYZ_Y: f64 = 1.0;
+    pub const XYZ_Z: f64 = 1.089;
+}
+
+/// D65 4-digit - rounded values from ITU-R BT.709 / Adobe RGB specs.
+/// Derived from xy chromaticity (0.3127, 0.3290).
+pub mod d65 {
+    pub const X: f64 = 0.3127;
+    pub const Y: f64 = 0.329;
+    pub const XYZ_X: f64 = 0.95045592705167159;
+    pub const XYZ_Y: f64 = 1.0;
+    pub const XYZ_Z: f64 = 1.08905775075987843;
+}
+
+// =============================================================================
+// D50 ILLUMINANT
+// =============================================================================
+
+/// D50 standard illuminant.
+/// Derived from xy chromaticity (0.3457, 0.3585).
+pub mod d50 {
+    pub const X: f64 = 0.3457;
+    pub const Y: f64 = 0.3585;
+    pub const XYZ_X: f64 = 0.96429567642956771;
+    pub const XYZ_Y: f64 = 1.0;
+    pub const XYZ_Z: f64 = 0.82510460251046025;
 }
 
 // =============================================================================
@@ -228,10 +256,17 @@ pub mod f32 {
     // ILLUMINANT XYZ
     // -------------------------------------------------------------------------
 
+    /// D65 XYZ (4-digit variant, from specs)
     pub const D65_X: f32 = 0.95045592705167159 as f32;
     pub const D65_Y: f32 = 1.0 as f32;
     pub const D65_Z: f32 = 1.08905775075987843 as f32;
     pub const D65_XYZ: [f32; 3] = [D65_X, D65_Y, D65_Z];
+
+    /// D65 sRGB XYZ (derived from sRGB matrix row sums)
+    pub const D65_SRGB_X: f32 = 0.9505 as f32;
+    pub const D65_SRGB_Y: f32 = 1.0 as f32;
+    pub const D65_SRGB_Z: f32 = 1.089 as f32;
+    pub const D65_SRGB_XYZ: [f32; 3] = [D65_SRGB_X, D65_SRGB_Y, D65_SRGB_Z];
 
     pub const D50_X: f32 = 0.96429567642956771 as f32;
     pub const D50_Y: f32 = 1.0 as f32;
@@ -239,9 +274,10 @@ pub mod f32 {
     pub const D50_XYZ: [f32; 3] = [D50_X, D50_Y, D50_Z];
 
     // -------------------------------------------------------------------------
-    // ILLUMINANT CHROMATICITY (from primary constants)
+    // ILLUMINANT CHROMATICITY
     // -------------------------------------------------------------------------
 
+    /// D65 chromaticity (4-digit variant)
     pub const D65_CHROMATICITY: [f32; 2] = [0.3127 as f32, 0.329 as f32];
     pub const D50_CHROMATICITY: [f32; 2] = [0.3457 as f32, 0.3585 as f32];
 
@@ -511,15 +547,14 @@ mod tests {
     }
 
     #[test]
-    fn test_white_point_maps_to_white() {
-        // RGB (1,1,1) should map approximately to D65 white point XYZ.
-        // Tolerance is 1e-3 because the 4-digit canonical sRGB matrix
-        // is not perfectly consistent with D65 chromaticity.
+    fn test_srgb_white_matches_d65_srgb() {
+        // RGB (1,1,1) maps to white XYZ via matrix row sums.
+        // This should exactly match d65_srgb since both are derived from the same matrix.
         let x = SRGB_TO_XYZ[0][0] + SRGB_TO_XYZ[0][1] + SRGB_TO_XYZ[0][2];
         let y = SRGB_TO_XYZ[1][0] + SRGB_TO_XYZ[1][1] + SRGB_TO_XYZ[1][2];
         let z = SRGB_TO_XYZ[2][0] + SRGB_TO_XYZ[2][1] + SRGB_TO_XYZ[2][2];
-        assert!((x - d65_xyz::X).abs() < 1e-3, "X: {} vs {}", x, d65_xyz::X);
-        assert!((y - d65_xyz::Y).abs() < 1e-3, "Y: {} vs {}", y, d65_xyz::Y);
-        assert!((z - d65_xyz::Z).abs() < 1e-3, "Z: {} vs {}", z, d65_xyz::Z);
+        assert!((x - d65_srgb::XYZ_X).abs() < 1e-14, "X: {} vs {}", x, d65_srgb::XYZ_X);
+        assert!((y - d65_srgb::XYZ_Y).abs() < 1e-14, "Y: {} vs {}", y, d65_srgb::XYZ_Y);
+        assert!((z - d65_srgb::XYZ_Z).abs() < 1e-14, "Z: {} vs {}", z, d65_srgb::XYZ_Z);
     }
 }

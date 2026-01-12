@@ -17,9 +17,17 @@
 // ILLUMINANT CHROMATICITY (CIE xy)
 // =============================================================================
 
-/// D65 standard illuminant - CIE xy chromaticity.
-/// From ITU-R BT.709 / IEC 61966-2-1 (sRGB specification).
-/// These are rounded from CIE 15:2004 values (0.31272, 0.32903).
+/// D65 standard illuminant - CIE authoritative definition.
+/// From CIE 15:2004, derived from the D65 spectral power distribution.
+/// This is the most precise definition but is not directly used by display specs.
+pub mod d65_cie {
+    pub const X: f64 = 0.31272;
+    pub const Y: f64 = 0.32903;
+}
+
+/// D65 standard illuminant - 4-digit rounded values.
+/// From ITU-R BT.709 / IEC 61966-2-1 / Adobe RGB specifications.
+/// Note: D65 sRGB (derived from the sRGB matrix) is in colorspace_derived.rs.
 pub mod d65 {
     pub const X: f64 = 0.3127;
     pub const Y: f64 = 0.3290;
