@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CRA - Chroma Rotation Averaging Color Matching</title>
+    <title>Color Matching | CRA</title>
     <style>
         * {
             box-sizing: border-box;
@@ -14,28 +14,113 @@
             max-width: 1200px;
             margin: 0 auto;
             padding: 20px;
-            background: #f5f5f5;
-            color: #333;
+            padding-top: 80px;
+            background: #121212;
+            color: #e0e0e0;
+        }
+
+        .site-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+            padding: 0 20px;
+            z-index: 900;
+            display: flex;
+            align-items: center;
+            height: 56px;
+        }
+
+        .site-nav-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 32px;
+        }
+
+        .site-logo {
+            font-weight: 700;
+            font-size: 18px;
+            color: #fff;
+            text-decoration: none;
+            letter-spacing: -0.5px;
+        }
+
+        .site-logo span {
+            color: #5dade2;
+        }
+
+        .site-logo .sep {
+            color: #666;
+        }
+
+        .github-link {
+            margin-left: auto;
+            color: #888;
+            transition: color 0.2s ease;
+        }
+
+        .github-link:hover {
+            color: #fff;
+        }
+
+        .github-link svg {
+            width: 24px;
+            height: 24px;
+            display: block;
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 8px;
+        }
+
+        .nav-links a {
+            color: #999;
+            text-decoration: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .nav-links a:hover {
+            color: #e0e0e0;
+            background: #2a2a2a;
+        }
+
+        .nav-links a.active {
+            color: #fff;
+            background: #333;
         }
 
         h1 {
             text-align: center;
-            color: #2c3e50;
-            margin-bottom: 10px;
+            color: #fff;
+            margin-bottom: 8px;
+            font-size: 28px;
+            font-weight: 600;
         }
 
         .subtitle {
             text-align: center;
-            color: #666;
+            color: #888;
             margin-bottom: 30px;
+            font-size: 15px;
         }
 
         .container {
-            background: white;
+            background: #1e1e1e;
             border-radius: 12px;
             padding: 30px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
             margin-bottom: 20px;
+            border: 1px solid #2a2a2a;
         }
 
         .upload-section {
@@ -52,7 +137,7 @@
         }
 
         .upload-box {
-            border: 2px dashed #ccc;
+            border: 2px dashed #444;
             border-radius: 8px;
             padding: 30px;
             text-align: center;
@@ -63,11 +148,12 @@
             flex-direction: column;
             align-items: center;
             justify-content: center;
+            background: #252525;
         }
 
         .upload-box:hover {
-            border-color: #3498db;
-            background: #f8f9fa;
+            border-color: #5dade2;
+            background: #2a2a2a;
         }
 
         .upload-box.has-image {
@@ -83,13 +169,13 @@
 
         .upload-box label {
             font-weight: 600;
-            color: #555;
+            color: #ccc;
             margin-bottom: 10px;
             display: block;
         }
 
         .upload-box .hint {
-            color: #888;
+            color: #777;
             font-size: 14px;
         }
 
@@ -105,34 +191,41 @@
             display: block;
             font-weight: 600;
             margin-bottom: 10px;
-            color: #555;
+            color: #ccc;
         }
 
         .method-select {
             width: 100%;
             padding: 12px;
-            border: 1px solid #ddd;
+            border: 1px solid #444;
             border-radius: 8px;
             font-size: 16px;
-            background: white;
+            background: #252525;
+            color: #e0e0e0;
             cursor: pointer;
+        }
+
+        .method-select:focus {
+            outline: none;
+            border-color: #5dade2;
         }
 
         .method-description {
             margin-top: 15px;
             padding: 15px;
-            background: #f8f9fa;
+            background: #252525;
             border-radius: 8px;
-            border-left: 4px solid #3498db;
+            border-left: 4px solid #5dade2;
             font-size: 14px;
             line-height: 1.6;
+            color: #aaa;
         }
 
         .process-btn {
             width: 100%;
             padding: 15px 30px;
-            background: #3498db;
-            color: white;
+            background: #5dade2;
+            color: #000;
             border: none;
             border-radius: 8px;
             font-size: 18px;
@@ -142,11 +235,12 @@
         }
 
         .process-btn:hover:not(:disabled) {
-            background: #2980b9;
+            background: #3498db;
         }
 
         .process-btn:disabled {
-            background: #bdc3c7;
+            background: #444;
+            color: #666;
             cursor: not-allowed;
         }
 
@@ -154,10 +248,10 @@
             display: none;
             margin-top: 10px;
             padding: 12px 15px;
-            background: #fff3cd;
-            border: 1px solid #ffc107;
+            background: #3d3520;
+            border: 1px solid #665c30;
             border-radius: 8px;
-            color: #856404;
+            color: #d4a844;
             font-size: 14px;
             text-align: center;
         }
@@ -168,14 +262,14 @@
 
         .output-section h3 {
             margin-bottom: 20px;
-            color: #555;
+            color: #ccc;
         }
 
         #output-image {
             max-width: 100%;
             max-height: 500px;
             border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
 
         .download-btn {
@@ -207,8 +301,8 @@
         .spinner {
             width: 50px;
             height: 50px;
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #3498db;
+            border: 4px solid #333;
+            border-top: 4px solid #5dade2;
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin: 0 auto 20px;
@@ -220,14 +314,14 @@
         }
 
         .status-message {
-            color: #666;
+            color: #888;
             font-size: 14px;
         }
 
         .console-output {
             margin-top: 20px;
             padding: 15px;
-            background: #1e1e1e;
+            background: #0d0d0d;
             color: #d4d4d4;
             border-radius: 8px;
             font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
@@ -237,6 +331,7 @@
             overflow-y: auto;
             white-space: pre-wrap;
             line-height: 1.4;
+            border: 1px solid #333;
         }
 
         .console-output:empty {
@@ -254,12 +349,20 @@
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(255,255,255,0.95);
+            background: rgba(18,18,18,0.98);
             display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: center;
             z-index: 1000;
+        }
+
+        .init-overlay h2 {
+            color: #fff;
+        }
+
+        .init-overlay p {
+            color: #888;
         }
 
         .init-overlay.hidden {
@@ -269,7 +372,7 @@
         .init-progress {
             width: 300px;
             height: 8px;
-            background: #e0e0e0;
+            background: #333;
             border-radius: 4px;
             overflow: hidden;
             margin-top: 20px;
@@ -277,17 +380,17 @@
 
         .init-progress-bar {
             height: 100%;
-            background: #3498db;
+            background: #5dade2;
             width: 0%;
             transition: width 0.3s ease;
         }
 
         .error-message {
-            background: #fee;
-            border: 1px solid #fcc;
+            background: #3d2020;
+            border: 1px solid #663030;
             border-radius: 8px;
             padding: 15px;
-            color: #c00;
+            color: #e57373;
             margin-top: 15px;
             display: none;
         }
@@ -316,19 +419,19 @@
         .compare-box img {
             width: 100%;
             border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
 
         .compare-box p {
             margin-top: 10px;
             font-weight: 600;
-            color: #555;
+            color: #aaa;
         }
 
         .implementation-section {
             margin-bottom: 30px;
             padding: 15px;
-            background: #f8f9fa;
+            background: #252525;
             border-radius: 8px;
         }
 
@@ -341,7 +444,7 @@
 
         .toggle-label {
             font-weight: 600;
-            color: #555;
+            color: #ccc;
         }
 
         .toggle-switch {
@@ -363,7 +466,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background-color: #e67e22;
+            background-color: #b57920;
             transition: 0.3s;
             border-radius: 26px;
         }
@@ -390,30 +493,43 @@
 
         .toggle-text {
             font-weight: 600;
-            color: #333;
+            color: #e0e0e0;
             min-width: 100px;
         }
 
         .impl-description {
             margin-top: 10px;
             font-size: 13px;
-            color: #666;
+            color: #888;
             margin-bottom: 0;
         }
     </style>
 </head>
 <body>
+    <nav class="site-nav">
+        <div class="site-nav-inner">
+            <a href="index.html" class="site-logo">CRA <span class="sep">|</span> <span>Chroma Rotation Averaging</span></a>
+            <div class="nav-links">
+                <a href="index.html" class="active">Color Matching</a>
+                <a href="dither.html">Dithering</a>
+            </div>
+            <a href="https://github.com/kaetemi/cra-web" class="github-link" target="_blank" rel="noopener noreferrer" title="View on GitHub">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+            </a>
+        </div>
+    </nav>
+
     <div class="init-overlay" id="init-overlay">
         <div class="spinner"></div>
-        <h2>Loading CRA Web...</h2>
-        <p id="init-status">Initializing Python environment...</p>
+        <h2>Loading CRA...</h2>
+        <p id="init-status">Initializing WebAssembly module...</p>
         <div class="init-progress">
             <div class="init-progress-bar" id="init-progress-bar"></div>
         </div>
     </div>
 
-    <h1>Chroma Rotation Averaging (CRA)</h1>
-    <p class="subtitle">Histogram-based color matching for images</p>
+    <h1>Color Matching</h1>
+    <p class="subtitle">Chroma Rotation Averaging for histogram-based color transfer</p>
 
     <div class="container">
         <div class="upload-section">
