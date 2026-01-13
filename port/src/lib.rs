@@ -760,6 +760,8 @@ pub fn format_is_grayscale_wasm(format: &str) -> bool {
 ///     width, height: Image dimensions
 ///     bits_r, bits_g, bits_b: Bits per channel
 ///
+/// fill: 0 = Black (zeros), 1 = Repeat last pixel (only affects RGB666 partial groups)
+///
 /// Returns:
 ///     Packed binary data as uint8 array
 #[wasm_bindgen]
@@ -772,8 +774,14 @@ pub fn encode_rgb_packed_wasm(
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
+    fill: u8,
 ) -> Vec<u8> {
-    binary_format::encode_rgb_packed(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b)
+    let fill_mode = if fill == 0 {
+        binary_format::StrideFill::Black
+    } else {
+        binary_format::StrideFill::Repeat
+    };
+    binary_format::encode_rgb_packed(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b, fill_mode)
 }
 
 /// Encode RGB data to row-aligned binary format (WASM export)

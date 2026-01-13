@@ -704,7 +704,7 @@
                         </select>
                     </div>
                 </div>
-                <p class="stride-hint">Row alignment for binary (row-aligned) output. Each row is padded to this boundary.</p>
+                <p class="stride-hint">Row stride applies to row-aligned output. Padding fill affects both row padding and RGB666 partial groups (4-pixel boundaries).</p>
             </div>
 
             <div class="toggle-row">
@@ -1439,6 +1439,7 @@
             if (!lastDitherResult) return;
 
             const format = getFormatString();
+            const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
             let binaryData;
 
             if (lastDitherResult.isGrayscale) {
@@ -1457,7 +1458,8 @@
                     lastDitherResult.height,
                     lastDitherResult.bitsR,
                     lastDitherResult.bitsG,
-                    lastDitherResult.bitsB
+                    lastDitherResult.bitsB,
+                    fill
                 );
             }
 

@@ -545,6 +545,7 @@ fn main() -> Result<(), String> {
             eprintln!("Writing binary (packed): {}", bin_path.display());
         }
 
+        let fill = args.stride_fill.to_stride_fill();
         let bin_data = if format.is_grayscale {
             encode_gray_packed(dithered_gray.as_ref().unwrap(), width_usize, height_usize, format.bits_r)
         } else {
@@ -553,7 +554,8 @@ fn main() -> Result<(), String> {
                 dithered_g.as_ref().unwrap(),
                 dithered_b.as_ref().unwrap(),
                 width_usize, height_usize,
-                format.bits_r, format.bits_g, format.bits_b
+                format.bits_r, format.bits_g, format.bits_b,
+                fill
             )
         };
 
