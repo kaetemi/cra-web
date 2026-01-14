@@ -265,39 +265,6 @@
         .preset-btn:hover {
             background: #bdc3c7;
         }
-
-        .perceptual-options {
-            display: none;
-            margin-top: 15px;
-            padding: 15px;
-            background: #f3e5f5;
-            border-radius: 8px;
-            border: 1px solid #ce93d8;
-        }
-
-        .perceptual-options.visible {
-            display: block;
-        }
-
-        .perceptual-options label {
-            font-weight: 600;
-            color: #555;
-            margin-right: 10px;
-        }
-
-        .perceptual-options select {
-            padding: 8px 12px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-            background: white;
-        }
-
-        .perceptual-options .perceptual-hint {
-            font-size: 12px;
-            color: #888;
-            margin-top: 8px;
-        }
     </style>
 </head>
 <body>
@@ -349,37 +316,15 @@
                 </select>
             </div>
 
-            <div class="option-row">
+            <!-- Dither options hidden - using good defaults (Mixed + OKLab color-aware) -->
+            <div class="option-row" style="display: none;">
                 <label>Dither Mode:</label>
                 <select id="dither-mode">
-                    <option value="4">Mixed (reduces patterns)</option>
-                    <option value="5">Mixed Serpentine</option>
-                    <option value="0">Floyd-Steinberg</option>
-                    <option value="1">Floyd-Steinberg Serpentine</option>
-                    <option value="2">Jarvis-Judice-Ninke</option>
-                    <option value="3">Jarvis Serpentine</option>
+                    <option value="4" selected>Mixed (reduces patterns)</option>
                 </select>
             </div>
-
-            <div class="option-row">
-                <label>
-                    <input type="checkbox" id="perceptual-toggle" checked>
-                    Color Space Aware Dithering
-                </label>
-            </div>
-
-            <div class="perceptual-options visible" id="perceptual-options">
-                <label for="perceptual-space">Distance Metric:</label>
-                <select id="perceptual-space">
-                    <option value="1" selected>OKLab (recommended)</option>
-                    <option value="3">CIELAB (CIEDE2000)</option>
-                    <option value="2">CIELAB (CIE94)</option>
-                    <option value="0">CIELAB (CIE76)</option>
-                    <option value="4">Linear RGB (not recommended)</option>
-                    <option value="5">Y'CbCr (not recommended)</option>
-                </select>
-                <p class="perceptual-hint">Uses perceptual distance for candidate selection. Processes RGB channels jointly for better color accuracy when quantizing float values to 8-bit.</p>
-            </div>
+            <input type="hidden" id="perceptual-toggle" value="1">
+            <input type="hidden" id="perceptual-space" value="1">
 
             <div class="option-row">
                 <label>
@@ -649,7 +594,7 @@
             const interpolation = parseInt(document.getElementById('interpolation').value);
             const ditherMode = parseInt(document.getElementById('dither-mode').value);
             const showComparison = document.getElementById('show-comparison').checked;
-            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Dither technique: 1 = PerChannel, 2 = ColorAware
@@ -801,13 +746,6 @@
 
         document.getElementById('process-btn').addEventListener('click', processImage);
         document.getElementById('download-btn').addEventListener('click', downloadResult);
-
-        // Perceptual toggle - show/hide distance metric options
-        function updatePerceptualMode() {
-            const isPerceptual = document.getElementById('perceptual-toggle').checked;
-            document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
-        }
-        document.getElementById('perceptual-toggle').addEventListener('change', updatePerceptualMode);
 
         // Initialize
         initWorker();
