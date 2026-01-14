@@ -442,6 +442,108 @@ fn dither_grayscale(
     colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed)
 }
 
+/// Result of dithering operation, holding all output channels
+struct DitherResult {
+    /// Interleaved output (grayscale or RGB)
+    interleaved: Vec<u8>,
+    /// Grayscale channel (Some if grayscale format)
+    gray: Option<Vec<u8>>,
+    /// Red channel (Some if RGB format)
+    r: Option<Vec<u8>>,
+    /// Green channel (Some if RGB format)
+    g: Option<Vec<u8>>,
+    /// Blue channel (Some if RGB format)
+    b: Option<Vec<u8>>,
+}
+
+/// Dither linear RGB pixels to the target format
+#[allow(clippy::too_many_arguments)]
+fn dither_pixels(
+    pixels: Vec<Pixel4>,
+    width: usize,
+    height: usize,
+    format: &cra_wasm::binary_format::ColorFormat,
+    color_aware: bool,
+    dither_mode: CSDitherMode,
+    colorspace: PerceptualSpace,
+    seed: u32,
+) -> DitherResult {
+    let pixel_count = width * height;
+
+    if format.is_grayscale {
+        let gray = linear_pixels_to_grayscale(&pixels);
+        let gray_out = dither_grayscale(
+            &gray, width, height, format.bits_r, colorspace, dither_mode, seed,
+        );
+        DitherResult {
+            interleaved: gray_out.clone(),
+            gray: Some(gray_out),
+            r: None,
+            g: None,
+            b: None,
+        }
+    } else {
+        let mut linear_pixels = pixels;
+        let technique = build_output_technique(color_aware, dither_mode, colorspace);
+        let (r_out, g_out, b_out) = finalize_output(
+            &mut linear_pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b,
+            technique,
+            seed,
+        );
+
+        // Build interleaved for PNG output
+        let mut interleaved = Vec::with_capacity(pixel_count * 3);
+        for i in 0..pixel_count {
+            interleaved.push(r_out[i]);
+            interleaved.push(g_out[i]);
+            interleaved.push(b_out[i]);
+        }
+
+        DitherResult {
+            interleaved,
+            gray: None,
+            r: Some(r_out),
+            g: Some(g_out),
+            b: Some(b_out),
+        }
+    }
+}
+
+/// Encode dithered pixels to binary format
+fn encode_binary(
+    result: &DitherResult,
+    format: &ColorFormat,
+    width: usize,
+    height: usize,
+    row_aligned: bool,
+    stride: usize,
+    fill: StrideFill,
+) -> Vec<u8> {
+    if format.is_grayscale {
+        let gray = result.gray.as_ref().unwrap();
+        if row_aligned {
+            encode_gray_row_aligned_stride(gray, width, height, format.bits_r, stride, fill)
+        } else {
+            encode_gray_packed(gray, width, height, format.bits_r)
+        }
+    } else {
+        let r = result.r.as_ref().unwrap();
+        let g = result.g.as_ref().unwrap();
+        let b = result.b.as_ref().unwrap();
+        if row_aligned {
+            encode_rgb_row_aligned_stride(
+                r, g, b, width, height, format.bits_r, format.bits_g, format.bits_b, stride, fill,
+            )
+        } else {
+            encode_rgb_packed(
+                r, g, b, width, height, format.bits_r, format.bits_g, format.bits_b, fill,
+            )
+        }
+    }
+}
+
 // ============================================================================
 // PNG Output
 // ============================================================================
@@ -653,13 +755,7 @@ fn main() -> Result<(), String> {
     }
 
     // Process image: color correction returns linear RGB, then we dither to sRGB
-    let dithered_gray: Option<Vec<u8>>;
-    let dithered_r: Option<Vec<u8>>;
-    let dithered_g: Option<Vec<u8>>;
-    let dithered_b: Option<Vec<u8>>;
-    let dithered_interleaved: Vec<u8>;
-
-    if needs_reference {
+    let pixels_to_dither = if needs_reference {
         // Load reference image as linear RGB Pixel4
         let ref_path = args.r#ref.as_ref().unwrap();
         let (ref_pixels, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
@@ -667,7 +763,7 @@ fn main() -> Result<(), String> {
         let ref_height_usize = ref_height as usize;
 
         // Apply color correction using unified API
-        let output_pixels = color_correct(
+        color_correct(
             &input_pixels,
             &ref_pixels,
             width_usize,
@@ -676,118 +772,29 @@ fn main() -> Result<(), String> {
             ref_height_usize,
             correction_method.expect("Method should not be None when reference is provided"),
             histogram_options,
-        );
-
-        // Now dither linear RGB to sRGB output
-        if format.is_grayscale {
-            // Convert linear RGB to grayscale and dither
-            let gray = linear_pixels_to_grayscale(&output_pixels);
-            let gray_out = dither_grayscale(
-                &gray,
-                width_usize,
-                height_usize,
-                format.bits_r,
-                output_colorspace.to_perceptual_space(),
-                output_dither_mode,
-                args.seed,
-            );
-            dithered_interleaved = gray_out.clone();
-            dithered_gray = Some(gray_out);
-            dithered_r = None;
-            dithered_g = None;
-            dithered_b = None;
-        } else {
-            // RGB output - use unified finalize_output API
-            let pixel_count = width_usize * height_usize;
-            let mut result_pixels = output_pixels;
-            let technique = build_output_technique(
-                args.color_aware_output,
-                output_dither_mode,
-                output_colorspace.to_perceptual_space(),
-            );
-
-            let (r_out, g_out, b_out) = finalize_output(
-                &mut result_pixels,
-                width_usize, height_usize,
-                format.bits_r, format.bits_g, format.bits_b,
-                technique,
-                args.seed,
-            );
-
-            // Build interleaved for PNG output
-            dithered_interleaved = {
-                let mut out = Vec::with_capacity(pixel_count * 3);
-                for i in 0..pixel_count {
-                    out.push(r_out[i]);
-                    out.push(g_out[i]);
-                    out.push(b_out[i]);
-                }
-                out
-            };
-            dithered_gray = None;
-            dithered_r = Some(r_out);
-            dithered_g = Some(g_out);
-            dithered_b = Some(b_out);
-        }
+        )
     } else {
         // Dither-only path (no color correction)
-        // Convert linear RGB to sRGB for dithering
-        let pixel_count = width_usize * height_usize;
-
-        if format.is_grayscale {
-            if args.verbose {
+        if args.verbose {
+            if format.is_grayscale {
                 eprintln!("Converting to grayscale and dithering...");
-            }
-            let gray = linear_pixels_to_grayscale(&input_pixels);
-            let gray_out = dither_grayscale(
-                &gray,
-                width_usize,
-                height_usize,
-                format.bits_r,
-                output_colorspace.to_perceptual_space(),
-                output_dither_mode,
-                args.seed,
-            );
-            dithered_interleaved = gray_out.clone();
-            dithered_gray = Some(gray_out);
-            dithered_r = None;
-            dithered_g = None;
-            dithered_b = None;
-        } else {
-            if args.verbose {
+            } else {
                 eprintln!("Dithering RGB channels...");
             }
-            // Use unified finalize_output API
-            let mut linear_pixels = input_pixels.clone();
-            let technique = build_output_technique(
-                args.color_aware_output,
-                output_dither_mode,
-                output_colorspace.to_perceptual_space(),
-            );
-
-            let (r_out, g_out, b_out) = finalize_output(
-                &mut linear_pixels,
-                width_usize, height_usize,
-                format.bits_r, format.bits_g, format.bits_b,
-                technique,
-                args.seed,
-            );
-
-            dithered_interleaved = {
-                let mut out = Vec::with_capacity(pixel_count * 3);
-                for i in 0..pixel_count {
-                    out.push(r_out[i]);
-                    out.push(g_out[i]);
-                    out.push(b_out[i]);
-                }
-                out
-            };
-            dithered_gray = None;
-            dithered_r = Some(r_out);
-            dithered_g = Some(g_out);
-            dithered_b = Some(b_out);
         }
-    }
+        input_pixels
+    };
+
+    let dither_result = dither_pixels(
+        pixels_to_dither,
+        width_usize,
+        height_usize,
+        &format,
+        args.color_aware_output,
+        output_dither_mode,
+        output_colorspace.to_perceptual_space(),
+        args.seed,
+    );
 
     // Track outputs for metadata
     let mut outputs: Vec<(String, PathBuf, usize)> = Vec::new();
@@ -799,9 +806,9 @@ fn main() -> Result<(), String> {
         }
 
         if format.is_grayscale {
-            save_png_grayscale(png_path, &dithered_interleaved, width, height)?;
+            save_png_grayscale(png_path, &dither_result.interleaved, width, height)?;
         } else {
-            save_png_rgb(png_path, &dithered_interleaved, width, height)?;
+            save_png_rgb(png_path, &dither_result.interleaved, width, height)?;
         }
 
         let size = std::fs::metadata(png_path)
@@ -810,44 +817,23 @@ fn main() -> Result<(), String> {
         outputs.push(("png".to_string(), png_path.clone(), size));
     }
 
+    // Helper to write binary output file
+    let fill = args.stride_fill.to_stride_fill();
+
     // Write packed binary output
     if let Some(ref bin_path) = args.output_raw {
         if args.verbose {
             eprintln!("Writing binary (packed): {}", bin_path.display());
         }
 
-        let fill = args.stride_fill.to_stride_fill();
-        let bin_data = if format.is_grayscale {
-            encode_gray_packed(
-                dithered_gray.as_ref().unwrap(),
-                width_usize,
-                height_usize,
-                format.bits_r,
-            )
-        } else {
-            encode_rgb_packed(
-                dithered_r.as_ref().unwrap(),
-                dithered_g.as_ref().unwrap(),
-                dithered_b.as_ref().unwrap(),
-                width_usize,
-                height_usize,
-                format.bits_r,
-                format.bits_g,
-                format.bits_b,
-                fill,
-            )
-        };
+        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, false, 1, fill);
 
         let mut file = File::create(bin_path)
             .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
         file.write_all(&bin_data)
             .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
-        outputs.push((
-            "binary_packed".to_string(),
-            bin_path.clone(),
-            bin_data.len(),
-        ));
+        outputs.push(("binary_packed".to_string(), bin_path.clone(), bin_data.len()));
     }
 
     // Write row-aligned binary output
@@ -855,47 +841,18 @@ fn main() -> Result<(), String> {
         if args.verbose {
             eprintln!(
                 "Writing binary (row-aligned, stride={}, fill={:?}): {}",
-                args.stride,
-                args.stride_fill,
-                bin_r_path.display()
+                args.stride, args.stride_fill, bin_r_path.display()
             );
         }
 
-        let fill = args.stride_fill.to_stride_fill();
-        let bin_data = if format.is_grayscale {
-            encode_gray_row_aligned_stride(
-                dithered_gray.as_ref().unwrap(),
-                width_usize,
-                height_usize,
-                format.bits_r,
-                args.stride,
-                fill,
-            )
-        } else {
-            encode_rgb_row_aligned_stride(
-                dithered_r.as_ref().unwrap(),
-                dithered_g.as_ref().unwrap(),
-                dithered_b.as_ref().unwrap(),
-                width_usize,
-                height_usize,
-                format.bits_r,
-                format.bits_g,
-                format.bits_b,
-                args.stride,
-                fill,
-            )
-        };
+        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, true, args.stride, fill);
 
         let mut file = File::create(bin_r_path)
             .map_err(|e| format!("Failed to create {}: {}", bin_r_path.display(), e))?;
         file.write_all(&bin_data)
             .map_err(|e| format!("Failed to write {}: {}", bin_r_path.display(), e))?;
 
-        outputs.push((
-            "binary_row_aligned".to_string(),
-            bin_r_path.clone(),
-            bin_data.len(),
-        ));
+        outputs.push(("binary_row_aligned".to_string(), bin_r_path.clone(), bin_data.len()));
     }
 
     // Write metadata JSON

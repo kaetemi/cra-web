@@ -1609,48 +1609,27 @@
             downloadBlob(blob, 'dither_metadata.json');
         });
 
-        // Per-channel download handlers
-        document.getElementById('download-r-btn').addEventListener('click', () => {
-            if (!lastDitherResult || !lastDitherResult.rChannel) return;
+        // Per-channel download handler helper
+        function downloadChannel(channelName, channelData, bits) {
+            if (!lastDitherResult || !channelData) return;
 
             const rawData = encode_channel_packed_wasm(
-                lastDitherResult.rChannel,
+                channelData,
                 lastDitherResult.width,
                 lastDitherResult.height,
-                lastDitherResult.bitsR
+                bits
             );
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_R${lastDitherResult.bitsR}.raw`);
-        });
+            downloadBlob(blob, `dithered_${channelName}${bits}.raw`);
+        }
 
-        document.getElementById('download-g-btn').addEventListener('click', () => {
-            if (!lastDitherResult || !lastDitherResult.gChannel) return;
-
-            const rawData = encode_channel_packed_wasm(
-                lastDitherResult.gChannel,
-                lastDitherResult.width,
-                lastDitherResult.height,
-                lastDitherResult.bitsG
-            );
-
-            const blob = new Blob([rawData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_G${lastDitherResult.bitsG}.raw`);
-        });
-
-        document.getElementById('download-b-btn').addEventListener('click', () => {
-            if (!lastDitherResult || !lastDitherResult.bChannel) return;
-
-            const rawData = encode_channel_packed_wasm(
-                lastDitherResult.bChannel,
-                lastDitherResult.width,
-                lastDitherResult.height,
-                lastDitherResult.bitsB
-            );
-
-            const blob = new Blob([rawData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_B${lastDitherResult.bitsB}.raw`);
-        });
+        document.getElementById('download-r-btn').addEventListener('click', () =>
+            downloadChannel('R', lastDitherResult?.rChannel, lastDitherResult?.bitsR));
+        document.getElementById('download-g-btn').addEventListener('click', () =>
+            downloadChannel('G', lastDitherResult?.gChannel, lastDitherResult?.bitsG));
+        document.getElementById('download-b-btn').addEventListener('click', () =>
+            downloadChannel('B', lastDitherResult?.bChannel, lastDitherResult?.bitsB));
 
         // Initialize
         initWasm();
