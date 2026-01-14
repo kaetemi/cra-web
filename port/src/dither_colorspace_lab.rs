@@ -10,8 +10,7 @@
 /// while error accumulation remains in linear RGB (unrotated space).
 
 use crate::color::{
-    lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single,
-    oklab_to_linear_rgb,
+    lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, oklab_to_linear_rgb,
 };
 use crate::color_distance::perceptual_distance_sq;
 use crate::dither_common::{wang_hash, DitherMode, PerceptualSpace};
@@ -656,51 +655,6 @@ pub fn lab_space_dither(
     )
 }
 
-/// Convert Lab u8 values back to f32 based on scale/offset
-#[inline]
-pub fn lab_u8_to_f32_with_params(l: u8, a: u8, b: u8, params: &LabQuantParams) -> (f32, f32, f32) {
-    let l_f = (l as f32 - params.offset_l) / params.scale_l;
-    let a_f = (a as f32 - params.offset_a) / params.scale_a;
-    let b_f = (b as f32 - params.offset_b) / params.scale_b;
-    (l_f, a_f, b_f)
-}
-
-/// Convert Lab u8 output back to sRGB u8
-pub fn lab_to_srgb_u8(
-    l_channel: &[u8],
-    a_channel: &[u8],
-    b_channel: &[u8],
-    params: &LabQuantParams,
-    quant_space: LabQuantSpace,
-) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    let pixels = l_channel.len();
-    let mut r_out = vec![0u8; pixels];
-    let mut g_out = vec![0u8; pixels];
-    let mut b_out = vec![0u8; pixels];
-
-    for i in 0..pixels {
-        // Convert u8 Lab back to f32 using scale/offset
-        let (l_f, a_f, b_f) = lab_u8_to_f32_with_params(
-            l_channel[i], a_channel[i], b_channel[i], params
-        );
-
-        let (r_lin, g_lin, b_lin) = match quant_space {
-            LabQuantSpace::CIELab => lab_to_linear_rgb(l_f, a_f, b_f),
-            LabQuantSpace::OkLab => oklab_to_linear_rgb(l_f, a_f, b_f),
-        };
-
-        let r_srgb = (linear_to_srgb_single(r_lin.clamp(0.0, 1.0)) * 255.0).round() as u8;
-        let g_srgb = (linear_to_srgb_single(g_lin.clamp(0.0, 1.0)) * 255.0).round() as u8;
-        let b_srgb = (linear_to_srgb_single(b_lin.clamp(0.0, 1.0)) * 255.0).round() as u8;
-
-        r_out[i] = r_srgb;
-        g_out[i] = g_srgb;
-        b_out[i] = b_srgb;
-    }
-
-    (r_out, g_out, b_out)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,31 +772,6 @@ mod tests {
         assert_eq!(l_out.len(), 100);
         assert_eq!(a_out.len(), 100);
         assert_eq!(b_out.len(), 100);
-    }
-
-    #[test]
-    fn test_lab_to_srgb_roundtrip() {
-        // Gray in OKLab: L=0.5, a=0, b=0
-        let l: Vec<f32> = vec![0.5; 4];
-        let a: Vec<f32> = vec![0.0; 4];
-        let b: Vec<f32> = vec![0.0; 4];
-
-        let params = LabQuantParams::default_oklab();
-
-        let (l_out, a_out, b_out) = lab_space_dither(
-            &l, &a, &b, 2, 2,
-            &params,
-            LabQuantSpace::OkLab,
-            PerceptualSpace::OkLab,
-        );
-
-        let (r_srgb, g_srgb, b_srgb) = lab_to_srgb_u8(&l_out, &a_out, &b_out, &params, LabQuantSpace::OkLab);
-
-        // Gray should remain gray (R=G=B)
-        for i in 0..4 {
-            assert!((r_srgb[i] as i32 - g_srgb[i] as i32).abs() < 5, "Not gray at {}: R={}, G={}", i, r_srgb[i], g_srgb[i]);
-            assert!((g_srgb[i] as i32 - b_srgb[i] as i32).abs() < 5, "Not gray at {}: G={}, B={}", i, g_srgb[i], b_srgb[i]);
-        }
     }
 
     #[test]
