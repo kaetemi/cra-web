@@ -5,25 +5,25 @@
 
 use wasm_bindgen::prelude::*;
 
-mod basic_lab;
-mod basic_oklab;
-mod basic_rgb;
+pub mod basic_lab;
+pub mod basic_oklab;
+pub mod basic_rgb;
 pub mod binary_format;
-mod color;
+pub mod color;
 mod color_distance;
 pub mod colorspace_derived;
 pub mod colorspace_primary;
-mod cra_lab;
-mod cra_rgb;
+pub mod cra_lab;
+pub mod cra_rgb;
 pub mod dither;
 pub mod dither_colorspace_aware;
 pub mod dither_colorspace_lab;
 pub mod dither_colorspace_luminosity;
 pub mod dither_common;
 mod histogram;
-mod output;
+pub mod output;
 mod rotation;
-mod tiled_lab;
+pub mod tiled_lab;
 mod tiling;
 
 // Re-export dithering function for compatibility with existing WASM code
