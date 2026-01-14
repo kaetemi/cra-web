@@ -119,6 +119,104 @@ function initWorker() {
     worker.postMessage({ type: 'init' });
 }
 
+// Generate CLI command based on current settings
+function generateCliCommand() {
+    const method = document.getElementById('method-select').value;
+    const histogramMode = parseInt(document.getElementById('histogram-mode-select')?.value || '0', 10);
+    const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '0', 10);
+    const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
+    const colorAwareHistogram = document.getElementById('color-aware-histogram')?.checked || false;
+    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
+    const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
+    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+
+    // Map method values to CLI method names
+    const methodMap = {
+        'lab': 'basic-lab',
+        'rgb': 'basic-rgb',
+        'oklab': 'basic-oklab',
+        'cra_lab': 'cra-lab',
+        'cra_lab_tiled': 'tiled-lab',
+        'cra_lab_tiled_ab': 'tiled-lab',
+        'cra_rgb': 'cra-rgb',
+        'cra_rgb_perceptual': 'cra-rgb',
+        'cra_oklab': 'cra-oklab',
+        'cra_oklab_tiled': 'tiled-oklab',
+        'cra_oklab_tiled_ab': 'tiled-oklab'
+    };
+
+    // Map dither mode values to CLI dither names
+    const ditherMap = {
+        0: 'fs-standard',
+        1: 'fs-serpentine',
+        2: 'jjn-standard',
+        3: 'jjn-serpentine',
+        4: 'mixed-standard',
+        5: 'mixed-serpentine',
+        6: 'mixed-random'
+    };
+
+    // Map histogram mode values to CLI histogram mode names
+    const histogramModeMap = {
+        0: 'binned',
+        1: 'f32-endpoint',
+        2: 'f32-midpoint'
+    };
+
+    // Map perceptual space values to CLI names
+    const spaceMap = {
+        0: 'lab-cie76',
+        1: 'ok-lab',
+        2: 'lab-cie94',
+        3: 'lab-ciede2000',
+        4: 'linear-rgb',
+        5: 'y-cb-cr'
+    };
+
+    let cmd = `cra -i input.png -r reference.png -o output.png`;
+    cmd += ` --method ${methodMap[method] || 'cra-lab'}`;
+
+    // Add keep-luminosity for basic-lab, basic-oklab, cra-lab, cra-oklab if not tiled
+    if (['lab', 'oklab', 'cra_lab', 'cra_oklab'].includes(method)) {
+        // These methods could have keep_luminosity but web UI doesn't expose it currently
+    }
+
+    // Add tiled-luminosity for tiled methods
+    if (method === 'cra_lab_tiled' || method === 'cra_oklab_tiled') {
+        cmd += ' --tiled-luminosity';
+    }
+
+    // Add perceptual for cra-rgb with perceptual weighting
+    if (method === 'cra_rgb_perceptual') {
+        cmd += ' --perceptual';
+    }
+
+    // Add histogram mode
+    cmd += ` --histogram-mode ${histogramModeMap[histogramMode]}`;
+
+    // Add output dither
+    cmd += ` --output-dither ${ditherMap[outputDitherMode]}`;
+
+    // Add histogram dither only if binned mode
+    if (histogramMode === 0) {
+        cmd += ` --histogram-dither ${ditherMap[histogramDitherMode]}`;
+
+        // Add color-aware histogram options
+        if (colorAwareHistogram && methodSupportsColorAware(method)) {
+            cmd += ' --color-aware-histogram';
+            cmd += ` --histogram-distance-space ${spaceMap[histogramDistanceSpace]}`;
+        }
+    }
+
+    // Add color-aware output options
+    if (colorAwareOutput && methodSupportsColorAware(method)) {
+        cmd += ' --color-aware-output';
+        cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
+    }
+
+    return cmd;
+}
+
 // Handle processing completion
 function handleProcessingComplete(outputData) {
     const blob = new Blob([outputData], { type: 'image/png' });
@@ -129,6 +227,10 @@ function handleProcessingComplete(outputData) {
     document.getElementById('compare-output').src = url;
     document.getElementById('compare-ref').src = document.getElementById('ref-preview').src;
     document.getElementById('download-btn').href = url;
+
+    // Generate and display CLI command
+    const cliCommand = generateCliCommand();
+    document.getElementById('cli-command').textContent = cliCommand;
 
     document.getElementById('output-section').style.display = 'block';
     document.getElementById('loading').classList.remove('active');

@@ -818,6 +818,11 @@
                 </div>
             </div>
         </div>
+
+        <div class="cli-command-section" id="cli-command-section" style="margin-top: 20px;">
+            <h4 style="margin-bottom: 10px; color: #555;">Equivalent CLI Command</h4>
+            <pre class="cli-command" id="cli-command" style="background: #1e1e1e; color: #9cdcfe; padding: 15px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></pre>
+        </div>
     </div>
 
     <script type="module">
@@ -1195,6 +1200,10 @@
                 // Update download buttons
                 updateDownloadButtons();
 
+                // Generate and display CLI command
+                const cliCommand = generateCliCommand();
+                document.getElementById('cli-command').textContent = cliCommand;
+
                 outputSection.style.display = 'block';
             } catch (err) {
                 console.error('Processing error:', err);
@@ -1265,6 +1274,72 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
+        }
+
+        // Generate CLI command based on current settings
+        function generateCliCommand() {
+            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            const mode = parseInt(document.getElementById('dither-mode').value);
+            const seed = parseInt(document.getElementById('seed-input').value) || 0;
+            const doDownscale = document.getElementById('downscale-toggle').checked;
+
+            // Map dither mode values to CLI names
+            const modeMap = {
+                0: 'fs-standard',
+                1: 'fs-serpentine',
+                2: 'jjn-standard',
+                3: 'jjn-serpentine',
+                4: 'mixed-standard',
+                5: 'mixed-serpentine',
+                6: 'mixed-random'
+            };
+
+            // Map perceptual space values to CLI names
+            const spaceMap = {
+                0: 'lab-cie76',
+                1: 'ok-lab',
+                2: 'lab-cie94',
+                3: 'lab-ciede2000',
+                4: 'linear-rgb',
+                5: 'y-cb-cr'
+            };
+
+            let cmd = 'cra_dither -i input.png -o output.png';
+
+            // Add format
+            if (isGrayscale) {
+                const bitsGray = parseInt(document.getElementById('bits-gray').value);
+                cmd += ` --format L${bitsGray}`;
+            } else {
+                const bitsR = parseInt(document.getElementById('bits-r').value);
+                const bitsG = parseInt(document.getElementById('bits-g').value);
+                const bitsB = parseInt(document.getElementById('bits-b').value);
+                cmd += ` --format RGB${bitsR}${bitsG}${bitsB}`;
+            }
+
+            // Add dither mode
+            cmd += ` --dither ${modeMap[mode]}`;
+
+            // Add colorspace if perceptual
+            if (isPerceptual) {
+                const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                cmd += ` --colorspace ${spaceMap[perceptualSpace]}`;
+            }
+
+            // Add seed for mixed modes
+            if (mode >= 4 && mode <= 6) {
+                cmd += ` --seed ${seed}`;
+            }
+
+            // Add resize if downscaling
+            if (doDownscale) {
+                const width = parseInt(document.getElementById('scale-width').value);
+                const height = parseInt(document.getElementById('scale-height').value);
+                cmd += ` --resize ${width}x${height}`;
+            }
+
+            return cmd;
         }
 
         // Generate metadata JSON
