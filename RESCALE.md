@@ -112,12 +112,27 @@ The precomputation reduces `lanczos3()` evaluations by ~16,000× for this exampl
 Pixel centers are at half-integer coordinates. The mapping from destination to source:
 
 ```
-src_pos = (dst_i + 0.5) * scale - 0.5
+mapped_src_len = dst_len * scale
+offset = (src_len - mapped_src_len) / 2
+src_pos = (dst_i + 0.5) * scale - 0.5 + offset
 ```
 
 This ensures:
-- Destination pixel 0's center (0.5) maps to source position `0.5 * scale - 0.5`
+- Destination pixel 0's center (0.5) maps to source position `0.5 * scale - 0.5 + offset`
 - Edge pixels are handled correctly without shift artifacts
+
+### Centering for Uniform Scaling
+
+When using uniform scale modes (UniformWidth/UniformHeight), one dimension may not match its natural scale. The offset centers the mapping:
+
+- **Independent scaling**: `scale = src_len/dst_len`, so `offset = 0`
+- **Uniform scaling**: `scale` may differ from `src_len/dst_len`, so `offset ≠ 0`
+
+Example: 100×50 source → 200×200 target with UniformWidth (scale=0.5):
+- Horizontal: `offset = (100 - 200*0.5) / 2 = 0` (exact fit)
+- Vertical: `offset = (50 - 200*0.5) / 2 = -25` (centered, extends 25 pixels past each edge)
+
+When `src_pos` falls outside `[0, src_len-1]`, the kernel is clipped to valid indices and weights are renormalized. This effectively clamps to edge pixels.
 
 ## Weight Normalization
 

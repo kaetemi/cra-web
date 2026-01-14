@@ -72,8 +72,13 @@ fn precompute_lanczos_weights(
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
+    // Center offset: if scale doesn't match src_len/dst_len (uniform scaling),
+    // center the mapping so edges are equally cropped/extended
+    let mapped_src_len = dst_len as f32 * scale;
+    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+
     for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
         let center = src_pos.floor() as i32;
 
         // Find the valid source index range
