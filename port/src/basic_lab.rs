@@ -1,9 +1,7 @@
 /// Basic LAB histogram matching algorithm.
 /// Corresponds to color_correction_basic.py
 
-use crate::color::{
-    lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, srgb_to_linear_channels,
-};
+use crate::color::{lab_to_linear_rgb_channels, linear_rgb_to_lab_channels};
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 
@@ -48,12 +46,23 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>) {
 /// This is the core algorithm that performs histogram matching in LAB space
 /// and returns the result as linear RGB channels (f32, 0-1 range).
 ///
-/// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+/// Args:
+///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
+///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
+///     input_width, input_height: Input image dimensions
+///     ref_width, ref_height: Reference image dimensions
+///     keep_luminosity: If true, preserve original L channel
+///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+///     histogram_dither_mode: Dither mode for histogram quantization
 ///
 /// Returns: (R, G, B) linear RGB channels
 pub fn color_correct_basic_lab_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -62,10 +71,6 @@ pub fn color_correct_basic_lab_linear(
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    // Convert to separate linear RGB channels
-    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
-
     // Convert to separate LAB channels
     let (in_l, in_a, in_b_ch) = linear_rgb_to_lab_channels(&in_r, &in_g, &in_b);
     let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab_channels(&ref_r, &ref_g, &ref_b);

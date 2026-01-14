@@ -1,7 +1,6 @@
 /// Basic RGB histogram matching algorithm.
 /// Corresponds to color_correction_basic_rgb.py
 
-use crate::color::srgb_to_linear_channels;
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 
@@ -11,16 +10,21 @@ use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, Inte
 /// and returns the result as linear RGB channels (f32, 0-1 range).
 ///
 /// Args:
-///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
-///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
+///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
+///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+///     histogram_dither_mode: Dither mode for histogram quantization
 ///
 /// Returns: (R, G, B) linear RGB channels
 pub fn color_correct_basic_rgb_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -28,10 +32,6 @@ pub fn color_correct_basic_rgb_linear(
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    // Convert to separate linear RGB channels
-    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
-
     // Scale to 0-255 range
     let in_r_scaled: Vec<f32> = in_r.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();
     let in_g_scaled: Vec<f32> = in_g.iter().map(|&v| (v * 255.0).clamp(0.0, 255.0)).collect();

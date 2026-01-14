@@ -1,7 +1,6 @@
 /// CRA (Chroma Rotation Averaging) in RGB color space.
 /// Corresponds to color_correction_cra_rgb.py
 
-use crate::color::srgb_to_linear;
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{
@@ -180,8 +179,8 @@ fn process_rgb_iteration(
 /// CRA RGB color correction - returns linear RGB channels
 ///
 /// Args:
-///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
-///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
+///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
+///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
@@ -190,8 +189,12 @@ fn process_rgb_iteration(
 /// Returns:
 ///     (R, G, B) linear RGB channels (f32, 0-1 range)
 pub fn color_correct_cra_rgb_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -210,11 +213,19 @@ pub fn color_correct_cra_rgb_linear(
         None
     };
 
-    // Convert to linear RGB
-    let mut input_linear = input_srgb.to_vec();
-    let mut ref_linear = ref_srgb.to_vec();
-    srgb_to_linear(&mut input_linear);
-    srgb_to_linear(&mut ref_linear);
+    // Interleave linear RGB channels for rotation operations
+    let mut input_linear = vec![0.0f32; input_pixels * 3];
+    let mut ref_linear = vec![0.0f32; ref_pixels * 3];
+    for i in 0..input_pixels {
+        input_linear[i * 3] = in_r[i];
+        input_linear[i * 3 + 1] = in_g[i];
+        input_linear[i * 3 + 2] = in_b[i];
+    }
+    for i in 0..ref_pixels {
+        ref_linear[i * 3] = ref_r[i];
+        ref_linear[i * 3 + 1] = ref_g[i];
+        ref_linear[i * 3 + 2] = ref_b[i];
+    }
 
     // Apply perceptual scaling if enabled
     let (mut current, ref_scaled) = if let Some(scale) = perceptual_scale {

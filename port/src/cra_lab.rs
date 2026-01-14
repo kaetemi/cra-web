@@ -4,7 +4,7 @@
 
 use crate::color::{
     lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, linear_rgb_to_oklab_channels,
-    oklab_to_linear_rgb_channels, srgb_to_linear_channels,
+    oklab_to_linear_rgb_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::dither_colorspace_lab::{
@@ -302,8 +302,8 @@ fn process_lab_iteration(
 /// and returns the result as linear RGB channels (f32, 0-1 range).
 ///
 /// Args:
-///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
-///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
+///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
+///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     colorspace: Which Lab color space to use (CIELab or OkLab)
@@ -316,8 +316,12 @@ fn process_lab_iteration(
 /// Returns: (R, G, B) linear RGB channels
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -330,10 +334,6 @@ pub fn color_correct_cra_linear(
     histogram_distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
-
-    // Convert to separate linear RGB channels
-    let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
     // Convert to separate Lab channels (colorspace-aware)
     let (original_l, in_a, in_b_ch) = linear_rgb_to_lab(&in_r, &in_g, &in_b, colorspace);
@@ -487,8 +487,12 @@ pub fn color_correct_cra_linear(
 /// CRA CIELAB color correction - returns linear RGB (convenience wrapper)
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_lab_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -500,8 +504,12 @@ pub fn color_correct_cra_lab_linear(
     histogram_distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     color_correct_cra_linear(
-        input_srgb,
-        ref_srgb,
+        in_r,
+        in_g,
+        in_b,
+        ref_r,
+        ref_g,
+        ref_b,
         input_width,
         input_height,
         ref_width,
@@ -518,8 +526,12 @@ pub fn color_correct_cra_lab_linear(
 /// CRA OKLab color correction - returns linear RGB (convenience wrapper)
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_oklab_linear(
-    input_srgb: &[f32],
-    ref_srgb: &[f32],
+    in_r: &[f32],
+    in_g: &[f32],
+    in_b: &[f32],
+    ref_r: &[f32],
+    ref_g: &[f32],
+    ref_b: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -531,8 +543,12 @@ pub fn color_correct_cra_oklab_linear(
     histogram_distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     color_correct_cra_linear(
-        input_srgb,
-        ref_srgb,
+        in_r,
+        in_g,
+        in_b,
+        ref_r,
+        ref_g,
+        ref_b,
         input_width,
         input_height,
         ref_width,

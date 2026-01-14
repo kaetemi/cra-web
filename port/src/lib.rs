@@ -478,13 +478,17 @@ pub fn color_correct_basic_lab(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    // Convert uint8 to float (0-1)
+    // Convert uint8 to float (0-1) sRGB
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = basic_lab::color_correct_basic_lab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -530,9 +534,13 @@ pub fn color_correct_basic_rgb(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = basic_rgb::color_correct_basic_rgb_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -591,9 +599,13 @@ pub fn color_correct_cra_lab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = cra_lab::color_correct_cra_lab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -657,9 +669,13 @@ pub fn color_correct_tiled_lab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = tiled_lab::color_correct_tiled_lab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -714,9 +730,13 @@ pub fn color_correct_cra_rgb(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = cra_rgb::color_correct_cra_rgb_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -763,13 +783,17 @@ pub fn color_correct_basic_oklab(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    // Convert uint8 to float (0-1)
+    // Convert uint8 to float (0-1) sRGB
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = basic_oklab::color_correct_basic_oklab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -829,9 +853,13 @@ pub fn color_correct_cra_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = cra_lab::color_correct_cra_oklab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
@@ -895,9 +923,13 @@ pub fn color_correct_tiled_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
+    // Convert sRGB to linear RGB channels
+    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
+    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+
     let (r, g, b) = tiled_lab::color_correct_tiled_oklab_linear(
-        &input_srgb,
-        &ref_srgb,
+        &in_r, &in_g, &in_b,
+        &ref_r, &ref_g, &ref_b,
         input_width,
         input_height,
         ref_width,
