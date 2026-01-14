@@ -1298,14 +1298,15 @@
             // Map perceptual space values to CLI names
             const spaceMap = {
                 0: 'lab-cie76',
-                1: 'ok-lab',
+                1: 'oklab',
                 2: 'lab-cie94',
                 3: 'lab-ciede2000',
                 4: 'linear-rgb',
                 5: 'y-cb-cr'
             };
 
-            let cmd = 'cra_dither -i input.png -o output.png';
+            // Use unified cra tool with --method none for dither-only mode
+            let cmd = 'cra -i input.png -o output.png --method none';
 
             // Add format
             if (isGrayscale) {
@@ -1319,12 +1320,12 @@
             }
 
             // Add dither mode
-            cmd += ` --dither ${modeMap[mode]}`;
+            cmd += ` --output-dither ${modeMap[mode]}`;
 
             // Add colorspace if perceptual
             if (isPerceptual) {
                 const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                cmd += ` --colorspace ${spaceMap[perceptualSpace]}`;
+                cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
             }
 
             // Add seed for mixed modes
@@ -1336,7 +1337,7 @@
             if (doDownscale) {
                 const width = parseInt(document.getElementById('scale-width').value);
                 const height = parseInt(document.getElementById('scale-height').value);
-                cmd += ` --resize ${width}x${height}`;
+                cmd += ` --width ${width} --height ${height}`;
             }
 
             return cmd;

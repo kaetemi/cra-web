@@ -166,7 +166,7 @@ function generateCliCommand() {
     // Map perceptual space values to CLI names
     const spaceMap = {
         0: 'lab-cie76',
-        1: 'ok-lab',
+        1: 'oklab',
         2: 'lab-cie94',
         3: 'lab-ciede2000',
         4: 'linear-rgb',
