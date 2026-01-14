@@ -36,6 +36,7 @@ impl RescaleMethod {
 }
 
 /// Lanczos kernel with a=3
+#[inline]
 fn lanczos3(x: f32) -> f32 {
     if x.abs() < 1e-8 {
         1.0
@@ -46,6 +47,67 @@ fn lanczos3(x: f32) -> f32 {
         let pi_x_3 = pi_x / 3.0;
         (pi_x.sin() / pi_x) * (pi_x_3.sin() / pi_x_3)
     }
+}
+
+/// Precomputed kernel weights for a single output position
+/// Weights are normalized (sum to 1.0) and include source index range
+#[derive(Clone)]
+struct KernelWeights {
+    /// First source index to sample from
+    start_idx: usize,
+    /// Normalized weights for each source sample (length = end_idx - start_idx + 1)
+    weights: Vec<f32>,
+    /// Fallback source index (when no weights available, e.g., at edges)
+    fallback_idx: usize,
+}
+
+/// Precompute all kernel weights for 1D Lanczos resampling
+/// Returns exact weights for each destination position
+fn precompute_lanczos_weights(
+    src_len: usize,
+    dst_len: usize,
+    scale: f32,
+    filter_scale: f32,
+    radius: i32,
+) -> Vec<KernelWeights> {
+    let mut all_weights = Vec::with_capacity(dst_len);
+
+    for dst_i in 0..dst_len {
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
+        let center = src_pos.floor() as i32;
+
+        // Find the valid source index range
+        let start = (center - radius).max(0) as usize;
+        let end = ((center + radius) as usize).min(src_len - 1);
+
+        // Collect ALL weights in the range (no skipping - maintains index correspondence)
+        let mut weights = Vec::with_capacity(end - start + 1);
+        let mut weight_sum = 0.0f32;
+
+        for si in start..=end {
+            let d = (src_pos - si as f32) / filter_scale;
+            let weight = lanczos3(d);
+            weights.push(weight);
+            weight_sum += weight;
+        }
+
+        // Normalize weights (exact normalization)
+        if weight_sum.abs() > 1e-8 {
+            for w in &mut weights {
+                *w /= weight_sum;
+            }
+        }
+
+        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+
+        all_weights.push(KernelWeights {
+            start_idx: start,
+            weights,
+            fallback_idx: fallback,
+        });
+    }
+
+    all_weights
 }
 
 /// Calculate scale factors based on scale mode
@@ -122,52 +184,32 @@ fn rescale_bilinear(
     dst
 }
 
-/// Lanczos3 1D resample - resamples a contiguous slice
+/// Lanczos3 1D resample using precomputed weights - resamples a contiguous slice
 #[inline]
-fn lanczos3_resample_1d(
+fn lanczos3_resample_1d_precomputed(
     src: &[f32],
-    dst_len: usize,
-    scale: f32,
-    filter_scale: f32,
-    radius: i32,
+    kernel_weights: &[KernelWeights],
 ) -> Vec<f32> {
-    let src_len = src.len();
+    let dst_len = kernel_weights.len();
     let mut dst = vec![0.0f32; dst_len];
 
-    for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
-        let center = src_pos.floor() as i32;
-
-        let mut sum = 0.0f32;
-        let mut weight_sum = 0.0f32;
-
-        for k in -radius..=radius {
-            let si = center + k;
-            if si < 0 || si >= src_len as i32 {
-                continue;
-            }
-
-            let d = (src_pos - si as f32) / filter_scale;
-            let weight = lanczos3(d);
-
-            if weight.abs() >= 1e-8 {
-                sum += src[si as usize] * weight;
-                weight_sum += weight;
-            }
-        }
-
-        dst[dst_i] = if weight_sum.abs() > 1e-8 {
-            sum / weight_sum
+    for (dst_i, kw) in kernel_weights.iter().enumerate() {
+        if kw.weights.is_empty() {
+            dst[dst_i] = src[kw.fallback_idx];
         } else {
-            let si = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
-            src[si]
-        };
+            let mut sum = 0.0f32;
+            for (i, &weight) in kw.weights.iter().enumerate() {
+                sum += src[kw.start_idx + i] * weight;
+            }
+            dst[dst_i] = sum;
+        }
     }
 
     dst
 }
 
 /// Rescale a single channel using Lanczos3 interpolation (separable, 2-pass)
+/// Uses precomputed kernel weights for efficiency
 fn rescale_lanczos3(
     src: &[f32],
     src_width: usize,
@@ -186,11 +228,15 @@ fn rescale_lanczos3(
     let radius_x = (3.0 * filter_scale_x).ceil() as i32;
     let radius_y = (3.0 * filter_scale_y).ceil() as i32;
 
+    // Precompute weights for horizontal and vertical passes
+    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
+    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
+
     // Pass 1: Horizontal resample each row (src_width -> dst_width)
     let mut temp = vec![0.0f32; dst_width * src_height];
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = lanczos3_resample_1d(src_row, dst_width, scale_x, filter_scale_x, radius_x);
+        let dst_row = lanczos3_resample_1d_precomputed(src_row, &h_weights);
         temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
     }
 
@@ -199,7 +245,7 @@ fn rescale_lanczos3(
     for x in 0..dst_width {
         // Extract column
         let col: Vec<f32> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
-        let dst_col = lanczos3_resample_1d(&col, dst_height, scale_y, filter_scale_y, radius_y);
+        let dst_col = lanczos3_resample_1d_precomputed(&col, &v_weights);
         for (y, &val) in dst_col.iter().enumerate() {
             dst[y * dst_width + x] = val;
         }
@@ -350,61 +396,36 @@ fn rescale_bilinear_pixels(
     dst
 }
 
-/// Lanczos3 1D resample for Pixel4 row
+/// Lanczos3 1D resample for Pixel4 row using precomputed weights
 #[inline]
-fn lanczos3_resample_row_pixel4(
+fn lanczos3_resample_row_pixel4_precomputed(
     src: &[Pixel4],
-    dst_len: usize,
-    scale: f32,
-    filter_scale: f32,
-    radius: i32,
+    kernel_weights: &[KernelWeights],
 ) -> Vec<Pixel4> {
-    let src_len = src.len();
+    let dst_len = kernel_weights.len();
     let mut dst = vec![[0.0f32; 4]; dst_len];
 
-    for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
-        let center = src_pos.floor() as i32;
-
-        let mut sum = [0.0f32; 4];
-        let mut weight_sum = 0.0f32;
-
-        for k in -radius..=radius {
-            let si = center + k;
-            if si < 0 || si >= src_len as i32 {
-                continue;
-            }
-
-            let d = (src_pos - si as f32) / filter_scale;
-            let weight = lanczos3(d);
-
-            if weight.abs() >= 1e-8 {
-                let sample = src[si as usize];
+    for (dst_i, kw) in kernel_weights.iter().enumerate() {
+        if kw.weights.is_empty() {
+            dst[dst_i] = src[kw.fallback_idx];
+        } else {
+            let mut sum = [0.0f32; 4];
+            for (i, &weight) in kw.weights.iter().enumerate() {
+                let sample = src[kw.start_idx + i];
                 sum[0] += sample[0] * weight;
                 sum[1] += sample[1] * weight;
                 sum[2] += sample[2] * weight;
                 sum[3] += sample[3] * weight;
-                weight_sum += weight;
             }
+            dst[dst_i] = sum;
         }
-
-        dst[dst_i] = if weight_sum.abs() > 1e-8 {
-            [
-                sum[0] / weight_sum,
-                sum[1] / weight_sum,
-                sum[2] / weight_sum,
-                sum[3] / weight_sum,
-            ]
-        } else {
-            let si = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
-            src[si]
-        };
     }
 
     dst
 }
 
 /// Rescale Pixel4 array using Lanczos3 interpolation (separable, 2-pass)
+/// Uses precomputed kernel weights for efficiency
 /// Progress callback is optional - receives 0.0-1.0 after each row
 fn rescale_lanczos3_pixels(
     src: &[Pixel4],
@@ -424,12 +445,16 @@ fn rescale_lanczos3_pixels(
     let radius_x = (3.0 * filter_scale_x).ceil() as i32;
     let radius_y = (3.0 * filter_scale_y).ceil() as i32;
 
+    // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
+    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
+    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
+
     // Pass 1: Horizontal resample each row (src_width -> dst_width)
     // Progress: 0% to 50%
     let mut temp = vec![[0.0f32; 4]; dst_width * src_height];
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = lanczos3_resample_row_pixel4(src_row, dst_width, scale_x, filter_scale_x, radius_x);
+        let dst_row = lanczos3_resample_row_pixel4_precomputed(src_row, &h_weights);
         temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
 
         if let Some(ref mut cb) = progress {
@@ -443,7 +468,7 @@ fn rescale_lanczos3_pixels(
     for x in 0..dst_width {
         // Extract column
         let col: Vec<Pixel4> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
-        let dst_col = lanczos3_resample_row_pixel4(&col, dst_height, scale_y, filter_scale_y, radius_y);
+        let dst_col = lanczos3_resample_row_pixel4_precomputed(&col, &v_weights);
         for (y, &val) in dst_col.iter().enumerate() {
             dst[y * dst_width + x] = val;
         }
@@ -751,5 +776,79 @@ mod tests {
         let (sx4, sy4) = calculate_scales(100, 50, 200, 99, ScaleMode::UniformHeight);
         assert_eq!(sx4, sy4);
         assert!((sx4 - 0.505).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_lanczos_prime_dimensions() {
+        // Test with prime number dimensions to stress-test kernel weight computation
+        // Prime numbers create non-repeating scale factors that can hit edge cases
+        // 97x89 -> 53x47 (all primes)
+        let src_w = 97;
+        let src_h = 89;
+        let dst_w = 53;
+        let dst_h = 47;
+
+        // Create a gradient test pattern
+        let mut src = Vec::with_capacity(src_w * src_h);
+        for y in 0..src_h {
+            for x in 0..src_w {
+                let r = x as f32 / (src_w - 1) as f32;
+                let g = y as f32 / (src_h - 1) as f32;
+                let b = ((x + y) as f32 / (src_w + src_h - 2) as f32).min(1.0);
+                src.push([r, g, b, 0.0]);
+            }
+        }
+
+        let dst = rescale(&src, src_w, src_h, dst_w, dst_h, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        assert_eq!(dst.len(), dst_w * dst_h);
+
+        // Verify output gradient is roughly preserved (corners should match)
+        // Top-left should be dark
+        assert!(dst[0][0] < 0.1, "Top-left R should be dark: {}", dst[0][0]);
+        assert!(dst[0][1] < 0.1, "Top-left G should be dark: {}", dst[0][1]);
+
+        // Bottom-right should be bright
+        let br = &dst[(dst_h - 1) * dst_w + (dst_w - 1)];
+        assert!(br[0] > 0.9, "Bottom-right R should be bright: {}", br[0]);
+        assert!(br[1] > 0.9, "Bottom-right G should be bright: {}", br[1]);
+
+        // All values should be finite and reasonable
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..3 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos_extreme_downscale_primes() {
+        // Extreme downscale with primes: 1009x1013 -> 7x11
+        // This creates a huge filter radius and tests weight accumulation
+        let src_w = 127; // Smaller primes for faster test
+        let src_h = 131;
+        let dst_w = 7;
+        let dst_h = 11;
+
+        // Checkerboard pattern
+        let mut src = Vec::with_capacity(src_w * src_h);
+        for y in 0..src_h {
+            for x in 0..src_w {
+                let v = if (x + y) % 2 == 0 { 0.0 } else { 1.0 };
+                src.push([v, v, v, 0.0]);
+            }
+        }
+
+        let dst = rescale(&src, src_w, src_h, dst_w, dst_h, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        assert_eq!(dst.len(), dst_w * dst_h);
+
+        // Checkerboard should average to ~0.5 after extreme downscale
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..3 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite", i, c);
+                // Should be somewhere around 0.5 (averaged checkerboard)
+                assert!(p[c] > 0.3 && p[c] < 0.7,
+                    "Pixel {} channel {} should be ~0.5 (averaged): {}", i, c, p[c]);
+            }
+        }
     }
 }
