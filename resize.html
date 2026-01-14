@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Linear RGB Resize</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .upload-box {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-height: 200px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .upload-box:hover {
+            border-color: #3498db;
+            background: #f8f9fa;
+        }
+
+        .upload-box.has-image {
+            border-style: solid;
+            border-color: #27ae60;
+        }
+
+        .upload-box img {
+            max-width: 100%;
+            max-height: 300px;
+            border-radius: 4px;
+        }
+
+        .upload-box label {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 10px;
+            display: block;
+        }
+
+        .upload-box .hint {
+            color: #888;
+            font-size: 14px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .options-section {
+            margin-bottom: 30px;
+        }
+
+        .options-section h3 {
+            margin-bottom: 15px;
+            color: #555;
+        }
+
+        .option-row {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .option-row label {
+            min-width: 120px;
+            font-weight: 500;
+        }
+
+        select, input[type="number"] {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        input[type="number"] {
+            width: 100px;
+        }
+
+        .size-inputs {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .size-inputs span {
+            color: #888;
+        }
+
+        button {
+            background: #3498db;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        button:hover {
+            background: #2980b9;
+        }
+
+        button:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .button-secondary {
+            background: #95a5a6;
+        }
+
+        .button-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        #output-section {
+            display: none;
+        }
+
+        .output-container {
+            text-align: center;
+        }
+
+        .output-container canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .output-info {
+            margin-top: 15px;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+
+        .loading.active {
+            display: block;
+        }
+
+        .error-message {
+            background: #fee;
+            border: 1px solid #fcc;
+            color: #c00;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .error-message.visible {
+            display: block;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border: 1px solid #b8d4e3;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #2c5282;
+        }
+
+        .info-box strong {
+            color: #1a365d;
+        }
+
+        .comparison-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .comparison-box {
+            text-align: center;
+        }
+
+        .comparison-box h4 {
+            margin-bottom: 10px;
+            color: #555;
+        }
+
+        .comparison-box canvas {
+            max-width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        @media (max-width: 768px) {
+            .comparison-container {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .preset-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+
+        .preset-btn {
+            padding: 6px 12px;
+            font-size: 13px;
+            background: #ecf0f1;
+            color: #555;
+        }
+
+        .preset-btn:hover {
+            background: #bdc3c7;
+        }
+    </style>
+</head>
+<body>
+    <h1>Linear RGB Resize</h1>
+    <p class="subtitle">Proper image resizing in linear color space</p>
+
+    <div class="container">
+        <div class="info-box">
+            <strong>Why linear RGB?</strong> Most image resizers work in sRGB space, which causes color shifts and darkening during interpolation.
+            This tool converts to linear RGB before resizing, then back to sRGB - producing more accurate colors and brightness.
+        </div>
+
+        <div class="upload-box" id="upload-box">
+            <label>Drop image here or click to upload</label>
+            <p class="hint">Supports PNG, JPG, WebP</p>
+            <input type="file" id="file-input" accept="image/*">
+        </div>
+
+        <div class="error-message" id="error-message"></div>
+
+        <div class="options-section">
+            <h3>Resize Options</h3>
+
+            <div class="option-row">
+                <label>Target Size:</label>
+                <div class="size-inputs">
+                    <input type="number" id="target-width" min="1" max="8192" value="256" placeholder="Width">
+                    <span>x</span>
+                    <input type="number" id="target-height" min="1" max="8192" value="256" placeholder="Height">
+                    <span>px</span>
+                </div>
+            </div>
+
+            <div class="preset-buttons">
+                <button class="preset-btn" data-w="64" data-h="64">64x64</button>
+                <button class="preset-btn" data-w="128" data-h="128">128x128</button>
+                <button class="preset-btn" data-w="256" data-h="256">256x256</button>
+                <button class="preset-btn" data-w="512" data-h="512">512x512</button>
+                <button class="preset-btn" data-w="320" data-h="240">320x240</button>
+                <button class="preset-btn" data-w="640" data-h="480">640x480</button>
+                <button class="preset-btn" data-w="1280" data-h="720">1280x720</button>
+            </div>
+
+            <div class="option-row" style="margin-top: 20px;">
+                <label>Aspect Ratio:</label>
+                <select id="aspect-mode">
+                    <option value="stretch">Stretch to fit</option>
+                    <option value="fit-width">Fit to width (preserve aspect)</option>
+                    <option value="fit-height">Fit to height (preserve aspect)</option>
+                    <option value="contain">Contain (fit inside bounds)</option>
+                </select>
+            </div>
+
+            <div class="option-row">
+                <label>Interpolation:</label>
+                <select id="interpolation">
+                    <option value="1">Lanczos (best quality)</option>
+                    <option value="0">Bilinear (faster)</option>
+                </select>
+            </div>
+
+            <div class="option-row">
+                <label>Dither Mode:</label>
+                <select id="dither-mode">
+                    <option value="0">Floyd-Steinberg</option>
+                    <option value="1">Floyd-Steinberg Serpentine</option>
+                    <option value="2">Jarvis-Judice-Ninke</option>
+                    <option value="3">Jarvis Serpentine</option>
+                    <option value="4">Mixed (reduces patterns)</option>
+                    <option value="5">Mixed Serpentine</option>
+                </select>
+            </div>
+
+            <div class="option-row">
+                <label>
+                    <input type="checkbox" id="show-comparison" checked>
+                    Show sRGB comparison
+                </label>
+            </div>
+        </div>
+
+        <div class="button-row">
+            <button id="process-btn" disabled>Resize Image</button>
+            <button id="download-btn" class="button-secondary" disabled>Download PNG</button>
+        </div>
+
+        <div class="loading" id="loading">
+            Processing...
+        </div>
+    </div>
+
+    <div class="container" id="output-section">
+        <h3>Result</h3>
+        <div class="output-container">
+            <div id="single-output" style="display: none;">
+                <canvas id="output-canvas"></canvas>
+            </div>
+            <div id="comparison-output" class="comparison-container" style="display: none;">
+                <div class="comparison-box">
+                    <h4>Linear RGB (correct)</h4>
+                    <canvas id="linear-canvas"></canvas>
+                </div>
+                <div class="comparison-box">
+                    <h4>sRGB (incorrect)</h4>
+                    <canvas id="srgb-canvas"></canvas>
+                </div>
+            </div>
+            <p class="output-info" id="output-info"></p>
+        </div>
+    </div>
+
+    <script type="module">
+        import init, {
+            dither_output_wasm,
+            // Atomic color space conversion functions
+            unpack_u8_to_f32_wasm,
+            srgb_to_linear_f32_wasm,
+            linear_to_srgb_f32_wasm,
+            // Atomic rescaling functions (linear space)
+            rescale_linear_rgb_wasm,
+            calculate_dimensions_wasm
+        } from './wasm_cra/cra_wasm.js';
+
+        let wasmReady = false;
+        let inputImageData = null;
+        let originalWidth = 0;
+        let originalHeight = 0;
+        let lastLinearResult = null;
+        let lastOutputWidth = 0;
+        let lastOutputHeight = 0;
+
+        // Extract RGB from ImageData as interleaved Uint8Array
+        function imageDataToU8Interleaved(imageData) {
+            const pixels = imageData.width * imageData.height;
+            const data = imageData.data;
+            const rgb = new Uint8Array(pixels * 3);
+
+            for (let i = 0; i < pixels; i++) {
+                rgb[i * 3] = data[i * 4];
+                rgb[i * 3 + 1] = data[i * 4 + 1];
+                rgb[i * 3 + 2] = data[i * 4 + 2];
+            }
+
+            return rgb;
+        }
+
+        // Naive sRGB resize (for comparison - this is the WRONG way)
+        function resizeSrgbNaive(imageData, srcW, srcH, dstW, dstH) {
+            const srcData = imageData.data;
+            const dstData = new Uint8ClampedArray(dstW * dstH * 4);
+
+            // Simple bilinear in sRGB space
+            for (let y = 0; y < dstH; y++) {
+                for (let x = 0; x < dstW; x++) {
+                    const srcX = (x + 0.5) * srcW / dstW - 0.5;
+                    const srcY = (y + 0.5) * srcH / dstH - 0.5;
+
+                    const x0 = Math.floor(srcX);
+                    const y0 = Math.floor(srcY);
+                    const x1 = Math.min(x0 + 1, srcW - 1);
+                    const y1 = Math.min(y0 + 1, srcH - 1);
+
+                    const fx = srcX - x0;
+                    const fy = srcY - y0;
+
+                    const dstIdx = (y * dstW + x) * 4;
+
+                    for (let c = 0; c < 3; c++) {
+                        const v00 = srcData[(y0 * srcW + x0) * 4 + c];
+                        const v01 = srcData[(y0 * srcW + x1) * 4 + c];
+                        const v10 = srcData[(y1 * srcW + x0) * 4 + c];
+                        const v11 = srcData[(y1 * srcW + x1) * 4 + c];
+
+                        const v0 = v00 * (1 - fx) + v01 * fx;
+                        const v1 = v10 * (1 - fx) + v11 * fx;
+                        const v = v0 * (1 - fy) + v1 * fy;
+
+                        dstData[dstIdx + c] = Math.round(v);
+                    }
+                    dstData[dstIdx + 3] = 255;
+                }
+            }
+
+            return new ImageData(dstData, dstW, dstH);
+        }
+
+        async function initWasm() {
+            try {
+                await init();
+                wasmReady = true;
+                document.getElementById('process-btn').disabled = !inputImageData;
+            } catch (e) {
+                console.error('WASM init failed:', e);
+                document.getElementById('error-message').textContent = 'Failed to load WASM module: ' + e.message;
+                document.getElementById('error-message').classList.add('visible');
+            }
+        }
+
+        function loadImage(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        resolve({
+                            imageData: ctx.getImageData(0, 0, img.width, img.height),
+                            width: img.width,
+                            height: img.height
+                        });
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function calculateOutputDimensions() {
+            const targetW = parseInt(document.getElementById('target-width').value) || 256;
+            const targetH = parseInt(document.getElementById('target-height').value) || 256;
+            const mode = document.getElementById('aspect-mode').value;
+
+            if (!originalWidth || !originalHeight) {
+                return { width: targetW, height: targetH };
+            }
+
+            const aspect = originalWidth / originalHeight;
+
+            switch (mode) {
+                case 'stretch':
+                    return { width: targetW, height: targetH };
+                case 'fit-width':
+                    return { width: targetW, height: Math.round(targetW / aspect) };
+                case 'fit-height':
+                    return { width: Math.round(targetH * aspect), height: targetH };
+                case 'contain':
+                    const scaleW = targetW / originalWidth;
+                    const scaleH = targetH / originalHeight;
+                    const scale = Math.min(scaleW, scaleH);
+                    return {
+                        width: Math.round(originalWidth * scale),
+                        height: Math.round(originalHeight * scale)
+                    };
+                default:
+                    return { width: targetW, height: targetH };
+            }
+        }
+
+        async function processImage() {
+            if (!inputImageData || !wasmReady) return;
+
+            const loading = document.getElementById('loading');
+            const errorMsg = document.getElementById('error-message');
+            const outputSection = document.getElementById('output-section');
+
+            loading.classList.add('active');
+            errorMsg.classList.remove('visible');
+            outputSection.style.display = 'none';
+
+            try {
+                const { width: dstW, height: dstH } = calculateOutputDimensions();
+                const interpolation = parseInt(document.getElementById('interpolation').value);
+                const ditherMode = parseInt(document.getElementById('dither-mode').value);
+                const showComparison = document.getElementById('show-comparison').checked;
+
+                // === LINEAR RGB RESIZE (correct way) ===
+                // Step 1: Unpack u8 to f32
+                const srgbF32 = unpack_u8_to_f32_wasm(
+                    imageDataToU8Interleaved(inputImageData),
+                    originalWidth,
+                    originalHeight
+                );
+
+                // Step 2: Convert to linear
+                const linearRgb = srgb_to_linear_f32_wasm(srgbF32, originalWidth, originalHeight);
+
+                // Step 3: Rescale in linear space
+                const linearResized = rescale_linear_rgb_wasm(
+                    linearRgb,
+                    originalWidth, originalHeight,
+                    dstW, dstH,
+                    interpolation
+                );
+
+                // Step 4: Convert back to sRGB
+                const srgbResized = linear_to_srgb_f32_wasm(linearResized, dstW, dstH);
+
+                // Step 5: Dither to RGB888
+                const dithered = dither_output_wasm(
+                    srgbResized,
+                    dstW, dstH,
+                    8, 8, 8,  // RGB888
+                    1,        // PerChannel technique
+                    ditherMode,
+                    1,        // OkLab perceptual space (not used for 8-bit)
+                    0         // seed
+                );
+
+                // Store for download
+                lastLinearResult = dithered;
+                lastOutputWidth = dstW;
+                lastOutputHeight = dstH;
+
+                // Convert to ImageData for display
+                const linearOutputData = new Uint8ClampedArray(dstW * dstH * 4);
+                for (let i = 0; i < dstW * dstH; i++) {
+                    linearOutputData[i * 4] = dithered[i * 3];
+                    linearOutputData[i * 4 + 1] = dithered[i * 3 + 1];
+                    linearOutputData[i * 4 + 2] = dithered[i * 3 + 2];
+                    linearOutputData[i * 4 + 3] = 255;
+                }
+                const linearImageData = new ImageData(linearOutputData, dstW, dstH);
+
+                // Display results
+                if (showComparison) {
+                    // Also do naive sRGB resize for comparison
+                    const srgbImageData = resizeSrgbNaive(inputImageData, originalWidth, originalHeight, dstW, dstH);
+
+                    document.getElementById('single-output').style.display = 'none';
+                    document.getElementById('comparison-output').style.display = 'grid';
+
+                    const linearCanvas = document.getElementById('linear-canvas');
+                    linearCanvas.width = dstW;
+                    linearCanvas.height = dstH;
+                    linearCanvas.getContext('2d').putImageData(linearImageData, 0, 0);
+
+                    const srgbCanvas = document.getElementById('srgb-canvas');
+                    srgbCanvas.width = dstW;
+                    srgbCanvas.height = dstH;
+                    srgbCanvas.getContext('2d').putImageData(srgbImageData, 0, 0);
+                } else {
+                    document.getElementById('single-output').style.display = 'block';
+                    document.getElementById('comparison-output').style.display = 'none';
+
+                    const canvas = document.getElementById('output-canvas');
+                    canvas.width = dstW;
+                    canvas.height = dstH;
+                    canvas.getContext('2d').putImageData(linearImageData, 0, 0);
+                }
+
+                document.getElementById('output-info').textContent =
+                    `${originalWidth}x${originalHeight} → ${dstW}x${dstH}`;
+
+                outputSection.style.display = 'block';
+                document.getElementById('download-btn').disabled = false;
+
+            } catch (e) {
+                console.error('Processing failed:', e);
+                errorMsg.textContent = 'Processing failed: ' + e.message;
+                errorMsg.classList.add('visible');
+            } finally {
+                loading.classList.remove('active');
+            }
+        }
+
+        function downloadResult() {
+            if (!lastLinearResult) return;
+
+            const canvas = document.createElement('canvas');
+            canvas.width = lastOutputWidth;
+            canvas.height = lastOutputHeight;
+            const ctx = canvas.getContext('2d');
+
+            const imageData = new ImageData(lastOutputWidth, lastOutputHeight);
+            for (let i = 0; i < lastOutputWidth * lastOutputHeight; i++) {
+                imageData.data[i * 4] = lastLinearResult[i * 3];
+                imageData.data[i * 4 + 1] = lastLinearResult[i * 3 + 1];
+                imageData.data[i * 4 + 2] = lastLinearResult[i * 3 + 2];
+                imageData.data[i * 4 + 3] = 255;
+            }
+            ctx.putImageData(imageData, 0, 0);
+
+            const link = document.createElement('a');
+            link.download = `resized_${lastOutputWidth}x${lastOutputHeight}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // Event handlers
+        document.getElementById('upload-box').addEventListener('click', () => {
+            document.getElementById('file-input').click();
+        });
+
+        document.getElementById('file-input').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            try {
+                const { imageData, width, height } = await loadImage(file);
+                inputImageData = imageData;
+                originalWidth = width;
+                originalHeight = height;
+
+                const box = document.getElementById('upload-box');
+                box.classList.add('has-image');
+                box.innerHTML = `
+                    <label>Image loaded: ${width}x${height}</label>
+                    <p class="hint">Click to change image</p>
+                    <input type="file" id="file-input" accept="image/*">
+                `;
+
+                // Re-attach event listener
+                document.getElementById('file-input').addEventListener('change', arguments.callee);
+
+                document.getElementById('process-btn').disabled = !wasmReady;
+                document.getElementById('error-message').classList.remove('visible');
+            } catch (err) {
+                document.getElementById('error-message').textContent = 'Failed to load image: ' + err.message;
+                document.getElementById('error-message').classList.add('visible');
+            }
+        });
+
+        // Drag and drop
+        document.getElementById('upload-box').addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.currentTarget.style.borderColor = '#3498db';
+        });
+
+        document.getElementById('upload-box').addEventListener('dragleave', (e) => {
+            e.currentTarget.style.borderColor = '';
+        });
+
+        document.getElementById('upload-box').addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.currentTarget.style.borderColor = '';
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const input = document.getElementById('file-input');
+                const dt = new DataTransfer();
+                dt.items.add(file);
+                input.files = dt.files;
+                input.dispatchEvent(new Event('change'));
+            }
+        });
+
+        // Preset buttons
+        document.querySelectorAll('.preset-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.getElementById('target-width').value = btn.dataset.w;
+                document.getElementById('target-height').value = btn.dataset.h;
+            });
+        });
+
+        document.getElementById('process-btn').addEventListener('click', processImage);
+        document.getElementById('download-btn').addEventListener('click', downloadResult);
+
+        // Initialize
+        initWasm();
+    </script>
+</body>
+</html>
