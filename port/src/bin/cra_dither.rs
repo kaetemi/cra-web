@@ -150,8 +150,9 @@ struct Args {
     method: DitherMethod,
 
     /// Perceptual color space for distance calculations
-    #[arg(short, long, value_enum, default_value_t = ColorSpace::Oklab)]
-    colorspace: ColorSpace,
+    /// Default: OKLab for RGB, CIE94 for grayscale
+    #[arg(short, long, value_enum)]
+    colorspace: Option<ColorSpace>,
 
     /// Random seed for mixed dithering modes
     #[arg(short, long, default_value_t = 12345)]
@@ -341,6 +342,7 @@ fn write_metadata(
     path: &PathBuf,
     args: &Args,
     format: &ColorFormat,
+    colorspace: ColorSpace,
     width: u32,
     height: u32,
     outputs: &[(String, PathBuf, usize)], // (type, path, size_bytes)
@@ -363,7 +365,7 @@ fn write_metadata(
     }
 
     json.push_str(&format!("  \"dither_method\": \"{:?}\",\n", args.method));
-    json.push_str(&format!("  \"colorspace\": \"{:?}\",\n", args.colorspace));
+    json.push_str(&format!("  \"colorspace\": \"{:?}\",\n", colorspace));
     json.push_str(&format!("  \"seed\": {},\n", args.seed));
     json.push_str(&format!("  \"stride\": {},\n", args.stride));
     json.push_str(&format!("  \"stride_fill\": \"{:?}\",\n", args.stride_fill));
@@ -402,6 +404,14 @@ fn main() -> Result<(), String> {
     // Parse format string
     let format = ColorFormat::parse(&args.format)?;
 
+    // Determine colorspace: use user-specified value, or apply mode-specific default
+    // Default: OKLab for RGB, CIE94 for grayscale
+    let colorspace = args.colorspace.unwrap_or(if format.is_grayscale {
+        ColorSpace::LabCie94
+    } else {
+        ColorSpace::Oklab
+    });
+
     if args.verbose {
         eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
         if format.is_grayscale {
@@ -413,7 +423,7 @@ fn main() -> Result<(), String> {
             );
         }
         eprintln!("Dither method: {:?}", args.method);
-        eprintln!("Colorspace: {:?}", args.colorspace);
+        eprintln!("Colorspace: {:?}{}", colorspace, if args.colorspace.is_none() { " (default)" } else { "" });
         eprintln!("Seed: {}", args.seed);
     }
 
@@ -453,7 +463,7 @@ fn main() -> Result<(), String> {
     let height_usize = height as usize;
 
     // Perform dithering
-    let perceptual_space = args.colorspace.to_perceptual_space();
+    let perceptual_space = colorspace.to_perceptual_space();
     let cs_mode = args.method.to_cs_dither_mode();
 
     // Store channel data for binary encoding
@@ -600,7 +610,7 @@ fn main() -> Result<(), String> {
         if args.verbose {
             eprintln!("Writing metadata: {}", meta_path.display());
         }
-        write_metadata(meta_path, &args, &format, width, height, &outputs)?;
+        write_metadata(meta_path, &args, &format, colorspace, width, height, &outputs)?;
     }
 
     if args.verbose {
