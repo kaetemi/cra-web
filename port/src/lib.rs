@@ -352,7 +352,7 @@ fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
 
 /// Lab-space dithering with rotation-aware quantization (WASM export)
 ///
-/// Unlike the RGB quantizer, this quantizes directly in Lab space with support for:
+/// Takes Lab input directly and quantizes with support for:
 /// - Rotation of the a/b plane before quantization
 /// - Offset and scaling for quantization ranges
 /// - Optional preservation of L channel (no quantization)
@@ -360,9 +360,9 @@ fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
 /// Error diffusion is performed in linear RGB for physically correct light mixing.
 ///
 /// Args:
-///     r_channel: Red channel as f32 values in range [0, 255]
-///     g_channel: Green channel as f32 values in range [0, 255]
-///     b_channel: Blue channel as f32 values in range [0, 255]
+///     l_channel: L channel as f32 (CIELAB: 0-100, OKLab: 0-1)
+///     a_channel: a channel as f32 (CIELAB: -127 to 127, OKLab: -0.5 to 0.5)
+///     b_channel: b channel as f32 (CIELAB: -127 to 127, OKLab: -0.5 to 0.5)
 ///     w: image width
 ///     h: image height
 ///     levels_ab: Number of quantization levels for a/b channels (e.g., 16 = 4 bits)
@@ -371,7 +371,7 @@ fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
 ///     rotation_deg: Rotation angle in degrees for a/b plane
 ///     offset: Offset for quantization range (0.0 = no offset, 0.5 = shift by half a level)
 ///     scale: Scaling factor for quantization range (1.0 = full range)
-///     quant_space: Color space for rotation/quantization (0 = CIELAB, 1 = OKLab)
+///     quant_space: Color space for rotation/quantization (0 = CIELAB, 1 = OKLab) - must match input
 ///     distance_space: Perceptual space for distance calculation (0-5, same as other dithers)
 ///     mode: Dither mode (0-6)
 ///     seed: Random seed for mixed modes
@@ -380,8 +380,8 @@ fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
 ///     Interleaved RGB uint8 array (RGBRGB...)
 #[wasm_bindgen]
 pub fn lab_space_dither_wasm(
-    r_channel: Vec<f32>,
-    g_channel: Vec<f32>,
+    l_channel: Vec<f32>,
+    a_channel: Vec<f32>,
     b_channel: Vec<f32>,
     w: usize,
     h: usize,
@@ -396,7 +396,7 @@ pub fn lab_space_dither_wasm(
     mode: u8,
     seed: u32,
 ) -> Vec<u8> {
-    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_rgb_with_mode, lab_to_srgb_u8};
+    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_with_mode, lab_to_srgb_u8};
     use dither_colorspace_aware::DitherMode as CSDitherMode;
 
     let params = LabQuantParams {
@@ -421,9 +421,9 @@ pub fn lab_space_dither_wasm(
     let quant = lab_quant_space_from_u8(quant_space);
     let dist = perceptual_space_from_u8(distance_space);
 
-    let (l_out, a_out, b_out) = lab_space_dither_rgb_with_mode(
-        &r_channel,
-        &g_channel,
+    let (l_out, a_out, b_out) = lab_space_dither_with_mode(
+        &l_channel,
+        &a_channel,
         &b_channel,
         w,
         h,
@@ -450,15 +450,21 @@ pub fn lab_space_dither_wasm(
 
 /// Lab-space dithering returning Lab values directly (WASM export)
 ///
-/// Returns the Lab values instead of converting back to RGB.
+/// Takes Lab input and returns quantized Lab output.
 /// Useful when you want to work with the Lab output directly.
+///
+/// Args:
+///     l_channel: L channel as f32 (CIELAB: 0-100, OKLab: 0-1)
+///     a_channel: a channel as f32 (CIELAB: -127 to 127, OKLab: -0.5 to 0.5)
+///     b_channel: b channel as f32 (CIELAB: -127 to 127, OKLab: -0.5 to 0.5)
+///     (other args same as lab_space_dither_wasm)
 ///
 /// Returns:
 ///     Interleaved Lab f32 array (LabLabLab...)
 #[wasm_bindgen]
 pub fn lab_space_dither_lab_output_wasm(
-    r_channel: Vec<f32>,
-    g_channel: Vec<f32>,
+    l_channel: Vec<f32>,
+    a_channel: Vec<f32>,
     b_channel: Vec<f32>,
     w: usize,
     h: usize,
@@ -473,7 +479,7 @@ pub fn lab_space_dither_lab_output_wasm(
     mode: u8,
     seed: u32,
 ) -> Vec<f32> {
-    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_rgb_with_mode};
+    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_with_mode};
     use dither_colorspace_aware::DitherMode as CSDitherMode;
 
     let params = LabQuantParams {
@@ -498,9 +504,9 @@ pub fn lab_space_dither_lab_output_wasm(
     let quant = lab_quant_space_from_u8(quant_space);
     let dist = perceptual_space_from_u8(distance_space);
 
-    let (l_out, a_out, b_out) = lab_space_dither_rgb_with_mode(
-        &r_channel,
-        &g_channel,
+    let (l_out, a_out, b_out) = lab_space_dither_with_mode(
+        &l_channel,
+        &a_channel,
         &b_channel,
         w,
         h,

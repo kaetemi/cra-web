@@ -12,7 +12,7 @@
 
 use crate::color::{
     lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single,
-    oklab_to_linear_rgb, srgb_to_linear_single,
+    oklab_to_linear_rgb,
 };
 use crate::color_distance::perceptual_distance_sq;
 use crate::dither_common::{wang_hash, DitherMode, PerceptualSpace};
@@ -443,24 +443,26 @@ fn process_pixel_lab(
 
 /// Lab-space dithering with rotation-aware quantization.
 ///
-/// Processes RGB input through Lab color space with optional rotation,
-/// offset, and scaling for quantization. Error diffusion is performed
-/// in linear RGB for physically correct light mixing.
+/// Takes Lab input directly and performs quantization with optional rotation,
+/// offset, and scaling. Error diffusion is performed in linear RGB for
+/// physically correct light mixing.
 ///
 /// Args:
-///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
+///     l_channel, a_channel, b_channel: Input Lab channels as f32
+///         - For CIELAB: L is 0-100, a/b are roughly -127 to +127
+///         - For OKLab: L is 0-1, a/b are roughly -0.5 to +0.5
 ///     width, height: Image dimensions
 ///     params: Quantization parameters (levels, rotation, offset, scale)
-///     quant_space: Color space for rotation and quantization (CIELAB or OKLab)
+///     quant_space: Color space for rotation and quantization (must match input format)
 ///     distance_space: Perceptual space for distance calculation
 ///     mode: Dithering algorithm and scanning mode
 ///     seed: Random seed for mixed modes
 ///
 /// Returns:
-///     (l_out, a_out, b_out): Output Lab channels as f32
-pub fn lab_space_dither_rgb_with_mode(
-    r_channel: &[f32],
-    g_channel: &[f32],
+///     (l_out, a_out, b_out): Output Lab channels as f32 (same space as input)
+pub fn lab_space_dither_with_mode(
+    l_channel: &[f32],
+    a_channel: &[f32],
     b_channel: &[f32],
     width: usize,
     height: usize,
@@ -517,13 +519,12 @@ pub fn lab_space_dither_rgb_with_mode(
             let bx = x + pad_left;
             let err_idx = y * buf_width + bx;
 
-            // Get input in linear RGB
-            let r_srgb = r_channel[idx] / 255.0;
-            let g_srgb = g_channel[idx] / 255.0;
-            let b_srgb = b_channel[idx] / 255.0;
-            let r_lin = srgb_to_linear_single(r_srgb);
-            let g_lin = srgb_to_linear_single(g_srgb);
-            let b_lin = srgb_to_linear_single(b_srgb);
+            // Get input Lab and convert to linear RGB (for error accumulation base)
+            let (r_lin, g_lin, b_lin) = ctx.lab_to_rgb(
+                l_channel[idx],
+                a_channel[idx],
+                b_channel[idx],
+            );
 
             // Get accumulated error
             let e_r = err_bufs[0][err_idx];
@@ -627,9 +628,9 @@ fn apply_fs_rtl_row(err: &mut [Vec<f32>], bx: usize, y: usize, e_r: f32, e_g: f3
 }
 
 /// Convenience function with default Floyd-Steinberg mode
-pub fn lab_space_dither_rgb(
-    r_channel: &[f32],
-    g_channel: &[f32],
+pub fn lab_space_dither(
+    l_channel: &[f32],
+    a_channel: &[f32],
     b_channel: &[f32],
     width: usize,
     height: usize,
@@ -637,8 +638,8 @@ pub fn lab_space_dither_rgb(
     quant_space: LabQuantSpace,
     distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    lab_space_dither_rgb_with_mode(
-        r_channel, g_channel, b_channel,
+    lab_space_dither_with_mode(
+        l_channel, a_channel, b_channel,
         width, height,
         params,
         quant_space,
@@ -682,15 +683,29 @@ pub fn lab_to_srgb_u8(
 mod tests {
     use super::*;
 
+    /// Generate test data in OKLab space (L: 0-1, a/b: -0.5 to 0.5)
+    fn generate_oklab_test_data(pixels: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let l: Vec<f32> = (0..pixels).map(|i| (i as f32) / (pixels as f32)).collect();
+        let a: Vec<f32> = (0..pixels).map(|i| ((i + pixels / 3) % pixels) as f32 / (pixels as f32) - 0.5).collect();
+        let b: Vec<f32> = (0..pixels).map(|i| ((i + 2 * pixels / 3) % pixels) as f32 / (pixels as f32) - 0.5).collect();
+        (l, a, b)
+    }
+
+    /// Generate test data in CIELAB space (L: 0-100, a/b: -127 to 127)
+    fn generate_cielab_test_data(pixels: usize) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let l: Vec<f32> = (0..pixels).map(|i| (i as f32) / (pixels as f32) * 100.0).collect();
+        let a: Vec<f32> = (0..pixels).map(|i| ((i + pixels / 3) % pixels) as f32 / (pixels as f32) * 254.0 - 127.0).collect();
+        let b: Vec<f32> = (0..pixels).map(|i| ((i + 2 * pixels / 3) % pixels) as f32 / (pixels as f32) * 254.0 - 127.0).collect();
+        (l, a, b)
+    }
+
     #[test]
-    fn test_lab_dither_basic() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+    fn test_lab_dither_basic_oklab() {
+        let (l, a, b) = generate_oklab_test_data(100);
 
         let params = LabQuantParams::default();
-        let (l_out, a_out, b_out) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
+        let (l_out, a_out, b_out) = lab_space_dither(
+            &l, &a, &b, 10, 10,
             &params,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
@@ -702,16 +717,31 @@ mod tests {
     }
 
     #[test]
+    fn test_lab_dither_basic_cielab() {
+        let (l, a, b) = generate_cielab_test_data(100);
+
+        let params = LabQuantParams::default();
+        let (l_out, a_out, b_out) = lab_space_dither(
+            &l, &a, &b, 10, 10,
+            &params,
+            LabQuantSpace::CIELab,
+            PerceptualSpace::LabCIE76,
+        );
+
+        assert_eq!(l_out.len(), 100);
+        assert_eq!(a_out.len(), 100);
+        assert_eq!(b_out.len(), 100);
+    }
+
+    #[test]
     fn test_lab_dither_with_rotation() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+        let (l, a, b) = generate_cielab_test_data(100);
 
         let mut params = LabQuantParams::default();
         params.rotation_deg = 45.0;
 
-        let (l_out, a_out, b_out) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
+        let (l_out, a_out, b_out) = lab_space_dither(
+            &l, &a, &b, 10, 10,
             &params,
             LabQuantSpace::CIELab,
             PerceptualSpace::LabCIE76,
@@ -724,15 +754,13 @@ mod tests {
 
     #[test]
     fn test_lab_dither_no_l_quantization() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+        let (l, a, b) = generate_oklab_test_data(100);
 
         let mut params = LabQuantParams::default();
         params.quantize_l = false;
 
-        let (l_out, _a_out, _b_out) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
+        let (l_out, _a_out, _b_out) = lab_space_dither(
+            &l, &a, &b, 10, 10,
             &params,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
@@ -744,16 +772,14 @@ mod tests {
 
     #[test]
     fn test_lab_dither_with_offset_and_scale() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+        let (l, a, b) = generate_oklab_test_data(100);
 
         let mut params = LabQuantParams::default();
         params.offset = 0.25;
         params.scale = 0.8;
 
-        let (l_out, a_out, b_out) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
+        let (l_out, a_out, b_out) = lab_space_dither(
+            &l, &a, &b, 10, 10,
             &params,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
@@ -766,9 +792,10 @@ mod tests {
 
     #[test]
     fn test_lab_to_srgb_roundtrip() {
-        let r: Vec<f32> = vec![127.5; 4];
-        let g: Vec<f32> = vec![127.5; 4];
-        let b: Vec<f32> = vec![127.5; 4];
+        // Gray in OKLab: L=0.5, a=0, b=0
+        let l: Vec<f32> = vec![0.5; 4];
+        let a: Vec<f32> = vec![0.0; 4];
+        let b: Vec<f32> = vec![0.0; 4];
 
         let params = LabQuantParams {
             levels_ab: 256,
@@ -779,8 +806,8 @@ mod tests {
             scale: 1.0,
         };
 
-        let (l_out, a_out, b_out) = lab_space_dither_rgb(
-            &r, &g, &b, 2, 2,
+        let (l_out, a_out, b_out) = lab_space_dither(
+            &l, &a, &b, 2, 2,
             &params,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
@@ -788,19 +815,16 @@ mod tests {
 
         let (r_srgb, g_srgb, b_srgb) = lab_to_srgb_u8(&l_out, &a_out, &b_out, LabQuantSpace::OkLab);
 
-        // With 256 levels and no rotation, should be close to original
+        // Gray should remain gray (R=G=B)
         for i in 0..4 {
-            assert!((r_srgb[i] as i32 - 128).abs() < 5, "R mismatch: {}", r_srgb[i]);
-            assert!((g_srgb[i] as i32 - 128).abs() < 5, "G mismatch: {}", g_srgb[i]);
-            assert!((b_srgb[i] as i32 - 128).abs() < 5, "B mismatch: {}", b_srgb[i]);
+            assert!((r_srgb[i] as i32 - g_srgb[i] as i32).abs() < 5, "Not gray at {}: R={}, G={}", i, r_srgb[i], g_srgb[i]);
+            assert!((g_srgb[i] as i32 - b_srgb[i] as i32).abs() < 5, "Not gray at {}: G={}, B={}", i, g_srgb[i], b_srgb[i]);
         }
     }
 
     #[test]
     fn test_all_modes_produce_output() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+        let (l, a, b) = generate_oklab_test_data(100);
 
         let params = LabQuantParams::default();
         let modes = [
@@ -814,8 +838,8 @@ mod tests {
         ];
 
         for mode in modes {
-            let (l_out, a_out, b_out) = lab_space_dither_rgb_with_mode(
-                &r, &g, &b, 10, 10,
+            let (l_out, a_out, b_out) = lab_space_dither_with_mode(
+                &l, &a, &b, 10, 10,
                 &params,
                 LabQuantSpace::OkLab,
                 PerceptualSpace::OkLab,
@@ -830,30 +854,30 @@ mod tests {
     }
 
     #[test]
-    fn test_cielab_vs_oklab() {
-        let r: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let g: Vec<f32> = (0..100).map(|i| ((i + 33) % 100) as f32 * 2.55).collect();
-        let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
+    fn test_rotation_changes_output() {
+        let (l, a, b) = generate_oklab_test_data(100);
 
-        let params = LabQuantParams::default();
+        let params_no_rot = LabQuantParams::default();
+        let mut params_rot = LabQuantParams::default();
+        params_rot.rotation_deg = 45.0;
 
-        let (l_cielab, a_cielab, b_cielab) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
-            &params,
-            LabQuantSpace::CIELab,
-            PerceptualSpace::LabCIE76,
-        );
-
-        let (l_oklab, a_oklab, b_oklab) = lab_space_dither_rgb(
-            &r, &g, &b, 10, 10,
-            &params,
+        let (l_out1, a_out1, b_out1) = lab_space_dither(
+            &l, &a, &b, 10, 10,
+            &params_no_rot,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
         );
 
-        // Results should differ between spaces
-        let cielab_sum: f32 = l_cielab.iter().chain(a_cielab.iter()).chain(b_cielab.iter()).sum();
-        let oklab_sum: f32 = l_oklab.iter().chain(a_oklab.iter()).chain(b_oklab.iter()).sum();
-        assert!((cielab_sum - oklab_sum).abs() > 0.01, "CIELAB and OKLab should produce different results");
+        let (l_out2, a_out2, b_out2) = lab_space_dither(
+            &l, &a, &b, 10, 10,
+            &params_rot,
+            LabQuantSpace::OkLab,
+            PerceptualSpace::OkLab,
+        );
+
+        // Results should differ with rotation
+        let sum1: f32 = a_out1.iter().chain(b_out1.iter()).map(|x| x.abs()).sum();
+        let sum2: f32 = a_out2.iter().chain(b_out2.iter()).map(|x| x.abs()).sum();
+        assert!((sum1 - sum2).abs() > 0.001, "Rotation should change output: {} vs {}", sum1, sum2);
     }
 }
