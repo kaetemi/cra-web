@@ -22,6 +22,7 @@ pub mod dither_colorspace_luminosity;
 pub mod dither_common;
 mod histogram;
 pub mod output;
+pub mod pixel;
 pub mod rescale;
 mod rotation;
 pub mod tiled_lab;
@@ -1341,6 +1342,97 @@ pub fn calculate_dimensions_wasm(
     let th = if target_height == 0 { None } else { Some(target_height) };
     let (w, h) = rescale::calculate_target_dimensions(src_width, src_height, tw, th);
     vec![w, h]
+}
+
+// ============================================================================
+// SIMD-friendly Pixel4 WASM Exports (4-channel format)
+// ============================================================================
+
+/// Rescale sRGB image using 4-channel SIMD-friendly format
+/// Input: flat array of RGBX f32 values (0-255 scale), 4 values per pixel
+/// Output: flat array of RGBX f32 values (0-255 scale)
+/// Performs: sRGB -> linear -> rescale -> sRGB
+#[wasm_bindgen]
+pub fn rescale_srgb_pixel4_wasm(
+    srgb: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let src_pixels = src_width * src_height;
+    let method = rescale_method_from_u8(method);
+
+    // Convert flat array to Pixel4 array and sRGB to linear
+    let mut linear_pixels: Vec<pixel::Pixel4> = Vec::with_capacity(src_pixels);
+    for i in 0..src_pixels {
+        linear_pixels.push([
+            color::srgb_to_linear_single(srgb[i * 4] / 255.0),
+            color::srgb_to_linear_single(srgb[i * 4 + 1] / 255.0),
+            color::srgb_to_linear_single(srgb[i * 4 + 2] / 255.0),
+            srgb[i * 4 + 3], // preserve 4th channel
+        ]);
+    }
+
+    // Rescale in linear space using Pixel4 API
+    let rescaled = rescale::rescale_pixels(
+        &linear_pixels, src_width, src_height, dst_width, dst_height, method
+    );
+
+    // Convert back to sRGB and flatten
+    let dst_pixels = dst_width * dst_height;
+    let mut result = Vec::with_capacity(dst_pixels * 4);
+    for p in &rescaled {
+        result.push(color::linear_to_srgb_single(p[0]) * 255.0);
+        result.push(color::linear_to_srgb_single(p[1]) * 255.0);
+        result.push(color::linear_to_srgb_single(p[2]) * 255.0);
+        result.push(p[3]); // preserve 4th channel
+    }
+
+    result
+}
+
+/// Rescale linear RGB image using 4-channel SIMD-friendly format
+/// Input: flat array of RGBX f32 values (0-1 scale), 4 values per pixel
+/// Output: flat array of RGBX f32 values (0-1 scale)
+#[wasm_bindgen]
+pub fn rescale_linear_pixel4_wasm(
+    linear: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+
+    // Convert flat array to Pixel4 array
+    let linear_pixels = pixel::interleaved_rgba_to_pixels(&linear);
+
+    // Rescale using Pixel4 API
+    let rescaled = rescale::rescale_pixels(
+        &linear_pixels, src_width, src_height, dst_width, dst_height, method
+    );
+
+    // Flatten back to Vec<f32>
+    pixel::pixels_to_interleaved_rgba(&rescaled)
+}
+
+/// Rescale single channel (grayscale)
+/// Input: flat array of f32 values
+/// Output: flat array of f32 values
+#[wasm_bindgen]
+pub fn rescale_channel_wasm(
+    src: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+    rescale::rescale_channel(&src, src_width, src_height, dst_width, dst_height, method)
 }
 
 #[cfg(test)]

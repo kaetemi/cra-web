@@ -258,6 +258,158 @@ pub fn calculate_target_dimensions(
     }
 }
 
+// ============================================================================
+// SIMD-friendly Pixel4 rescaling
+// ============================================================================
+
+use crate::pixel::{Pixel4, lerp};
+
+/// Rescale Pixel4 array using bilinear interpolation
+fn rescale_bilinear_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+) -> Vec<Pixel4> {
+    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+
+    let scale_x = src_width as f32 / dst_width as f32;
+    let scale_y = src_height as f32 / dst_height as f32;
+
+    let max_x = (src_width - 1) as f32;
+    let max_y = (src_height - 1) as f32;
+
+    for dst_y in 0..dst_height {
+        for dst_x in 0..dst_width {
+            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
+            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
+
+            let x0 = src_x.floor() as usize;
+            let y0 = src_y.floor() as usize;
+            let x1 = (x0 + 1).min(src_width - 1);
+            let y1 = (y0 + 1).min(src_height - 1);
+            let fx = src_x - x0 as f32;
+            let fy = src_y - y0 as f32;
+
+            // Sample four corners
+            let p00 = src[y0 * src_width + x0];
+            let p10 = src[y0 * src_width + x1];
+            let p01 = src[y1 * src_width + x0];
+            let p11 = src[y1 * src_width + x1];
+
+            // Bilinear interpolation using SIMD-friendly lerp
+            let top = lerp(p00, p10, fx);
+            let bottom = lerp(p01, p11, fx);
+            dst[dst_y * dst_width + dst_x] = lerp(top, bottom, fy);
+        }
+    }
+
+    dst
+}
+
+/// Rescale Pixel4 array using Lanczos3 interpolation
+fn rescale_lanczos3_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+) -> Vec<Pixel4> {
+    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+
+    let scale_x = src_width as f32 / dst_width as f32;
+    let scale_y = src_height as f32 / dst_height as f32;
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
+    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+
+    for dst_y in 0..dst_height {
+        for dst_x in 0..dst_width {
+            let src_x = (dst_x as f32 + 0.5) * scale_x - 0.5;
+            let src_y = (dst_y as f32 + 0.5) * scale_y - 0.5;
+
+            let center_x = src_x.floor() as i32;
+            let center_y = src_y.floor() as i32;
+
+            let mut sum = [0.0f32; 4];
+            let mut weight_sum = 0.0f32;
+
+            for ky in -radius_y..=radius_y {
+                let sy = center_y + ky;
+                if sy < 0 || sy >= src_height as i32 {
+                    continue;
+                }
+
+                let dy = (src_y - sy as f32) / filter_scale_y;
+                let wy = lanczos3(dy);
+
+                if wy.abs() < 1e-8 {
+                    continue;
+                }
+
+                for kx in -radius_x..=radius_x {
+                    let sx = center_x + kx;
+                    if sx < 0 || sx >= src_width as i32 {
+                        continue;
+                    }
+
+                    let dx = (src_x - sx as f32) / filter_scale_x;
+                    let wx = lanczos3(dx);
+
+                    let weight = wx * wy;
+                    if weight.abs() < 1e-8 {
+                        continue;
+                    }
+
+                    let sample = src[sy as usize * src_width + sx as usize];
+                    sum[0] += sample[0] * weight;
+                    sum[1] += sample[1] * weight;
+                    sum[2] += sample[2] * weight;
+                    sum[3] += sample[3] * weight;
+                    weight_sum += weight;
+                }
+            }
+
+            dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
+                [
+                    (sum[0] / weight_sum).clamp(0.0, 1.0),
+                    (sum[1] / weight_sum).clamp(0.0, 1.0),
+                    (sum[2] / weight_sum).clamp(0.0, 1.0),
+                    (sum[3] / weight_sum).clamp(0.0, 1.0),
+                ]
+            } else {
+                let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
+                let sy = src_y.round().clamp(0.0, (src_height - 1) as f32) as usize;
+                src[sy * src_width + sx]
+            };
+        }
+    }
+
+    dst
+}
+
+/// Rescale Pixel4 image (SIMD-friendly, linear space)
+pub fn rescale_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+) -> Vec<Pixel4> {
+    if src_width == dst_width && src_height == dst_height {
+        return src.to_vec();
+    }
+
+    match method {
+        RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height),
+        RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +560,52 @@ mod tests {
 
         assert!(left_avg < 0.5, "Left edge should be dark: {}", left_avg);
         assert!(right_avg > 0.5, "Right edge should be bright: {}", right_avg);
+    }
+
+    // Pixel4 tests
+    #[test]
+    fn test_pixel4_bilinear_identity() {
+        let src = vec![
+            [0.0, 0.1, 0.2, 0.0],
+            [0.3, 0.4, 0.5, 0.0],
+            [0.6, 0.7, 0.8, 0.0],
+            [0.9, 1.0, 0.5, 0.0],
+        ];
+        let dst = rescale_pixels(&src, 2, 2, 2, 2, RescaleMethod::Bilinear);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_pixel4_bilinear_upscale() {
+        let src = vec![
+            [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
+        ];
+        let dst = rescale_pixels(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+        assert_eq!(dst.len(), 16);
+
+        // All values should be in valid range
+        for p in &dst {
+            for c in 0..3 {
+                assert!(p[c] >= 0.0 && p[c] <= 1.0);
+            }
+        }
+    }
+
+    #[test]
+    fn test_pixel4_lanczos_roundtrip() {
+        let src = vec![
+            [0.1, 0.2, 0.3, 0.0], [0.4, 0.5, 0.6, 0.0],
+            [0.7, 0.8, 0.9, 0.0], [0.2, 0.3, 0.4, 0.0],
+        ];
+        let up = rescale_pixels(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3);
+        let down = rescale_pixels(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3);
+
+        for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
+            for c in 0..3 {
+                let diff = (orig[c] - result[c]).abs();
+                assert!(diff < 0.2, "Pixel {} channel {} drifted: {} -> {}", i, c, orig[c], result[c]);
+            }
+        }
     }
 }
