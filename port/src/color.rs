@@ -42,6 +42,7 @@ pub fn linear_to_srgb(data: &mut [f32]) {
 // Pixel color space conversions
 // ============================================================================
 
+#[cfg(test)]
 #[inline]
 fn srgb_to_linear_pixel(p: Pixel4) -> Pixel4 {
     [
@@ -52,6 +53,7 @@ fn srgb_to_linear_pixel(p: Pixel4) -> Pixel4 {
     ]
 }
 
+#[cfg(test)]
 #[inline]
 fn linear_to_srgb_pixel(p: Pixel4) -> Pixel4 {
     [
@@ -104,29 +106,6 @@ pub fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
     gray
 }
 
-/// Convert interleaved sRGB u8 array to grayscale (sRGB 0-255 as f32)
-///
-/// Input: Interleaved RGB bytes (RGBRGB..., 0-255)
-/// Output: Grayscale values (sRGB 0-255 as f32, ready for dithering)
-/// Pipeline: sRGB -> linear RGB -> luminance (Rec.709) -> sRGB
-pub fn srgb_interleaved_to_grayscale(srgb: &[u8], pixel_count: usize) -> Vec<f32> {
-    let mut gray = Vec::with_capacity(pixel_count);
-
-    for i in 0..pixel_count {
-        // Convert sRGB 0-255 to linear 0-1
-        let r_linear = srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
-        let g_linear = srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
-        let b_linear = srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
-
-        // Compute luminance in linear space
-        let luminance = linear_rgb_to_luminance(r_linear, g_linear, b_linear);
-
-        // Convert back to sRGB 0-255
-        gray.push(linear_to_srgb_single(luminance) * 255.0);
-    }
-
-    gray
-}
 
 /// Lab f(t) function - attempt to linearize cube root near zero.
 ///
@@ -479,16 +458,20 @@ pub fn scale_from_255_inplace(pixels: &mut [Pixel4]) {
     }
 }
 
+#[cfg(test)]
 #[inline]
 fn scale_to_255_pixel(p: Pixel4) -> Pixel4 {
     [p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3]]
 }
 
+#[cfg(test)]
 #[inline]
 fn scale_from_255_pixel(p: Pixel4) -> Pixel4 {
     [p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3]]
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 #[inline]
 fn linear_to_srgb_255_pixel(p: Pixel4) -> Pixel4 {
     [
@@ -499,6 +482,8 @@ fn linear_to_srgb_255_pixel(p: Pixel4) -> Pixel4 {
     ]
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 #[inline]
 fn srgb_255_to_linear_pixel(p: Pixel4) -> Pixel4 {
     [

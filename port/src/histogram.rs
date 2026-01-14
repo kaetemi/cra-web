@@ -5,6 +5,7 @@
 #[derive(Clone, Copy, Debug, Default)]
 pub enum InterpolationMode {
     /// Snap to nearest reference value (can cause banding)
+    #[allow(dead_code)]
     Nearest,
     /// Linear interpolation between adjacent reference values (smoother)
     #[default]

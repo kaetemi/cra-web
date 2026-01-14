@@ -18,8 +18,10 @@ use crate::dither_common::{bit_replicate, wang_hash};
 #[derive(Debug, Clone, Copy)]
 struct QuantParams {
     /// Number of bits (1-8)
+    #[allow(dead_code)]
     bits: u8,
     /// Maximum level value (2^bits - 1), e.g., 31 for 5 bits, 255 for 8 bits
+    #[allow(dead_code)]
     max_level: f32,
     /// LUT mapping each uint8 input to the nearest bit-replicated level
     lut_nearest: [f32; 256],
