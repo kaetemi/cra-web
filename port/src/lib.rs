@@ -450,7 +450,7 @@ pub fn lab_space_dither_wasm(
 
 /// Lab-space dithering returning Lab values directly (WASM export)
 ///
-/// Takes Lab input and returns quantized Lab output.
+/// Takes Lab input and returns quantized Lab output as u8.
 /// Useful when you want to work with the Lab output directly.
 ///
 /// Args:
@@ -460,7 +460,8 @@ pub fn lab_space_dither_wasm(
 ///     (other args same as lab_space_dither_wasm)
 ///
 /// Returns:
-///     Interleaved Lab f32 array (LabLabLab...)
+///     Interleaved Lab u8 array (LabLabLab...) where each channel is 0-255
+///     - L channel may be ignored if quantize_l is false
 #[wasm_bindgen]
 pub fn lab_space_dither_lab_output_wasm(
     l_channel: Vec<f32>,
@@ -478,7 +479,7 @@ pub fn lab_space_dither_lab_output_wasm(
     distance_space: u8,
     mode: u8,
     seed: u32,
-) -> Vec<f32> {
+) -> Vec<u8> {
     use dither_colorspace_lab::{LabQuantParams, lab_space_dither_with_mode};
     use dither_colorspace_aware::DitherMode as CSDitherMode;
 
@@ -517,9 +518,9 @@ pub fn lab_space_dither_lab_output_wasm(
         seed,
     );
 
-    // Interleave Lab channels
+    // Interleave Lab channels (already u8)
     let pixels = w * h;
-    let mut result = vec![0.0f32; pixels * 3];
+    let mut result = vec![0u8; pixels * 3];
     for i in 0..pixels {
         result[i * 3] = l_out[i];
         result[i * 3 + 1] = a_out[i];

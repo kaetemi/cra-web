@@ -441,6 +441,29 @@ fn process_pixel_lab(
 // Main dithering function
 // ============================================================================
 
+/// Convert Lab f32 values to u8 (0-255) based on color space
+#[inline]
+fn lab_f32_to_u8(l: f32, a: f32, b: f32, quant_space: LabQuantSpace) -> (u8, u8, u8) {
+    match quant_space {
+        LabQuantSpace::CIELab => {
+            // L: 0-100 → 0-255
+            // a/b: -127 to 127 → 0-255
+            let l_u8 = (l / 100.0 * 255.0).clamp(0.0, 255.0).round() as u8;
+            let a_u8 = ((a + 127.0) / 254.0 * 255.0).clamp(0.0, 255.0).round() as u8;
+            let b_u8 = ((b + 127.0) / 254.0 * 255.0).clamp(0.0, 255.0).round() as u8;
+            (l_u8, a_u8, b_u8)
+        }
+        LabQuantSpace::OkLab => {
+            // L: 0-1 → 0-255
+            // a/b: -0.5 to 0.5 → 0-255
+            let l_u8 = (l * 255.0).clamp(0.0, 255.0).round() as u8;
+            let a_u8 = ((a + 0.5) * 255.0).clamp(0.0, 255.0).round() as u8;
+            let b_u8 = ((b + 0.5) * 255.0).clamp(0.0, 255.0).round() as u8;
+            (l_u8, a_u8, b_u8)
+        }
+    }
+}
+
 /// Lab-space dithering with rotation-aware quantization.
 ///
 /// Takes Lab input directly and performs quantization with optional rotation,
@@ -459,7 +482,8 @@ fn process_pixel_lab(
 ///     seed: Random seed for mixed modes
 ///
 /// Returns:
-///     (l_out, a_out, b_out): Output Lab channels as f32 (same space as input)
+///     (l_out, a_out, b_out): Output Lab channels as u8 (0-255)
+///     - L channel may be ignored if quantize_l is false (value undefined)
 pub fn lab_space_dither_with_mode(
     l_channel: &[f32],
     a_channel: &[f32],
@@ -471,7 +495,7 @@ pub fn lab_space_dither_with_mode(
     distance_space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
     let ctx = LabDitherContext::new(params, quant_space, distance_space);
 
@@ -485,10 +509,10 @@ pub fn lab_space_dither_with_mode(
     // Error buffers in linear RGB (3 channels, flattened)
     let mut err_bufs: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width * buf_height]; 3];
 
-    // Output buffers in Lab space
-    let mut l_out = vec![0.0f32; pixels];
-    let mut a_out = vec![0.0f32; pixels];
-    let mut b_out = vec![0.0f32; pixels];
+    // Output buffers in Lab space (u8)
+    let mut l_out = vec![0u8; pixels];
+    let mut a_out = vec![0u8; pixels];
+    let mut b_out = vec![0u8; pixels];
 
     let hashed_seed = wang_hash(seed);
 
@@ -535,10 +559,11 @@ pub fn lab_space_dither_with_mode(
             let (out_l, out_a, out_b, new_err_r, new_err_g, new_err_b) =
                 process_pixel_lab(&ctx, r_lin, g_lin, b_lin, e_r, e_g, e_b);
 
-            // Store output
-            l_out[idx] = out_l;
-            a_out[idx] = out_a;
-            b_out[idx] = out_b;
+            // Store output as u8
+            let (l_u8, a_u8, b_u8) = lab_f32_to_u8(out_l, out_a, out_b, quant_space);
+            l_out[idx] = l_u8;
+            a_out[idx] = a_u8;
+            b_out[idx] = b_u8;
 
             // Apply error diffusion kernel
             if use_mixed {
@@ -637,7 +662,7 @@ pub fn lab_space_dither(
     params: &LabQuantParams,
     quant_space: LabQuantSpace,
     distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     lab_space_dither_with_mode(
         l_channel, a_channel, b_channel,
         width, height,
@@ -649,11 +674,32 @@ pub fn lab_space_dither(
     )
 }
 
-/// Convert Lab output back to sRGB u8
+/// Convert Lab u8 values back to f32 based on color space
+#[inline]
+fn lab_u8_to_f32(l: u8, a: u8, b: u8, quant_space: LabQuantSpace) -> (f32, f32, f32) {
+    match quant_space {
+        LabQuantSpace::CIELab => {
+            // 0-255 → L: 0-100, a/b: -127 to 127
+            let l_f = l as f32 / 255.0 * 100.0;
+            let a_f = a as f32 / 255.0 * 254.0 - 127.0;
+            let b_f = b as f32 / 255.0 * 254.0 - 127.0;
+            (l_f, a_f, b_f)
+        }
+        LabQuantSpace::OkLab => {
+            // 0-255 → L: 0-1, a/b: -0.5 to 0.5
+            let l_f = l as f32 / 255.0;
+            let a_f = a as f32 / 255.0 - 0.5;
+            let b_f = b as f32 / 255.0 - 0.5;
+            (l_f, a_f, b_f)
+        }
+    }
+}
+
+/// Convert Lab u8 output back to sRGB u8
 pub fn lab_to_srgb_u8(
-    l_channel: &[f32],
-    a_channel: &[f32],
-    b_channel: &[f32],
+    l_channel: &[u8],
+    a_channel: &[u8],
+    b_channel: &[u8],
     quant_space: LabQuantSpace,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = l_channel.len();
@@ -662,9 +708,12 @@ pub fn lab_to_srgb_u8(
     let mut b_out = vec![0u8; pixels];
 
     for i in 0..pixels {
+        // Convert u8 Lab back to f32
+        let (l_f, a_f, b_f) = lab_u8_to_f32(l_channel[i], a_channel[i], b_channel[i], quant_space);
+
         let (r_lin, g_lin, b_lin) = match quant_space {
-            LabQuantSpace::CIELab => lab_to_linear_rgb(l_channel[i], a_channel[i], b_channel[i]),
-            LabQuantSpace::OkLab => oklab_to_linear_rgb(l_channel[i], a_channel[i], b_channel[i]),
+            LabQuantSpace::CIELab => lab_to_linear_rgb(l_f, a_f, b_f),
+            LabQuantSpace::OkLab => oklab_to_linear_rgb(l_f, a_f, b_f),
         };
 
         let r_srgb = (linear_to_srgb_single(r_lin.clamp(0.0, 1.0)) * 255.0).round() as u8;
@@ -861,23 +910,23 @@ mod tests {
         let mut params_rot = LabQuantParams::default();
         params_rot.rotation_deg = 45.0;
 
-        let (l_out1, a_out1, b_out1) = lab_space_dither(
+        let (_l_out1, a_out1, b_out1) = lab_space_dither(
             &l, &a, &b, 10, 10,
             &params_no_rot,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
         );
 
-        let (l_out2, a_out2, b_out2) = lab_space_dither(
+        let (_l_out2, a_out2, b_out2) = lab_space_dither(
             &l, &a, &b, 10, 10,
             &params_rot,
             LabQuantSpace::OkLab,
             PerceptualSpace::OkLab,
         );
 
-        // Results should differ with rotation
-        let sum1: f32 = a_out1.iter().chain(b_out1.iter()).map(|x| x.abs()).sum();
-        let sum2: f32 = a_out2.iter().chain(b_out2.iter()).map(|x| x.abs()).sum();
-        assert!((sum1 - sum2).abs() > 0.001, "Rotation should change output: {} vs {}", sum1, sum2);
+        // Results should differ with rotation (compare sum of u8 values)
+        let sum1: u32 = a_out1.iter().chain(b_out1.iter()).map(|&x| x as u32).sum();
+        let sum2: u32 = a_out2.iter().chain(b_out2.iter()).map(|&x| x as u32).sum();
+        assert!(sum1 != sum2, "Rotation should change output: {} vs {}", sum1, sum2);
     }
 }
