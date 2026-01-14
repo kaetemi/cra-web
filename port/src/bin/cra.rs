@@ -86,6 +86,36 @@ impl HistogramMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum PerceptualSpace {
+    /// CIELAB with CIE76 (simple Euclidean distance)
+    LabCie76,
+    /// OKLab (perceptually uniform, recommended)
+    #[default]
+    OkLab,
+    /// CIELAB with CIE94 (weighted distance)
+    LabCie94,
+    /// CIELAB with CIEDE2000 (most accurate)
+    LabCiede2000,
+    /// Linear RGB (not recommended, for testing only)
+    LinearRgb,
+    /// Y'CbCr (not recommended, for testing only)
+    YCbCr,
+}
+
+impl PerceptualSpace {
+    fn to_u8(self) -> u8 {
+        match self {
+            PerceptualSpace::LabCie76 => 0,
+            PerceptualSpace::OkLab => 1,
+            PerceptualSpace::LabCie94 => 2,
+            PerceptualSpace::LabCiede2000 => 3,
+            PerceptualSpace::LinearRgb => 4,
+            PerceptualSpace::YCbCr => 5,
+        }
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "cra")]
 #[command(author, version, about = "CRA Color Correction Tool", long_about = None)]
@@ -129,6 +159,24 @@ struct Args {
     /// Dithering method for histogram processing (only used with --histogram-mode=binned)
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     histogram_dither: DitherMethod,
+
+    /// Use color-aware dithering for histogram quantization (only with --histogram-mode=binned)
+    /// Applies to: cra-lab, cra-oklab, tiled-lab, tiled-oklab
+    #[arg(long)]
+    color_aware_histogram: bool,
+
+    /// Perceptual space for color-aware histogram dithering distance metric
+    #[arg(long, value_enum, default_value_t = PerceptualSpace::OkLab)]
+    histogram_distance_space: PerceptualSpace,
+
+    /// Use color-aware dithering for final RGB output (joint RGB processing)
+    /// Applies to: cra-lab, cra-oklab, tiled-lab, tiled-oklab
+    #[arg(long)]
+    color_aware_output: bool,
+
+    /// Perceptual space for color-aware output dithering distance metric
+    #[arg(long, value_enum, default_value_t = PerceptualSpace::OkLab)]
+    output_distance_space: PerceptualSpace,
 
     /// Enable verbose output
     #[arg(short, long)]
@@ -182,13 +230,23 @@ fn main() -> Result<(), String> {
     let histogram_mode = args.histogram_mode.to_u8();
     let histogram_dither = args.histogram_dither.to_u8();
     let output_dither = args.output_dither.to_u8();
+    let histogram_distance_space = args.histogram_distance_space.to_u8();
+    let output_distance_space = args.output_distance_space.to_u8();
 
     if args.verbose {
         eprintln!("Method: {:?}", args.method);
         eprintln!("Histogram mode: {:?}", args.histogram_mode);
         eprintln!("Output dither: {:?}", args.output_dither);
+        if args.color_aware_output {
+            eprintln!("Color-aware output: true");
+            eprintln!("Output distance space: {:?}", args.output_distance_space);
+        }
         if histogram_mode == 0 {
             eprintln!("Histogram dither: {:?}", args.histogram_dither);
+            if args.color_aware_histogram {
+                eprintln!("Color-aware histogram: true");
+                eprintln!("Histogram distance space: {:?}", args.histogram_distance_space);
+            }
         }
     }
 
@@ -247,7 +305,11 @@ fn main() -> Result<(), String> {
             args.keep_luminosity,
             histogram_mode,
             histogram_dither,
+            args.color_aware_histogram,
+            histogram_distance_space,
             output_dither,
+            args.color_aware_output,
+            output_distance_space,
         ),
         Method::CraRgb => color_correct_cra_rgb(
             &input_data,
@@ -271,7 +333,11 @@ fn main() -> Result<(), String> {
             args.keep_luminosity,
             histogram_mode,
             histogram_dither,
+            args.color_aware_histogram,
+            histogram_distance_space,
             output_dither,
+            args.color_aware_output,
+            output_distance_space,
         ),
         Method::TiledLab => color_correct_tiled_lab(
             &input_data,
@@ -283,7 +349,11 @@ fn main() -> Result<(), String> {
             args.tiled_luminosity,
             histogram_mode,
             histogram_dither,
+            args.color_aware_histogram,
+            histogram_distance_space,
             output_dither,
+            args.color_aware_output,
+            output_distance_space,
         ),
         Method::TiledOklab => color_correct_tiled_oklab(
             &input_data,
@@ -295,7 +365,11 @@ fn main() -> Result<(), String> {
             args.tiled_luminosity,
             histogram_mode,
             histogram_dither,
+            args.color_aware_histogram,
+            histogram_distance_space,
             output_dither,
+            args.color_aware_output,
+            output_distance_space,
         ),
     };
 
