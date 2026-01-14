@@ -265,6 +265,39 @@
         .preset-btn:hover {
             background: #bdc3c7;
         }
+
+        .perceptual-options {
+            display: none;
+            margin-top: 15px;
+            padding: 15px;
+            background: #f3e5f5;
+            border-radius: 8px;
+            border: 1px solid #ce93d8;
+        }
+
+        .perceptual-options.visible {
+            display: block;
+        }
+
+        .perceptual-options label {
+            font-weight: 600;
+            color: #555;
+            margin-right: 10px;
+        }
+
+        .perceptual-options select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+        }
+
+        .perceptual-options .perceptual-hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
     </style>
 </head>
 <body>
@@ -326,6 +359,26 @@
                     <option value="2">Jarvis-Judice-Ninke</option>
                     <option value="3">Jarvis Serpentine</option>
                 </select>
+            </div>
+
+            <div class="option-row">
+                <label>
+                    <input type="checkbox" id="perceptual-toggle" checked>
+                    Color Space Aware Dithering
+                </label>
+            </div>
+
+            <div class="perceptual-options visible" id="perceptual-options">
+                <label for="perceptual-space">Distance Metric:</label>
+                <select id="perceptual-space">
+                    <option value="1" selected>OKLab (recommended)</option>
+                    <option value="3">CIELAB (CIEDE2000)</option>
+                    <option value="2">CIELAB (CIE94)</option>
+                    <option value="0">CIELAB (CIE76)</option>
+                    <option value="4">Linear RGB (not recommended)</option>
+                    <option value="5">Y'CbCr (not recommended)</option>
+                </select>
+                <p class="perceptual-hint">Uses perceptual distance for candidate selection. Processes RGB channels jointly for better color accuracy when quantizing float values to 8-bit.</p>
             </div>
 
             <div class="option-row">
@@ -414,7 +467,7 @@
         }
 
         // sRGB resize using library functions (WRONG way - skips linear conversion)
-        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode, progressCallback) {
+        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode, ditherTechnique, perceptualSpace, progressCallback) {
             // Step 1: Unpack u8 to f32 (this gives us sRGB f32 values)
             const srgbF32 = unpack_u8_to_f32_wasm(
                 imageDataToU8Interleaved(imageData),
@@ -441,15 +494,15 @@
                     scaleMode
                 );
 
-            // Step 3: Dither to RGB888
+            // Step 3: Dither floating-point result to RGB888
             const dithered = dither_output_wasm(
                 srgbResized,
                 dstW, dstH,
-                8, 8, 8,  // RGB888
-                1,        // PerChannel technique
+                8, 8, 8,           // RGB888 output
+                ditherTechnique,   // 1=PerChannel, 2=ColorAware
                 ditherMode,
-                1,        // OkLab perceptual space (not used for 8-bit)
-                0         // seed
+                perceptualSpace,   // Distance metric for ColorAware mode
+                0                  // seed
             );
 
             // Convert to ImageData for display
@@ -559,6 +612,11 @@
                 const interpolation = parseInt(document.getElementById('interpolation').value);
                 const ditherMode = parseInt(document.getElementById('dither-mode').value);
                 const showComparison = document.getElementById('show-comparison').checked;
+                const isPerceptual = document.getElementById('perceptual-toggle').checked;
+                const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+
+                // Dither technique: 1 = PerChannel, 2 = ColorAware
+                const ditherTechnique = isPerceptual ? 2 : 1;
 
                 // Total stages: 1 for linear resize, +1 if comparison enabled
                 const totalStages = showComparison ? 2 : 1;
@@ -591,15 +649,16 @@
                 // Step 4: Convert back to sRGB
                 const srgbResized = linear_to_srgb_f32_wasm(linearResized, dstW, dstH);
 
-                // Step 5: Dither to RGB888
+                // Step 5: Dither floating-point result to RGB888
+                // Rescale output is float - dithering is essential for quality
                 const dithered = dither_output_wasm(
                     srgbResized,
                     dstW, dstH,
-                    8, 8, 8,  // RGB888
-                    1,        // PerChannel technique
+                    8, 8, 8,           // RGB888 output
+                    ditherTechnique,   // 1=PerChannel, 2=ColorAware
                     ditherMode,
-                    1,        // OkLab perceptual space (not used for 8-bit)
-                    0         // seed
+                    perceptualSpace,   // Distance metric for ColorAware mode
+                    0                  // seed
                 );
 
                 // Store for download
@@ -622,7 +681,7 @@
                     // Also do sRGB resize (wrong way) for comparison
                     const srgbImageData = resizeSrgbBad(
                         inputImageData, originalWidth, originalHeight, dstW, dstH,
-                        interpolation, scaleMode, ditherMode,
+                        interpolation, scaleMode, ditherMode, ditherTechnique, perceptualSpace,
                         (progress) => updateProgress(progress, 1, totalStages)
                     );
 
@@ -778,6 +837,13 @@
 
         document.getElementById('process-btn').addEventListener('click', processImage);
         document.getElementById('download-btn').addEventListener('click', downloadResult);
+
+        // Perceptual toggle - show/hide distance metric options
+        function updatePerceptualMode() {
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            document.getElementById('perceptual-options').classList.toggle('visible', isPerceptual);
+        }
+        document.getElementById('perceptual-toggle').addEventListener('change', updatePerceptualMode);
 
         // Initialize
         initWasm();
