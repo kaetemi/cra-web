@@ -195,10 +195,20 @@ Updated existing WASM exports to use Pixel4 internally (no new function names ne
 
 ---
 
-## Cleanup
+## Cleanup ✅
 
 - [x] Refactored functions in-place (no deprecated functions to remove)
-- [ ] Remove unused `*_channels()` conversion utilities from `color.rs` (optional)
+- [x] Removed unused `*_channels()` conversion utilities from `color.rs`:
+  - `srgb_to_linear_channels()`
+  - `linear_rgb_to_lab_channels()`
+  - `lab_to_linear_rgb_channels()`
+  - `linear_rgb_to_oklab_channels()`
+  - `oklab_to_linear_rgb_channels()`
+  - `linear_to_srgb_scaled_channels()`
+- [x] Removed old channel-based finalization functions from `output.rs`:
+  - `finalize_linear_to_srgb_u8()`
+  - `finalize_linear_to_srgb_u8_color_aware()`
+  - `finalize_linear_to_srgb_u8_with_options()`
 - [x] Updated documentation (this file)
 
 ---
