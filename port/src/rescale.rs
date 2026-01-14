@@ -191,7 +191,7 @@ fn rescale_lanczos3(
 
             // Normalize
             dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
-                (sum / weight_sum).clamp(0.0, 1.0)
+                sum / weight_sum
             } else {
                 // Fallback to nearest neighbor
                 let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
@@ -417,10 +417,10 @@ fn rescale_lanczos3_pixels(
 
             dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
                 [
-                    (sum[0] / weight_sum).clamp(0.0, 1.0),
-                    (sum[1] / weight_sum).clamp(0.0, 1.0),
-                    (sum[2] / weight_sum).clamp(0.0, 1.0),
-                    (sum[3] / weight_sum).clamp(0.0, 1.0),
+                    sum[0] / weight_sum,
+                    sum[1] / weight_sum,
+                    sum[2] / weight_sum,
+                    sum[3] / weight_sum,
                 ]
             } else {
                 let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
