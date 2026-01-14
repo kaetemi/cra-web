@@ -80,6 +80,54 @@ pub fn linear_to_srgb_inplace(pixels: &mut [Pixel4]) {
     }
 }
 
+// ============================================================================
+// Grayscale conversion (Rec.709 luminance)
+// ============================================================================
+
+/// Compute luminance from linear RGB using Rec.709/BT.709 coefficients
+#[inline]
+pub fn linear_rgb_to_luminance(r: f32, g: f32, b: f32) -> f32 {
+    r * cs::YCBCR_KR + g * cs::YCBCR_KG + b * cs::YCBCR_KB
+}
+
+/// Convert linear RGB Pixel4 array (0-1 range) to grayscale (sRGB 0-255)
+///
+/// Pipeline: linear RGB -> luminance (Rec.709) -> sRGB -> scale to 0-255
+pub fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
+    let mut gray = Vec::with_capacity(pixels.len());
+
+    for p in pixels {
+        let luminance = linear_rgb_to_luminance(p[0], p[1], p[2]);
+        gray.push(linear_to_srgb_single(luminance) * 255.0);
+    }
+
+    gray
+}
+
+/// Convert interleaved sRGB u8 array to grayscale (sRGB 0-255 as f32)
+///
+/// Input: Interleaved RGB bytes (RGBRGB..., 0-255)
+/// Output: Grayscale values (sRGB 0-255 as f32, ready for dithering)
+/// Pipeline: sRGB -> linear RGB -> luminance (Rec.709) -> sRGB
+pub fn srgb_interleaved_to_grayscale(srgb: &[u8], pixel_count: usize) -> Vec<f32> {
+    let mut gray = Vec::with_capacity(pixel_count);
+
+    for i in 0..pixel_count {
+        // Convert sRGB 0-255 to linear 0-1
+        let r_linear = srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
+        let g_linear = srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
+        let b_linear = srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
+
+        // Compute luminance in linear space
+        let luminance = linear_rgb_to_luminance(r_linear, g_linear, b_linear);
+
+        // Convert back to sRGB 0-255
+        gray.push(linear_to_srgb_single(luminance) * 255.0);
+    }
+
+    gray
+}
+
 /// Lab f(t) function - attempt to linearize cube root near zero.
 ///
 /// The standard CIELAB f(t) function uses a linear segment near zero to avoid

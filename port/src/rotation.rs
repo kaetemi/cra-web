@@ -1,6 +1,7 @@
 /// Rotation utilities for color correction algorithms.
 /// Includes AB plane rotation (LAB) and RGB cube rotation around (1,1,1).
 
+use crate::colorspace_derived::f32 as cs;
 use std::f32::consts::PI;
 
 /// Convert degrees to radians
@@ -193,8 +194,8 @@ pub fn compute_rgb_channel_ranges(
     ranges
 }
 
-/// Perceptual luminance weights (Rec.709)
-pub const LUMA_WEIGHTS: [f32; 3] = [0.2126, 0.7152, 0.0722];
+/// Perceptual luminance weights (Rec.709/BT.709)
+pub const LUMA_WEIGHTS: [f32; 3] = [cs::YCBCR_KR, cs::YCBCR_KG, cs::YCBCR_KB];
 
 /// Compute perceptual scale factors
 /// Compress less-important channels, match green precisely

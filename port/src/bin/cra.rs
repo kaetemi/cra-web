@@ -15,7 +15,7 @@ use cra_wasm::binary_format::{
     encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
     encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
-use cra_wasm::color::{linear_to_srgb_single, srgb_to_linear_single};
+use cra_wasm::color::{linear_pixels_to_grayscale, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -425,50 +425,6 @@ fn resize_linear(
     Ok((dst_pixels, dst_width as u32, dst_height as u32))
 }
 
-/// Convert linear RGB Pixel4 to grayscale (luminance) using Rec.709 coefficients
-fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
-    // Rec.709 luminance coefficients (for linear RGB)
-    const R_COEF: f32 = 0.2126;
-    const G_COEF: f32 = 0.7152;
-    const B_COEF: f32 = 0.0722;
-
-    let mut gray = Vec::with_capacity(pixels.len());
-
-    for p in pixels {
-        // Compute luminance in linear space
-        let luminance = p[0] * R_COEF + p[1] * G_COEF + p[2] * B_COEF;
-        // Convert to sRGB for perceptual grayscale output, scale to 0-255
-        gray.push(linear_to_srgb_single(luminance) * 255.0);
-    }
-
-    gray
-}
-
-/// Convert sRGB Pixel4 (0-255 range) to grayscale using proper linear-space luminance
-/// Pipeline: sRGB -> linear -> luminance (Rec.709) -> sRGB (0-255)
-fn srgb_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
-    const R_COEF: f32 = 0.2126;
-    const G_COEF: f32 = 0.7152;
-    const B_COEF: f32 = 0.0722;
-
-    let mut gray = Vec::with_capacity(pixels.len());
-
-    for p in pixels {
-        // Convert sRGB 0-255 to linear 0-1
-        let r_linear = srgb_to_linear_single(p[0] / 255.0);
-        let g_linear = srgb_to_linear_single(p[1] / 255.0);
-        let b_linear = srgb_to_linear_single(p[2] / 255.0);
-
-        // Compute luminance in linear space
-        let luminance = r_linear * R_COEF + g_linear * G_COEF + b_linear * B_COEF;
-
-        // Convert back to sRGB 0-255
-        gray.push(linear_to_srgb_single(luminance) * 255.0);
-    }
-
-    gray
-}
-
 // ============================================================================
 // Dithering
 // ============================================================================
@@ -567,10 +523,11 @@ fn dither_pixels(
     }
 }
 
-/// Dither sRGB pixels (0-255 range) directly to the target format
-/// Use when no color correction or resize is needed (avoids linear conversion overhead)
+/// Dither sRGB RGB pixels (0-255 range) directly to the target format
+/// Use when no color correction, resize, or grayscale conversion is needed
+/// (avoids linear conversion overhead)
 #[allow(clippy::too_many_arguments)]
-fn dither_pixels_srgb(
+fn dither_pixels_srgb_rgb(
     pixels: Vec<Pixel4>,
     width: usize,
     height: usize,
@@ -582,47 +539,32 @@ fn dither_pixels_srgb(
 ) -> DitherResult {
     use cra_wasm::output::dither_output;
 
+    debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
+
     let pixel_count = width * height;
+    let technique = build_output_technique(color_aware, dither_mode, colorspace);
+    let (r_out, g_out, b_out) = dither_output(
+        &pixels,
+        width, height,
+        format.bits_r, format.bits_g, format.bits_b,
+        technique,
+        seed,
+    );
 
-    if format.is_grayscale {
-        // Grayscale still needs linear-space luminance computation for correctness
-        let gray = srgb_pixels_to_grayscale(&pixels);
-        let gray_out = dither_grayscale(
-            &gray, width, height, format.bits_r, colorspace, dither_mode, seed,
-        );
-        DitherResult {
-            interleaved: gray_out.clone(),
-            gray: Some(gray_out),
-            r: None,
-            g: None,
-            b: None,
-        }
-    } else {
-        // RGB: dither sRGB directly (no linear conversion needed)
-        let technique = build_output_technique(color_aware, dither_mode, colorspace);
-        let (r_out, g_out, b_out) = dither_output(
-            &pixels,
-            width, height,
-            format.bits_r, format.bits_g, format.bits_b,
-            technique,
-            seed,
-        );
+    // Build interleaved for PNG output
+    let mut interleaved = Vec::with_capacity(pixel_count * 3);
+    for i in 0..pixel_count {
+        interleaved.push(r_out[i]);
+        interleaved.push(g_out[i]);
+        interleaved.push(b_out[i]);
+    }
 
-        // Build interleaved for PNG output
-        let mut interleaved = Vec::with_capacity(pixel_count * 3);
-        for i in 0..pixel_count {
-            interleaved.push(r_out[i]);
-            interleaved.push(g_out[i]);
-            interleaved.push(b_out[i]);
-        }
-
-        DitherResult {
-            interleaved,
-            gray: None,
-            r: Some(r_out),
-            g: Some(g_out),
-            b: Some(b_out),
-        }
+    DitherResult {
+        interleaved,
+        gray: None,
+        r: Some(r_out),
+        g: Some(g_out),
+        b: Some(b_out),
     }
 }
 
@@ -851,8 +793,9 @@ fn main() -> Result<(), String> {
     }
 
     // Determine if linear-space processing is needed
+    // Grayscale requires linear for correct luminance computation
     let needs_resize = args.width.is_some() || args.height.is_some();
-    let needs_linear = needs_reference || needs_resize;
+    let needs_linear = needs_reference || needs_resize || format.is_grayscale;
 
     // Process image based on whether linear space is needed
     let (dither_result, width, height) = if needs_linear {
@@ -909,19 +852,15 @@ fn main() -> Result<(), String> {
 
         (result, width, height)
     } else {
-        // sRGB path: dither-only (no resize, no color correction)
+        // sRGB path: RGB dither-only (no resize, no color correction, no grayscale)
         // Avoids unnecessary sRGB -> linear -> sRGB conversion
         if args.verbose {
-            if format.is_grayscale {
-                eprintln!("Converting to grayscale and dithering (sRGB path)...");
-            } else {
-                eprintln!("Dithering RGB channels (sRGB path)...");
-            }
+            eprintln!("Dithering RGB channels (sRGB path)...");
         }
 
         let (input_pixels, width, height) = load_image_srgb(&args.input, args.verbose)?;
 
-        let result = dither_pixels_srgb(
+        let result = dither_pixels_srgb_rgb(
             input_pixels,
             width as usize,
             height as usize,

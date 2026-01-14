@@ -664,28 +664,7 @@ pub fn linear_to_srgb_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec
 /// Pipeline: sRGB -> linear RGB -> luminance (Rec.709) -> sRGB
 #[wasm_bindgen]
 pub fn srgb_to_grayscale_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
-    let pixels = width * height;
-    let mut gray = vec![0.0f32; pixels];
-
-    // Rec.709 luminance coefficients
-    const R_COEF: f32 = 0.2126;
-    const G_COEF: f32 = 0.7152;
-    const B_COEF: f32 = 0.0722;
-
-    for i in 0..pixels {
-        // Convert sRGB to linear
-        let r_linear = color::srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
-        let g_linear = color::srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
-        let b_linear = color::srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
-
-        // Compute luminance in linear space
-        let luminance = r_linear * R_COEF + g_linear * G_COEF + b_linear * B_COEF;
-
-        // Convert back to sRGB for perceptual output
-        gray[i] = color::linear_to_srgb_single(luminance) * 255.0;
-    }
-
-    gray
+    color::srgb_interleaved_to_grayscale(&srgb, width * height)
 }
 
 // Image Rescaling WASM Exports
