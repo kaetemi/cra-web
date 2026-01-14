@@ -18,6 +18,7 @@ mod cra_oklab;
 mod cra_rgb;
 pub mod dither;
 pub mod dither_colorspace_aware;
+pub mod dither_colorspace_lab;
 pub mod dither_colorspace_luminosity;
 pub mod dither_common;
 mod histogram;
@@ -337,6 +338,188 @@ pub fn colorspace_aware_dither_gray_with_mode_wasm(
         cs_mode,
         seed,
     )
+}
+
+/// Convert u8 to LabQuantSpace for WASM interface
+/// 0 = CIELAB
+/// 1 = OKLab (default)
+fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
+    match space {
+        0 => dither_colorspace_lab::LabQuantSpace::CIELab,
+        _ => dither_colorspace_lab::LabQuantSpace::OkLab,
+    }
+}
+
+/// Lab-space dithering with rotation-aware quantization (WASM export)
+///
+/// Unlike the RGB quantizer, this quantizes directly in Lab space with support for:
+/// - Rotation of the a/b plane before quantization
+/// - Offset and scaling for quantization ranges
+/// - Optional preservation of L channel (no quantization)
+///
+/// Error diffusion is performed in linear RGB for physically correct light mixing.
+///
+/// Args:
+///     r_channel: Red channel as f32 values in range [0, 255]
+///     g_channel: Green channel as f32 values in range [0, 255]
+///     b_channel: Blue channel as f32 values in range [0, 255]
+///     w: image width
+///     h: image height
+///     levels_ab: Number of quantization levels for a/b channels (e.g., 16 = 4 bits)
+///     levels_l: Number of quantization levels for L channel (e.g., 256 = 8 bits)
+///     quantize_l: Whether to quantize L channel (if false, L is preserved)
+///     rotation_deg: Rotation angle in degrees for a/b plane
+///     offset: Offset for quantization range (0.0 = no offset, 0.5 = shift by half a level)
+///     scale: Scaling factor for quantization range (1.0 = full range)
+///     quant_space: Color space for rotation/quantization (0 = CIELAB, 1 = OKLab)
+///     distance_space: Perceptual space for distance calculation (0-5, same as other dithers)
+///     mode: Dither mode (0-6)
+///     seed: Random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn lab_space_dither_wasm(
+    r_channel: Vec<f32>,
+    g_channel: Vec<f32>,
+    b_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    levels_ab: usize,
+    levels_l: usize,
+    quantize_l: bool,
+    rotation_deg: f32,
+    offset: f32,
+    scale: f32,
+    quant_space: u8,
+    distance_space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_rgb_with_mode, lab_to_srgb_u8};
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let params = LabQuantParams {
+        levels_ab,
+        levels_l,
+        quantize_l,
+        rotation_deg,
+        offset,
+        scale,
+    };
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    let quant = lab_quant_space_from_u8(quant_space);
+    let dist = perceptual_space_from_u8(distance_space);
+
+    let (l_out, a_out, b_out) = lab_space_dither_rgb_with_mode(
+        &r_channel,
+        &g_channel,
+        &b_channel,
+        w,
+        h,
+        &params,
+        quant,
+        dist,
+        cs_mode,
+        seed,
+    );
+
+    // Convert Lab output to sRGB u8
+    let (r_out, g_out, b_out) = lab_to_srgb_u8(&l_out, &a_out, &b_out, quant);
+
+    // Interleave RGB channels
+    let pixels = w * h;
+    let mut result = vec![0u8; pixels * 3];
+    for i in 0..pixels {
+        result[i * 3] = r_out[i];
+        result[i * 3 + 1] = g_out[i];
+        result[i * 3 + 2] = b_out[i];
+    }
+    result
+}
+
+/// Lab-space dithering returning Lab values directly (WASM export)
+///
+/// Returns the Lab values instead of converting back to RGB.
+/// Useful when you want to work with the Lab output directly.
+///
+/// Returns:
+///     Interleaved Lab f32 array (LabLabLab...)
+#[wasm_bindgen]
+pub fn lab_space_dither_lab_output_wasm(
+    r_channel: Vec<f32>,
+    g_channel: Vec<f32>,
+    b_channel: Vec<f32>,
+    w: usize,
+    h: usize,
+    levels_ab: usize,
+    levels_l: usize,
+    quantize_l: bool,
+    rotation_deg: f32,
+    offset: f32,
+    scale: f32,
+    quant_space: u8,
+    distance_space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<f32> {
+    use dither_colorspace_lab::{LabQuantParams, lab_space_dither_rgb_with_mode};
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let params = LabQuantParams {
+        levels_ab,
+        levels_l,
+        quantize_l,
+        rotation_deg,
+        offset,
+        scale,
+    };
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    let quant = lab_quant_space_from_u8(quant_space);
+    let dist = perceptual_space_from_u8(distance_space);
+
+    let (l_out, a_out, b_out) = lab_space_dither_rgb_with_mode(
+        &r_channel,
+        &g_channel,
+        &b_channel,
+        w,
+        h,
+        &params,
+        quant,
+        dist,
+        cs_mode,
+        seed,
+    );
+
+    // Interleave Lab channels
+    let pixels = w * h;
+    let mut result = vec![0.0f32; pixels * 3];
+    for i in 0..pixels {
+        result[i * 3] = l_out[i];
+        result[i * 3 + 1] = a_out[i];
+        result[i * 3 + 2] = b_out[i];
+    }
+    result
 }
 
 /// Basic LAB histogram matching (WASM export)
