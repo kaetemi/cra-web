@@ -841,7 +841,11 @@
             encode_gray_row_aligned_wasm,
             encode_gray_row_aligned_stride_wasm,
             encode_channel_packed_wasm,
-            encode_channel_row_aligned_stride_wasm
+            encode_channel_row_aligned_stride_wasm,
+            // Color space conversion functions (use WASM for precision)
+            srgb_to_linear_wasm,
+            linear_to_srgb_wasm,
+            srgb_to_grayscale_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
@@ -854,83 +858,66 @@
             };
         }
 
-        // sRGB constants (matching Rust implementation)
-        const SRGB_GAMMA = 2.4;
-        const SRGB_OFFSET = 0.055;
-        const SRGB_SCALE = 1.055;
-        const SRGB_LINEAR_SLOPE = 12.92;
-        const SRGB_DECODE_THRESHOLD = 0.04045;
-        const SRGB_ENCODE_THRESHOLD = 0.0031308;
-
-        // Convert single sRGB value (0-1) to linear (0-1)
-        function srgbToLinearSingle(srgb) {
-            if (srgb <= SRGB_DECODE_THRESHOLD) {
-                return srgb / SRGB_LINEAR_SLOPE;
-            } else {
-                return Math.pow((srgb + SRGB_OFFSET) / SRGB_SCALE, SRGB_GAMMA);
-            }
-        }
-
-        // Convert single linear value (0-1) to sRGB (0-1)
-        function linearToSrgbSingle(linear) {
-            if (linear <= SRGB_ENCODE_THRESHOLD) {
-                return linear * SRGB_LINEAR_SLOPE;
-            } else {
-                return SRGB_SCALE * Math.pow(linear, 1.0 / SRGB_GAMMA) - SRGB_OFFSET;
-            }
-        }
-
-        // Convert sRGB ImageData to linear RGB Float32Arrays (0-1 range)
-        function imageDataToLinearRgb(imageData) {
+        // Extract RGB from ImageData as interleaved Uint8Array (for WASM input)
+        function extractRgbFromImageData(imageData) {
             const pixels = imageData.width * imageData.height;
             const data = imageData.data;
+            const rgb = new Uint8Array(pixels * 3);
+
+            for (let i = 0; i < pixels; i++) {
+                rgb[i * 3] = data[i * 4];
+                rgb[i * 3 + 1] = data[i * 4 + 1];
+                rgb[i * 3 + 2] = data[i * 4 + 2];
+            }
+
+            return rgb;
+        }
+
+        // Split interleaved RGB Float32Array into separate channel Float32Arrays
+        function splitRgbChannels(interleaved) {
+            const pixels = interleaved.length / 3;
             const r = new Float32Array(pixels);
             const g = new Float32Array(pixels);
             const b = new Float32Array(pixels);
 
             for (let i = 0; i < pixels; i++) {
-                r[i] = srgbToLinearSingle(data[i * 4] / 255.0);
-                g[i] = srgbToLinearSingle(data[i * 4 + 1] / 255.0);
-                b[i] = srgbToLinearSingle(data[i * 4 + 2] / 255.0);
+                r[i] = interleaved[i * 3];
+                g[i] = interleaved[i * 3 + 1];
+                b[i] = interleaved[i * 3 + 2];
             }
 
             return { r, g, b };
         }
 
-        // Convert linear RGB (0-1) to sRGB (0-255) for dithering
-        function linearToSrgb255(r, g, b) {
-            const pixels = r.length;
-            const rSrgb = new Float32Array(pixels);
-            const gSrgb = new Float32Array(pixels);
-            const bSrgb = new Float32Array(pixels);
-
-            for (let i = 0; i < pixels; i++) {
-                rSrgb[i] = linearToSrgbSingle(r[i]) * 255.0;
-                gSrgb[i] = linearToSrgbSingle(g[i]) * 255.0;
-                bSrgb[i] = linearToSrgbSingle(b[i]) * 255.0;
-            }
-
-            return { r: rSrgb, g: gSrgb, b: bSrgb };
+        // Convert sRGB ImageData to linear RGB as separate Float32Arrays (0-1 range)
+        // Uses WASM implementation for high-precision color conversion
+        function imageDataToLinearRgb(imageData) {
+            const rgb = extractRgbFromImageData(imageData);
+            const linearInterleaved = srgb_to_linear_wasm(rgb, imageData.width, imageData.height);
+            return splitRgbChannels(linearInterleaved);
         }
 
-        // Convert linear RGB to grayscale using Rec.709 luminance, output as sRGB 0-255
-        function linearRgbToGrayscale(r, g, b) {
+        // Convert linear RGB (0-1, separate channels) to sRGB (0-255) for dithering
+        // Uses WASM implementation for high-precision color conversion
+        function linearToSrgb255(r, g, b, width, height) {
             const pixels = r.length;
-            const gray = new Float32Array(pixels);
-
-            // Rec.709 luminance coefficients (for linear RGB)
-            const rCoef = 0.2126;
-            const gCoef = 0.7152;
-            const bCoef = 0.0722;
-
+            // Recombine into interleaved format for WASM
+            const interleaved = new Float32Array(pixels * 3);
             for (let i = 0; i < pixels; i++) {
-                // Compute luminance in linear space
-                const luminance = r[i] * rCoef + g[i] * gCoef + b[i] * bCoef;
-                // Convert to sRGB for perceptual output
-                gray[i] = linearToSrgbSingle(luminance) * 255.0;
+                interleaved[i * 3] = r[i];
+                interleaved[i * 3 + 1] = g[i];
+                interleaved[i * 3 + 2] = b[i];
             }
+            // WASM returns sRGB in 0-255 range
+            const srgbInterleaved = linear_to_srgb_wasm(interleaved, width, height);
+            return splitRgbChannels(srgbInterleaved);
+        }
 
-            return gray;
+        // Convert sRGB ImageData directly to grayscale using proper luminance computation
+        // Uses WASM implementation: sRGB -> linear -> Rec.709 luminance -> sRGB (0-255)
+        function imageDataToGrayscale(imageData) {
+            const rgb = extractRgbFromImageData(imageData);
+            return srgb_to_grayscale_wasm(rgb, imageData.width, imageData.height);
         }
 
         let wasmReady = false;
@@ -1100,16 +1087,14 @@
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-                // Convert sRGB image data to linear RGB
-                const linear = imageDataToLinearRgb(processData);
-
                 if (isGrayscale) {
-                    // Grayscale mode: compute luminance in linear space, convert to sRGB for dithering
+                    // Grayscale mode: convert sRGB to grayscale using WASM
+                    // WASM handles: sRGB -> linear -> Rec.709 luminance -> sRGB (0-255)
                     const bitsGray = parseInt(document.getElementById('bits-gray').value);
                     const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
-                    // Convert linear RGB to grayscale (outputs sRGB 0-255)
-                    const grayChannel = linearRgbToGrayscale(linear.r, linear.g, linear.b);
+                    // Convert sRGB directly to grayscale using WASM (high precision)
+                    const grayChannel = imageDataToGrayscale(processData);
 
                     let grayDithered;
                     const seeds = getSeeds();
@@ -1139,14 +1124,16 @@
                         outputData[i * 4 + 3] = 255;
                     }
                 } else {
-                    // RGB mode: convert linear to sRGB, then dither
+                    // RGB mode: convert sRGB to linear, then back to sRGB for dithering
+                    // (Linear step is for future processing; WASM provides high-precision conversion)
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
                     const bitsB = parseInt(document.getElementById('bits-b').value);
                     const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
-                    // Convert linear RGB to sRGB 0-255 for dithering
-                    const srgb = linearToSrgb255(linear.r, linear.g, linear.b);
+                    // Convert sRGB -> linear RGB -> sRGB (0-255) using WASM for precision
+                    const linear = imageDataToLinearRgb(processData);
+                    const srgb = linearToSrgb255(linear.r, linear.g, linear.b, processWidth, processHeight);
 
                     if (isPerceptual) {
                         // Color space aware dithering: process all channels jointly

@@ -38,6 +38,7 @@ dither/pkg/
 wasm_cra/
 *.wasm
 *_bg.wasm.d.ts
+wasm/
 
 # Node/npm (if using any JS tooling)
 node_modules/

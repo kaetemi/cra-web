@@ -1161,6 +1161,97 @@ pub fn encode_channel_row_aligned_stride_wasm(
     binary_format::encode_channel_row_aligned_stride(&channel_data, width, height, bits, stride, binary_format::StrideFill::from_u8(fill))
 }
 
+// ============================================================================
+// Color Space Conversion WASM Exports
+// ============================================================================
+
+/// Convert sRGB image (interleaved RGB, 0-255) to linear RGB channels (0-1 range)
+/// Returns interleaved RGB as f32
+#[wasm_bindgen]
+pub fn srgb_to_linear_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut linear = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        linear[i * 3] = color::srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
+        linear[i * 3 + 1] = color::srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
+        linear[i * 3 + 2] = color::srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
+    }
+
+    linear
+}
+
+/// Convert linear RGB (interleaved, 0-1 range) to sRGB (0-255 range)
+/// Returns interleaved RGB as f32 in 0-255 range (for dithering)
+#[wasm_bindgen]
+pub fn linear_to_srgb_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut srgb = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        srgb[i * 3] = color::linear_to_srgb_single(linear[i * 3]) * 255.0;
+        srgb[i * 3 + 1] = color::linear_to_srgb_single(linear[i * 3 + 1]) * 255.0;
+        srgb[i * 3 + 2] = color::linear_to_srgb_single(linear[i * 3 + 2]) * 255.0;
+    }
+
+    srgb
+}
+
+/// Convert sRGB RGB image to grayscale using proper linear-space luminance computation
+/// Input: sRGB interleaved RGB (0-255 as u8)
+/// Output: sRGB grayscale (0-255 range as f32, ready for dithering)
+///
+/// Pipeline: sRGB -> linear RGB -> luminance (Rec.709) -> sRGB
+#[wasm_bindgen]
+pub fn srgb_to_grayscale_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut gray = vec![0.0f32; pixels];
+
+    // Rec.709 luminance coefficients
+    const R_COEF: f32 = 0.2126;
+    const G_COEF: f32 = 0.7152;
+    const B_COEF: f32 = 0.0722;
+
+    for i in 0..pixels {
+        // Convert sRGB to linear
+        let r_linear = color::srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
+        let g_linear = color::srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
+        let b_linear = color::srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
+
+        // Compute luminance in linear space
+        let luminance = r_linear * R_COEF + g_linear * G_COEF + b_linear * B_COEF;
+
+        // Convert back to sRGB for perceptual output
+        gray[i] = color::linear_to_srgb_single(luminance) * 255.0;
+    }
+
+    gray
+}
+
+/// Convert linear RGB channels to grayscale using Rec.709 luminance
+/// Input: linear RGB channels (0-1 range)
+/// Output: sRGB grayscale (0-255 range as f32, ready for dithering)
+#[wasm_bindgen]
+pub fn linear_rgb_to_grayscale_wasm(r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Vec<f32> {
+    let pixels = r.len();
+    let mut gray = vec![0.0f32; pixels];
+
+    // Rec.709 luminance coefficients
+    const R_COEF: f32 = 0.2126;
+    const G_COEF: f32 = 0.7152;
+    const B_COEF: f32 = 0.0722;
+
+    for i in 0..pixels {
+        // Compute luminance in linear space
+        let luminance = r[i] * R_COEF + g[i] * G_COEF + b[i] * B_COEF;
+
+        // Convert to sRGB for perceptual output
+        gray[i] = color::linear_to_srgb_single(luminance) * 255.0;
+    }
+
+    gray
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
