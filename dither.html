@@ -803,14 +803,14 @@
             <h4>Downloads</h4>
             <div class="download-row">
                 <a class="download-btn" id="download-btn" download="dithered.png">PNG Image</a>
-                <button class="download-btn secondary" id="download-bin-btn" disabled>Binary (packed)</button>
-                <button class="download-btn secondary" id="download-bin-r-btn" disabled>Binary (row-aligned)</button>
+                <button class="download-btn secondary" id="download-raw-btn" disabled>Raw (packed)</button>
+                <button class="download-btn secondary" id="download-raw-r-btn" disabled>Raw (row-aligned)</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
             </div>
-            <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - binary download available</p>
+            <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - raw download available</p>
 
             <div class="channel-downloads" id="channel-downloads">
-                <h5>Per-Channel Binary</h5>
+                <h5>Per-Channel Raw</h5>
                 <div class="download-row">
                     <button class="download-btn secondary" id="download-r-btn" disabled>R Channel</button>
                     <button class="download-btn secondary" id="download-g-btn" disabled>G Channel</button>
@@ -1239,14 +1239,14 @@
             // Update format info
             const formatInfo = document.getElementById('format-info');
             if (supportsBinary) {
-                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - binary download available`;
+                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - raw download available`;
             } else {
-                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - binary not supported (needs 1/2/4/8/16/24/32 bpp)`;
+                formatInfo.textContent = `Format: ${format} (${totalBits} bits/pixel) - raw not supported (needs 1/2/4/8/16/24/32 bpp)`;
             }
 
-            // Enable/disable binary download buttons
-            document.getElementById('download-bin-btn').disabled = !supportsBinary;
-            document.getElementById('download-bin-r-btn').disabled = !supportsBinary;
+            // Enable/disable raw download buttons
+            document.getElementById('download-raw-btn').disabled = !supportsBinary;
+            document.getElementById('download-raw-r-btn').disabled = !supportsBinary;
 
             // Per-channel downloads
             const channelDownloads = document.getElementById('channel-downloads');
@@ -1510,23 +1510,23 @@
             }
         });
 
-        // Binary download handlers
-        document.getElementById('download-bin-btn').addEventListener('click', () => {
+        // Raw download handlers
+        document.getElementById('download-raw-btn').addEventListener('click', () => {
             if (!lastDitherResult) return;
 
             const format = getFormatString();
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
-            let binaryData;
+            let rawData;
 
             if (lastDitherResult.isGrayscale) {
-                binaryData = encode_gray_packed_wasm(
+                rawData = encode_gray_packed_wasm(
                     lastDitherResult.grayChannel,
                     lastDitherResult.width,
                     lastDitherResult.height,
                     lastDitherResult.bitsR
                 );
             } else {
-                binaryData = encode_rgb_packed_wasm(
+                rawData = encode_rgb_packed_wasm(
                     lastDitherResult.rChannel,
                     lastDitherResult.gChannel,
                     lastDitherResult.bChannel,
@@ -1539,20 +1539,20 @@
                 );
             }
 
-            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_${format}.bin`);
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_${format}.raw`);
         });
 
-        document.getElementById('download-bin-r-btn').addEventListener('click', () => {
+        document.getElementById('download-raw-r-btn').addEventListener('click', () => {
             if (!lastDitherResult) return;
 
             const format = getFormatString();
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
-            let binaryData;
+            let rawData;
 
             if (lastDitherResult.isGrayscale) {
-                binaryData = encode_gray_row_aligned_stride_wasm(
+                rawData = encode_gray_row_aligned_stride_wasm(
                     lastDitherResult.grayChannel,
                     lastDitherResult.width,
                     lastDitherResult.height,
@@ -1561,7 +1561,7 @@
                     fill
                 );
             } else {
-                binaryData = encode_rgb_row_aligned_stride_wasm(
+                rawData = encode_rgb_row_aligned_stride_wasm(
                     lastDitherResult.rChannel,
                     lastDitherResult.gChannel,
                     lastDitherResult.bChannel,
@@ -1575,9 +1575,9 @@
                 );
             }
 
-            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
             const strideSuffix = stride > 1 ? `_stride${stride}` : '';
-            downloadBlob(blob, `dithered_${format}_row${strideSuffix}.bin`);
+            downloadBlob(blob, `dithered_${format}_row${strideSuffix}.raw`);
         });
 
         document.getElementById('download-meta-btn').addEventListener('click', () => {
@@ -1593,43 +1593,43 @@
         document.getElementById('download-r-btn').addEventListener('click', () => {
             if (!lastDitherResult || !lastDitherResult.rChannel) return;
 
-            const binaryData = encode_channel_packed_wasm(
+            const rawData = encode_channel_packed_wasm(
                 lastDitherResult.rChannel,
                 lastDitherResult.width,
                 lastDitherResult.height,
                 lastDitherResult.bitsR
             );
 
-            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_R${lastDitherResult.bitsR}.bin`);
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_R${lastDitherResult.bitsR}.raw`);
         });
 
         document.getElementById('download-g-btn').addEventListener('click', () => {
             if (!lastDitherResult || !lastDitherResult.gChannel) return;
 
-            const binaryData = encode_channel_packed_wasm(
+            const rawData = encode_channel_packed_wasm(
                 lastDitherResult.gChannel,
                 lastDitherResult.width,
                 lastDitherResult.height,
                 lastDitherResult.bitsG
             );
 
-            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_G${lastDitherResult.bitsG}.bin`);
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_G${lastDitherResult.bitsG}.raw`);
         });
 
         document.getElementById('download-b-btn').addEventListener('click', () => {
             if (!lastDitherResult || !lastDitherResult.bChannel) return;
 
-            const binaryData = encode_channel_packed_wasm(
+            const rawData = encode_channel_packed_wasm(
                 lastDitherResult.bChannel,
                 lastDitherResult.width,
                 lastDitherResult.height,
                 lastDitherResult.bitsB
             );
 
-            const blob = new Blob([binaryData], { type: 'application/octet-stream' });
-            downloadBlob(blob, `dithered_B${lastDitherResult.bitsB}.bin`);
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            downloadBlob(blob, `dithered_B${lastDitherResult.bitsB}.raw`);
         });
 
         // Initialize

@@ -190,11 +190,11 @@ struct Args {
 
     /// Output raw binary file path (optional) - packed pixel data
     #[arg(long)]
-    output_bin: Option<PathBuf>,
+    output_raw: Option<PathBuf>,
 
-    /// Output row-aligned binary file path (optional) - each row padded to stride boundary
+    /// Output row-aligned raw binary file path (optional) - each row padded to stride boundary
     #[arg(long)]
-    output_bin_r: Option<PathBuf>,
+    output_raw_r: Option<PathBuf>,
 
     /// Output metadata JSON file path (optional)
     #[arg(long)]
@@ -595,18 +595,18 @@ fn main() -> Result<(), String> {
 
     // Check if at least one output is specified
     if args.output.is_none()
-        && args.output_bin.is_none()
-        && args.output_bin_r.is_none()
+        && args.output_raw.is_none()
+        && args.output_raw_r.is_none()
         && args.output_meta.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-bin, --output-bin-r, or --output-meta"
+            "No output specified. Use --output, --output-raw, --output-raw-r, or --output-meta"
                 .to_string(),
         );
     }
 
     // Check binary output compatibility
-    if (args.output_bin.is_some() || args.output_bin_r.is_some()) && !format.supports_binary() {
+    if (args.output_raw.is_some() || args.output_raw_r.is_some()) && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
             format.name, format.total_bits
@@ -902,7 +902,7 @@ fn main() -> Result<(), String> {
     }
 
     // Write packed binary output
-    if let Some(ref bin_path) = args.output_bin {
+    if let Some(ref bin_path) = args.output_raw {
         if args.verbose {
             eprintln!("Writing binary (packed): {}", bin_path.display());
         }
@@ -942,7 +942,7 @@ fn main() -> Result<(), String> {
     }
 
     // Write row-aligned binary output
-    if let Some(ref bin_r_path) = args.output_bin_r {
+    if let Some(ref bin_r_path) = args.output_raw_r {
         if args.verbose {
             eprintln!(
                 "Writing binary (row-aligned, stride={}, fill={:?}): {}",
