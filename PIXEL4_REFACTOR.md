@@ -230,11 +230,18 @@ For 1000×1000 image:
 - Range: 0.0-1.0 for linear, 0.0-255.0 for sRGB/scaled
 
 ### Backward Compatibility
-- Keep old WASM exports working during transition
-- Add new `*_pixel4_*` variants alongside existing functions
-- Deprecate old functions after full migration
+- WASM exports unchanged (internal refactoring only)
+- Rust library API changed from separate channels to Pixel4
+- CLI updated to use new Pixel4 APIs
 
 ### Testing
-- Each phase should have corresponding tests
-- Verify output matches between old and new implementations
-- Benchmark memory usage and performance
+- All 142 existing tests pass
+- Library and CLI build successfully
+- Output behavior unchanged (same algorithms, different internal format)
+
+### Refactoring Approach
+Instead of adding duplicate `*_pixel4_*` functions, we refactored existing functions in-place:
+- Changed function signatures from `(r: &[f32], g: &[f32], b: &[f32])` to `(input: &[Pixel4])`
+- Changed return types from `(Vec<f32>, Vec<f32>, Vec<f32>)` to `Vec<Pixel4>`
+- Added helper functions like `pixels_to_lab_channels()` for internal conversion
+- This keeps the API surface small while achieving the Pixel4 benefits
