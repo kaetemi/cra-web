@@ -1344,8 +1344,8 @@
                 5: 'y-cb-cr'
             };
 
-            // Use unified cra tool with --method none for dither-only mode
-            let cmd = 'cra -i input.png -o output.png --method none';
+            // Use unified cra tool with --histogram none for dither-only mode
+            let cmd = 'cra -i input.png -o output.png --histogram none';
 
             // Add format
             if (isGrayscale) {

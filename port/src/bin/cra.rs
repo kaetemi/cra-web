@@ -31,8 +31,8 @@ use cra_wasm::pixel::Pixel4;
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
-enum Method {
-    /// No color correction (dither only)
+enum Histogram {
+    /// No histogram matching (dither only)
     None,
     /// Basic LAB histogram matching
     BasicLab,
@@ -167,21 +167,21 @@ impl ScaleMethod {
 
 /// Build ColorCorrectionMethod from CLI arguments
 fn build_correction_method(
-    method: Method,
+    histogram: Histogram,
     keep_luminosity: bool,
     tiled_luminosity: bool,
     use_perceptual: bool,
 ) -> Option<ColorCorrectionMethod> {
-    match method {
-        Method::None => None,
-        Method::BasicLab => Some(ColorCorrectionMethod::BasicLab { keep_luminosity }),
-        Method::BasicRgb => Some(ColorCorrectionMethod::BasicRgb),
-        Method::BasicOklab => Some(ColorCorrectionMethod::BasicOklab { keep_luminosity }),
-        Method::CraLab => Some(ColorCorrectionMethod::CraLab { keep_luminosity }),
-        Method::CraRgb => Some(ColorCorrectionMethod::CraRgb { use_perceptual }),
-        Method::CraOklab => Some(ColorCorrectionMethod::CraOklab { keep_luminosity }),
-        Method::TiledLab => Some(ColorCorrectionMethod::TiledLab { tiled_luminosity }),
-        Method::TiledOklab => Some(ColorCorrectionMethod::TiledOklab { tiled_luminosity }),
+    match histogram {
+        Histogram::None => None,
+        Histogram::BasicLab => Some(ColorCorrectionMethod::BasicLab { keep_luminosity }),
+        Histogram::BasicRgb => Some(ColorCorrectionMethod::BasicRgb),
+        Histogram::BasicOklab => Some(ColorCorrectionMethod::BasicOklab { keep_luminosity }),
+        Histogram::CraLab => Some(ColorCorrectionMethod::CraLab { keep_luminosity }),
+        Histogram::CraRgb => Some(ColorCorrectionMethod::CraRgb { use_perceptual }),
+        Histogram::CraOklab => Some(ColorCorrectionMethod::CraOklab { keep_luminosity }),
+        Histogram::TiledLab => Some(ColorCorrectionMethod::TiledLab { tiled_luminosity }),
+        Histogram::TiledOklab => Some(ColorCorrectionMethod::TiledOklab { tiled_luminosity }),
     }
 }
 
@@ -215,7 +215,7 @@ struct Args {
     #[arg(short, long)]
     input: PathBuf,
 
-    /// Reference image path (optional - required for color correction methods)
+    /// Reference image path (optional - required for histogram matching methods)
     #[arg(short, long)]
     r#ref: Option<PathBuf>,
 
@@ -239,9 +239,9 @@ struct Args {
     #[arg(short, long, default_value = "RGB888")]
     format: String,
 
-    /// Color correction method (default: none if no reference, cra-lab if reference provided)
-    #[arg(short, long, value_enum)]
-    method: Option<Method>,
+    /// Histogram matching method (default: none if no reference, cra-oklab if reference provided)
+    #[arg(long, value_enum)]
+    histogram: Option<Histogram>,
 
     /// Preserve original luminosity (L channel) - applies to basic-lab, basic-oklab, cra-lab, cra-oklab
     #[arg(long)]
@@ -275,11 +275,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
     histogram_distance_space: ColorSpace,
 
-    /// Use color-aware dithering for final RGB output (joint RGB processing)
+    /// Disable color-aware dithering for final RGB output (use per-channel instead)
     #[arg(long)]
-    color_aware_output: bool,
+    no_color_aware_output: bool,
 
-    /// Perceptual space for output dithering distance metric
+    /// Perceptual space for output dithering distance metric (default: oklab for RGB, lab-cie94 for grayscale)
     #[arg(long, value_enum)]
     output_distance_space: Option<ColorSpace>,
 
@@ -636,7 +636,7 @@ fn write_metadata(
     path: &PathBuf,
     args: &Args,
     format: &ColorFormat,
-    method: Method,
+    histogram: Histogram,
     output_colorspace: ColorSpace,
     width: u32,
     height: u32,
@@ -648,7 +648,7 @@ fn write_metadata(
     if let Some(ref ref_path) = args.r#ref {
         json.push_str(&format!("  \"reference\": \"{}\",\n", ref_path.display()));
     }
-    json.push_str(&format!("  \"method\": \"{:?}\",\n", method));
+    json.push_str(&format!("  \"histogram\": \"{:?}\",\n", histogram));
     json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
     json.push_str(&format!("  \"width\": {},\n", width));
     json.push_str(&format!("  \"height\": {},\n", height));
@@ -703,19 +703,19 @@ fn main() -> Result<(), String> {
     // Parse format string
     let format = ColorFormat::parse(&args.format)?;
 
-    // Determine method: user-specified, or default based on whether reference is provided
-    let method = args.method.unwrap_or(if args.r#ref.is_some() {
-        Method::CraLab
+    // Determine histogram method: user-specified, or default based on whether reference is provided
+    let histogram = args.histogram.unwrap_or(if args.r#ref.is_some() {
+        Histogram::CraOklab
     } else {
-        Method::None
+        Histogram::None
     });
 
-    // Validate: color correction methods require a reference image
-    let needs_reference = !matches!(method, Method::None);
+    // Validate: histogram matching methods require a reference image
+    let needs_reference = !matches!(histogram, Histogram::None);
     if needs_reference && args.r#ref.is_none() {
         return Err(format!(
-            "Method {:?} requires a reference image. Use --ref <path> or --method none for dither-only mode.",
-            method
+            "Histogram {:?} requires a reference image. Use --ref <path> or --histogram none for dither-only mode.",
+            histogram
         ));
     }
 
@@ -734,16 +734,16 @@ fn main() -> Result<(), String> {
     };
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
 
-    // Build the correction method (None if method is None)
+    // Build the correction method (None if histogram is None)
     let correction_method = build_correction_method(
-        method,
+        histogram,
         args.keep_luminosity,
         args.tiled_luminosity,
         args.perceptual,
     );
 
     if args.verbose {
-        eprintln!("Method: {:?}", method);
+        eprintln!("Histogram: {:?}", histogram);
         eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
         if format.is_grayscale {
             eprintln!("  Grayscale: {} bits", format.bits_r);
@@ -845,7 +845,7 @@ fn main() -> Result<(), String> {
             width_usize,
             height_usize,
             &format,
-            args.color_aware_output,
+            !args.no_color_aware_output,
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
@@ -866,7 +866,7 @@ fn main() -> Result<(), String> {
             width as usize,
             height as usize,
             &format,
-            args.color_aware_output,
+            !args.no_color_aware_output,
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
@@ -946,7 +946,7 @@ fn main() -> Result<(), String> {
             meta_path,
             &args,
             &format,
-            method,
+            histogram,
             output_colorspace,
             width,
             height,

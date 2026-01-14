@@ -102,33 +102,38 @@ This produces:
 ```
 Options:
   -i, --input <INPUT>              Input image path
-  -r, --ref <REF>                  Reference image path
-  -o, --output <OUTPUT>            Output image path
-  -m, --method <METHOD>            Color correction method [default: cra-lab]
-                                   [values: basic-lab, basic-rgb, basic-oklab,
+  -r, --ref <REF>                  Reference image path (for histogram matching)
+  -o, --output <OUTPUT>            Output PNG image path
+      --output-raw <PATH>          Output raw binary (packed)
+      --output-raw-r <PATH>        Output raw binary (row-aligned)
+  -f, --format <FORMAT>            Output format [default: RGB888]
+                                   (e.g., RGB332, RGB565, RGB888, L4, L8)
+      --histogram <HISTOGRAM>      Histogram matching method
+                                   [default: none, or cra-oklab if --ref provided]
+                                   [values: none, basic-lab, basic-rgb, basic-oklab,
                                     cra-lab, cra-rgb, cra-oklab, tiled-lab, tiled-oklab]
-      --keep-luminosity            Preserve original L channel
-      --tiled-luminosity           Process L channel per-tile before global match
-  -p, --perceptual                 Use perceptual weighting (cra-rgb only)
-      --f32-histogram              Use f32 sort-based histogram matching
-      --output-dither <DITHER>     Output dithering method [default: jjn-standard]
-      --histogram-dither <DITHER>  Histogram processing dither [default: mixed-standard]
+      --output-dither <DITHER>     Output dithering method [default: mixed-standard]
+      --output-distance-space      Perceptual space for dithering [default: oklab]
+      --no-color-aware-output      Disable color-aware dithering (use per-channel)
+      --width <W>                  Resize to width (preserves aspect ratio)
+      --height <H>                 Resize to height (preserves aspect ratio)
+      --scale-method <METHOD>      Resize method [default: lanczos]
+  -s, --seed <SEED>                Random seed for mixed dithering [default: 12345]
   -v, --verbose                    Enable verbose output
   -h, --help                       Print help
-  -V, --version                    Print version
 ```
 
 ### Examples
 
 ```bash
-# CRA LAB (default, recommended)
+# CRA Oklab (default when reference provided)
 ./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg
 
 # CRA Oklab with f32 histogram (highest quality)
-./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg -m cra-oklab --f32-histogram
+./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg --histogram cra-oklab --f32-histogram
 
 # Tiled LAB for images with varying color casts
-./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg -m tiled-lab
+./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg --histogram tiled-lab
 
 # Preserve original luminosity
 ./dist/bin/cra -i input.jpg -r reference.jpg -o output.jpg --keep-luminosity
