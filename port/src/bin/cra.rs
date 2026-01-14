@@ -18,12 +18,11 @@ use cra_wasm::binary_format::{
     encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
     encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
-use cra_wasm::color::{linear_to_srgb_single, srgb_to_linear_single};
+use cra_wasm::color::{linear_to_srgb_255_inplace, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::cra_lab::{color_correct_cra_lab_linear, color_correct_cra_oklab_linear};
 use cra_wasm::cra_rgb::color_correct_cra_rgb_linear;
-use cra_wasm::dither::colorspace_aware_dither_rgb_with_mode;
 use cra_wasm::dither::DitherMode as HistogramDitherMode;
-use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
+use cra_wasm::dither_colorspace_aware::{colorspace_aware_dither_rgb_channels, DitherMode as CSDitherMode};
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
 use cra_wasm::dither_common::PerceptualSpace;
 use cra_wasm::output::finalize_to_srgb_u8_with_options;
@@ -413,24 +412,6 @@ fn dither_grayscale(
     colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed)
 }
 
-fn dither_rgb(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    width: usize,
-    height: usize,
-    bits_r: u8,
-    bits_g: u8,
-    bits_b: u8,
-    space: PerceptualSpace,
-    mode: CSDitherMode,
-    seed: u32,
-) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
-    colorspace_aware_dither_rgb_with_mode(
-        r, g, b, width, height, bits_r, bits_g, bits_b, space, mode, seed,
-    )
-}
-
 // ============================================================================
 // PNG Output
 // ============================================================================
@@ -779,17 +760,11 @@ fn main() -> Result<(), String> {
         } else {
             // Non-RGB888 - convert to sRGB 0-255 range, then dither to target bit depth
             let pixel_count = width_usize * height_usize;
-            let mut srgb_r = Vec::with_capacity(pixel_count);
-            let mut srgb_g = Vec::with_capacity(pixel_count);
-            let mut srgb_b = Vec::with_capacity(pixel_count);
-            for p in &output_pixels {
-                srgb_r.push(linear_to_srgb_single(p[0]) * 255.0);
-                srgb_g.push(linear_to_srgb_single(p[1]) * 255.0);
-                srgb_b.push(linear_to_srgb_single(p[2]) * 255.0);
-            }
+            let mut srgb_pixels = output_pixels;
+            linear_to_srgb_255_inplace(&mut srgb_pixels);
 
-            let (r_out, g_out, b_out) = dither_rgb(
-                &srgb_r, &srgb_g, &srgb_b,
+            let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_channels(
+                &srgb_pixels,
                 width_usize, height_usize,
                 format.bits_r, format.bits_g, format.bits_b,
                 output_colorspace.to_perceptual_space(),
@@ -840,17 +815,11 @@ fn main() -> Result<(), String> {
                 eprintln!("Dithering RGB channels...");
             }
             // Convert linear to sRGB 0-255 range
-            let mut srgb_r = Vec::with_capacity(pixel_count);
-            let mut srgb_g = Vec::with_capacity(pixel_count);
-            let mut srgb_b = Vec::with_capacity(pixel_count);
-            for p in &input_pixels {
-                srgb_r.push(linear_to_srgb_single(p[0]) * 255.0);
-                srgb_g.push(linear_to_srgb_single(p[1]) * 255.0);
-                srgb_b.push(linear_to_srgb_single(p[2]) * 255.0);
-            }
+            let mut srgb_pixels = input_pixels.clone();
+            linear_to_srgb_255_inplace(&mut srgb_pixels);
 
-            let (r_out, g_out, b_out) = dither_rgb(
-                &srgb_r, &srgb_g, &srgb_b,
+            let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_channels(
+                &srgb_pixels,
                 width_usize, height_usize,
                 format.bits_r, format.bits_g, format.bits_b,
                 output_colorspace.to_perceptual_space(),

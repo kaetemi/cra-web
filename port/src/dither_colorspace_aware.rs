@@ -1107,6 +1107,71 @@ pub fn colorspace_aware_dither_rgb_with_mode(
     (r_out, g_out, b_out)
 }
 
+// ============================================================================
+// Pixel4 convenience wrappers
+// ============================================================================
+
+use crate::color::interleave_rgb_u8;
+use crate::pixel::{pixels_to_channels, Pixel4};
+
+/// Color-aware dither for Pixel4 array (sRGB 0-255 range) to separate RGB channels.
+///
+/// This is a convenience wrapper that extracts channels, performs color-aware
+/// dithering with joint RGB processing, and returns separate channel outputs.
+///
+/// Args:
+///     pixels: Pixel4 array with values in sRGB 0-255 range
+///     width, height: image dimensions
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     space: perceptual color space for distance calculation
+///     mode: dither algorithm and scan pattern
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Tuple of (R, G, B) u8 vectors
+pub fn colorspace_aware_dither_rgb_channels(
+    pixels: &[Pixel4],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (r, g, b) = pixels_to_channels(pixels);
+    colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, bits_r, bits_g, bits_b, space, mode, seed)
+}
+
+/// Color-aware dither for Pixel4 array (sRGB 0-255 range) to interleaved u8.
+///
+/// This is a convenience wrapper for 8-bit RGB output that extracts channels,
+/// performs color-aware dithering with joint RGB processing, and interleaves
+/// the result.
+///
+/// Args:
+///     pixels: Pixel4 array with values in sRGB 0-255 range
+///     width, height: image dimensions
+///     space: perceptual color space for distance calculation
+///     mode: dither algorithm and scan pattern
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB u8 data (RGBRGB...)
+pub fn colorspace_aware_dither_rgb_interleaved(
+    pixels: &[Pixel4],
+    width: usize,
+    height: usize,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+) -> Vec<u8> {
+    let (r, g, b) = pixels_to_channels(pixels);
+    let (r_u8, g_u8, b_u8) = colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, 8, 8, 8, space, mode, seed);
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

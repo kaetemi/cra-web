@@ -613,6 +613,69 @@ pub fn dither_rgb(rgb: &[f32], width: usize, height: usize) -> Vec<u8> {
     dither_channel_stack(&channels, width, height)
 }
 
+// ============================================================================
+// Pixel4 convenience wrappers
+// ============================================================================
+
+use crate::color::interleave_rgb_u8;
+use crate::pixel::{pixels_to_channels, Pixel4};
+
+/// Dither Pixel4 array (sRGB 0-255 range) to interleaved u8 with selectable mode.
+///
+/// This is a convenience wrapper that extracts channels, dithers each independently,
+/// and interleaves the result. For higher quality color-aware dithering, use
+/// `colorspace_aware_dither_rgb_with_mode` instead.
+///
+/// Args:
+///     pixels: Pixel4 array with values in sRGB 0-255 range
+///     width, height: image dimensions
+///     mode: dither algorithm and scan pattern
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB u8 data (RGBRGB...)
+pub fn dither_rgb_with_mode(
+    pixels: &[Pixel4],
+    width: usize,
+    height: usize,
+    mode: DitherMode,
+    seed: u32,
+) -> Vec<u8> {
+    let (r, g, b) = pixels_to_channels(pixels);
+    let r_u8 = dither_with_mode(&r, width, height, mode, seed);
+    let g_u8 = dither_with_mode(&g, width, height, mode, seed.wrapping_add(1));
+    let b_u8 = dither_with_mode(&b, width, height, mode, seed.wrapping_add(2));
+    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+}
+
+/// Dither Pixel4 array to separate RGB channels with selectable mode and bit depth.
+///
+/// Args:
+///     pixels: Pixel4 array with values in sRGB 0-255 range
+///     width, height: image dimensions
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     mode: dither algorithm and scan pattern
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Tuple of (R, G, B) u8 vectors
+pub fn dither_rgb_channels_with_mode(
+    pixels: &[Pixel4],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    mode: DitherMode,
+    seed: u32,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    let (r, g, b) = pixels_to_channels(pixels);
+    let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r);
+    let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g);
+    let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b);
+    (r_u8, g_u8, b_u8)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
