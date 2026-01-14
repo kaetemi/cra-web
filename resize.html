@@ -409,44 +409,46 @@
             return rgb;
         }
 
-        // Naive sRGB resize (for comparison - this is the WRONG way)
-        function resizeSrgbNaive(imageData, srcW, srcH, dstW, dstH) {
-            const srcData = imageData.data;
-            const dstData = new Uint8ClampedArray(dstW * dstH * 4);
+        // sRGB resize using library functions (WRONG way - skips linear conversion)
+        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode) {
+            // Step 1: Unpack u8 to f32 (this gives us sRGB f32 values)
+            const srgbF32 = unpack_u8_to_f32_wasm(
+                imageDataToU8Interleaved(imageData),
+                srcW,
+                srcH
+            );
 
-            // Simple bilinear in sRGB space
-            for (let y = 0; y < dstH; y++) {
-                for (let x = 0; x < dstW; x++) {
-                    const srcX = (x + 0.5) * srcW / dstW - 0.5;
-                    const srcY = (y + 0.5) * srcH / dstH - 0.5;
+            // Step 2: WRONG - rescale directly in sRGB space (treating sRGB as if it were linear)
+            // This is the common mistake that causes color shifts and darkening
+            const srgbResized = rescale_linear_rgb_wasm(
+                srgbF32,
+                srcW, srcH,
+                dstW, dstH,
+                interpolation,
+                scaleMode
+            );
 
-                    const x0 = Math.floor(srcX);
-                    const y0 = Math.floor(srcY);
-                    const x1 = Math.min(x0 + 1, srcW - 1);
-                    const y1 = Math.min(y0 + 1, srcH - 1);
+            // Step 3: Dither to RGB888
+            const dithered = dither_output_wasm(
+                srgbResized,
+                dstW, dstH,
+                8, 8, 8,  // RGB888
+                1,        // PerChannel technique
+                ditherMode,
+                1,        // OkLab perceptual space (not used for 8-bit)
+                0         // seed
+            );
 
-                    const fx = srcX - x0;
-                    const fy = srcY - y0;
-
-                    const dstIdx = (y * dstW + x) * 4;
-
-                    for (let c = 0; c < 3; c++) {
-                        const v00 = srcData[(y0 * srcW + x0) * 4 + c];
-                        const v01 = srcData[(y0 * srcW + x1) * 4 + c];
-                        const v10 = srcData[(y1 * srcW + x0) * 4 + c];
-                        const v11 = srcData[(y1 * srcW + x1) * 4 + c];
-
-                        const v0 = v00 * (1 - fx) + v01 * fx;
-                        const v1 = v10 * (1 - fx) + v11 * fx;
-                        const v = v0 * (1 - fy) + v1 * fy;
-
-                        dstData[dstIdx + c] = Math.round(v);
-                    }
-                    dstData[dstIdx + 3] = 255;
-                }
+            // Convert to ImageData for display
+            const outputData = new Uint8ClampedArray(dstW * dstH * 4);
+            for (let i = 0; i < dstW * dstH; i++) {
+                outputData[i * 4] = dithered[i * 3];
+                outputData[i * 4 + 1] = dithered[i * 3 + 1];
+                outputData[i * 4 + 2] = dithered[i * 3 + 2];
+                outputData[i * 4 + 3] = 255;
             }
 
-            return new ImageData(dstData, dstW, dstH);
+            return new ImageData(outputData, dstW, dstH);
         }
 
         async function initWasm() {
@@ -585,8 +587,8 @@
 
                 // Display results
                 if (showComparison) {
-                    // Also do naive sRGB resize for comparison
-                    const srgbImageData = resizeSrgbNaive(inputImageData, originalWidth, originalHeight, dstW, dstH);
+                    // Also do sRGB resize (wrong way) for comparison
+                    const srgbImageData = resizeSrgbBad(inputImageData, originalWidth, originalHeight, dstW, dstH, interpolation, scaleMode, ditherMode);
 
                     document.getElementById('single-output').style.display = 'none';
                     document.getElementById('comparison-output').style.display = 'grid';
