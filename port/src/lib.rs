@@ -368,6 +368,68 @@ pub fn colorspace_aware_dither_rgb888_wasm(
     )
 }
 
+/// Unified dithering output with technique selection (WASM export)
+///
+/// Single entry point for all dithering techniques. Takes interleaved sRGB 0-255 input.
+///
+/// Args:
+///     rgb: Interleaved RGB as f32 values in range [0, 255] (RGBRGB...)
+///     w: image width
+///     h: image height
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     technique: 0 = None (no dithering), 1 = PerChannel, 2 = ColorAware
+///     mode: dither mode (0-6) - used for PerChannel and ColorAware
+///     space: perceptual space (0-5) - only used for ColorAware
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn dither_output_wasm(
+    rgb: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_common::OutputTechnique;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let output_technique = match technique {
+        0 => OutputTechnique::None,
+        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        _ => OutputTechnique::ColorAware {
+            mode: dither_mode,
+            space: perceptual_space,
+        },
+    };
+
+    // Convert interleaved to Pixel4
+    let pixels = w * h;
+    let mut pixel4_data: Vec<pixel::Pixel4> = Vec::with_capacity(pixels);
+    for i in 0..pixels {
+        pixel4_data.push([rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0]);
+    }
+
+    output::dither_output_interleaved(
+        &pixel4_data,
+        w,
+        h,
+        bits_r,
+        bits_g,
+        bits_b,
+        output_technique,
+        seed,
+    )
+}
+
 /// Color space aware dithering for grayscale images (WASM export)
 ///
 /// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation,

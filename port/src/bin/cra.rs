@@ -18,14 +18,14 @@ use cra_wasm::binary_format::{
     encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
     encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
-use cra_wasm::color::{linear_to_srgb_255_inplace, linear_to_srgb_single, srgb_to_linear_single};
+use cra_wasm::color::{linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::cra_lab::{color_correct_cra_lab_linear, color_correct_cra_oklab_linear};
 use cra_wasm::cra_rgb::color_correct_cra_rgb_linear;
 use cra_wasm::dither::DitherMode as HistogramDitherMode;
-use cra_wasm::dither_colorspace_aware::{colorspace_aware_dither_rgb_channels, DitherMode as CSDitherMode};
+use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
-use cra_wasm::dither_common::PerceptualSpace;
-use cra_wasm::output::finalize_to_srgb_u8_with_options;
+use cra_wasm::dither_common::{OutputTechnique, PerceptualSpace};
+use cra_wasm::output::{finalize_output, finalize_output_interleaved};
 use cra_wasm::pixel::Pixel4;
 use cra_wasm::tiled_lab::{color_correct_tiled_lab_linear, color_correct_tiled_oklab_linear};
 
@@ -400,6 +400,19 @@ fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
 // Dithering
 // ============================================================================
 
+/// Build OutputTechnique from CLI options
+fn build_output_technique(
+    color_aware: bool,
+    mode: CSDitherMode,
+    space: PerceptualSpace,
+) -> OutputTechnique {
+    if color_aware {
+        OutputTechnique::ColorAware { mode, space }
+    } else {
+        OutputTechnique::PerChannel { mode }
+    }
+}
+
 fn dither_grayscale(
     gray: &[f32],
     width: usize,
@@ -728,50 +741,25 @@ fn main() -> Result<(), String> {
             dithered_r = None;
             dithered_g = None;
             dithered_b = None;
-        } else if format.bits_r == 8 && format.bits_g == 8 && format.bits_b == 8 {
-            // RGB888 - use standard output finalization (linear -> sRGB with dithering)
+        } else {
+            // RGB output - use unified finalize_output API
+            let pixel_count = width_usize * height_usize;
             let mut result_pixels = output_pixels;
-            let dither_mode = Some(args.output_dither.to_histogram_dither_mode());
-            let srgb_out = finalize_to_srgb_u8_with_options(
+            let technique = build_output_technique(
+                args.color_aware_output,
+                output_dither_mode,
+                output_colorspace.to_perceptual_space(),
+            );
+
+            let (r_out, g_out, b_out) = finalize_output(
                 &mut result_pixels,
                 width_usize, height_usize,
-                dither_mode,
-                args.color_aware_output,
-                output_colorspace.to_perceptual_space(),
-                args.seed,
-            );
-
-            // Split channels for binary output
-            let pixel_count = width_usize * height_usize;
-            let mut r_out = Vec::with_capacity(pixel_count);
-            let mut g_out = Vec::with_capacity(pixel_count);
-            let mut b_out = Vec::with_capacity(pixel_count);
-            for i in 0..pixel_count {
-                r_out.push(srgb_out[i * 3]);
-                g_out.push(srgb_out[i * 3 + 1]);
-                b_out.push(srgb_out[i * 3 + 2]);
-            }
-
-            dithered_interleaved = srgb_out;
-            dithered_gray = None;
-            dithered_r = Some(r_out);
-            dithered_g = Some(g_out);
-            dithered_b = Some(b_out);
-        } else {
-            // Non-RGB888 - convert to sRGB 0-255 range, then dither to target bit depth
-            let pixel_count = width_usize * height_usize;
-            let mut srgb_pixels = output_pixels;
-            linear_to_srgb_255_inplace(&mut srgb_pixels);
-
-            let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_channels(
-                &srgb_pixels,
-                width_usize, height_usize,
                 format.bits_r, format.bits_g, format.bits_b,
-                output_colorspace.to_perceptual_space(),
-                output_dither_mode,
+                technique,
                 args.seed,
             );
 
+            // Build interleaved for PNG output
             dithered_interleaved = {
                 let mut out = Vec::with_capacity(pixel_count * 3);
                 for i in 0..pixel_count {
@@ -814,16 +802,19 @@ fn main() -> Result<(), String> {
             if args.verbose {
                 eprintln!("Dithering RGB channels...");
             }
-            // Convert linear to sRGB 0-255 range
-            let mut srgb_pixels = input_pixels.clone();
-            linear_to_srgb_255_inplace(&mut srgb_pixels);
+            // Use unified finalize_output API
+            let mut linear_pixels = input_pixels.clone();
+            let technique = build_output_technique(
+                args.color_aware_output,
+                output_dither_mode,
+                output_colorspace.to_perceptual_space(),
+            );
 
-            let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_channels(
-                &srgb_pixels,
+            let (r_out, g_out, b_out) = finalize_output(
+                &mut linear_pixels,
                 width_usize, height_usize,
                 format.bits_r, format.bits_g, format.bits_b,
-                output_colorspace.to_perceptual_space(),
-                output_dither_mode,
+                technique,
                 args.seed,
             );
 

@@ -32,6 +32,38 @@ pub enum PerceptualSpace {
     YCbCr,
 }
 
+/// Output dithering technique selection
+///
+/// Controls how RGB values are quantized to the target bit depth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputTechnique {
+    /// No dithering - simple rounding/truncation
+    /// Fastest but can cause visible banding
+    None,
+    /// Per-channel error diffusion dithering
+    /// Each RGB channel is dithered independently with its own error buffer
+    /// Fast and works well for most cases
+    PerChannel {
+        mode: DitherMode,
+    },
+    /// Color-aware joint RGB dithering (default)
+    /// Processes RGB channels together, selecting the quantized color that
+    /// minimizes perceptual distance. Higher quality but slower.
+    ColorAware {
+        mode: DitherMode,
+        space: PerceptualSpace,
+    },
+}
+
+impl Default for OutputTechnique {
+    fn default() -> Self {
+        OutputTechnique::ColorAware {
+            mode: DitherMode::default(),
+            space: PerceptualSpace::default(),
+        }
+    }
+}
+
 /// Dithering mode selection for color-space aware dithering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherMode {
