@@ -4,6 +4,7 @@
 /// algorithms, ported from the original Python scripts.
 
 use wasm_bindgen::prelude::*;
+use js_sys;
 
 pub mod basic_lab;
 pub mod basic_oklab;
@@ -881,6 +882,37 @@ pub fn calculate_dimensions_wasm(
     let th = if target_height == 0 { None } else { Some(target_height) };
     let (w, h) = rescale::calculate_target_dimensions(src_width, src_height, tw, th);
     vec![w, h]
+}
+
+/// Rescale linear RGB image with progress callback (interleaved, 0-1 range)
+/// Returns interleaved RGB as f32 in 0-1 range
+/// The progress callback receives a f32 value from 0.0 (before start) to 1.0 (after completion)
+/// Progress is reported row-by-row.
+/// scale_mode: 0=independent, 1=uniform from width, 2=uniform from height
+#[wasm_bindgen]
+pub fn rescale_linear_rgb_with_progress_wasm(
+    linear: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+    scale_mode: u8,
+    progress_callback: &js_sys::Function,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+    let scale_mode = scale_mode_from_u8(scale_mode);
+
+    // Wrap the JS callback
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+
+    rescale::rescale_rgb_interleaved_with_progress(
+        &linear, src_width, src_height, dst_width, dst_height, method, scale_mode,
+        |progress: f32| {
+            let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+        }
+    )
 }
 
 #[cfg(test)]

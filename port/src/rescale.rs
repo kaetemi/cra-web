@@ -4,6 +4,10 @@
 
 use std::f32::consts::PI;
 
+/// Progress callback type: receives progress as f32 in 0.0-1.0 range
+/// 0.0 = before first row, 1.0 = after last row
+pub type ProgressCallback<'a> = Option<&'a mut dyn FnMut(f32)>;
+
 /// Rescaling method
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RescaleMethod {
@@ -468,6 +472,205 @@ pub fn rescale(
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode),
         RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode),
     }
+}
+
+// ============================================================================
+// Progress-enabled rescaling functions
+// ============================================================================
+
+/// Rescale Pixel4 array using bilinear interpolation with progress callback
+fn rescale_bilinear_pixels_progress<F: FnMut(f32)>(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: F,
+) -> Vec<Pixel4> {
+    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let max_x = (src_width - 1) as f32;
+    let max_y = (src_height - 1) as f32;
+
+    for dst_y in 0..dst_height {
+        for dst_x in 0..dst_width {
+            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
+            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
+
+            let x0 = src_x.floor() as usize;
+            let y0 = src_y.floor() as usize;
+            let x1 = (x0 + 1).min(src_width - 1);
+            let y1 = (y0 + 1).min(src_height - 1);
+            let fx = src_x - x0 as f32;
+            let fy = src_y - y0 as f32;
+
+            // Sample four corners
+            let p00 = src[y0 * src_width + x0];
+            let p10 = src[y0 * src_width + x1];
+            let p01 = src[y1 * src_width + x0];
+            let p11 = src[y1 * src_width + x1];
+
+            // Bilinear interpolation using SIMD-friendly lerp
+            let top = lerp(p00, p10, fx);
+            let bottom = lerp(p01, p11, fx);
+            dst[dst_y * dst_width + dst_x] = lerp(top, bottom, fy);
+        }
+        // Report progress after each row (1.0 after last row)
+        progress((dst_y + 1) as f32 / dst_height as f32);
+    }
+
+    dst
+}
+
+/// Rescale Pixel4 array using Lanczos3 interpolation with progress callback
+fn rescale_lanczos3_pixels_progress<F: FnMut(f32)>(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: F,
+) -> Vec<Pixel4> {
+    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
+    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+
+    for dst_y in 0..dst_height {
+        for dst_x in 0..dst_width {
+            let src_x = (dst_x as f32 + 0.5) * scale_x - 0.5;
+            let src_y = (dst_y as f32 + 0.5) * scale_y - 0.5;
+
+            let center_x = src_x.floor() as i32;
+            let center_y = src_y.floor() as i32;
+
+            let mut sum = [0.0f32; 4];
+            let mut weight_sum = 0.0f32;
+
+            for ky in -radius_y..=radius_y {
+                let sy = center_y + ky;
+                if sy < 0 || sy >= src_height as i32 {
+                    continue;
+                }
+
+                let dy = (src_y - sy as f32) / filter_scale_y;
+                let wy = lanczos3(dy);
+
+                if wy.abs() < 1e-8 {
+                    continue;
+                }
+
+                for kx in -radius_x..=radius_x {
+                    let sx = center_x + kx;
+                    if sx < 0 || sx >= src_width as i32 {
+                        continue;
+                    }
+
+                    let dx = (src_x - sx as f32) / filter_scale_x;
+                    let wx = lanczos3(dx);
+
+                    let weight = wx * wy;
+                    if weight.abs() < 1e-8 {
+                        continue;
+                    }
+
+                    let sample = src[sy as usize * src_width + sx as usize];
+                    sum[0] += sample[0] * weight;
+                    sum[1] += sample[1] * weight;
+                    sum[2] += sample[2] * weight;
+                    sum[3] += sample[3] * weight;
+                    weight_sum += weight;
+                }
+            }
+
+            dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
+                [
+                    (sum[0] / weight_sum).clamp(0.0, 1.0),
+                    (sum[1] / weight_sum).clamp(0.0, 1.0),
+                    (sum[2] / weight_sum).clamp(0.0, 1.0),
+                    (sum[3] / weight_sum).clamp(0.0, 1.0),
+                ]
+            } else {
+                let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
+                let sy = src_y.round().clamp(0.0, (src_height - 1) as f32) as usize;
+                src[sy * src_width + sx]
+            };
+        }
+        // Report progress after each row (1.0 after last row)
+        progress((dst_y + 1) as f32 / dst_height as f32);
+    }
+
+    dst
+}
+
+/// Rescale Pixel4 image with progress callback (SIMD-friendly, linear space)
+pub fn rescale_with_progress<F: FnMut(f32)>(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+    mut progress: F,
+) -> Vec<Pixel4> {
+    if src_width == dst_width && src_height == dst_height {
+        progress(1.0);
+        return src.to_vec();
+    }
+
+    match method {
+        RescaleMethod::Bilinear => rescale_bilinear_pixels_progress(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Lanczos3 => rescale_lanczos3_pixels_progress(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+    }
+}
+
+/// Rescale interleaved RGB image with progress callback (linear space, f32 values in 0-1 range)
+pub fn rescale_rgb_interleaved_with_progress<F: FnMut(f32)>(
+    src: &[f32],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+    progress: F,
+) -> Vec<f32> {
+    let src_pixels = src_width * src_height;
+
+    // Convert interleaved to Pixel4
+    let mut pixels: Vec<Pixel4> = Vec::with_capacity(src_pixels);
+    for i in 0..src_pixels {
+        pixels.push([src[i * 3], src[i * 3 + 1], src[i * 3 + 2], 0.0]);
+    }
+
+    // Rescale with progress
+    let result_pixels = rescale_with_progress(
+        &pixels, src_width, src_height, dst_width, dst_height, method, scale_mode, progress
+    );
+
+    // Convert back to interleaved
+    let dst_pixels = dst_width * dst_height;
+    let mut dst = Vec::with_capacity(dst_pixels * 3);
+    for p in result_pixels {
+        dst.push(p[0]);
+        dst.push(p[1]);
+        dst.push(p[2]);
+    }
+
+    dst
 }
 
 #[cfg(test)]

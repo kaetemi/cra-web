@@ -342,7 +342,10 @@
         </div>
 
         <div class="loading" id="loading">
-            Processing...
+            <div>Processing... <span id="progress-text">0%</span></div>
+            <div style="width: 200px; height: 8px; background: #ddd; border-radius: 4px; margin-top: 10px;">
+                <div id="progress-bar" style="width: 0%; height: 100%; background: #3498db; border-radius: 4px; transition: width 0.1s;"></div>
+            </div>
         </div>
     </div>
 
@@ -375,6 +378,7 @@
             linear_to_srgb_f32_wasm,
             // Atomic rescaling functions (linear space)
             rescale_linear_rgb_wasm,
+            rescale_linear_rgb_with_progress_wasm,
             calculate_dimensions_wasm
         } from './wasm_cra/cra_wasm.js';
 
@@ -410,7 +414,7 @@
         }
 
         // sRGB resize using library functions (WRONG way - skips linear conversion)
-        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode) {
+        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode, progressCallback) {
             // Step 1: Unpack u8 to f32 (this gives us sRGB f32 values)
             const srgbF32 = unpack_u8_to_f32_wasm(
                 imageDataToU8Interleaved(imageData),
@@ -420,13 +424,22 @@
 
             // Step 2: WRONG - rescale directly in sRGB space (treating sRGB as if it were linear)
             // This is the common mistake that causes color shifts and darkening
-            const srgbResized = rescale_linear_rgb_wasm(
-                srgbF32,
-                srcW, srcH,
-                dstW, dstH,
-                interpolation,
-                scaleMode
-            );
+            const srgbResized = progressCallback
+                ? rescale_linear_rgb_with_progress_wasm(
+                    srgbF32,
+                    srcW, srcH,
+                    dstW, dstH,
+                    interpolation,
+                    scaleMode,
+                    progressCallback
+                )
+                : rescale_linear_rgb_wasm(
+                    srgbF32,
+                    srcW, srcH,
+                    dstW, dstH,
+                    interpolation,
+                    scaleMode
+                );
 
             // Step 3: Dither to RGB888
             const dithered = dither_output_wasm(
@@ -526,11 +539,29 @@
             errorMsg.classList.remove('visible');
             outputSection.style.display = 'none';
 
+            // Reset progress display
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
+            progressBar.style.width = '0%';
+            progressText.textContent = '0%';
+
+            // Progress callback for the rescale operation
+            const updateProgress = (progress, stage, totalStages) => {
+                // Calculate overall progress across stages
+                const stageProgress = (stage + progress) / totalStages;
+                const percent = Math.round(stageProgress * 100);
+                progressBar.style.width = percent + '%';
+                progressText.textContent = percent + '%';
+            };
+
             try {
                 const { width: dstW, height: dstH } = calculateOutputDimensions();
                 const interpolation = parseInt(document.getElementById('interpolation').value);
                 const ditherMode = parseInt(document.getElementById('dither-mode').value);
                 const showComparison = document.getElementById('show-comparison').checked;
+
+                // Total stages: 1 for linear resize, +1 if comparison enabled
+                const totalStages = showComparison ? 2 : 1;
 
                 // === LINEAR RGB RESIZE (correct way) ===
                 // Step 1: Unpack u8 to f32
@@ -543,17 +574,18 @@
                 // Step 2: Convert to linear
                 const linearRgb = srgb_to_linear_f32_wasm(srgbF32, originalWidth, originalHeight);
 
-                // Step 3: Rescale in linear space with uniform scaling
+                // Step 3: Rescale in linear space with uniform scaling and progress
                 // Use the primary dimension to determine scale mode for exact AR preservation
                 const scaleMode = primaryDimension === 'width'
                     ? SCALE_MODE_UNIFORM_WIDTH
                     : SCALE_MODE_UNIFORM_HEIGHT;
-                const linearResized = rescale_linear_rgb_wasm(
+                const linearResized = rescale_linear_rgb_with_progress_wasm(
                     linearRgb,
                     originalWidth, originalHeight,
                     dstW, dstH,
                     interpolation,
-                    scaleMode
+                    scaleMode,
+                    (progress) => updateProgress(progress, 0, totalStages)
                 );
 
                 // Step 4: Convert back to sRGB
@@ -588,7 +620,11 @@
                 // Display results
                 if (showComparison) {
                     // Also do sRGB resize (wrong way) for comparison
-                    const srgbImageData = resizeSrgbBad(inputImageData, originalWidth, originalHeight, dstW, dstH, interpolation, scaleMode, ditherMode);
+                    const srgbImageData = resizeSrgbBad(
+                        inputImageData, originalWidth, originalHeight, dstW, dstH,
+                        interpolation, scaleMode, ditherMode,
+                        (progress) => updateProgress(progress, 1, totalStages)
+                    );
 
                     document.getElementById('single-output').style.display = 'none';
                     document.getElementById('comparison-output').style.display = 'grid';
