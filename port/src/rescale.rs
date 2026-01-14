@@ -122,7 +122,52 @@ fn rescale_bilinear(
     dst
 }
 
-/// Rescale a single channel using Lanczos3 interpolation
+/// Lanczos3 1D resample - resamples a contiguous slice
+#[inline]
+fn lanczos3_resample_1d(
+    src: &[f32],
+    dst_len: usize,
+    scale: f32,
+    filter_scale: f32,
+    radius: i32,
+) -> Vec<f32> {
+    let src_len = src.len();
+    let mut dst = vec![0.0f32; dst_len];
+
+    for dst_i in 0..dst_len {
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
+        let center = src_pos.floor() as i32;
+
+        let mut sum = 0.0f32;
+        let mut weight_sum = 0.0f32;
+
+        for k in -radius..=radius {
+            let si = center + k;
+            if si < 0 || si >= src_len as i32 {
+                continue;
+            }
+
+            let d = (src_pos - si as f32) / filter_scale;
+            let weight = lanczos3(d);
+
+            if weight.abs() >= 1e-8 {
+                sum += src[si as usize] * weight;
+                weight_sum += weight;
+            }
+        }
+
+        dst[dst_i] = if weight_sum.abs() > 1e-8 {
+            sum / weight_sum
+        } else {
+            let si = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+            src[si]
+        };
+    }
+
+    dst
+}
+
+/// Rescale a single channel using Lanczos3 interpolation (separable, 2-pass)
 fn rescale_lanczos3(
     src: &[f32],
     src_width: usize,
@@ -131,73 +176,32 @@ fn rescale_lanczos3(
     dst_height: usize,
     scale_mode: ScaleMode,
 ) -> Vec<f32> {
-    let mut dst = vec![0.0f32; dst_width * dst_height];
-
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    // For downscaling, we need to increase the filter radius
+    // For downscaling, increase filter radius
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
     let radius_x = (3.0 * filter_scale_x).ceil() as i32;
     let radius_y = (3.0 * filter_scale_y).ceil() as i32;
 
-    for dst_y in 0..dst_height {
-        for dst_x in 0..dst_width {
-            // Map destination pixel to source coordinates
-            let src_x = (dst_x as f32 + 0.5) * scale_x - 0.5;
-            let src_y = (dst_y as f32 + 0.5) * scale_y - 0.5;
+    // Pass 1: Horizontal resample each row (src_width -> dst_width)
+    let mut temp = vec![0.0f32; dst_width * src_height];
+    for y in 0..src_height {
+        let src_row = &src[y * src_width..(y + 1) * src_width];
+        let dst_row = lanczos3_resample_1d(src_row, dst_width, scale_x, filter_scale_x, radius_x);
+        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
+    }
 
-            let center_x = src_x.floor() as i32;
-            let center_y = src_y.floor() as i32;
-
-            let mut sum = 0.0f32;
-            let mut weight_sum = 0.0f32;
-
-            // Sample in the kernel window
-            for ky in -radius_y..=radius_y {
-                let sy = center_y + ky;
-                if sy < 0 || sy >= src_height as i32 {
-                    continue;
-                }
-
-                let dy = (src_y - sy as f32) / filter_scale_y;
-                let wy = lanczos3(dy);
-
-                if wy.abs() < 1e-8 {
-                    continue;
-                }
-
-                for kx in -radius_x..=radius_x {
-                    let sx = center_x + kx;
-                    if sx < 0 || sx >= src_width as i32 {
-                        continue;
-                    }
-
-                    let dx = (src_x - sx as f32) / filter_scale_x;
-                    let wx = lanczos3(dx);
-
-                    let weight = wx * wy;
-                    if weight.abs() < 1e-8 {
-                        continue;
-                    }
-
-                    let sample = src[sy as usize * src_width + sx as usize];
-                    sum += sample * weight;
-                    weight_sum += weight;
-                }
-            }
-
-            // Normalize
-            dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
-                sum / weight_sum
-            } else {
-                // Fallback to nearest neighbor
-                let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
-                let sy = src_y.round().clamp(0.0, (src_height - 1) as f32) as usize;
-                src[sy * src_width + sx]
-            };
+    // Pass 2: Vertical resample each column (src_height -> dst_height)
+    let mut dst = vec![0.0f32; dst_width * dst_height];
+    for x in 0..dst_width {
+        // Extract column
+        let col: Vec<f32> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
+        let dst_col = lanczos3_resample_1d(&col, dst_height, scale_y, filter_scale_y, radius_y);
+        for (y, &val) in dst_col.iter().enumerate() {
+            dst[y * dst_width + x] = val;
         }
     }
 
@@ -346,7 +350,61 @@ fn rescale_bilinear_pixels(
     dst
 }
 
-/// Rescale Pixel4 array using Lanczos3 interpolation
+/// Lanczos3 1D resample for Pixel4 row
+#[inline]
+fn lanczos3_resample_row_pixel4(
+    src: &[Pixel4],
+    dst_len: usize,
+    scale: f32,
+    filter_scale: f32,
+    radius: i32,
+) -> Vec<Pixel4> {
+    let src_len = src.len();
+    let mut dst = vec![[0.0f32; 4]; dst_len];
+
+    for dst_i in 0..dst_len {
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5;
+        let center = src_pos.floor() as i32;
+
+        let mut sum = [0.0f32; 4];
+        let mut weight_sum = 0.0f32;
+
+        for k in -radius..=radius {
+            let si = center + k;
+            if si < 0 || si >= src_len as i32 {
+                continue;
+            }
+
+            let d = (src_pos - si as f32) / filter_scale;
+            let weight = lanczos3(d);
+
+            if weight.abs() >= 1e-8 {
+                let sample = src[si as usize];
+                sum[0] += sample[0] * weight;
+                sum[1] += sample[1] * weight;
+                sum[2] += sample[2] * weight;
+                sum[3] += sample[3] * weight;
+                weight_sum += weight;
+            }
+        }
+
+        dst[dst_i] = if weight_sum.abs() > 1e-8 {
+            [
+                sum[0] / weight_sum,
+                sum[1] / weight_sum,
+                sum[2] / weight_sum,
+                sum[3] / weight_sum,
+            ]
+        } else {
+            let si = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+            src[si]
+        };
+    }
+
+    dst
+}
+
+/// Rescale Pixel4 array using Lanczos3 interpolation (separable, 2-pass)
 /// Progress callback is optional - receives 0.0-1.0 after each row
 fn rescale_lanczos3_pixels(
     src: &[Pixel4],
@@ -357,8 +415,6 @@ fn rescale_lanczos3_pixels(
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
-
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
@@ -368,69 +424,32 @@ fn rescale_lanczos3_pixels(
     let radius_x = (3.0 * filter_scale_x).ceil() as i32;
     let radius_y = (3.0 * filter_scale_y).ceil() as i32;
 
-    for dst_y in 0..dst_height {
-        for dst_x in 0..dst_width {
-            let src_x = (dst_x as f32 + 0.5) * scale_x - 0.5;
-            let src_y = (dst_y as f32 + 0.5) * scale_y - 0.5;
+    // Pass 1: Horizontal resample each row (src_width -> dst_width)
+    // Progress: 0% to 50%
+    let mut temp = vec![[0.0f32; 4]; dst_width * src_height];
+    for y in 0..src_height {
+        let src_row = &src[y * src_width..(y + 1) * src_width];
+        let dst_row = lanczos3_resample_row_pixel4(src_row, dst_width, scale_x, filter_scale_x, radius_x);
+        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
 
-            let center_x = src_x.floor() as i32;
-            let center_y = src_y.floor() as i32;
-
-            let mut sum = [0.0f32; 4];
-            let mut weight_sum = 0.0f32;
-
-            for ky in -radius_y..=radius_y {
-                let sy = center_y + ky;
-                if sy < 0 || sy >= src_height as i32 {
-                    continue;
-                }
-
-                let dy = (src_y - sy as f32) / filter_scale_y;
-                let wy = lanczos3(dy);
-
-                if wy.abs() < 1e-8 {
-                    continue;
-                }
-
-                for kx in -radius_x..=radius_x {
-                    let sx = center_x + kx;
-                    if sx < 0 || sx >= src_width as i32 {
-                        continue;
-                    }
-
-                    let dx = (src_x - sx as f32) / filter_scale_x;
-                    let wx = lanczos3(dx);
-
-                    let weight = wx * wy;
-                    if weight.abs() < 1e-8 {
-                        continue;
-                    }
-
-                    let sample = src[sy as usize * src_width + sx as usize];
-                    sum[0] += sample[0] * weight;
-                    sum[1] += sample[1] * weight;
-                    sum[2] += sample[2] * weight;
-                    sum[3] += sample[3] * weight;
-                    weight_sum += weight;
-                }
-            }
-
-            dst[dst_y * dst_width + dst_x] = if weight_sum.abs() > 1e-8 {
-                [
-                    sum[0] / weight_sum,
-                    sum[1] / weight_sum,
-                    sum[2] / weight_sum,
-                    sum[3] / weight_sum,
-                ]
-            } else {
-                let sx = src_x.round().clamp(0.0, (src_width - 1) as f32) as usize;
-                let sy = src_y.round().clamp(0.0, (src_height - 1) as f32) as usize;
-                src[sy * src_width + sx]
-            };
-        }
-        // Report progress after each row
         if let Some(ref mut cb) = progress {
-            cb((dst_y + 1) as f32 / dst_height as f32);
+            cb((y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Vertical resample each column (src_height -> dst_height)
+    // Progress: 50% to 100%
+    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+    for x in 0..dst_width {
+        // Extract column
+        let col: Vec<Pixel4> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
+        let dst_col = lanczos3_resample_row_pixel4(&col, dst_height, scale_y, filter_scale_y, radius_y);
+        for (y, &val) in dst_col.iter().enumerate() {
+            dst[y * dst_width + x] = val;
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (x + 1) as f32 / dst_width as f32 * 0.5);
         }
     }
 
