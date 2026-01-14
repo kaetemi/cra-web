@@ -299,26 +299,16 @@
             </div>
 
             <div class="preset-buttons">
-                <button class="preset-btn" data-w="64" data-h="64">64x64</button>
-                <button class="preset-btn" data-w="128" data-h="128">128x128</button>
-                <button class="preset-btn" data-w="256" data-h="256">256x256</button>
-                <button class="preset-btn" data-w="512" data-h="512">512x512</button>
-                <button class="preset-btn" data-w="320" data-h="240">320x240</button>
-                <button class="preset-btn" data-w="640" data-h="480">640x480</button>
-                <button class="preset-btn" data-w="1280" data-h="720">1280x720</button>
+                <button class="preset-btn" data-w="64">64px</button>
+                <button class="preset-btn" data-w="128">128px</button>
+                <button class="preset-btn" data-w="256">256px</button>
+                <button class="preset-btn" data-w="512">512px</button>
+                <button class="preset-btn" data-w="640">640px</button>
+                <button class="preset-btn" data-w="1024">1024px</button>
+                <button class="preset-btn" data-w="1920">1920px</button>
             </div>
 
             <div class="option-row" style="margin-top: 20px;">
-                <label>Aspect Ratio:</label>
-                <select id="aspect-mode">
-                    <option value="stretch">Stretch to fit</option>
-                    <option value="fit-width">Fit to width (preserve aspect)</option>
-                    <option value="fit-height">Fit to height (preserve aspect)</option>
-                    <option value="contain">Contain (fit inside bounds)</option>
-                </select>
-            </div>
-
-            <div class="option-row">
                 <label>Interpolation:</label>
                 <select id="interpolation">
                     <option value="1">Lanczos (best quality)</option>
@@ -329,12 +319,12 @@
             <div class="option-row">
                 <label>Dither Mode:</label>
                 <select id="dither-mode">
+                    <option value="4">Mixed (reduces patterns)</option>
+                    <option value="5">Mixed Serpentine</option>
                     <option value="0">Floyd-Steinberg</option>
                     <option value="1">Floyd-Steinberg Serpentine</option>
                     <option value="2">Jarvis-Judice-Ninke</option>
                     <option value="3">Jarvis Serpentine</option>
-                    <option value="4">Mixed (reduces patterns)</option>
-                    <option value="5">Mixed Serpentine</option>
                 </select>
             </div>
 
@@ -392,6 +382,8 @@
         let inputImageData = null;
         let originalWidth = 0;
         let originalHeight = 0;
+        let aspectRatio = 1;
+        let updatingSize = false;
         let lastLinearResult = null;
         let lastOutputWidth = 0;
         let lastOutputHeight = 0;
@@ -488,35 +480,29 @@
             });
         }
 
+        // Update size fields based on aspect ratio
+        function updateSizeFromWidth() {
+            if (updatingSize || !originalWidth) return;
+            updatingSize = true;
+            const width = parseInt(document.getElementById('target-width').value) || 1;
+            const height = Math.round(width / aspectRatio);
+            document.getElementById('target-height').value = height;
+            updatingSize = false;
+        }
+
+        function updateSizeFromHeight() {
+            if (updatingSize || !originalHeight) return;
+            updatingSize = true;
+            const height = parseInt(document.getElementById('target-height').value) || 1;
+            const width = Math.round(height * aspectRatio);
+            document.getElementById('target-width').value = width;
+            updatingSize = false;
+        }
+
         function calculateOutputDimensions() {
-            const targetW = parseInt(document.getElementById('target-width').value) || 256;
-            const targetH = parseInt(document.getElementById('target-height').value) || 256;
-            const mode = document.getElementById('aspect-mode').value;
-
-            if (!originalWidth || !originalHeight) {
-                return { width: targetW, height: targetH };
-            }
-
-            const aspect = originalWidth / originalHeight;
-
-            switch (mode) {
-                case 'stretch':
-                    return { width: targetW, height: targetH };
-                case 'fit-width':
-                    return { width: targetW, height: Math.round(targetW / aspect) };
-                case 'fit-height':
-                    return { width: Math.round(targetH * aspect), height: targetH };
-                case 'contain':
-                    const scaleW = targetW / originalWidth;
-                    const scaleH = targetH / originalHeight;
-                    const scale = Math.min(scaleW, scaleH);
-                    return {
-                        width: Math.round(originalWidth * scale),
-                        height: Math.round(originalHeight * scale)
-                    };
-                default:
-                    return { width: targetW, height: targetH };
-            }
+            const width = parseInt(document.getElementById('target-width').value) || 256;
+            const height = parseInt(document.getElementById('target-height').value) || 256;
+            return { width, height };
         }
 
         async function processImage() {
@@ -654,7 +640,7 @@
             document.getElementById('file-input').click();
         });
 
-        document.getElementById('file-input').addEventListener('change', async (e) => {
+        async function handleFileSelect(e) {
             const file = e.target.files[0];
             if (!file) return;
 
@@ -663,17 +649,36 @@
                 inputImageData = imageData;
                 originalWidth = width;
                 originalHeight = height;
+                aspectRatio = width / height;
+
+                // Set initial target size (fit to 256 on longest side)
+                const maxDim = 256;
+                if (aspectRatio >= 1) {
+                    document.getElementById('target-width').value = maxDim;
+                    document.getElementById('target-height').value = Math.round(maxDim / aspectRatio);
+                } else {
+                    document.getElementById('target-height').value = maxDim;
+                    document.getElementById('target-width').value = Math.round(maxDim * aspectRatio);
+                }
 
                 const box = document.getElementById('upload-box');
                 box.classList.add('has-image');
+
+                // Create preview canvas to show the loaded image
+                const previewCanvas = document.createElement('canvas');
+                previewCanvas.width = width;
+                previewCanvas.height = height;
+                previewCanvas.getContext('2d').putImageData(imageData, 0, 0);
+
                 box.innerHTML = `
+                    <img id="input-preview" src="${previewCanvas.toDataURL()}" alt="Preview">
                     <label>Image loaded: ${width}x${height}</label>
                     <p class="hint">Click to change image</p>
                     <input type="file" id="file-input" accept="image/*">
                 `;
 
-                // Re-attach event listener
-                document.getElementById('file-input').addEventListener('change', arguments.callee);
+                // Re-attach event listener to new input element
+                document.getElementById('file-input').addEventListener('change', handleFileSelect);
 
                 document.getElementById('process-btn').disabled = !wasmReady;
                 document.getElementById('error-message').classList.remove('visible');
@@ -681,7 +686,9 @@
                 document.getElementById('error-message').textContent = 'Failed to load image: ' + err.message;
                 document.getElementById('error-message').classList.add('visible');
             }
-        });
+        }
+
+        document.getElementById('file-input').addEventListener('change', handleFileSelect);
 
         // Drag and drop
         document.getElementById('upload-box').addEventListener('dragover', (e) => {
@@ -706,11 +713,15 @@
             }
         });
 
-        // Preset buttons
+        // Size input handlers (maintain aspect ratio)
+        document.getElementById('target-width').addEventListener('input', updateSizeFromWidth);
+        document.getElementById('target-height').addEventListener('input', updateSizeFromHeight);
+
+        // Preset buttons - set width and auto-calculate height from aspect ratio
         document.querySelectorAll('.preset-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 document.getElementById('target-width').value = btn.dataset.w;
-                document.getElementById('target-height').value = btn.dataset.h;
+                updateSizeFromWidth();
             });
         });
 
