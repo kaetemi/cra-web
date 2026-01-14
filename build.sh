@@ -54,6 +54,7 @@ cp scripts/color_correction_tiled.py dist/scripts/
 # Copy web files
 cp index.html dist/
 cp dither.html dist/
+cp resize.html dist/
 cp app.js dist/
 cp worker.js dist/
 cp sw.js dist/
@@ -89,4 +90,5 @@ echo "To test locally:"
 echo "  cd dist && python -m http.server 8000"
 echo "  Then open http://localhost:8000"
 echo "  Dither demo: http://localhost:8000/dither.html"
+echo "  Resize demo: http://localhost:8000/resize.html"
 echo "=========================================="
