@@ -273,9 +273,9 @@
 
     <div class="container">
         <div class="info-box">
-            <strong>Why linear RGB?</strong> Most image resizers work in sRGB space, which causes color shifts and darkening during interpolation.
-            This tool converts to linear RGB before resizing, then back to sRGB - producing more accurate colors and brightness.
+            <strong>Why linear RGB?</strong> Most image resizers work in sRGB space, which causes color shifts and darkening during interpolation. This tool converts to linear RGB before resizing, then back to sRGB.
         </div>
+        <p style="margin: -12px 0 20px 0; font-size: 12px; color: #888;">Linear RGB values are proportional to physical light intensity, so averaging pixels correctly simulates how light mixes. sRGB's gamma curve breaks this, making blends too dark. Uniform scaling preserves the exact aspect ratio even when the output dimensions are off by a fraction of a pixel. Floating point results are quantized to 8-bit using mixed-kernel dithering with error diffusion in linear RGB (physically correct) and perceptual nearest in OKLab (perceptually correct) - no rounding errors or drift between saves.</p>
 
         <div class="upload-box" id="upload-box">
             <label>Drop image here or click to upload</label>
