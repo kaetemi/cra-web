@@ -49,23 +49,24 @@ fn rescale_bilinear(
     let scale_x = src_width as f32 / dst_width as f32;
     let scale_y = src_height as f32 / dst_height as f32;
 
+    // Maximum valid coordinate (for clamping)
+    let max_x = (src_width - 1) as f32;
+    let max_y = (src_height - 1) as f32;
+
     for dst_y in 0..dst_height {
         for dst_x in 0..dst_width {
-            // Map destination pixel to source coordinates (center of pixel)
-            let src_x = (dst_x as f32 + 0.5) * scale_x - 0.5;
-            let src_y = (dst_y as f32 + 0.5) * scale_y - 0.5;
+            // Map destination pixel center to source coordinates
+            // Using half-pixel offset: center of dst pixel maps to corresponding position in src
+            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
+            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
 
-            // Get integer and fractional parts
-            let x0 = src_x.floor() as i32;
-            let y0 = src_y.floor() as i32;
+            // Get integer and fractional parts (after clamping for correct edge behavior)
+            let x0 = src_x.floor() as usize;
+            let y0 = src_y.floor() as usize;
+            let x1 = (x0 + 1).min(src_width - 1);
+            let y1 = (y0 + 1).min(src_height - 1);
             let fx = src_x - x0 as f32;
             let fy = src_y - y0 as f32;
-
-            // Clamp coordinates
-            let x0 = x0.max(0).min(src_width as i32 - 1) as usize;
-            let x1 = (x0 + 1).min(src_width - 1);
-            let y0 = y0.max(0).min(src_height as i32 - 1) as usize;
-            let y1 = (y0 + 1).min(src_height - 1);
 
             // Sample four corners
             let p00 = src[y0 * src_width + x0];
@@ -331,5 +332,81 @@ mod tests {
         let (w, h) = calculate_target_dimensions(100, 50, None, None);
         assert_eq!(w, 100);
         assert_eq!(h, 50);
+    }
+
+    #[test]
+    fn test_bilinear_roundtrip_2x() {
+        // Test that 2x upscale then 2x downscale returns approximately original
+        // 4x4 -> 8x8 -> 4x4
+        let src = vec![
+            0.0, 0.3, 0.6, 1.0,
+            0.1, 0.4, 0.7, 0.9,
+            0.2, 0.5, 0.8, 0.8,
+            0.3, 0.6, 0.9, 0.7,
+        ];
+        let up = rescale_channel(&src, 4, 4, 8, 8, RescaleMethod::Bilinear);
+        let down = rescale_channel(&up, 8, 8, 4, 4, RescaleMethod::Bilinear);
+
+        // Should be close to original (within reasonable tolerance for interpolation)
+        for (i, (&orig, &result)) in src.iter().zip(down.iter()).enumerate() {
+            let diff = (orig - result).abs();
+            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig, result, diff);
+        }
+    }
+
+    #[test]
+    fn test_lanczos_roundtrip_2x() {
+        // Test that 2x upscale then 2x downscale returns approximately original
+        let src = vec![
+            0.0, 0.3, 0.6, 1.0,
+            0.1, 0.4, 0.7, 0.9,
+            0.2, 0.5, 0.8, 0.8,
+            0.3, 0.6, 0.9, 0.7,
+        ];
+        let up = rescale_channel(&src, 4, 4, 8, 8, RescaleMethod::Lanczos3);
+        let down = rescale_channel(&up, 8, 8, 4, 4, RescaleMethod::Lanczos3);
+
+        for (i, (&orig, &result)) in src.iter().zip(down.iter()).enumerate() {
+            let diff = (orig - result).abs();
+            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig, result, diff);
+        }
+    }
+
+    #[test]
+    fn test_no_shift_on_upscale() {
+        // A single white pixel in center should stay centered after upscale
+        // 3x3 with center pixel white -> 6x6
+        let src = vec![
+            0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0,
+        ];
+        let dst = rescale_channel(&src, 3, 3, 6, 6, RescaleMethod::Bilinear);
+
+        // The brightest area should still be in the center region
+        // Center of 6x6 is around pixels (2,2), (2,3), (3,2), (3,3)
+        let center_sum = dst[2 * 6 + 2] + dst[2 * 6 + 3] + dst[3 * 6 + 2] + dst[3 * 6 + 3];
+        let corner_sum = dst[0] + dst[5] + dst[30] + dst[35]; // corners
+
+        assert!(center_sum > corner_sum, "Center should be brighter than corners");
+    }
+
+    #[test]
+    fn test_edge_pixels_preserved() {
+        // Edge pixels shouldn't expand or shift weirdly
+        // Left column black, right column white
+        let src = vec![
+            0.0, 1.0,
+            0.0, 1.0,
+        ];
+        let up = rescale_channel(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+
+        // Left edge (x=0) should still be darkest
+        // Right edge (x=3) should still be brightest
+        let left_avg = (up[0] + up[4] + up[8] + up[12]) / 4.0;
+        let right_avg = (up[3] + up[7] + up[11] + up[15]) / 4.0;
+
+        assert!(left_avg < 0.5, "Left edge should be dark: {}", left_avg);
+        assert!(right_avg > 0.5, "Right edge should be bright: {}", right_avg);
     }
 }
