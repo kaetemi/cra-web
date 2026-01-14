@@ -1,9 +1,10 @@
 /// Basic Oklab histogram matching algorithm.
 /// Analogous to basic_lab.rs but using the Oklab color space.
 
-use crate::color::{linear_rgb_to_oklab_channels, oklab_to_linear_rgb_channels};
+use crate::color::{linear_rgb_to_oklab_pixel4, oklab_to_linear_rgb_pixel4};
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
+use crate::pixel::Pixel4;
 
 // Oklab ranges:
 // L: 0-1
@@ -68,28 +69,24 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>) {
     (a_oklab, b_oklab)
 }
 
-/// Basic Oklab histogram matching - returns linear RGB channels
+/// Basic Oklab histogram matching - returns linear RGB as Pixel4 array
 ///
 /// This is the core algorithm that performs histogram matching in Oklab space
-/// and returns the result as linear RGB channels (f32, 0-1 range).
+/// and returns the result as linear RGB Pixel4 array (0-1 range).
 ///
 /// Args:
-///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
-///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
+///     input: Input image as linear RGB Pixel4 array (0-1 range)
+///     reference: Reference image as linear RGB Pixel4 array (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     keep_luminosity: If true, preserve original L channel
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram quantization
 ///
-/// Returns: (R, G, B) linear RGB channels
+/// Returns: Linear RGB Pixel4 array
 pub fn color_correct_basic_oklab_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -97,10 +94,32 @@ pub fn color_correct_basic_oklab_linear(
     keep_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    // Convert to separate Oklab channels
-    let (in_l, in_a, in_b_ch) = linear_rgb_to_oklab_channels(&in_r, &in_g, &in_b);
-    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_oklab_channels(&ref_r, &ref_g, &ref_b);
+) -> Vec<Pixel4> {
+    let pixel_count = input.len();
+    let ref_count = reference.len();
+
+    // Convert input and reference to Oklab, extracting channels
+    let mut in_l = Vec::with_capacity(pixel_count);
+    let mut in_a = Vec::with_capacity(pixel_count);
+    let mut in_b_ch = Vec::with_capacity(pixel_count);
+
+    for &p in input {
+        let oklab = linear_rgb_to_oklab_pixel4(p);
+        in_l.push(oklab[0]);
+        in_a.push(oklab[1]);
+        in_b_ch.push(oklab[2]);
+    }
+
+    let mut ref_l = Vec::with_capacity(ref_count);
+    let mut ref_a = Vec::with_capacity(ref_count);
+    let mut ref_b_ch = Vec::with_capacity(ref_count);
+
+    for &p in reference {
+        let oklab = linear_rgb_to_oklab_pixel4(p);
+        ref_l.push(oklab[0]);
+        ref_a.push(oklab[1]);
+        ref_b_ch.push(oklab[2]);
+    }
 
     // Store original L if preserving luminosity
     let original_l = if keep_luminosity {
@@ -167,8 +186,13 @@ pub fn color_correct_basic_oklab_linear(
         }
     };
 
-    // Convert Oklab back to linear RGB (separate channels)
-    oklab_to_linear_rgb_channels(&final_l, &final_a, &final_b)
+    // Convert Oklab back to linear RGB as Pixel4 array
+    let mut result = Vec::with_capacity(pixel_count);
+    for i in 0..pixel_count {
+        let oklab_pixel: Pixel4 = [final_l[i], final_a[i], final_b[i], 0.0];
+        result.push(oklab_to_linear_rgb_pixel4(oklab_pixel));
+    }
+    result
 }
 
 #[cfg(test)]

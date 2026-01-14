@@ -3,6 +3,7 @@
 
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
+use crate::pixel::Pixel4;
 use crate::rotation::{
     compute_rgb_channel_ranges, deg_to_rad, perceptual_scale_factors, perceptual_scale_rgb,
     perceptual_unscale_rgb, rotate_rgb,
@@ -176,25 +177,21 @@ fn process_rgb_iteration(
     avg_rgb
 }
 
-/// CRA RGB color correction - returns linear RGB channels
+/// CRA RGB color correction - returns linear RGB as Pixel4 array
 ///
 /// Args:
-///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
-///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
+///     input: Input image as linear RGB Pixel4 array (0-1 range)
+///     reference: Reference image as linear RGB Pixel4 array (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     use_perceptual: If true, use perceptual weighting
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
-///     (R, G, B) linear RGB channels (f32, 0-1 range)
+///     Linear RGB Pixel4 array
 pub fn color_correct_cra_rgb_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -202,7 +199,7 @@ pub fn color_correct_cra_rgb_linear(
     use_perceptual: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
 
@@ -213,18 +210,18 @@ pub fn color_correct_cra_rgb_linear(
         None
     };
 
-    // Interleave linear RGB channels for rotation operations
+    // Convert Pixel4 to interleaved RGB for rotation operations
     let mut input_linear = vec![0.0f32; input_pixels * 3];
     let mut ref_linear = vec![0.0f32; ref_pixels * 3];
     for i in 0..input_pixels {
-        input_linear[i * 3] = in_r[i];
-        input_linear[i * 3 + 1] = in_g[i];
-        input_linear[i * 3 + 2] = in_b[i];
+        input_linear[i * 3] = input[i][0];
+        input_linear[i * 3 + 1] = input[i][1];
+        input_linear[i * 3 + 2] = input[i][2];
     }
     for i in 0..ref_pixels {
-        ref_linear[i * 3] = ref_r[i];
-        ref_linear[i * 3 + 1] = ref_g[i];
-        ref_linear[i * 3 + 2] = ref_b[i];
+        ref_linear[i * 3] = reference[i][0];
+        ref_linear[i * 3 + 1] = reference[i][1];
+        ref_linear[i * 3 + 2] = reference[i][2];
     }
 
     // Apply perceptual scaling if enabled
@@ -333,10 +330,15 @@ pub fn color_correct_cra_rgb_linear(
         final_scaled = perceptual_unscale_rgb(&final_scaled, scale);
     }
 
-    // Extract separate linear RGB channels
-    let final_r: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3]).collect();
-    let final_g: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 1]).collect();
-    let final_b: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 2]).collect();
-
-    (final_r, final_g, final_b)
+    // Convert interleaved RGB back to Pixel4 array
+    let mut result = Vec::with_capacity(input_pixels);
+    for i in 0..input_pixels {
+        result.push([
+            final_scaled[i * 3],
+            final_scaled[i * 3 + 1],
+            final_scaled[i * 3 + 2],
+            0.0,
+        ]);
+    }
+    result
 }

@@ -26,7 +26,8 @@ use cra_wasm::dither::DitherMode as HistogramDitherMode;
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
 use cra_wasm::dither_common::PerceptualSpace;
-use cra_wasm::output::finalize_linear_to_srgb_u8_with_options;
+use cra_wasm::output::finalize_pixels_to_srgb_u8_with_options;
+use cra_wasm::pixel::Pixel4;
 use cra_wasm::tiled_lab::{color_correct_tiled_lab_linear, color_correct_tiled_oklab_linear};
 
 // ============================================================================
@@ -300,7 +301,7 @@ struct Args {
 // ============================================================================
 
 /// Load image and convert to linear RGB channels (f32, 0-1 range)
-fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, u32, u32), String> {
+fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u32), String> {
     if verbose {
         eprintln!("Loading: {}", path.display());
     }
@@ -315,35 +316,32 @@ fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<f32>, Vec<f32
         eprintln!("  Dimensions: {}x{}", width, height);
     }
 
-    // Convert sRGB u8 to linear RGB f32
-    let pixels = (width * height) as usize;
-    let mut r = Vec::with_capacity(pixels);
-    let mut g = Vec::with_capacity(pixels);
-    let mut b = Vec::with_capacity(pixels);
+    // Convert sRGB u8 to linear RGB Pixel4
+    let pixel_count = (width * height) as usize;
+    let mut pixels = Vec::with_capacity(pixel_count);
 
-    for i in 0..pixels {
+    for i in 0..pixel_count {
         // Normalize to 0-1 then convert sRGB to linear
-        r.push(srgb_to_linear_single(data[i * 3] as f32 / 255.0));
-        g.push(srgb_to_linear_single(data[i * 3 + 1] as f32 / 255.0));
-        b.push(srgb_to_linear_single(data[i * 3 + 2] as f32 / 255.0));
+        let r = srgb_to_linear_single(data[i * 3] as f32 / 255.0);
+        let g = srgb_to_linear_single(data[i * 3 + 1] as f32 / 255.0);
+        let b = srgb_to_linear_single(data[i * 3 + 2] as f32 / 255.0);
+        pixels.push([r, g, b, 0.0]);
     }
 
-    Ok((r, g, b, width, height))
+    Ok((pixels, width, height))
 }
 
 /// Resize linear RGB image in linear space for correct color blending
 fn resize_linear(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
+    pixels: &[Pixel4],
     src_width: u32,
     src_height: u32,
     target_width: Option<u32>,
     target_height: Option<u32>,
     method: cra_wasm::rescale::RescaleMethod,
     verbose: bool,
-) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale_rgb};
+) -> Result<(Vec<Pixel4>, u32, u32), String> {
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale_pixels};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -355,7 +353,7 @@ fn resize_linear(
     );
 
     if dst_width == src_width as usize && dst_height == src_height as usize {
-        return Ok((r.to_vec(), g.to_vec(), b.to_vec(), src_width, src_height));
+        return Ok((pixels.to_vec(), src_width, src_height));
     }
 
     if verbose {
@@ -370,30 +368,29 @@ fn resize_linear(
     }
 
     // Rescale directly in linear space for correct color blending
-    let (dst_r, dst_g, dst_b) = rescale_rgb(
-        r, g, b,
+    let dst_pixels = rescale_pixels(
+        pixels,
         src_width as usize, src_height as usize,
         dst_width, dst_height,
         method,
     );
 
-    Ok((dst_r, dst_g, dst_b, dst_width as u32, dst_height as u32))
+    Ok((dst_pixels, dst_width as u32, dst_height as u32))
 }
 
-/// Convert linear RGB to grayscale (luminance) using Rec.709 coefficients
-fn linear_rgb_to_grayscale(r: &[f32], g: &[f32], b: &[f32]) -> Vec<f32> {
+/// Convert linear RGB Pixel4 to grayscale (luminance) using Rec.709 coefficients
+fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
     // Rec.709 luminance coefficients (for linear RGB)
     const R_COEF: f32 = 0.2126;
     const G_COEF: f32 = 0.7152;
     const B_COEF: f32 = 0.0722;
 
-    let pixels = r.len();
-    let mut gray = Vec::with_capacity(pixels);
+    let mut gray = Vec::with_capacity(pixels.len());
 
-    for i in 0..pixels {
-        // Compute luminance in linear space, scale to 0-255 for dithering
-        let luminance = r[i] * R_COEF + g[i] * G_COEF + b[i] * B_COEF;
-        // Convert to sRGB for perceptual grayscale output
+    for p in pixels {
+        // Compute luminance in linear space
+        let luminance = p[0] * R_COEF + p[1] * G_COEF + p[2] * B_COEF;
+        // Convert to sRGB for perceptual grayscale output, scale to 0-255
         gray.push(linear_to_srgb_single(luminance) * 255.0);
     }
 
@@ -614,12 +611,12 @@ fn main() -> Result<(), String> {
         ));
     }
 
-    // Load input image as linear RGB
-    let (in_r, in_g, in_b, src_width, src_height) = load_image_linear(&args.input, args.verbose)?;
+    // Load input image as linear RGB Pixel4
+    let (input_pixels, src_width, src_height) = load_image_linear(&args.input, args.verbose)?;
 
     // Resize in linear RGB space
-    let (in_r, in_g, in_b, width, height) = resize_linear(
-        &in_r, &in_g, &in_b,
+    let (input_pixels, width, height) = resize_linear(
+        &input_pixels,
         src_width, src_height,
         args.width, args.height,
         args.scale_method.to_rescale_method(),
@@ -641,18 +638,19 @@ fn main() -> Result<(), String> {
     let dithered_interleaved: Vec<u8>;
 
     if needs_reference {
-        // Load reference image as linear RGB
+        // Load reference image as linear RGB Pixel4
         let ref_path = args.r#ref.as_ref().unwrap();
-        let (ref_r, ref_g, ref_b, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
+        let (ref_pixels, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
         let ref_width_usize = ref_width as usize;
         let ref_height_usize = ref_height as usize;
 
-        // Apply color correction (operates in linear RGB, returns linear RGB)
-        let (out_r, out_g, out_b) = match method {
+        // Apply color correction (operates in linear RGB, returns linear RGB Pixel4)
+        // For functions not yet refactored to Pixel4, convert to/from channels
+        let output_pixels: Vec<Pixel4> = match method {
             Method::None => unreachable!(),
             Method::BasicLab => color_correct_basic_lab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.keep_luminosity,
@@ -660,16 +658,16 @@ fn main() -> Result<(), String> {
                 histogram_dither,
             ),
             Method::BasicRgb => color_correct_basic_rgb_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 histogram_mode,
                 histogram_dither,
             ),
             Method::BasicOklab => color_correct_basic_oklab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.keep_luminosity,
@@ -677,8 +675,8 @@ fn main() -> Result<(), String> {
                 histogram_dither,
             ),
             Method::CraLab => color_correct_cra_lab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.keep_luminosity,
@@ -688,8 +686,8 @@ fn main() -> Result<(), String> {
                 histogram_distance_space,
             ),
             Method::CraRgb => color_correct_cra_rgb_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.perceptual,
@@ -697,8 +695,8 @@ fn main() -> Result<(), String> {
                 histogram_dither,
             ),
             Method::CraOklab => color_correct_cra_oklab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.keep_luminosity,
@@ -708,8 +706,8 @@ fn main() -> Result<(), String> {
                 histogram_distance_space,
             ),
             Method::TiledLab => color_correct_tiled_lab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.tiled_luminosity,
@@ -719,8 +717,8 @@ fn main() -> Result<(), String> {
                 histogram_distance_space,
             ),
             Method::TiledOklab => color_correct_tiled_oklab_linear(
-                &in_r, &in_g, &in_b,
-                &ref_r, &ref_g, &ref_b,
+                &input_pixels,
+                &ref_pixels,
                 width_usize, height_usize,
                 ref_width_usize, ref_height_usize,
                 args.tiled_luminosity,
@@ -734,7 +732,7 @@ fn main() -> Result<(), String> {
         // Now dither linear RGB to sRGB output
         if format.is_grayscale {
             // Convert linear RGB to grayscale and dither
-            let gray = linear_rgb_to_grayscale(&out_r, &out_g, &out_b);
+            let gray = linear_pixels_to_grayscale(&output_pixels);
             let gray_out = dither_grayscale(
                 &gray,
                 width_usize,
@@ -751,21 +749,23 @@ fn main() -> Result<(), String> {
             dithered_b = None;
         } else if format.bits_r == 8 && format.bits_g == 8 && format.bits_b == 8 {
             // RGB888 - use standard output finalization (linear -> sRGB with dithering)
-            let srgb_out = finalize_linear_to_srgb_u8_with_options(
-                &out_r, &out_g, &out_b,
+            let mut result_pixels = output_pixels;
+            let dither_mode = Some(args.output_dither.to_histogram_dither_mode());
+            let srgb_out = finalize_pixels_to_srgb_u8_with_options(
+                &mut result_pixels,
                 width_usize, height_usize,
-                args.output_dither.to_histogram_dither_mode(),
+                dither_mode,
                 args.color_aware_output,
                 output_colorspace.to_perceptual_space(),
                 args.seed,
             );
 
             // Split channels for binary output
-            let pixels = width_usize * height_usize;
-            let mut r_out = Vec::with_capacity(pixels);
-            let mut g_out = Vec::with_capacity(pixels);
-            let mut b_out = Vec::with_capacity(pixels);
-            for i in 0..pixels {
+            let pixel_count = width_usize * height_usize;
+            let mut r_out = Vec::with_capacity(pixel_count);
+            let mut g_out = Vec::with_capacity(pixel_count);
+            let mut b_out = Vec::with_capacity(pixel_count);
+            for i in 0..pixel_count {
                 r_out.push(srgb_out[i * 3]);
                 g_out.push(srgb_out[i * 3 + 1]);
                 b_out.push(srgb_out[i * 3 + 2]);
@@ -778,14 +778,14 @@ fn main() -> Result<(), String> {
             dithered_b = Some(b_out);
         } else {
             // Non-RGB888 - convert to sRGB 0-255 range, then dither to target bit depth
-            let pixels = width_usize * height_usize;
-            let mut srgb_r = Vec::with_capacity(pixels);
-            let mut srgb_g = Vec::with_capacity(pixels);
-            let mut srgb_b = Vec::with_capacity(pixels);
-            for i in 0..pixels {
-                srgb_r.push(linear_to_srgb_single(out_r[i]) * 255.0);
-                srgb_g.push(linear_to_srgb_single(out_g[i]) * 255.0);
-                srgb_b.push(linear_to_srgb_single(out_b[i]) * 255.0);
+            let pixel_count = width_usize * height_usize;
+            let mut srgb_r = Vec::with_capacity(pixel_count);
+            let mut srgb_g = Vec::with_capacity(pixel_count);
+            let mut srgb_b = Vec::with_capacity(pixel_count);
+            for p in &output_pixels {
+                srgb_r.push(linear_to_srgb_single(p[0]) * 255.0);
+                srgb_g.push(linear_to_srgb_single(p[1]) * 255.0);
+                srgb_b.push(linear_to_srgb_single(p[2]) * 255.0);
             }
 
             let (r_out, g_out, b_out) = dither_rgb(
@@ -798,8 +798,8 @@ fn main() -> Result<(), String> {
             );
 
             dithered_interleaved = {
-                let mut out = Vec::with_capacity(pixels * 3);
-                for i in 0..pixels {
+                let mut out = Vec::with_capacity(pixel_count * 3);
+                for i in 0..pixel_count {
                     out.push(r_out[i]);
                     out.push(g_out[i]);
                     out.push(b_out[i]);
@@ -814,13 +814,13 @@ fn main() -> Result<(), String> {
     } else {
         // Dither-only path (no color correction)
         // Convert linear RGB to sRGB for dithering
-        let pixels = width_usize * height_usize;
+        let pixel_count = width_usize * height_usize;
 
         if format.is_grayscale {
             if args.verbose {
                 eprintln!("Converting to grayscale and dithering...");
             }
-            let gray = linear_rgb_to_grayscale(&in_r, &in_g, &in_b);
+            let gray = linear_pixels_to_grayscale(&input_pixels);
             let gray_out = dither_grayscale(
                 &gray,
                 width_usize,
@@ -840,13 +840,13 @@ fn main() -> Result<(), String> {
                 eprintln!("Dithering RGB channels...");
             }
             // Convert linear to sRGB 0-255 range
-            let mut srgb_r = Vec::with_capacity(pixels);
-            let mut srgb_g = Vec::with_capacity(pixels);
-            let mut srgb_b = Vec::with_capacity(pixels);
-            for i in 0..pixels {
-                srgb_r.push(linear_to_srgb_single(in_r[i]) * 255.0);
-                srgb_g.push(linear_to_srgb_single(in_g[i]) * 255.0);
-                srgb_b.push(linear_to_srgb_single(in_b[i]) * 255.0);
+            let mut srgb_r = Vec::with_capacity(pixel_count);
+            let mut srgb_g = Vec::with_capacity(pixel_count);
+            let mut srgb_b = Vec::with_capacity(pixel_count);
+            for p in &input_pixels {
+                srgb_r.push(linear_to_srgb_single(p[0]) * 255.0);
+                srgb_g.push(linear_to_srgb_single(p[1]) * 255.0);
+                srgb_b.push(linear_to_srgb_single(p[2]) * 255.0);
             }
 
             let (r_out, g_out, b_out) = dither_rgb(
@@ -859,8 +859,8 @@ fn main() -> Result<(), String> {
             );
 
             dithered_interleaved = {
-                let mut out = Vec::with_capacity(pixels * 3);
-                for i in 0..pixels {
+                let mut out = Vec::with_capacity(pixel_count * 3);
+                for i in 0..pixel_count {
                     out.push(r_out[i]);
                     out.push(g_out[i]);
                     out.push(b_out[i]);

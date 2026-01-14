@@ -82,94 +82,108 @@ WASM Output (u8 RGB/RGBA or f32)
 
 ---
 
-## Phase 5: Basic Color Correction
+## Phase 5: Basic Color Correction ✅
+
+Refactored in-place to use Pixel4 at API boundaries (no duplicate functions).
 
 ### basic_lab.rs
 
-- [ ] Add `color_correct_basic_lab_pixel4(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
-- [ ] Internal: process histogram matching on Pixel4 arrays
-- [ ] Avoid intermediate separate-channel vectors
+- [x] `color_correct_basic_lab_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] Internal: convert to Lab channels for histogram matching, back to Pixel4 on return
+- [x] Uses `linear_rgb_to_lab_pixel4()` / `lab_to_linear_rgb_pixel4()` for conversion
 
 ### basic_rgb.rs
 
-- [ ] Add `color_correct_basic_rgb_pixel4(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] `color_correct_basic_rgb_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
 
 ### basic_oklab.rs
 
-- [ ] Add `color_correct_basic_oklab_pixel4(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] `color_correct_basic_oklab_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] Uses `linear_rgb_to_oklab_pixel4()` / `oklab_to_linear_rgb_pixel4()` for conversion
 
 ---
 
-## Phase 6: CRA Color Correction
+## Phase 6: CRA Color Correction ✅
+
+Refactored in-place to use Pixel4 at API boundaries.
 
 ### cra_lab.rs
 
-- [ ] Add `color_correct_cra_lab_pixel4(...)`
-- [ ] Add `color_correct_cra_oklab_pixel4(...)`
-- [ ] Refactor rotation processing to use Pixel4
-- [ ] Avoid 3× channel separation per rotation
+- [x] `color_correct_cra_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] `color_correct_cra_lab_linear(...)` - convenience wrapper for CIELAB
+- [x] `color_correct_cra_oklab_linear(...)` - convenience wrapper for OkLab
+- [x] Added `pixels_to_lab_channels()` / `lab_channels_to_pixels()` helpers
+- [x] Internal rotation processing still uses separate channels (required for histogram ops)
 
 ### cra_rgb.rs
 
-- [ ] Add `color_correct_cra_rgb_pixel4(...)`
-- [ ] Refactor internal processing to Pixel4
+- [x] `color_correct_cra_rgb_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] Converts Pixel4 to interleaved RGB for rotation, back to Pixel4 on return
 
 ---
 
-## Phase 7: Tiled Processing
+## Phase 7: Tiled Processing ✅
+
+Refactored in-place to use Pixel4 at API boundaries.
 
 ### tiled_lab.rs
 
-- [ ] Add `color_correct_tiled_lab_pixel4(...)`
-- [ ] Add `color_correct_tiled_oklab_pixel4(...)`
-- [ ] Process tiles as Pixel4 blocks
-- [ ] Reduce per-tile format conversions
+- [x] `color_correct_tiled_linear(input: &[Pixel4], reference: &[Pixel4], ...) -> Vec<Pixel4>`
+- [x] `color_correct_tiled_lab_linear(...)` - convenience wrapper for CIELAB
+- [x] `color_correct_tiled_oklab_linear(...)` - convenience wrapper for OkLab
+- [x] Added `pixels_to_lab_channels()` / `lab_channels_to_pixels()` helpers
+- [x] Per-tile format conversions still occur (histogram matching requires channels)
 
 ---
 
-## Phase 8: Histogram Matching
+## Phase 8: Histogram Matching (Deferred)
 
 ### histogram.rs
 
 - [ ] Consider joint-channel histogram operations
-- [ ] Or: extract channels from Pixel4 only when needed for histogram LUT building
+- [x] Current approach: extract channels from Pixel4 only when needed for histogram LUT building
+- Note: Histogram matching inherently operates per-channel, so separate channels are required
 
 ---
 
-## Phase 9: Dithering
+## Phase 9: Dithering (No Changes Needed)
 
 ### dither.rs
 
-- [ ] Ensure `dither_with_mode` works efficiently with Pixel4 output
-- [ ] Already has `colorspace_aware_dither_rgb_with_mode` - verify it uses Pixel4 efficiently
+- [x] `dither_with_mode` works with separate channels (used internally by histogram prep)
+- [x] `colorspace_aware_dither_rgb_with_mode` handles joint RGB processing
 
 ### dither_colorspace_aware.rs
 
-- [ ] Already does joint RGB processing - ensure it accepts Pixel4 input
-- [ ] Add `colorspace_aware_dither_pixel4(...)` if needed
+- [x] Already does joint RGB processing with perceptual color distance
+- [x] Used by `output::finalize_pixels_to_srgb_u8_color_aware()` for Pixel4 output
 
 ---
 
-## Phase 10: WASM Exports (lib.rs)
+## Phase 10: WASM Exports (lib.rs) ✅
 
-- [ ] Add `color_correct_basic_lab_pixel4_wasm(...)`
-- [ ] Add `color_correct_basic_rgb_pixel4_wasm(...)`
-- [ ] Add `color_correct_basic_oklab_pixel4_wasm(...)`
-- [ ] Add `color_correct_cra_lab_pixel4_wasm(...)`
-- [ ] Add `color_correct_cra_rgb_pixel4_wasm(...)`
-- [ ] Add `color_correct_cra_oklab_pixel4_wasm(...)`
-- [ ] Add `color_correct_tiled_lab_pixel4_wasm(...)`
-- [ ] Add `color_correct_tiled_oklab_pixel4_wasm(...)`
-- [ ] Replace manual interleave loops with `pixel::*` utilities
+Updated existing WASM exports to use Pixel4 internally (no new function names needed).
+
+- [x] `color_correct_basic_lab()` - uses `pixel::srgb_u8_to_pixels()` + Pixel4 processing
+- [x] `color_correct_basic_rgb()` - uses Pixel4 internally
+- [x] `color_correct_basic_oklab()` - uses Pixel4 internally
+- [x] `color_correct_cra_lab()` - uses Pixel4 internally
+- [x] `color_correct_cra_rgb()` - uses Pixel4 internally
+- [x] `color_correct_cra_oklab()` - uses Pixel4 internally
+- [x] `color_correct_tiled_lab()` - uses Pixel4 internally
+- [x] `color_correct_tiled_oklab()` - uses Pixel4 internally
+- [x] All use `output::finalize_pixels_to_srgb_u8_*()` for final conversion
 
 ---
 
-## Phase 11: CLI Updates (bin/cra.rs)
+## Phase 11: CLI Updates (bin/cra.rs) ✅
 
-- [ ] Refactor `load_image_linear` to return `Vec<Pixel4>`
-- [ ] Refactor `resize_linear` to use `rescale_pixels`
-- [ ] Update all color correction calls to use Pixel4 variants
-- [ ] Update output path to use Pixel4 finalization
+- [x] `load_image_linear()` returns `(Vec<Pixel4>, u32, u32)`
+- [x] `resize_linear()` uses Pixel4 throughout
+- [x] All color correction calls use Pixel4 APIs directly
+- [x] `linear_pixels_to_grayscale()` takes `&[Pixel4]`
+- [x] Output path uses `finalize_pixels_to_srgb_u8_with_options()`
+- [x] Removed temporary `pixels_to_channels` / `channels_to_pixels` workaround
 
 ---
 
@@ -177,14 +191,26 @@ WASM Output (u8 RGB/RGBA or f32)
 
 - [ ] Update dither.html to use new Pixel4 WASM APIs (if beneficial)
 - [ ] Test performance improvements
+- Note: WASM API signatures unchanged, so no JS changes required
 
 ---
 
 ## Cleanup
 
-- [ ] Remove deprecated separate-channel functions (after migration complete)
-- [ ] Remove unused conversion utilities
-- [ ] Update documentation
+- [x] Refactored functions in-place (no deprecated functions to remove)
+- [ ] Remove unused `*_channels()` conversion utilities from `color.rs` (optional)
+- [x] Updated documentation (this file)
+
+---
+
+## Current Status: Core Refactoring Complete ✅
+
+All color correction algorithms now use Pixel4 at their API boundaries:
+- **Input**: `&[Pixel4]` (linear RGB)
+- **Output**: `Vec<Pixel4>` (linear RGB)
+- **Internal**: May use separate channels for histogram operations (inherent requirement)
+
+The WASM layer handles u8 ↔ Pixel4 conversion, so JavaScript API unchanged.
 
 ---
 

@@ -480,17 +480,17 @@ pub fn color_correct_basic_lab(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    // Convert uint8 to float (0-1) sRGB
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert uint8 sRGB to linear RGB Pixel4
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    let (r, g, b) = basic_lab::color_correct_basic_lab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    // Perform color correction
+    let mut result = basic_lab::color_correct_basic_lab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -500,9 +500,11 @@ pub fn color_correct_basic_lab(
         dither_mode_from_u8(histogram_dither_mode),
     );
 
-    output::finalize_linear_to_srgb_u8(
-        &r, &g, &b,
-        input_width, input_height,
+    // Finalize to sRGB u8 output
+    output::finalize_pixels_to_srgb_u8_dithered(
+        &mut result,
+        input_width,
+        input_height,
         dither_mode_from_u8(output_dither_mode),
         0, // seed
     )
@@ -533,16 +535,17 @@ pub fn color_correct_basic_rgb(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert uint8 sRGB to linear RGB Pixel4
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    let (r, g, b) = basic_rgb::color_correct_basic_rgb_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    // Perform color correction
+    let mut result = basic_rgb::color_correct_basic_rgb_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -551,9 +554,11 @@ pub fn color_correct_basic_rgb(
         dither_mode_from_u8(histogram_dither_mode),
     );
 
-    output::finalize_linear_to_srgb_u8(
-        &r, &g, &b,
-        input_width, input_height,
+    // Finalize to sRGB u8 output
+    output::finalize_pixels_to_srgb_u8_dithered(
+        &mut result,
+        input_width,
+        input_height,
         dither_mode_from_u8(output_dither_mode),
         0, // seed
     )
@@ -598,16 +603,15 @@ pub fn color_correct_cra_lab(
     color_aware_output: bool,
     output_distance_space: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
-
-    let (r, g, b) = cra_lab::color_correct_cra_lab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    let mut result = cra_lab::color_correct_cra_lab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -619,10 +623,11 @@ pub fn color_correct_cra_lab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_linear_to_srgb_u8_with_options(
-        &r, &g, &b,
-        input_width, input_height,
-        dither_mode_from_u8(output_dither_mode),
+    output::finalize_pixels_to_srgb_u8_with_options(
+        &mut result,
+        input_width,
+        input_height,
+        Some(dither_mode_from_u8(output_dither_mode)),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
         0, // seed
@@ -668,16 +673,15 @@ pub fn color_correct_tiled_lab(
     color_aware_output: bool,
     output_distance_space: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
-
-    let (r, g, b) = tiled_lab::color_correct_tiled_lab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    let mut result = tiled_lab::color_correct_tiled_lab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -689,10 +693,11 @@ pub fn color_correct_tiled_lab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_linear_to_srgb_u8_with_options(
-        &r, &g, &b,
-        input_width, input_height,
-        dither_mode_from_u8(output_dither_mode),
+    output::finalize_pixels_to_srgb_u8_with_options(
+        &mut result,
+        input_width,
+        input_height,
+        Some(dither_mode_from_u8(output_dither_mode)),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
         0, // seed
@@ -729,16 +734,15 @@ pub fn color_correct_cra_rgb(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
-
-    let (r, g, b) = cra_rgb::color_correct_cra_rgb_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    let mut result = cra_rgb::color_correct_cra_rgb_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -748,9 +752,10 @@ pub fn color_correct_cra_rgb(
         dither_mode_from_u8(histogram_dither_mode),
     );
 
-    output::finalize_linear_to_srgb_u8(
-        &r, &g, &b,
-        input_width, input_height,
+    output::finalize_pixels_to_srgb_u8_dithered(
+        &mut result,
+        input_width,
+        input_height,
         dither_mode_from_u8(output_dither_mode),
         0, // seed
     )
@@ -785,17 +790,17 @@ pub fn color_correct_basic_oklab(
     histogram_dither_mode: u8,
     output_dither_mode: u8,
 ) -> Vec<u8> {
-    // Convert uint8 to float (0-1) sRGB
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert uint8 sRGB to linear RGB Pixel4
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    let (r, g, b) = basic_oklab::color_correct_basic_oklab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    // Perform color correction
+    let mut result = basic_oklab::color_correct_basic_oklab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -805,9 +810,11 @@ pub fn color_correct_basic_oklab(
         dither_mode_from_u8(histogram_dither_mode),
     );
 
-    output::finalize_linear_to_srgb_u8(
-        &r, &g, &b,
-        input_width, input_height,
+    // Finalize to sRGB u8 output
+    output::finalize_pixels_to_srgb_u8_dithered(
+        &mut result,
+        input_width,
+        input_height,
         dither_mode_from_u8(output_dither_mode),
         0, // seed
     )
@@ -852,16 +859,15 @@ pub fn color_correct_cra_oklab(
     color_aware_output: bool,
     output_distance_space: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
-
-    let (r, g, b) = cra_lab::color_correct_cra_oklab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    let mut result = cra_lab::color_correct_cra_oklab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -873,10 +879,11 @@ pub fn color_correct_cra_oklab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_linear_to_srgb_u8_with_options(
-        &r, &g, &b,
-        input_width, input_height,
-        dither_mode_from_u8(output_dither_mode),
+    output::finalize_pixels_to_srgb_u8_with_options(
+        &mut result,
+        input_width,
+        input_height,
+        Some(dither_mode_from_u8(output_dither_mode)),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
         0, // seed
@@ -922,16 +929,15 @@ pub fn color_correct_tiled_oklab(
     color_aware_output: bool,
     output_distance_space: u8,
 ) -> Vec<u8> {
-    let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
-    let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
 
-    // Convert sRGB to linear RGB channels
-    let (in_r, in_g, in_b) = color::srgb_to_linear_channels(&input_srgb, input_width, input_height);
-    let (ref_r, ref_g, ref_b) = color::srgb_to_linear_channels(&ref_srgb, ref_width, ref_height);
-
-    let (r, g, b) = tiled_lab::color_correct_tiled_oklab_linear(
-        &in_r, &in_g, &in_b,
-        &ref_r, &ref_g, &ref_b,
+    let mut result = tiled_lab::color_correct_tiled_oklab_linear(
+        &input_pixels,
+        &ref_pixels,
         input_width,
         input_height,
         ref_width,
@@ -943,10 +949,11 @@ pub fn color_correct_tiled_oklab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_linear_to_srgb_u8_with_options(
-        &r, &g, &b,
-        input_width, input_height,
-        dither_mode_from_u8(output_dither_mode),
+    output::finalize_pixels_to_srgb_u8_with_options(
+        &mut result,
+        input_width,
+        input_height,
+        Some(dither_mode_from_u8(output_dither_mode)),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
         0, // seed

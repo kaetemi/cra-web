@@ -2,10 +2,11 @@
 /// Supports both CIELAB and OkLab color spaces via the colorspace parameter.
 
 use crate::color::{
-    lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, linear_rgb_to_oklab_channels,
-    oklab_to_linear_rgb_channels,
+    lab_to_linear_rgb_pixel4, linear_rgb_to_lab_pixel4,
+    linear_rgb_to_oklab_pixel4, oklab_to_linear_rgb_pixel4,
 };
 use crate::dither::{dither_with_mode, DitherMode};
+use crate::pixel::Pixel4;
 use crate::dither_colorspace_lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
@@ -136,30 +137,47 @@ fn lab_quant_params_from_ranges(
     }
 }
 
-/// Convert linear RGB to Lab channels based on colorspace
-fn linear_rgb_to_lab(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
+/// Convert Pixel4 linear RGB to Lab channels based on colorspace
+fn pixels_to_lab_channels(
+    pixels: &[Pixel4],
     colorspace: LabQuantSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    match colorspace {
-        LabQuantSpace::CIELab => linear_rgb_to_lab_channels(r, g, b),
-        LabQuantSpace::OkLab => linear_rgb_to_oklab_channels(r, g, b),
+    let mut l = Vec::with_capacity(pixels.len());
+    let mut a = Vec::with_capacity(pixels.len());
+    let mut b = Vec::with_capacity(pixels.len());
+
+    for &p in pixels {
+        let lab = match colorspace {
+            LabQuantSpace::CIELab => linear_rgb_to_lab_pixel4(p),
+            LabQuantSpace::OkLab => linear_rgb_to_oklab_pixel4(p),
+        };
+        l.push(lab[0]);
+        a.push(lab[1]);
+        b.push(lab[2]);
     }
+
+    (l, a, b)
 }
 
-/// Convert Lab channels to linear RGB based on colorspace
-fn lab_to_linear_rgb(
+/// Convert Lab channels to Pixel4 linear RGB based on colorspace
+fn lab_channels_to_pixels(
     l: &[f32],
     a: &[f32],
     b: &[f32],
     colorspace: LabQuantSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    match colorspace {
-        LabQuantSpace::CIELab => lab_to_linear_rgb_channels(l, a, b),
-        LabQuantSpace::OkLab => oklab_to_linear_rgb_channels(l, a, b),
+) -> Vec<Pixel4> {
+    let mut result = Vec::with_capacity(l.len());
+
+    for i in 0..l.len() {
+        let lab: Pixel4 = [l[i], a[i], b[i], 0.0];
+        let rgb = match colorspace {
+            LabQuantSpace::CIELab => lab_to_linear_rgb_pixel4(lab),
+            LabQuantSpace::OkLab => oklab_to_linear_rgb_pixel4(lab),
+        };
+        result.push(rgb);
     }
+
+    result
 }
 
 /// Process one iteration for a single block (AB only)
@@ -398,11 +416,11 @@ fn process_block_iteration_with_l(
     (avg_l, avg_a, avg_b)
 }
 
-/// Tiled CRA color correction with configurable colorspace - returns linear RGB
+/// Tiled CRA color correction with configurable colorspace - returns linear RGB as Pixel4 array
 ///
 /// Args:
-///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
-///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
+///     input: Input image as linear RGB Pixel4 array (0-1 range)
+///     reference: Reference image as linear RGB Pixel4 array (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     colorspace: Color space to use (CIELAB or OkLab)
@@ -413,15 +431,11 @@ fn process_block_iteration_with_l(
 ///     histogram_distance_space: Perceptual space for color-aware histogram dithering
 ///
 /// Returns:
-///     (R, G, B) linear RGB channels (f32, 0-1 range)
+///     Linear RGB Pixel4 array
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_tiled_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -432,12 +446,12 @@ pub fn color_correct_tiled_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
 
     // Convert to separate Lab channels
-    let (input_l, input_a, input_b) = linear_rgb_to_lab(in_r, in_g, in_b, colorspace);
-    let (ref_l, ref_a, ref_b) = linear_rgb_to_lab(ref_r, ref_g, ref_b, colorspace);
+    let (input_l, input_a, input_b) = pixels_to_lab_channels(input, colorspace);
+    let (ref_l, ref_a, ref_b) = pixels_to_lab_channels(reference, colorspace);
 
     // Store original L for use when tiled_luminosity is disabled
     let original_l = input_l.clone();
@@ -714,19 +728,15 @@ pub fn color_correct_tiled_linear(
         (l_lab, a_lab, b_lab)
     };
 
-    // Convert LAB back to linear RGB (separate channels)
-    lab_to_linear_rgb(&final_l, &final_a, &final_b, colorspace)
+    // Convert LAB back to linear RGB (Pixel4 array)
+    lab_channels_to_pixels(&final_l, &final_a, &final_b, colorspace)
 }
 
-/// Convenience wrapper: Tiled CRA LAB color correction (CIELAB colorspace) - returns linear RGB
+/// Convenience wrapper: Tiled CRA LAB color correction (CIELAB colorspace) - returns linear RGB as Pixel4 array
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_tiled_lab_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -736,10 +746,10 @@ pub fn color_correct_tiled_lab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     color_correct_tiled_linear(
-        in_r, in_g, in_b,
-        ref_r, ref_g, ref_b,
+        input,
+        reference,
         input_width,
         input_height,
         ref_width,
@@ -753,15 +763,11 @@ pub fn color_correct_tiled_lab_linear(
     )
 }
 
-/// Convenience wrapper: Tiled CRA OkLab color correction (OkLab colorspace) - returns linear RGB
+/// Convenience wrapper: Tiled CRA OkLab color correction (OkLab colorspace) - returns linear RGB as Pixel4 array
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_tiled_oklab_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -771,10 +777,10 @@ pub fn color_correct_tiled_oklab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     color_correct_tiled_linear(
-        in_r, in_g, in_b,
-        ref_r, ref_g, ref_b,
+        input,
+        reference,
         input_width,
         input_height,
         ref_width,

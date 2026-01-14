@@ -3,10 +3,11 @@
 /// Corresponds to color_correction_cra.py
 
 use crate::color::{
-    lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, linear_rgb_to_oklab_channels,
-    oklab_to_linear_rgb_channels,
+    lab_to_linear_rgb_pixel4, linear_rgb_to_lab_pixel4,
+    linear_rgb_to_oklab_pixel4, oklab_to_linear_rgb_pixel4,
 };
 use crate::dither::{dither_with_mode, DitherMode};
+use crate::pixel::Pixel4;
 use crate::dither_colorspace_lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
@@ -134,30 +135,47 @@ fn get_ab_ranges(theta_deg: f32, colorspace: LabQuantSpace) -> [[f32; 2]; 2] {
     }
 }
 
-/// Convert linear RGB to Lab channels based on colorspace
-fn linear_rgb_to_lab(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
+/// Convert Pixel4 linear RGB to Lab channels based on colorspace
+fn pixels_to_lab_channels(
+    pixels: &[Pixel4],
     colorspace: LabQuantSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    match colorspace {
-        LabQuantSpace::CIELab => linear_rgb_to_lab_channels(r, g, b),
-        LabQuantSpace::OkLab => linear_rgb_to_oklab_channels(r, g, b),
+    let mut l = Vec::with_capacity(pixels.len());
+    let mut a = Vec::with_capacity(pixels.len());
+    let mut b = Vec::with_capacity(pixels.len());
+
+    for &p in pixels {
+        let lab = match colorspace {
+            LabQuantSpace::CIELab => linear_rgb_to_lab_pixel4(p),
+            LabQuantSpace::OkLab => linear_rgb_to_oklab_pixel4(p),
+        };
+        l.push(lab[0]);
+        a.push(lab[1]);
+        b.push(lab[2]);
     }
+
+    (l, a, b)
 }
 
-/// Convert Lab channels to linear RGB based on colorspace
-fn lab_to_linear_rgb(
+/// Convert Lab channels to Pixel4 linear RGB based on colorspace
+fn lab_channels_to_pixels(
     l: &[f32],
     a: &[f32],
     b: &[f32],
     colorspace: LabQuantSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    match colorspace {
-        LabQuantSpace::CIELab => lab_to_linear_rgb_channels(l, a, b),
-        LabQuantSpace::OkLab => oklab_to_linear_rgb_channels(l, a, b),
+) -> Vec<Pixel4> {
+    let mut result = Vec::with_capacity(l.len());
+
+    for i in 0..l.len() {
+        let lab: Pixel4 = [l[i], a[i], b[i], 0.0];
+        let rgb = match colorspace {
+            LabQuantSpace::CIELab => lab_to_linear_rgb_pixel4(lab),
+            LabQuantSpace::OkLab => oklab_to_linear_rgb_pixel4(lab),
+        };
+        result.push(rgb);
     }
+
+    result
 }
 
 /// Process one iteration of Lab-space histogram matching
@@ -296,14 +314,14 @@ fn process_lab_iteration(
     (avg_a, avg_b)
 }
 
-/// CRA Lab color correction - returns linear RGB channels
+/// CRA Lab color correction - returns linear RGB as Pixel4 array
 ///
 /// This is the core CRA algorithm that performs histogram matching in Lab space
-/// and returns the result as linear RGB channels (f32, 0-1 range).
+/// and returns the result as linear RGB Pixel4 array (0-1 range).
 ///
 /// Args:
-///     in_r, in_g, in_b: Input image as linear RGB channels (0-1 range)
-///     ref_r, ref_g, ref_b: Reference image as linear RGB channels (0-1 range)
+///     input: Input image as linear RGB Pixel4 array (0-1 range)
+///     reference: Reference image as linear RGB Pixel4 array (0-1 range)
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
 ///     colorspace: Which Lab color space to use (CIELab or OkLab)
@@ -313,15 +331,11 @@ fn process_lab_iteration(
 ///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
 ///     histogram_distance_space: Perceptual space for color-aware histogram dithering
 ///
-/// Returns: (R, G, B) linear RGB channels
+/// Returns: Linear RGB Pixel4 array
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -332,12 +346,12 @@ pub fn color_correct_cra_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
 
     // Convert to separate Lab channels (colorspace-aware)
-    let (original_l, in_a, in_b_ch) = linear_rgb_to_lab(&in_r, &in_g, &in_b, colorspace);
-    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab(&ref_r, &ref_g, &ref_b, colorspace);
+    let (original_l, in_a, in_b_ch) = pixels_to_lab_channels(input, colorspace);
+    let (ref_l, ref_a, ref_b_ch) = pixels_to_lab_channels(reference, colorspace);
 
     // Initialize current AB channels
     let mut current_a = in_a;
@@ -481,18 +495,14 @@ pub fn color_correct_cra_linear(
     };
 
     // Convert Lab back to linear RGB (colorspace-aware)
-    lab_to_linear_rgb(&final_l, &final_a, &final_b, colorspace)
+    lab_channels_to_pixels(&final_l, &final_a, &final_b, colorspace)
 }
 
-/// CRA CIELAB color correction - returns linear RGB (convenience wrapper)
+/// CRA CIELAB color correction - returns linear RGB as Pixel4 array (convenience wrapper)
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_lab_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -502,14 +512,10 @@ pub fn color_correct_cra_lab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     color_correct_cra_linear(
-        in_r,
-        in_g,
-        in_b,
-        ref_r,
-        ref_g,
-        ref_b,
+        input,
+        reference,
         input_width,
         input_height,
         ref_width,
@@ -523,15 +529,11 @@ pub fn color_correct_cra_lab_linear(
     )
 }
 
-/// CRA OKLab color correction - returns linear RGB (convenience wrapper)
+/// CRA OKLab color correction - returns linear RGB as Pixel4 array (convenience wrapper)
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_cra_oklab_linear(
-    in_r: &[f32],
-    in_g: &[f32],
-    in_b: &[f32],
-    ref_r: &[f32],
-    ref_g: &[f32],
-    ref_b: &[f32],
+    input: &[Pixel4],
+    reference: &[Pixel4],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
@@ -541,14 +543,10 @@ pub fn color_correct_cra_oklab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> Vec<Pixel4> {
     color_correct_cra_linear(
-        in_r,
-        in_g,
-        in_b,
-        ref_r,
-        ref_g,
-        ref_b,
+        input,
+        reference,
         input_width,
         input_height,
         ref_width,
