@@ -848,12 +848,15 @@
             encode_gray_row_aligned_stride_wasm,
             encode_channel_packed_wasm,
             encode_channel_row_aligned_stride_wasm,
-            // Color space conversion functions (use WASM for precision)
-            srgb_to_linear_wasm,
-            linear_to_srgb_wasm,
-            srgb_to_grayscale_wasm,
-            // Rescaling functions (proper linear-space interpolation)
-            rescale_srgb_wasm,
+            // Atomic color space conversion functions
+            unpack_u8_to_f32_wasm,
+            srgb_to_linear_f32_wasm,
+            linear_to_srgb_f32_wasm,
+            linear_rgb_to_grayscale_wasm,
+            linear_gray_to_srgb_f32_wasm,
+            // Atomic rescaling functions (linear space)
+            rescale_linear_rgb_wasm,
+            rescale_linear_gray_wasm,
             calculate_dimensions_wasm
         } from './wasm_cra/cra_wasm.js';
 
@@ -868,7 +871,7 @@
         }
 
         // Extract RGB from ImageData as interleaved Uint8Array (for WASM input)
-        function extractRgbFromImageData(imageData) {
+        function imageDataToU8Interleaved(imageData) {
             const pixels = imageData.width * imageData.height;
             const data = imageData.data;
             const rgb = new Uint8Array(pixels * 3);
@@ -882,27 +885,10 @@
             return rgb;
         }
 
-        // Convert sRGB ImageData directly to sRGB 0-255 Float32Array for dithering
-        // No linear conversion needed - rescaling (if any) handles linear space internally
-        function imageDataToSrgb255Interleaved(imageData) {
-            const pixels = imageData.width * imageData.height;
-            const data = imageData.data;
-            const srgb = new Float32Array(pixels * 3);
-
-            for (let i = 0; i < pixels; i++) {
-                srgb[i * 3] = data[i * 4];
-                srgb[i * 3 + 1] = data[i * 4 + 1];
-                srgb[i * 3 + 2] = data[i * 4 + 2];
-            }
-
-            return srgb;
-        }
-
-        // Convert sRGB ImageData directly to grayscale using proper luminance computation
-        // Uses WASM implementation: sRGB -> linear -> Rec.709 luminance -> sRGB (0-255)
-        function imageDataToGrayscale(imageData) {
-            const rgb = extractRgbFromImageData(imageData);
-            return srgb_to_grayscale_wasm(rgb, imageData.width, imageData.height);
+        // Unpack ImageData to sRGB f32 (0-255 scale) - for direct dithering when no processing needed
+        function imageDataToSrgbF32(imageData) {
+            const rgb = imageDataToU8Interleaved(imageData);
+            return unpack_u8_to_f32_wasm(rgb, imageData.width, imageData.height);
         }
 
         let wasmReady = false;
@@ -964,34 +950,7 @@
             return ctx.getImageData(0, 0, img.width, img.height);
         }
 
-        // Rescale image data using WASM (proper linear-space interpolation)
-        // method: 0=Bilinear, 1=Lanczos3
-        function rescaleImageData(imageData, srcWidth, srcHeight, dstWidth, dstHeight, method) {
-            // Extract RGB from ImageData as Uint8Array
-            const srcPixels = srcWidth * srcHeight;
-            const rgb = new Uint8Array(srcPixels * 3);
-            const srcData = imageData.data;
-            for (let i = 0; i < srcPixels; i++) {
-                rgb[i * 3] = srcData[i * 4];
-                rgb[i * 3 + 1] = srcData[i * 4 + 1];
-                rgb[i * 3 + 2] = srcData[i * 4 + 2];
-            }
-
-            // Rescale using WASM (handles sRGB->linear->rescale->sRGB)
-            const rescaled = rescale_srgb_wasm(rgb, srcWidth, srcHeight, dstWidth, dstHeight, method);
-
-            // Convert back to ImageData
-            const dstPixels = dstWidth * dstHeight;
-            const dstData = new Uint8ClampedArray(dstPixels * 4);
-            for (let i = 0; i < dstPixels; i++) {
-                dstData[i * 4] = Math.round(rescaled[i * 3]);
-                dstData[i * 4 + 1] = Math.round(rescaled[i * 3 + 1]);
-                dstData[i * 4 + 2] = Math.round(rescaled[i * 3 + 2]);
-                dstData[i * 4 + 3] = 255;
-            }
-
-            return new ImageData(dstData, dstWidth, dstHeight);
-        }
+        // Note: rescaleImageData removed - now using atomic pipeline in processImage
 
         // Upscale image data using nearest neighbor
         function upscaleNearestNeighbor(imageData, srcWidth, srcHeight, factor) {
@@ -1047,8 +1006,11 @@
             return dither_with_mode_wasm(floatData, width, height, mode, seed, bits);
         }
 
-        // Process the image
-        // Pipeline: input sRGB -> linear RGB -> optional resize -> dither to sRGB -> output
+        // Process the image using atomic pipeline
+        // Pipeline decisions:
+        // - RGB without rescale: u8 → unpack → sRGB f32 → dither (skip linear)
+        // - RGB with rescale: u8 → unpack → sRGB f32 → linear → rescale → sRGB f32 → dither
+        // - Grayscale: u8 → unpack → sRGB f32 → linear → [rescale] → grayscale → sRGB f32 → dither
         async function processImage() {
             if (!inputImageData) return;
 
@@ -1066,78 +1028,121 @@
                 const doDownscale = document.getElementById('downscale-toggle').checked;
                 const doUpscale = document.getElementById('upscale-toggle').checked;
                 const upscaleFactor = parseInt(document.getElementById('upscale-factor').value) || 1;
+                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
+                const seeds = getSeeds();
 
-                // Determine processing dimensions and get image data
+                // Determine target dimensions
                 let processWidth = originalWidth;
                 let processHeight = originalHeight;
-                let processData = inputImageData;
-
                 if (doDownscale) {
                     processWidth = parseInt(document.getElementById('scale-width').value) || originalWidth;
                     processHeight = parseInt(document.getElementById('scale-height').value) || originalHeight;
-                    const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
-                    // Rescale using WASM (proper linear-space interpolation)
-                    processData = rescaleImageData(inputImageData, originalWidth, originalHeight, processWidth, processHeight, scaleMethod);
                 }
+
+                // Determine if linear processing is needed
+                // Grayscale requires linear for correct luminance computation
+                // Rescale requires linear for correct interpolation
+                const needsLinear = isGrayscale || doDownscale;
 
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-                if (isGrayscale) {
-                    // Grayscale mode: convert sRGB to grayscale using WASM
-                    // WASM handles: sRGB -> linear -> Rec.709 luminance -> sRGB (0-255)
-                    const bitsGray = parseInt(document.getElementById('bits-gray').value);
-                    const isPerceptual = document.getElementById('perceptual-toggle').checked;
+                // Step 1: Unpack u8 to sRGB f32
+                let srgbF32 = imageDataToSrgbF32(inputImageData);
+                let currentWidth = originalWidth;
+                let currentHeight = originalHeight;
 
-                    // Convert sRGB directly to grayscale using WASM (high precision)
-                    const grayChannel = imageDataToGrayscale(processData);
+                if (needsLinear) {
+                    // Step 2: Convert to linear
+                    let linearRgb = srgb_to_linear_f32_wasm(srgbF32, currentWidth, currentHeight);
 
-                    let grayDithered;
-                    const seeds = getSeeds();
-
-                    if (isPerceptual) {
-                        // Color space aware grayscale dithering
-                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                        grayDithered = colorspace_aware_dither_gray_with_mode_wasm(
-                            grayChannel,
+                    // Step 3: Rescale in linear space (if needed)
+                    if (doDownscale) {
+                        linearRgb = rescale_linear_rgb_wasm(
+                            linearRgb,
+                            currentWidth, currentHeight,
                             processWidth, processHeight,
-                            bitsGray,
-                            perceptualSpace,
+                            scaleMethod
+                        );
+                        currentWidth = processWidth;
+                        currentHeight = processHeight;
+                    }
+
+                    if (isGrayscale) {
+                        // Step 4a: Convert to grayscale in linear space
+                        const linearGray = linear_rgb_to_grayscale_wasm(linearRgb, currentWidth, currentHeight);
+
+                        // Step 5a: Convert to sRGB grayscale
+                        const srgbGray = linear_gray_to_srgb_f32_wasm(linearGray);
+
+                        // Step 6a: Dither grayscale
+                        const bitsGray = parseInt(document.getElementById('bits-gray').value);
+                        const isPerceptual = document.getElementById('perceptual-toggle').checked;
+
+                        let grayDithered;
+                        if (isPerceptual) {
+                            const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                            grayDithered = colorspace_aware_dither_gray_with_mode_wasm(
+                                srgbGray,
+                                currentWidth, currentHeight,
+                                bitsGray,
+                                perceptualSpace,
+                                mode,
+                                seeds.r
+                            );
+                        } else {
+                            grayDithered = ditherChannel(srgbGray, currentWidth, currentHeight, mode, seeds.r, bitsGray);
+                        }
+
+                        // Output as grayscale (R=G=B)
+                        for (let i = 0; i < pixelCount; i++) {
+                            const v = grayDithered[i];
+                            outputData[i * 4] = v;
+                            outputData[i * 4 + 1] = v;
+                            outputData[i * 4 + 2] = v;
+                            outputData[i * 4 + 3] = 255;
+                        }
+                    } else {
+                        // Step 4b: Convert back to sRGB for dithering
+                        srgbF32 = linear_to_srgb_f32_wasm(linearRgb, currentWidth, currentHeight);
+
+                        // Step 5b: Dither RGB
+                        const bitsR = parseInt(document.getElementById('bits-r').value);
+                        const bitsG = parseInt(document.getElementById('bits-g').value);
+                        const bitsB = parseInt(document.getElementById('bits-b').value);
+                        const isPerceptual = document.getElementById('perceptual-toggle').checked;
+                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                        const technique = isPerceptual ? 2 : 1;
+
+                        const rgbDithered = dither_output_wasm(
+                            srgbF32,
+                            currentWidth, currentHeight,
+                            bitsR, bitsG, bitsB,
+                            technique,
                             mode,
+                            perceptualSpace,
                             seeds.r
                         );
-                    } else {
-                        // Standard grayscale dithering
-                        grayDithered = ditherChannel(grayChannel, processWidth, processHeight, mode, seeds.r, bitsGray);
-                    }
 
-                    // Output as grayscale (R=G=B)
-                    for (let i = 0; i < pixelCount; i++) {
-                        const v = grayDithered[i];
-                        outputData[i * 4] = v;
-                        outputData[i * 4 + 1] = v;
-                        outputData[i * 4 + 2] = v;
-                        outputData[i * 4 + 3] = 255;
+                        for (let i = 0; i < pixelCount; i++) {
+                            outputData[i * 4] = rgbDithered[i * 3];
+                            outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
+                            outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
+                            outputData[i * 4 + 3] = 255;
+                        }
                     }
                 } else {
-                    // RGB mode: use unified dither_output_wasm API
+                    // No linear processing needed - direct RGB dithering
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
                     const bitsB = parseInt(document.getElementById('bits-b').value);
                     const isPerceptual = document.getElementById('perceptual-toggle').checked;
                     const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                    const seeds = getSeeds();
-
-                    // Convert ImageData directly to sRGB 0-255 Float32Array
-                    // (rescaling, if any, already handled linear space internally)
-                    const srgbInterleaved = imageDataToSrgb255Interleaved(processData);
-
-                    // technique: 0 = None, 1 = PerChannel, 2 = ColorAware
                     const technique = isPerceptual ? 2 : 1;
 
                     const rgbDithered = dither_output_wasm(
-                        srgbInterleaved,
-                        processWidth, processHeight,
+                        srgbF32,
+                        currentWidth, currentHeight,
                         bitsR, bitsG, bitsB,
                         technique,
                         mode,

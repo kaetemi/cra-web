@@ -622,11 +622,199 @@ pub fn encode_channel_row_aligned_stride_wasm(
 }
 
 // ============================================================================
-// Color Space Conversion WASM Exports
+// Color Space Conversion WASM Exports (Atomic API)
+// ============================================================================
+//
+// Pipeline: u8 → unpack → sRGB f32 → linear → [process] → sRGB f32 → dither/pack
+//
+// Functions:
+// - unpack_u8_to_f32_wasm: u8 → sRGB f32 (no color conversion)
+// - srgb_to_linear_f32_wasm: sRGB f32 → linear f32
+// - linear_to_srgb_f32_wasm: linear f32 → sRGB f32
+// - linear_rgb_to_grayscale_wasm: linear RGB → linear L
+// - histogram_match_channel_wasm: single channel histogram matching
+// - histogram_match_rgb_wasm: RGB histogram matching (3 channels)
+//
+// The only time linear conversion is skipped is when there's no processing
+// (dither only).
+
+/// Unpack u8 image data to f32 (no color space conversion)
+/// Input: interleaved RGB u8 (0-255)
+/// Output: interleaved RGB f32 (0-255 scale, still sRGB)
+#[wasm_bindgen]
+pub fn unpack_u8_to_f32_wasm(data: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut result = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        result[i * 3] = data[i * 3] as f32;
+        result[i * 3 + 1] = data[i * 3 + 1] as f32;
+        result[i * 3 + 2] = data[i * 3 + 2] as f32;
+    }
+
+    result
+}
+
+/// Convert sRGB f32 (0-255) to linear RGB f32 (0-1)
+/// Input: interleaved RGB f32 (0-255 scale, sRGB)
+/// Output: interleaved RGB f32 (0-1 scale, linear)
+#[wasm_bindgen]
+pub fn srgb_to_linear_f32_wasm(srgb: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut linear = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        linear[i * 3] = color::srgb_to_linear_single(srgb[i * 3] / 255.0);
+        linear[i * 3 + 1] = color::srgb_to_linear_single(srgb[i * 3 + 1] / 255.0);
+        linear[i * 3 + 2] = color::srgb_to_linear_single(srgb[i * 3 + 2] / 255.0);
+    }
+
+    linear
+}
+
+/// Convert linear RGB f32 (0-1) to sRGB f32 (0-255)
+/// Input: interleaved RGB f32 (0-1 scale, linear)
+/// Output: interleaved RGB f32 (0-255 scale, sRGB)
+#[wasm_bindgen]
+pub fn linear_to_srgb_f32_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut srgb = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        srgb[i * 3] = color::linear_to_srgb_single(linear[i * 3]) * 255.0;
+        srgb[i * 3 + 1] = color::linear_to_srgb_single(linear[i * 3 + 1]) * 255.0;
+        srgb[i * 3 + 2] = color::linear_to_srgb_single(linear[i * 3 + 2]) * 255.0;
+    }
+
+    srgb
+}
+
+/// Convert linear RGB to linear grayscale (luminance)
+/// Input: interleaved RGB f32 (0-1 scale, linear)
+/// Output: single channel f32 (0-1 scale, linear luminance)
+/// Uses Rec.709/BT.709 luminance coefficients
+#[wasm_bindgen]
+pub fn linear_rgb_to_grayscale_wasm(linear_rgb: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut gray = Vec::with_capacity(pixels);
+
+    for i in 0..pixels {
+        let r = linear_rgb[i * 3];
+        let g = linear_rgb[i * 3 + 1];
+        let b = linear_rgb[i * 3 + 2];
+        gray.push(color::linear_rgb_to_luminance(r, g, b));
+    }
+
+    gray
+}
+
+/// Convert linear grayscale (0-1) to sRGB grayscale (0-255)
+/// Input: single channel f32 (0-1 scale, linear)
+/// Output: single channel f32 (0-255 scale, sRGB)
+#[wasm_bindgen]
+pub fn linear_gray_to_srgb_f32_wasm(linear_gray: Vec<f32>) -> Vec<f32> {
+    linear_gray
+        .iter()
+        .map(|&l| color::linear_to_srgb_single(l) * 255.0)
+        .collect()
+}
+
+// ============================================================================
+// Histogram Matching WASM Exports (Atomic API)
+// ============================================================================
+
+/// Match histogram of a single channel
+/// Input: source and reference channels as f32 (any range, typically 0-1 for linear)
+/// Output: matched source with histogram matching reference distribution
+/// Uses linear interpolation and midpoint alignment by default
+#[wasm_bindgen]
+pub fn histogram_match_channel_wasm(source: Vec<f32>, reference: Vec<f32>, seed: u32) -> Vec<f32> {
+    histogram::match_histogram_f32(
+        &source,
+        &reference,
+        histogram::InterpolationMode::Linear,
+        histogram::AlignmentMode::Midpoint,
+        seed,
+    )
+}
+
+/// Match histogram of RGB image (3 channels independently)
+/// Input: interleaved RGB f32 (linear, 0-1 scale)
+/// Output: interleaved RGB f32 (linear, 0-1 scale)
+#[wasm_bindgen]
+pub fn histogram_match_rgb_wasm(
+    source: Vec<f32>,
+    reference: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    ref_width: usize,
+    ref_height: usize,
+    seed: u32,
+) -> Vec<f32> {
+    let src_pixels = src_width * src_height;
+    let ref_pixels = ref_width * ref_height;
+
+    // Extract channels
+    let mut src_r = Vec::with_capacity(src_pixels);
+    let mut src_g = Vec::with_capacity(src_pixels);
+    let mut src_b = Vec::with_capacity(src_pixels);
+    let mut ref_r = Vec::with_capacity(ref_pixels);
+    let mut ref_g = Vec::with_capacity(ref_pixels);
+    let mut ref_b = Vec::with_capacity(ref_pixels);
+
+    for i in 0..src_pixels {
+        src_r.push(source[i * 3]);
+        src_g.push(source[i * 3 + 1]);
+        src_b.push(source[i * 3 + 2]);
+    }
+
+    for i in 0..ref_pixels {
+        ref_r.push(reference[i * 3]);
+        ref_g.push(reference[i * 3 + 1]);
+        ref_b.push(reference[i * 3 + 2]);
+    }
+
+    // Match each channel (use different seeds to reduce correlation)
+    let matched_r = histogram::match_histogram_f32(
+        &src_r,
+        &ref_r,
+        histogram::InterpolationMode::Linear,
+        histogram::AlignmentMode::Midpoint,
+        seed,
+    );
+    let matched_g = histogram::match_histogram_f32(
+        &src_g,
+        &ref_g,
+        histogram::InterpolationMode::Linear,
+        histogram::AlignmentMode::Midpoint,
+        seed.wrapping_add(1),
+    );
+    let matched_b = histogram::match_histogram_f32(
+        &src_b,
+        &ref_b,
+        histogram::InterpolationMode::Linear,
+        histogram::AlignmentMode::Midpoint,
+        seed.wrapping_add(2),
+    );
+
+    // Interleave result
+    let mut result = vec![0.0f32; src_pixels * 3];
+    for i in 0..src_pixels {
+        result[i * 3] = matched_r[i];
+        result[i * 3 + 1] = matched_g[i];
+        result[i * 3 + 2] = matched_b[i];
+    }
+
+    result
+}
+
+// ============================================================================
+// Legacy Color Space Conversion WASM Exports (for backward compatibility)
 // ============================================================================
 
 /// Convert sRGB image (interleaved RGB, 0-255) to linear RGB channels (0-1 range)
 /// Returns interleaved RGB as f32
+/// LEGACY: Consider using unpack_u8_to_f32_wasm + srgb_to_linear_f32_wasm
 #[wasm_bindgen]
 pub fn srgb_to_linear_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
     let pixels = width * height;
@@ -643,6 +831,7 @@ pub fn srgb_to_linear_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f3
 
 /// Convert linear RGB (interleaved, 0-1 range) to sRGB (0-255 range)
 /// Returns interleaved RGB as f32 in 0-255 range (for dithering)
+/// LEGACY: Alias for linear_to_srgb_f32_wasm
 #[wasm_bindgen]
 pub fn linear_to_srgb_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
     let pixels = width * height;
@@ -662,11 +851,14 @@ pub fn linear_to_srgb_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec
 /// Output: sRGB grayscale (0-255 range as f32, ready for dithering)
 ///
 /// Pipeline: sRGB -> linear RGB -> luminance (Rec.709) -> sRGB
+/// LEGACY: Convenience function. For atomic API use:
+/// unpack_u8_to_f32_wasm -> srgb_to_linear_f32_wasm -> linear_rgb_to_grayscale_wasm -> linear_gray_to_srgb_f32_wasm
 #[wasm_bindgen]
 pub fn srgb_to_grayscale_wasm(srgb: Vec<u8>, width: usize, height: usize) -> Vec<f32> {
     color::srgb_interleaved_to_grayscale(&srgb, width * height)
 }
 
+// ============================================================================
 // Image Rescaling WASM Exports
 // ============================================================================
 
@@ -680,9 +872,62 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
     }
 }
 
+/// Rescale linear RGB image (interleaved, 0-1 range)
+/// Returns interleaved RGB as f32 in 0-1 range
+/// This is the atomic rescale function - use with linear data.
+#[wasm_bindgen]
+pub fn rescale_linear_rgb_wasm(
+    linear: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method)
+}
+
+/// Rescale linear grayscale image (single channel, 0-1 range)
+/// Returns single channel f32 in 0-1 range
+#[wasm_bindgen]
+pub fn rescale_linear_gray_wasm(
+    linear_gray: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+    rescale::rescale_channel(&linear_gray, src_width, src_height, dst_width, dst_height, method)
+}
+
+/// Calculate target dimensions preserving aspect ratio
+/// Returns [width, height]
+/// If both target_width and target_height are 0, returns source dimensions
+#[wasm_bindgen]
+pub fn calculate_dimensions_wasm(
+    src_width: usize,
+    src_height: usize,
+    target_width: usize,
+    target_height: usize,
+) -> Vec<usize> {
+    let tw = if target_width == 0 { None } else { Some(target_width) };
+    let th = if target_height == 0 { None } else { Some(target_height) };
+    let (w, h) = rescale::calculate_target_dimensions(src_width, src_height, tw, th);
+    vec![w, h]
+}
+
+// ============================================================================
+// Legacy Rescaling WASM Exports (for backward compatibility)
+// ============================================================================
+
 /// Rescale sRGB image (interleaved RGB, 0-255 as u8)
 /// Converts to linear, rescales, converts back to sRGB
 /// Returns interleaved RGB as f32 in 0-255 range (ready for dithering)
+/// LEGACY: Does sRGB->linear->rescale->sRGB internally. For atomic API use:
+/// unpack_u8_to_f32_wasm -> srgb_to_linear_f32_wasm -> rescale_linear_rgb_wasm -> linear_to_srgb_f32_wasm
 ///
 /// Args:
 ///     srgb: interleaved RGB u8 values
@@ -726,42 +971,12 @@ pub fn rescale_srgb_wasm(
     result
 }
 
-/// Rescale linear RGB image (interleaved, 0-1 range)
-/// Returns interleaved RGB as f32 in 0-1 range
-#[wasm_bindgen]
-pub fn rescale_linear_wasm(
-    linear: Vec<f32>,
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: u8,
-) -> Vec<f32> {
-    let method = rescale_method_from_u8(method);
-    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method)
-}
-
-/// Calculate target dimensions preserving aspect ratio
-/// Returns [width, height]
-/// If both target_width and target_height are 0, returns source dimensions
-#[wasm_bindgen]
-pub fn calculate_dimensions_wasm(
-    src_width: usize,
-    src_height: usize,
-    target_width: usize,
-    target_height: usize,
-) -> Vec<usize> {
-    let tw = if target_width == 0 { None } else { Some(target_width) };
-    let th = if target_height == 0 { None } else { Some(target_height) };
-    let (w, h) = rescale::calculate_target_dimensions(src_width, src_height, tw, th);
-    vec![w, h]
-}
-
 // ============================================================================
-// SIMD-friendly WASM Exports (4-channel format)
+// Legacy SIMD-friendly WASM Exports (4-channel format)
 // ============================================================================
 
 /// Rescale sRGB image using 4-channel SIMD-friendly format
+/// LEGACY: Does sRGB->linear->rescale->sRGB internally.
 /// Input: flat array of RGBX f32 values (0-255 scale), 4 values per pixel
 /// Output: flat array of RGBX f32 values (0-255 scale)
 /// Performs: sRGB -> linear -> rescale -> sRGB
@@ -809,6 +1024,7 @@ pub fn rescale_srgb_4ch_wasm(
 /// Rescale linear RGB image using 4-channel SIMD-friendly format
 /// Input: flat array of RGBX f32 values (0-1 scale), 4 values per pixel
 /// Output: flat array of RGBX f32 values (0-1 scale)
+/// Note: 4-channel variant for alpha channel support
 #[wasm_bindgen]
 pub fn rescale_linear_4ch_wasm(
     linear: Vec<f32>,
@@ -835,6 +1051,7 @@ pub fn rescale_linear_4ch_wasm(
 /// Rescale single channel (grayscale)
 /// Input: flat array of f32 values
 /// Output: flat array of f32 values
+/// LEGACY: Alias for rescale_linear_gray_wasm
 #[wasm_bindgen]
 pub fn rescale_channel_wasm(
     src: Vec<f32>,
