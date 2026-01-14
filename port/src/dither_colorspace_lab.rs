@@ -411,8 +411,13 @@ fn process_pixel_lab(
     let b_pos = ctx.lab_b_to_u8_pos(b_rot);
 
     // Find floor/ceil candidates (clamped to 0-255)
-    let l_floor = l_pos.floor().clamp(0.0, 255.0) as u8;
-    let l_ceil = l_pos.ceil().clamp(0.0, 255.0) as u8;
+    // When not quantizing L, use rounded value for both (single iteration)
+    let (l_floor, l_ceil) = if ctx.quantize_l {
+        (l_pos.floor().clamp(0.0, 255.0) as u8, l_pos.ceil().clamp(0.0, 255.0) as u8)
+    } else {
+        let l_round = l_pos.round().clamp(0.0, 255.0) as u8;
+        (l_round, l_round)
+    };
     let a_floor = a_pos.floor().clamp(0.0, 255.0) as u8;
     let a_ceil = a_pos.ceil().clamp(0.0, 255.0) as u8;
     let b_floor = b_pos.floor().clamp(0.0, 255.0) as u8;
@@ -427,18 +432,7 @@ fn process_pixel_lab(
     let mut best_b_u8 = b_floor;
     let mut best_dist = f32::INFINITY;
 
-    // L candidates
-    let l_candidates: &[u8] = if ctx.quantize_l {
-        if l_floor == l_ceil { &[l_floor] } else { &[l_floor, l_ceil] }
-    } else {
-        &[l_floor] // Placeholder, will use original L for output
-    };
-
-    // a/b candidates
-    let a_candidates: &[u8] = if a_floor == a_ceil { &[a_floor] } else { &[a_floor, a_ceil] };
-    let b_candidates: &[u8] = if b_floor == b_ceil { &[b_floor] } else { &[b_floor, b_ceil] };
-
-    for &l_cand_u8 in l_candidates {
+    for l_cand_u8 in l_floor..=l_ceil {
         // Convert L candidate back to Lab f32
         let l_cand = if ctx.quantize_l {
             ctx.u8_pos_to_lab_l(l_cand_u8 as f32)
@@ -446,8 +440,8 @@ fn process_pixel_lab(
             l // Keep original L for distance calculation
         };
 
-        for &a_cand_u8 in a_candidates {
-            for &b_cand_u8 in b_candidates {
+        for a_cand_u8 in a_floor..=a_ceil {
+            for b_cand_u8 in b_floor..=b_ceil {
                 // Convert a/b candidates back to Lab f32 (still rotated)
                 let a_cand_rot = ctx.u8_pos_to_lab_a(a_cand_u8 as f32);
                 let b_cand_rot = ctx.u8_pos_to_lab_b(b_cand_u8 as f32);
