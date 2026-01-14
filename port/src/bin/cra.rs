@@ -347,6 +347,37 @@ fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32,
     Ok((pixels, width, height))
 }
 
+/// Load image as sRGB (f32, 0-255 range) - no color space conversion
+/// Use when only dithering is needed (no resize, no color correction)
+fn load_image_srgb(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u32), String> {
+    if verbose {
+        eprintln!("Loading: {}", path.display());
+    }
+
+    let img = image::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+
+    let (width, height) = img.dimensions();
+    let rgb_img = img.to_rgb8();
+    let data = rgb_img.as_raw();
+
+    if verbose {
+        eprintln!("  Dimensions: {}x{}", width, height);
+    }
+
+    // Keep as sRGB 0-255 in Pixel4 format
+    let pixel_count = (width * height) as usize;
+    let mut pixels = Vec::with_capacity(pixel_count);
+
+    for i in 0..pixel_count {
+        let r = data[i * 3] as f32;
+        let g = data[i * 3 + 1] as f32;
+        let b = data[i * 3 + 2] as f32;
+        pixels.push([r, g, b, 0.0]);
+    }
+
+    Ok((pixels, width, height))
+}
+
 /// Resize linear RGB image in linear space for correct color blending
 fn resize_linear(
     pixels: &[Pixel4],
@@ -407,6 +438,31 @@ fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
         // Compute luminance in linear space
         let luminance = p[0] * R_COEF + p[1] * G_COEF + p[2] * B_COEF;
         // Convert to sRGB for perceptual grayscale output, scale to 0-255
+        gray.push(linear_to_srgb_single(luminance) * 255.0);
+    }
+
+    gray
+}
+
+/// Convert sRGB Pixel4 (0-255 range) to grayscale using proper linear-space luminance
+/// Pipeline: sRGB -> linear -> luminance (Rec.709) -> sRGB (0-255)
+fn srgb_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
+    const R_COEF: f32 = 0.2126;
+    const G_COEF: f32 = 0.7152;
+    const B_COEF: f32 = 0.0722;
+
+    let mut gray = Vec::with_capacity(pixels.len());
+
+    for p in pixels {
+        // Convert sRGB 0-255 to linear 0-1
+        let r_linear = srgb_to_linear_single(p[0] / 255.0);
+        let g_linear = srgb_to_linear_single(p[1] / 255.0);
+        let b_linear = srgb_to_linear_single(p[2] / 255.0);
+
+        // Compute luminance in linear space
+        let luminance = r_linear * R_COEF + g_linear * G_COEF + b_linear * B_COEF;
+
+        // Convert back to sRGB 0-255
         gray.push(linear_to_srgb_single(luminance) * 255.0);
     }
 
@@ -487,6 +543,65 @@ fn dither_pixels(
         let technique = build_output_technique(color_aware, dither_mode, colorspace);
         let (r_out, g_out, b_out) = finalize_output(
             &mut linear_pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b,
+            technique,
+            seed,
+        );
+
+        // Build interleaved for PNG output
+        let mut interleaved = Vec::with_capacity(pixel_count * 3);
+        for i in 0..pixel_count {
+            interleaved.push(r_out[i]);
+            interleaved.push(g_out[i]);
+            interleaved.push(b_out[i]);
+        }
+
+        DitherResult {
+            interleaved,
+            gray: None,
+            r: Some(r_out),
+            g: Some(g_out),
+            b: Some(b_out),
+        }
+    }
+}
+
+/// Dither sRGB pixels (0-255 range) directly to the target format
+/// Use when no color correction or resize is needed (avoids linear conversion overhead)
+#[allow(clippy::too_many_arguments)]
+fn dither_pixels_srgb(
+    pixels: Vec<Pixel4>,
+    width: usize,
+    height: usize,
+    format: &cra_wasm::binary_format::ColorFormat,
+    color_aware: bool,
+    dither_mode: CSDitherMode,
+    colorspace: PerceptualSpace,
+    seed: u32,
+) -> DitherResult {
+    use cra_wasm::output::dither_output;
+
+    let pixel_count = width * height;
+
+    if format.is_grayscale {
+        // Grayscale still needs linear-space luminance computation for correctness
+        let gray = srgb_pixels_to_grayscale(&pixels);
+        let gray_out = dither_grayscale(
+            &gray, width, height, format.bits_r, colorspace, dither_mode, seed,
+        );
+        DitherResult {
+            interleaved: gray_out.clone(),
+            gray: Some(gray_out),
+            r: None,
+            g: None,
+            b: None,
+        }
+    } else {
+        // RGB: dither sRGB directly (no linear conversion needed)
+        let technique = build_output_technique(color_aware, dither_mode, colorspace);
+        let (r_out, g_out, b_out) = dither_output(
+            &pixels,
             width, height,
             format.bits_r, format.bits_g, format.bits_b,
             technique,
@@ -735,66 +850,93 @@ fn main() -> Result<(), String> {
         ));
     }
 
-    // Load input image as linear RGB Pixel4
-    let (input_pixels, src_width, src_height) = load_image_linear(&args.input, args.verbose)?;
+    // Determine if linear-space processing is needed
+    let needs_resize = args.width.is_some() || args.height.is_some();
+    let needs_linear = needs_reference || needs_resize;
 
-    // Resize in linear RGB space
-    let (input_pixels, width, height) = resize_linear(
-        &input_pixels,
-        src_width, src_height,
-        args.width, args.height,
-        args.scale_method.to_rescale_method(),
-        args.verbose,
-    )?;
+    // Process image based on whether linear space is needed
+    let (dither_result, width, height) = if needs_linear {
+        // Linear RGB path: load -> resize -> color correct -> dither
+        if args.verbose {
+            eprintln!("Processing in linear RGB space...");
+        }
+
+        let (input_pixels, src_width, src_height) = load_image_linear(&args.input, args.verbose)?;
+
+        // Resize in linear RGB space
+        let (input_pixels, width, height) = resize_linear(
+            &input_pixels,
+            src_width, src_height,
+            args.width, args.height,
+            args.scale_method.to_rescale_method(),
+            args.verbose,
+        )?;
+
+        let width_usize = width as usize;
+        let height_usize = height as usize;
+
+        let pixels_to_dither = if needs_reference {
+            // Load reference and apply color correction
+            let ref_path = args.r#ref.as_ref().unwrap();
+            let (ref_pixels, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
+            let ref_width_usize = ref_width as usize;
+            let ref_height_usize = ref_height as usize;
+
+            color_correct(
+                &input_pixels,
+                &ref_pixels,
+                width_usize,
+                height_usize,
+                ref_width_usize,
+                ref_height_usize,
+                correction_method.expect("Method should not be None when reference is provided"),
+                histogram_options,
+            )
+        } else {
+            input_pixels
+        };
+
+        let result = dither_pixels(
+            pixels_to_dither,
+            width_usize,
+            height_usize,
+            &format,
+            args.color_aware_output,
+            output_dither_mode,
+            output_colorspace.to_perceptual_space(),
+            args.seed,
+        );
+
+        (result, width, height)
+    } else {
+        // sRGB path: dither-only (no resize, no color correction)
+        // Avoids unnecessary sRGB -> linear -> sRGB conversion
+        if args.verbose {
+            if format.is_grayscale {
+                eprintln!("Converting to grayscale and dithering (sRGB path)...");
+            } else {
+                eprintln!("Dithering RGB channels (sRGB path)...");
+            }
+        }
+
+        let (input_pixels, width, height) = load_image_srgb(&args.input, args.verbose)?;
+
+        let result = dither_pixels_srgb(
+            input_pixels,
+            width as usize,
+            height as usize,
+            &format,
+            args.color_aware_output,
+            output_dither_mode,
+            output_colorspace.to_perceptual_space(),
+            args.seed,
+        );
+
+        (result, width, height)
+    };
 
     let width_usize = width as usize;
     let height_usize = height as usize;
-
-    if args.verbose {
-        eprintln!("Processing in linear RGB space...");
-    }
-
-    // Process image: color correction returns linear RGB, then we dither to sRGB
-    let pixels_to_dither = if needs_reference {
-        // Load reference image as linear RGB Pixel4
-        let ref_path = args.r#ref.as_ref().unwrap();
-        let (ref_pixels, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
-        let ref_width_usize = ref_width as usize;
-        let ref_height_usize = ref_height as usize;
-
-        // Apply color correction using unified API
-        color_correct(
-            &input_pixels,
-            &ref_pixels,
-            width_usize,
-            height_usize,
-            ref_width_usize,
-            ref_height_usize,
-            correction_method.expect("Method should not be None when reference is provided"),
-            histogram_options,
-        )
-    } else {
-        // Dither-only path (no color correction)
-        if args.verbose {
-            if format.is_grayscale {
-                eprintln!("Converting to grayscale and dithering...");
-            } else {
-                eprintln!("Dithering RGB channels...");
-            }
-        }
-        input_pixels
-    };
-
-    let dither_result = dither_pixels(
-        pixels_to_dither,
-        width_usize,
-        height_usize,
-        &format,
-        args.color_aware_output,
-        output_dither_mode,
-        output_colorspace.to_perceptual_space(),
-        args.seed,
-    );
 
     // Track outputs for metadata
     let mut outputs: Vec<(String, PathBuf, usize)> = Vec::new();

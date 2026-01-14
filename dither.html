@@ -882,17 +882,20 @@
             return rgb;
         }
 
-        // Convert sRGB ImageData to linear RGB as interleaved Float32Array (0-1 range)
-        // Uses WASM implementation for high-precision color conversion
-        function imageDataToLinearRgbInterleaved(imageData) {
-            const rgb = extractRgbFromImageData(imageData);
-            return srgb_to_linear_wasm(rgb, imageData.width, imageData.height);
-        }
+        // Convert sRGB ImageData directly to sRGB 0-255 Float32Array for dithering
+        // No linear conversion needed - rescaling (if any) handles linear space internally
+        function imageDataToSrgb255Interleaved(imageData) {
+            const pixels = imageData.width * imageData.height;
+            const data = imageData.data;
+            const srgb = new Float32Array(pixels * 3);
 
-        // Convert linear RGB (interleaved, 0-1) to sRGB (0-255) as interleaved Float32Array
-        // Uses WASM implementation for high-precision color conversion
-        function linearToSrgb255Interleaved(linearInterleaved, width, height) {
-            return linear_to_srgb_wasm(linearInterleaved, width, height);
+            for (let i = 0; i < pixels; i++) {
+                srgb[i * 3] = data[i * 4];
+                srgb[i * 3 + 1] = data[i * 4 + 1];
+                srgb[i * 3 + 2] = data[i * 4 + 2];
+            }
+
+            return srgb;
         }
 
         // Convert sRGB ImageData directly to grayscale using proper luminance computation
@@ -1125,9 +1128,9 @@
                     const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                     const seeds = getSeeds();
 
-                    // Convert sRGB -> linear -> sRGB (0-255) as interleaved data
-                    const linearInterleaved = imageDataToLinearRgbInterleaved(processData);
-                    const srgbInterleaved = linearToSrgb255Interleaved(linearInterleaved, processWidth, processHeight);
+                    // Convert ImageData directly to sRGB 0-255 Float32Array
+                    // (rescaling, if any, already handled linear space internally)
+                    const srgbInterleaved = imageDataToSrgb255Interleaved(processData);
 
                     // technique: 0 = None, 1 = PerChannel, 2 = ColorAware
                     const technique = isPerceptual ? 2 : 1;
