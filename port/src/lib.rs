@@ -14,7 +14,6 @@ mod color_distance;
 pub mod colorspace_derived;
 pub mod colorspace_primary;
 mod cra_lab;
-mod cra_oklab;
 mod cra_rgb;
 pub mod dither;
 pub mod dither_colorspace_aware;
@@ -794,7 +793,7 @@ pub fn color_correct_cra_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    cra_oklab::color_correct_cra_oklab(
+    cra_lab::color_correct_cra_oklab(
         &input_srgb,
         &ref_srgb,
         input_width,

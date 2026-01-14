@@ -1,9 +1,11 @@
-/// CRA (Chroma Rotation Averaging) in LAB color space.
+/// CRA (Chroma Rotation Averaging) in Lab color space.
+/// Supports both CIELAB and OKLab color spaces via the colorspace parameter.
 /// Corresponds to color_correction_cra.py
 
 use crate::color::{
     interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
-    linear_to_srgb_scaled_channels, srgb_to_linear_channels,
+    linear_rgb_to_oklab_channels, linear_to_srgb_scaled_channels, oklab_to_linear_rgb_channels,
+    srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_with_mode;
@@ -12,7 +14,7 @@ use crate::dither_colorspace_lab::{
 };
 use crate::dither_common::PerceptualSpace;
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
-use crate::rotation::{compute_ab_ranges, deg_to_rad, rotate_ab};
+use crate::rotation::{compute_ab_ranges, compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 
 /// Default rotation angles for CRA
 const ROTATION_ANGLES: [f32; 3] = [0.0, 30.0, 60.0];
@@ -20,19 +22,31 @@ const ROTATION_ANGLES: [f32; 3] = [0.0, 30.0, 60.0];
 /// Default blend factors for iterative refinement
 const BLEND_FACTORS: [f32; 3] = [0.25, 0.5, 1.0];
 
-/// Scale L channel to 0-255 range: L (0-100) -> 0-255
-fn scale_l_to_255(l: &[f32]) -> Vec<f32> {
-    l.iter().map(|&v| v * 255.0 / 100.0).collect()
+/// Get L scaling factor based on colorspace
+/// CIELAB: L is 0-100, OKLab: L is 0-1
+fn l_scale_factor(colorspace: LabQuantSpace) -> f32 {
+    match colorspace {
+        LabQuantSpace::CIELab => 100.0,
+        LabQuantSpace::OkLab => 1.0,
+    }
 }
 
-/// Reverse L scaling: 0-255 -> L (0-100)
-fn scale_255_to_l(l: &[f32]) -> Vec<f32> {
-    l.iter().map(|&v| v * 100.0 / 255.0).collect()
+/// Scale L channel to 0-255 range based on colorspace
+fn scale_l_to_255(l: &[f32], colorspace: LabQuantSpace) -> Vec<f32> {
+    let scale = l_scale_factor(colorspace);
+    l.iter().map(|&v| v * 255.0 / scale).collect()
 }
 
-/// Reverse L scaling from uint8: uint8 -> L (0-100)
-fn scale_uint8_to_l(l: &[u8]) -> Vec<f32> {
-    l.iter().map(|&v| v as f32 * 100.0 / 255.0).collect()
+/// Reverse L scaling: 0-255 -> native L range based on colorspace
+fn scale_255_to_l(l: &[f32], colorspace: LabQuantSpace) -> Vec<f32> {
+    let scale = l_scale_factor(colorspace);
+    l.iter().map(|&v| v * scale / 255.0).collect()
+}
+
+/// Reverse L scaling from uint8 based on colorspace
+fn scale_uint8_to_l(l: &[u8], colorspace: LabQuantSpace) -> Vec<f32> {
+    let scale = l_scale_factor(colorspace);
+    l.iter().map(|&v| v as f32 * scale / 255.0).collect()
 }
 
 /// Scale AB values to uint8 range based on precomputed ranges
@@ -86,16 +100,26 @@ fn scale_255_to_ab(a: &[f32], b: &[f32], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>,
     (a_lab, b_lab)
 }
 
-/// Build LabQuantParams from ab_ranges for CIELAB
-/// Maps L: 0-100 -> 0-255, a/b: [min,max] -> 0-255
-fn lab_quant_params_from_ranges(ab_ranges: [[f32; 2]; 2], quantize_l: bool, rotation_deg: f32) -> LabQuantParams {
+/// Build LabQuantParams from ab_ranges
+/// Maps L to 0-255 based on colorspace, a/b: [min,max] -> 0-255
+fn quant_params_from_ranges(
+    ab_ranges: [[f32; 2]; 2],
+    quantize_l: bool,
+    rotation_deg: f32,
+    colorspace: LabQuantSpace,
+) -> LabQuantParams {
     let [a_min, a_max] = ab_ranges[0];
     let [b_min, b_max] = ab_ranges[1];
+
+    let scale_l = match colorspace {
+        LabQuantSpace::CIELab => 255.0 / 100.0, // L: 0-100 -> 0-255
+        LabQuantSpace::OkLab => 255.0,          // L: 0-1 -> 0-255
+    };
 
     LabQuantParams {
         quantize_l,
         rotation_deg,
-        scale_l: 255.0 / 100.0,
+        scale_l,
         offset_l: 0.0,
         scale_a: 255.0 / (a_max - a_min),
         offset_a: -a_min * 255.0 / (a_max - a_min),
@@ -104,7 +128,41 @@ fn lab_quant_params_from_ranges(ab_ranges: [[f32; 2]; 2], quantize_l: bool, rota
     }
 }
 
-/// Process one iteration of LAB-space histogram matching
+/// Get AB ranges for a given rotation angle based on colorspace
+fn get_ab_ranges(theta_deg: f32, colorspace: LabQuantSpace) -> [[f32; 2]; 2] {
+    match colorspace {
+        LabQuantSpace::CIELab => compute_ab_ranges(theta_deg),
+        LabQuantSpace::OkLab => compute_oklab_ab_ranges(theta_deg),
+    }
+}
+
+/// Convert linear RGB to Lab channels based on colorspace
+fn linear_rgb_to_lab(
+    r: &[f32],
+    g: &[f32],
+    b: &[f32],
+    colorspace: LabQuantSpace,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    match colorspace {
+        LabQuantSpace::CIELab => linear_rgb_to_lab_channels(r, g, b),
+        LabQuantSpace::OkLab => linear_rgb_to_oklab_channels(r, g, b),
+    }
+}
+
+/// Convert Lab channels to linear RGB based on colorspace
+fn lab_to_linear_rgb(
+    l: &[f32],
+    a: &[f32],
+    b: &[f32],
+    colorspace: LabQuantSpace,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    match colorspace {
+        LabQuantSpace::CIELab => lab_to_linear_rgb_channels(l, a, b),
+        LabQuantSpace::OkLab => oklab_to_linear_rgb_channels(l, a, b),
+    }
+}
+
+/// Process one iteration of Lab-space histogram matching
 ///
 /// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 /// color_aware: if true and histogram_mode == 0, use color-aware Lab dithering
@@ -127,6 +185,7 @@ fn process_lab_iteration(
     color_aware: bool,
     distance_space: PerceptualSpace,
     dither_seed_base: u32,
+    colorspace: LabQuantSpace,
 ) -> (Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
 
@@ -135,7 +194,7 @@ fn process_lab_iteration(
 
     for (pass_idx, &theta_deg) in rotation_angles.iter().enumerate() {
         let theta_rad = deg_to_rad(theta_deg);
-        let ab_ranges = compute_ab_ranges(theta_deg);
+        let ab_ranges = get_ab_ranges(theta_deg, colorspace);
 
         let (a_matched, b_matched) = if histogram_mode > 0 {
             // Use f32 histogram matching directly (no dithering/quantization)
@@ -165,7 +224,7 @@ fn process_lab_iteration(
             rotate_ab(&a_lab, &b_lab, -theta_rad)
         } else if color_aware {
             // Use color-aware Lab dithering - rotation handled internally
-            let params = lab_quant_params_from_ranges(ab_ranges, false, theta_deg);
+            let params = quant_params_from_ranges(ab_ranges, false, theta_deg, colorspace);
             let pass_seed = dither_seed_base + (pass_idx as u32) * 2;
 
             // Dither input (L not quantized, but used for distance)
@@ -174,7 +233,7 @@ fn process_lab_iteration(
                 current_l, current_a, current_b,
                 input_width, input_height,
                 &params,
-                LabQuantSpace::CIELab,
+                colorspace,
                 distance_space,
                 histogram_dither_mode.into(),
                 pass_seed,
@@ -185,7 +244,7 @@ fn process_lab_iteration(
                 ref_l, ref_a, ref_b,
                 ref_width, ref_height,
                 &params,
-                LabQuantSpace::CIELab,
+                colorspace,
                 distance_space,
                 histogram_dither_mode.into(),
                 pass_seed + 1,
@@ -239,13 +298,14 @@ fn process_lab_iteration(
     (avg_a, avg_b)
 }
 
-/// CRA LAB color correction
+/// CRA Lab color correction (supports both CIELAB and OKLab)
 ///
 /// Args:
 ///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
 ///     ref_srgb: Reference image as sRGB values (0-1), flat array HxWx3
 ///     input_width, input_height: Input image dimensions
 ///     ref_width, ref_height: Reference image dimensions
+///     colorspace: Which Lab color space to use (CIELab or OkLab)
 ///     keep_luminosity: If true, preserve original L channel
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram preparation
@@ -258,13 +318,14 @@ fn process_lab_iteration(
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
 #[allow(clippy::too_many_arguments)]
-pub fn color_correct_cra_lab(
+pub fn color_correct_cra(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
     input_height: usize,
     ref_width: usize,
     ref_height: usize,
+    colorspace: LabQuantSpace,
     keep_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
@@ -280,9 +341,9 @@ pub fn color_correct_cra_lab(
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
     let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
 
-    // Convert to separate LAB channels
-    let (original_l, in_a, in_b_ch) = linear_rgb_to_lab_channels(&in_r, &in_g, &in_b);
-    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab_channels(&ref_r, &ref_g, &ref_b);
+    // Convert to separate Lab channels (colorspace-aware)
+    let (original_l, in_a, in_b_ch) = linear_rgb_to_lab(&in_r, &in_g, &in_b, colorspace);
+    let (ref_l, ref_a, ref_b_ch) = linear_rgb_to_lab(&ref_r, &ref_g, &ref_b, colorspace);
 
     // Initialize current AB channels
     let mut current_a = in_a;
@@ -311,6 +372,7 @@ pub fn color_correct_cra_lab(
             color_aware_histogram,
             histogram_distance_space,
             (iter_idx as u32) * 100,
+            colorspace,
         );
 
         // Blend with current
@@ -320,15 +382,15 @@ pub fn color_correct_cra_lab(
         }
     }
 
-    // Final LAB histogram match
-    let final_ab_ranges = compute_ab_ranges(0.0);
+    // Final Lab histogram match
+    let final_ab_ranges = get_ab_ranges(0.0, colorspace);
 
     // Match histograms (final pass uses high seed values to avoid collision with rotation passes)
     let (final_l, final_a, final_b) = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering needed)
-        let l_scaled = scale_l_to_255(&current_l);
+        let l_scaled = scale_l_to_255(&current_l, colorspace);
         let (a_scaled, b_scaled) = scale_ab_to_uint8(&current_a, &current_b, final_ab_ranges);
-        let ref_l_scaled = scale_l_to_255(&ref_l);
+        let ref_l_scaled = scale_l_to_255(&ref_l, colorspace);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
 
         let align_mode = if histogram_mode == 2 {
@@ -350,21 +412,21 @@ pub fn color_correct_cra_lab(
                 match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, 101);
             let matched_b =
                 match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, 102);
-            let l_lab = scale_255_to_l(&matched_l);
+            let l_lab = scale_255_to_l(&matched_l, colorspace);
             let (a_lab, b_lab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (l_lab, a_lab, b_lab)
         }
     } else if color_aware_histogram {
         // Use color-aware Lab dithering for final histogram matching
         // Final pass has no rotation (0 degrees)
-        let params = lab_quant_params_from_ranges(final_ab_ranges, !keep_luminosity, 0.0);
+        let params = quant_params_from_ranges(final_ab_ranges, !keep_luminosity, 0.0, colorspace);
 
         // Dither input
         let (current_l_u8, current_a_u8, current_b_u8) = lab_space_dither_with_mode(
             &current_l, &current_a, &current_b,
             input_width, input_height,
             &params,
-            LabQuantSpace::CIELab,
+            colorspace,
             histogram_distance_space,
             histogram_dither_mode.into(),
             1000,
@@ -375,7 +437,7 @@ pub fn color_correct_cra_lab(
             &ref_l, &ref_a, &ref_b_ch,
             ref_width, ref_height,
             &params,
-            LabQuantSpace::CIELab,
+            colorspace,
             histogram_distance_space,
             histogram_dither_mode.into(),
             1001,
@@ -390,16 +452,16 @@ pub fn color_correct_cra_lab(
             let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
             let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
-            let l_lab = scale_uint8_to_l(&matched_l);
+            let l_lab = scale_uint8_to_l(&matched_l, colorspace);
             let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (l_lab, a_lab, b_lab)
         }
     } else {
         // Use channel-independent binned histogram matching with dithering
         // Final pass uses high seed values (1000+) to avoid collision with iteration passes
-        let l_scaled = scale_l_to_255(&current_l);
+        let l_scaled = scale_l_to_255(&current_l, colorspace);
         let (a_scaled, b_scaled) = scale_ab_to_uint8(&current_a, &current_b, final_ab_ranges);
-        let ref_l_scaled = scale_l_to_255(&ref_l);
+        let ref_l_scaled = scale_l_to_255(&ref_l, colorspace);
         let (ref_a_scaled, ref_b_scaled) = scale_ab_to_uint8(&ref_a, &ref_b_ch, final_ab_ranges);
 
         let current_l_u8 = dither_with_mode(&l_scaled, input_width, input_height, histogram_dither_mode, 1000);
@@ -418,14 +480,14 @@ pub fn color_correct_cra_lab(
             let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
             let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
-            let l_lab = scale_uint8_to_l(&matched_l);
+            let l_lab = scale_uint8_to_l(&matched_l, colorspace);
             let (a_lab, b_lab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
             (l_lab, a_lab, b_lab)
         }
     };
 
-    // Convert LAB back to linear RGB (separate channels)
-    let (out_r, out_g, out_b) = lab_to_linear_rgb_channels(&final_l, &final_a, &final_b);
+    // Convert Lab back to linear RGB (colorspace-aware)
+    let (out_r, out_g, out_b) = lab_to_linear_rgb(&final_l, &final_a, &final_b, colorspace);
 
     // Convert to sRGB and scale to 0-255
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
@@ -451,4 +513,78 @@ pub fn color_correct_cra_lab(
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+}
+
+/// CRA CIELAB color correction (convenience wrapper)
+#[allow(clippy::too_many_arguments)]
+pub fn color_correct_cra_lab(
+    input_srgb: &[f32],
+    ref_srgb: &[f32],
+    input_width: usize,
+    input_height: usize,
+    ref_width: usize,
+    ref_height: usize,
+    keep_luminosity: bool,
+    histogram_mode: u8,
+    histogram_dither_mode: DitherMode,
+    color_aware_histogram: bool,
+    histogram_distance_space: PerceptualSpace,
+    output_dither_mode: DitherMode,
+    color_aware_output: bool,
+    output_distance_space: PerceptualSpace,
+) -> Vec<u8> {
+    color_correct_cra(
+        input_srgb,
+        ref_srgb,
+        input_width,
+        input_height,
+        ref_width,
+        ref_height,
+        LabQuantSpace::CIELab,
+        keep_luminosity,
+        histogram_mode,
+        histogram_dither_mode,
+        color_aware_histogram,
+        histogram_distance_space,
+        output_dither_mode,
+        color_aware_output,
+        output_distance_space,
+    )
+}
+
+/// CRA OKLab color correction (convenience wrapper)
+#[allow(clippy::too_many_arguments)]
+pub fn color_correct_cra_oklab(
+    input_srgb: &[f32],
+    ref_srgb: &[f32],
+    input_width: usize,
+    input_height: usize,
+    ref_width: usize,
+    ref_height: usize,
+    keep_luminosity: bool,
+    histogram_mode: u8,
+    histogram_dither_mode: DitherMode,
+    color_aware_histogram: bool,
+    histogram_distance_space: PerceptualSpace,
+    output_dither_mode: DitherMode,
+    color_aware_output: bool,
+    output_distance_space: PerceptualSpace,
+) -> Vec<u8> {
+    color_correct_cra(
+        input_srgb,
+        ref_srgb,
+        input_width,
+        input_height,
+        ref_width,
+        ref_height,
+        LabQuantSpace::OkLab,
+        keep_luminosity,
+        histogram_mode,
+        histogram_dither_mode,
+        color_aware_histogram,
+        histogram_distance_space,
+        output_dither_mode,
+        color_aware_output,
+        output_distance_space,
+    )
 }
