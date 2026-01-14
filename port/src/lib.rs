@@ -907,11 +907,13 @@ pub fn rescale_linear_rgb_with_progress_wasm(
     let js_this = wasm_bindgen::JsValue::NULL;
     let callback = progress_callback.clone();
 
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
     rescale::rescale_rgb_interleaved_with_progress(
         &linear, src_width, src_height, dst_width, dst_height, method, scale_mode,
-        |progress: f32| {
-            let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
-        }
+        Some(&mut progress_fn)
     )
 }
 
