@@ -21,6 +21,7 @@ pub mod dither_colorspace_lab;
 pub mod dither_colorspace_luminosity;
 pub mod dither_common;
 mod histogram;
+mod output;
 mod rotation;
 mod tiled_lab;
 mod tiling;
@@ -481,7 +482,7 @@ pub fn color_correct_basic_lab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    basic_lab::color_correct_basic_lab(
+    let (r, g, b) = basic_lab::color_correct_basic_lab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -491,7 +492,13 @@ pub fn color_correct_basic_lab(
         keep_luminosity,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+    );
+
+    output::finalize_linear_to_srgb_u8(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
+        0, // seed
     )
 }
 
@@ -523,7 +530,7 @@ pub fn color_correct_basic_rgb(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    basic_rgb::color_correct_basic_rgb(
+    let (r, g, b) = basic_rgb::color_correct_basic_rgb_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -532,7 +539,13 @@ pub fn color_correct_basic_rgb(
         ref_height,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+    );
+
+    output::finalize_linear_to_srgb_u8(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
+        0, // seed
     )
 }
 
@@ -578,7 +591,7 @@ pub fn color_correct_cra_lab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    cra_lab::color_correct_cra_lab(
+    let (r, g, b) = cra_lab::color_correct_cra_lab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -590,9 +603,15 @@ pub fn color_correct_cra_lab(
         dither_mode_from_u8(histogram_dither_mode),
         color_aware_histogram,
         perceptual_space_from_u8(histogram_distance_space),
+    );
+
+    output::finalize_linear_to_srgb_u8_with_options(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
+        0, // seed
     )
 }
 
@@ -638,7 +657,7 @@ pub fn color_correct_tiled_lab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    tiled_lab::color_correct_tiled_lab(
+    let (r, g, b) = tiled_lab::color_correct_tiled_lab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -650,9 +669,15 @@ pub fn color_correct_tiled_lab(
         dither_mode_from_u8(histogram_dither_mode),
         color_aware_histogram,
         perceptual_space_from_u8(histogram_distance_space),
+    );
+
+    output::finalize_linear_to_srgb_u8_with_options(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
+        0, // seed
     )
 }
 
@@ -689,7 +714,7 @@ pub fn color_correct_cra_rgb(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    cra_rgb::color_correct_cra_rgb(
+    let (r, g, b) = cra_rgb::color_correct_cra_rgb_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -699,7 +724,13 @@ pub fn color_correct_cra_rgb(
         use_perceptual,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+    );
+
+    output::finalize_linear_to_srgb_u8(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
+        0, // seed
     )
 }
 
@@ -736,7 +767,7 @@ pub fn color_correct_basic_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    basic_oklab::color_correct_basic_oklab(
+    let (r, g, b) = basic_oklab::color_correct_basic_oklab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -746,7 +777,13 @@ pub fn color_correct_basic_oklab(
         keep_luminosity,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+    );
+
+    output::finalize_linear_to_srgb_u8(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
+        0, // seed
     )
 }
 
@@ -792,7 +829,7 @@ pub fn color_correct_cra_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    cra_lab::color_correct_cra_oklab(
+    let (r, g, b) = cra_lab::color_correct_cra_oklab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -804,9 +841,15 @@ pub fn color_correct_cra_oklab(
         dither_mode_from_u8(histogram_dither_mode),
         color_aware_histogram,
         perceptual_space_from_u8(histogram_distance_space),
+    );
+
+    output::finalize_linear_to_srgb_u8_with_options(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
+        0, // seed
     )
 }
 
@@ -852,7 +895,7 @@ pub fn color_correct_tiled_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    tiled_lab::color_correct_tiled_oklab(
+    let (r, g, b) = tiled_lab::color_correct_tiled_oklab_linear(
         &input_srgb,
         &ref_srgb,
         input_width,
@@ -864,9 +907,15 @@ pub fn color_correct_tiled_oklab(
         dither_mode_from_u8(histogram_dither_mode),
         color_aware_histogram,
         perceptual_space_from_u8(histogram_distance_space),
+    );
+
+    output::finalize_linear_to_srgb_u8_with_options(
+        &r, &g, &b,
+        input_width, input_height,
         dither_mode_from_u8(output_dither_mode),
         color_aware_output,
         perceptual_space_from_u8(output_distance_space),
+        0, // seed
     )
 }
 

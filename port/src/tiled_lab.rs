@@ -2,12 +2,10 @@
 /// Supports both CIELAB and OkLab color spaces via the colorspace parameter.
 
 use crate::color::{
-    interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
-    linear_rgb_to_oklab_channels, linear_to_srgb_scaled_channels, oklab_to_linear_rgb_channels,
-    srgb_to_linear_channels,
+    lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, linear_rgb_to_oklab_channels,
+    oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
-use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_with_mode;
 use crate::dither_colorspace_lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
@@ -400,7 +398,7 @@ fn process_block_iteration_with_l(
     (avg_l, avg_a, avg_b)
 }
 
-/// Tiled CRA color correction with configurable colorspace
+/// Tiled CRA color correction with configurable colorspace - returns linear RGB
 ///
 /// Args:
 ///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
@@ -413,14 +411,11 @@ fn process_block_iteration_with_l(
 ///     histogram_dither_mode: Dither mode for histogram preparation
 ///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
 ///     histogram_distance_space: Perceptual space for color-aware histogram dithering
-///     output_dither_mode: Dither mode for final RGB output
-///     color_aware_output: If true, use color-aware dithering for final RGB output
-///     output_distance_space: Perceptual space for color-aware output dithering
 ///
 /// Returns:
-///     Output image as sRGB uint8, flat array HxWx3
+///     (R, G, B) linear RGB channels (f32, 0-1 range)
 #[allow(clippy::too_many_arguments)]
-pub fn color_correct_tiled(
+pub fn color_correct_tiled_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -433,10 +428,7 @@ pub fn color_correct_tiled(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-    output_dither_mode: DitherMode,
-    color_aware_output: bool,
-    output_distance_space: PerceptualSpace,
-) -> Vec<u8> {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
 
     // Convert to separate linear RGB channels
@@ -723,37 +715,12 @@ pub fn color_correct_tiled(
     };
 
     // Convert LAB back to linear RGB (separate channels)
-    let (out_r, out_g, out_b) = lab_to_linear_rgb(&final_l, &final_a, &final_b, colorspace);
-
-    // Convert to sRGB and scale to 0-255
-    let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
-
-    // Dither for final output
-    let (r_u8, g_u8, b_u8) = if color_aware_output {
-        // Use color-aware dithering (joint RGB processing with perceptual distance)
-        colorspace_aware_dither_rgb_with_mode(
-            &r_scaled, &g_scaled, &b_scaled,
-            input_width, input_height,
-            8, 8, 8,
-            output_distance_space,
-            output_dither_mode,
-            10006,
-        )
-    } else {
-        // Channel-independent dithering
-        let r = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 10006);
-        let g = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 10007);
-        let b = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 10008);
-        (r, g, b)
-    };
-
-    // Interleave only at the very end
-    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+    lab_to_linear_rgb(&final_l, &final_a, &final_b, colorspace)
 }
 
-/// Convenience wrapper: Tiled CRA LAB color correction (CIELAB colorspace)
+/// Convenience wrapper: Tiled CRA LAB color correction (CIELAB colorspace) - returns linear RGB
 #[allow(clippy::too_many_arguments)]
-pub fn color_correct_tiled_lab(
+pub fn color_correct_tiled_lab_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -765,11 +732,8 @@ pub fn color_correct_tiled_lab(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-    output_dither_mode: DitherMode,
-    color_aware_output: bool,
-    output_distance_space: PerceptualSpace,
-) -> Vec<u8> {
-    color_correct_tiled(
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    color_correct_tiled_linear(
         input_srgb,
         ref_srgb,
         input_width,
@@ -782,15 +746,12 @@ pub fn color_correct_tiled_lab(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
-        output_dither_mode,
-        color_aware_output,
-        output_distance_space,
     )
 }
 
-/// Convenience wrapper: Tiled CRA OkLab color correction (OkLab colorspace)
+/// Convenience wrapper: Tiled CRA OkLab color correction (OkLab colorspace) - returns linear RGB
 #[allow(clippy::too_many_arguments)]
-pub fn color_correct_tiled_oklab(
+pub fn color_correct_tiled_oklab_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -802,11 +763,8 @@ pub fn color_correct_tiled_oklab(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
-    output_dither_mode: DitherMode,
-    color_aware_output: bool,
-    output_distance_space: PerceptualSpace,
-) -> Vec<u8> {
-    color_correct_tiled(
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    color_correct_tiled_linear(
         input_srgb,
         ref_srgb,
         input_width,
@@ -819,8 +777,5 @@ pub fn color_correct_tiled_oklab(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
-        output_dither_mode,
-        color_aware_output,
-        output_distance_space,
     )
 }

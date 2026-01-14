@@ -1,7 +1,7 @@
 /// CRA (Chroma Rotation Averaging) in RGB color space.
 /// Corresponds to color_correction_cra_rgb.py
 
-use crate::color::{interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear};
+use crate::color::srgb_to_linear;
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{
@@ -177,7 +177,7 @@ fn process_rgb_iteration(
     avg_rgb
 }
 
-/// CRA RGB color correction
+/// CRA RGB color correction - returns linear RGB channels
 ///
 /// Args:
 ///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
@@ -188,8 +188,8 @@ fn process_rgb_iteration(
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
 /// Returns:
-///     Output image as sRGB uint8, flat array HxWx3
-pub fn color_correct_cra_rgb(
+///     (R, G, B) linear RGB channels (f32, 0-1 range)
+pub fn color_correct_cra_rgb_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -199,8 +199,7 @@ pub fn color_correct_cra_rgb(
     use_perceptual: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
-    output_dither_mode: DitherMode,
-) -> Vec<u8> {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
 
@@ -328,15 +327,5 @@ pub fn color_correct_cra_rgb(
     let final_g: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 1]).collect();
     let final_b: Vec<f32> = (0..input_pixels).map(|i| final_scaled[i * 3 + 2]).collect();
 
-    // Convert to sRGB and scale to 0-255
-    let (r_scaled, g_scaled, b_scaled) =
-        linear_to_srgb_scaled_channels(&final_r, &final_g, &final_b);
-
-    // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 1006);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 1007);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 1008);
-
-    // Interleave only at the very end
-    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+    (final_r, final_g, final_b)
 }

@@ -1,13 +1,14 @@
 /// Basic RGB histogram matching algorithm.
 /// Corresponds to color_correction_basic_rgb.py
 
-use crate::color::{
-    interleave_rgb_u8, linear_to_srgb_scaled_channels, srgb_to_linear_channels,
-};
+use crate::color::srgb_to_linear_channels;
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 
-/// Basic RGB histogram matching
+/// Basic RGB histogram matching - returns linear RGB channels
+///
+/// This is the core algorithm that performs histogram matching in linear RGB space
+/// and returns the result as linear RGB channels (f32, 0-1 range).
 ///
 /// Args:
 ///     input_srgb: Input image as sRGB values (0-1), flat array HxWx3
@@ -16,9 +17,8 @@ use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, Inte
 ///     ref_width, ref_height: Reference image dimensions
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///
-/// Returns:
-///     Output image as sRGB uint8, flat array HxWx3
-pub fn color_correct_basic_rgb(
+/// Returns: (R, G, B) linear RGB channels
+pub fn color_correct_basic_rgb_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -27,8 +27,7 @@ pub fn color_correct_basic_rgb(
     ref_height: usize,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
-    output_dither_mode: DitherMode,
-) -> Vec<u8> {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Convert to separate linear RGB channels
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
     let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
@@ -44,7 +43,7 @@ pub fn color_correct_basic_rgb(
 
     // Match histograms
     // histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
-    let (matched_r_linear, matched_g_linear, matched_b_linear) = if histogram_mode > 0 {
+    if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
         let align_mode = if histogram_mode == 2 {
             AlignmentMode::Midpoint
@@ -83,17 +82,5 @@ pub fn color_correct_basic_rgb(
         let g_linear: Vec<f32> = matched_g.iter().map(|&v| v as f32 / 255.0).collect();
         let b_linear: Vec<f32> = matched_b.iter().map(|&v| v as f32 / 255.0).collect();
         (r_linear, g_linear, b_linear)
-    };
-
-    // Convert to sRGB and scale to 0-255
-    let (r_scaled, g_scaled, b_scaled) =
-        linear_to_srgb_scaled_channels(&matched_r_linear, &matched_g_linear, &matched_b_linear);
-
-    // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 6);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 7);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 8);
-
-    // Interleave only at the very end
-    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+    }
 }

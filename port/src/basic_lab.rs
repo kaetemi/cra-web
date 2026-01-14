@@ -2,8 +2,7 @@
 /// Corresponds to color_correction_basic.py
 
 use crate::color::{
-    interleave_rgb_u8, lab_to_linear_rgb_channels, linear_rgb_to_lab_channels,
-    linear_to_srgb_scaled_channels, srgb_to_linear_channels,
+    lab_to_linear_rgb_channels, linear_rgb_to_lab_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
@@ -44,10 +43,15 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8]) -> (Vec<f32>, Vec<f32>) {
     (a_lab, b_lab)
 }
 
-/// Basic LAB histogram matching
+/// Basic LAB histogram matching - returns linear RGB channels
+///
+/// This is the core algorithm that performs histogram matching in LAB space
+/// and returns the result as linear RGB channels (f32, 0-1 range).
 ///
 /// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
-pub fn color_correct_basic_lab(
+///
+/// Returns: (R, G, B) linear RGB channels
+pub fn color_correct_basic_lab_linear(
     input_srgb: &[f32],
     ref_srgb: &[f32],
     input_width: usize,
@@ -57,8 +61,7 @@ pub fn color_correct_basic_lab(
     keep_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
-    output_dither_mode: DitherMode,
-) -> Vec<u8> {
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Convert to separate linear RGB channels
     let (in_r, in_g, in_b) = srgb_to_linear_channels(input_srgb, input_width, input_height);
     let (ref_r, ref_g, ref_b) = srgb_to_linear_channels(ref_srgb, ref_width, ref_height);
@@ -129,18 +132,7 @@ pub fn color_correct_basic_lab(
     };
 
     // Convert LAB back to linear RGB (separate channels)
-    let (out_r, out_g, out_b) = lab_to_linear_rgb_channels(&final_l, &final_a, &final_b);
-
-    // Convert to sRGB and scale to 0-255
-    let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
-
-    // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 6);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 7);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 8);
-
-    // Interleave only at the very end
-    interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
+    lab_to_linear_rgb_channels(&final_l, &final_a, &final_b)
 }
 
 #[cfg(test)]
