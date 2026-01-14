@@ -369,8 +369,10 @@ fn lab_quant_space_from_u8(space: u8) -> dither_colorspace_lab::LabQuantSpace {
 ///     rotation_deg: Rotation angle in degrees for a/b plane
 ///     scale_l: Scale for L channel (u8 = L * scale_l + offset_l)
 ///     offset_l: Offset for L channel
-///     scale_ab: Scale for a/b channels (u8 = ab * scale_ab + offset_ab)
-///     offset_ab: Offset for a/b channels
+///     scale_a: Scale for a channel (u8 = a * scale_a + offset_a)
+///     offset_a: Offset for a channel
+///     scale_b: Scale for b channel (u8 = b * scale_b + offset_b)
+///     offset_b: Offset for b channel
 ///     quant_space: Color space for rotation/quantization (0 = CIELAB, 1 = OKLab) - must match input
 ///     distance_space: Perceptual space for distance calculation (0-5, same as other dithers)
 ///     mode: Dither mode (0-6)
@@ -389,8 +391,10 @@ pub fn lab_space_dither_wasm(
     rotation_deg: f32,
     scale_l: f32,
     offset_l: f32,
-    scale_ab: f32,
-    offset_ab: f32,
+    scale_a: f32,
+    offset_a: f32,
+    scale_b: f32,
+    offset_b: f32,
     quant_space: u8,
     distance_space: u8,
     mode: u8,
@@ -404,8 +408,10 @@ pub fn lab_space_dither_wasm(
         rotation_deg,
         scale_l,
         offset_l,
-        scale_ab,
-        offset_ab,
+        scale_a,
+        offset_a,
+        scale_b,
+        offset_b,
     };
 
     let cs_mode = match mode {
@@ -473,8 +479,10 @@ pub fn lab_space_dither_lab_output_wasm(
     rotation_deg: f32,
     scale_l: f32,
     offset_l: f32,
-    scale_ab: f32,
-    offset_ab: f32,
+    scale_a: f32,
+    offset_a: f32,
+    scale_b: f32,
+    offset_b: f32,
     quant_space: u8,
     distance_space: u8,
     mode: u8,
@@ -488,8 +496,10 @@ pub fn lab_space_dither_lab_output_wasm(
         rotation_deg,
         scale_l,
         offset_l,
-        scale_ab,
-        offset_ab,
+        scale_a,
+        offset_a,
+        scale_b,
+        offset_b,
     };
 
     let cs_mode = match mode {

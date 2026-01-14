@@ -45,10 +45,14 @@ pub struct LabQuantParams {
     pub scale_l: f32,
     /// Offset for L channel
     pub offset_l: f32,
-    /// Scale for a/b channels (after rotation): u8 = a * scale_ab + offset_ab
-    pub scale_ab: f32,
-    /// Offset for a/b channels
-    pub offset_ab: f32,
+    /// Scale for a channel (after rotation): u8 = a * scale_a + offset_a
+    pub scale_a: f32,
+    /// Offset for a channel
+    pub offset_a: f32,
+    /// Scale for b channel (after rotation): u8 = b * scale_b + offset_b
+    pub scale_b: f32,
+    /// Offset for b channel
+    pub offset_b: f32,
 }
 
 impl LabQuantParams {
@@ -59,8 +63,10 @@ impl LabQuantParams {
             rotation_deg: 0.0,
             scale_l: 255.0,      // L: 0-1 → 0-255
             offset_l: 0.0,
-            scale_ab: 255.0,     // a/b: -0.5 to 0.5 → 0-255 (with offset 127.5)
-            offset_ab: 127.5,
+            scale_a: 255.0,      // a: -0.5 to 0.5 → 0-255 (with offset 127.5)
+            offset_a: 127.5,
+            scale_b: 255.0,      // b: -0.5 to 0.5 → 0-255 (with offset 127.5)
+            offset_b: 127.5,
         }
     }
 
@@ -71,8 +77,10 @@ impl LabQuantParams {
             rotation_deg: 0.0,
             scale_l: 2.55,       // L: 0-100 → 0-255
             offset_l: 0.0,
-            scale_ab: 1.0,       // a/b: -127 to 127 → 0-254 (with offset 127)
-            offset_ab: 127.0,
+            scale_a: 1.0,        // a: -127 to 127 → 0-254 (with offset 127)
+            offset_a: 127.0,
+            scale_b: 1.0,        // b: -127 to 127 → 0-254 (with offset 127)
+            offset_b: 127.0,
         }
     }
 }
@@ -99,10 +107,14 @@ struct LabDitherContext {
     scale_l: f32,
     /// Offset for L channel
     offset_l: f32,
-    /// Scale for a/b channels
-    scale_ab: f32,
-    /// Offset for a/b channels
-    offset_ab: f32,
+    /// Scale for a channel
+    scale_a: f32,
+    /// Offset for a channel
+    offset_a: f32,
+    /// Scale for b channel
+    scale_b: f32,
+    /// Offset for b channel
+    offset_b: f32,
 }
 
 impl LabDitherContext {
@@ -119,8 +131,10 @@ impl LabDitherContext {
             quantize_l: params.quantize_l,
             scale_l: params.scale_l,
             offset_l: params.offset_l,
-            scale_ab: params.scale_ab,
-            offset_ab: params.offset_ab,
+            scale_a: params.scale_a,
+            offset_a: params.offset_a,
+            scale_b: params.scale_b,
+            offset_b: params.offset_b,
         }
     }
 
@@ -164,10 +178,16 @@ impl LabDitherContext {
         l * self.scale_l + self.offset_l
     }
 
-    /// Convert Lab a or b value to u8 position using scale/offset
+    /// Convert Lab a value to u8 position using scale/offset
     #[inline]
-    fn lab_ab_to_u8_pos(&self, ab: f32) -> f32 {
-        ab * self.scale_ab + self.offset_ab
+    fn lab_a_to_u8_pos(&self, a: f32) -> f32 {
+        a * self.scale_a + self.offset_a
+    }
+
+    /// Convert Lab b value to u8 position using scale/offset
+    #[inline]
+    fn lab_b_to_u8_pos(&self, b: f32) -> f32 {
+        b * self.scale_b + self.offset_b
     }
 
     /// Convert u8 position back to Lab L value
@@ -176,10 +196,16 @@ impl LabDitherContext {
         (pos - self.offset_l) / self.scale_l
     }
 
-    /// Convert u8 position back to Lab a or b value
+    /// Convert u8 position back to Lab a value
     #[inline]
-    fn u8_pos_to_lab_ab(&self, pos: f32) -> f32 {
-        (pos - self.offset_ab) / self.scale_ab
+    fn u8_pos_to_lab_a(&self, pos: f32) -> f32 {
+        (pos - self.offset_a) / self.scale_a
+    }
+
+    /// Convert u8 position back to Lab b value
+    #[inline]
+    fn u8_pos_to_lab_b(&self, pos: f32) -> f32 {
+        (pos - self.offset_b) / self.scale_b
     }
 
     /// Convert to distance space for comparison (uses unrotated Lab)
@@ -381,8 +407,8 @@ fn process_pixel_lab(
 
     // Convert to u8 positions using scale/offset
     let l_pos = ctx.lab_l_to_u8_pos(l);
-    let a_pos = ctx.lab_ab_to_u8_pos(a_rot);
-    let b_pos = ctx.lab_ab_to_u8_pos(b_rot);
+    let a_pos = ctx.lab_a_to_u8_pos(a_rot);
+    let b_pos = ctx.lab_b_to_u8_pos(b_rot);
 
     // Find floor/ceil candidates (clamped to 0-255)
     let l_floor = l_pos.floor().clamp(0.0, 255.0) as u8;
@@ -423,8 +449,8 @@ fn process_pixel_lab(
         for &a_cand_u8 in a_candidates {
             for &b_cand_u8 in b_candidates {
                 // Convert a/b candidates back to Lab f32 (still rotated)
-                let a_cand_rot = ctx.u8_pos_to_lab_ab(a_cand_u8 as f32);
-                let b_cand_rot = ctx.u8_pos_to_lab_ab(b_cand_u8 as f32);
+                let a_cand_rot = ctx.u8_pos_to_lab_a(a_cand_u8 as f32);
+                let b_cand_rot = ctx.u8_pos_to_lab_b(b_cand_u8 as f32);
 
                 // Unrotate the candidate
                 let (a_cand, b_cand) = ctx.unrotate_ab(a_cand_rot, b_cand_rot);
@@ -456,8 +482,8 @@ fn process_pixel_lab(
     } else {
         l // Use original L
     };
-    let best_a_rot = ctx.u8_pos_to_lab_ab(best_a_u8 as f32);
-    let best_b_rot = ctx.u8_pos_to_lab_ab(best_b_u8 as f32);
+    let best_a_rot = ctx.u8_pos_to_lab_a(best_a_u8 as f32);
+    let best_b_rot = ctx.u8_pos_to_lab_b(best_b_u8 as f32);
     let (best_a, best_b) = ctx.unrotate_ab(best_a_rot, best_b_rot);
 
     // Convert to linear RGB for error calculation
@@ -640,8 +666,8 @@ pub fn lab_space_dither(
 #[inline]
 pub fn lab_u8_to_f32_with_params(l: u8, a: u8, b: u8, params: &LabQuantParams) -> (f32, f32, f32) {
     let l_f = (l as f32 - params.offset_l) / params.scale_l;
-    let a_f = (a as f32 - params.offset_ab) / params.scale_ab;
-    let b_f = (b as f32 - params.offset_ab) / params.scale_ab;
+    let a_f = (a as f32 - params.offset_a) / params.scale_a;
+    let b_f = (b as f32 - params.offset_b) / params.scale_b;
     (l_f, a_f, b_f)
 }
 
@@ -782,8 +808,10 @@ mod tests {
             rotation_deg: 0.0,
             scale_l: 200.0,   // Narrower L range
             offset_l: 27.5,
-            scale_ab: 200.0,  // Narrower a/b range
-            offset_ab: 127.5,
+            scale_a: 200.0,   // Narrower a range
+            offset_a: 127.5,
+            scale_b: 200.0,   // Narrower b range
+            offset_b: 127.5,
         };
 
         let (l_out, a_out, b_out) = lab_space_dither(
