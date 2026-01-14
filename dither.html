@@ -731,7 +731,14 @@
                     <label for="scale-height">Height:</label>
                     <input type="number" id="scale-height" value="128" min="1" max="4096">
                 </div>
-                <p class="scale-hint">Aspect ratio is preserved. Edit one dimension to auto-calculate the other.</p>
+                <div class="size-inputs" style="margin-top: 10px;">
+                    <label for="scale-method">Method:</label>
+                    <select id="scale-method">
+                        <option value="1" selected>Lanczos (high quality)</option>
+                        <option value="0">Bilinear (fast)</option>
+                    </select>
+                </div>
+                <p class="scale-hint">Rescaling is performed in linear RGB space for correct color blending.</p>
             </div>
 
             <div class="toggle-row">
@@ -845,7 +852,10 @@
             // Color space conversion functions (use WASM for precision)
             srgb_to_linear_wasm,
             linear_to_srgb_wasm,
-            srgb_to_grayscale_wasm
+            srgb_to_grayscale_wasm,
+            // Rescaling functions (proper linear-space interpolation)
+            rescale_srgb_wasm,
+            calculate_dimensions_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
@@ -979,23 +989,33 @@
             return ctx.getImageData(0, 0, img.width, img.height);
         }
 
-        // Downscale image data using canvas (bilinear/bicubic)
-        function downscaleImageData(imageData, srcWidth, srcHeight, dstWidth, dstHeight) {
-            const srcCanvas = document.createElement('canvas');
-            srcCanvas.width = srcWidth;
-            srcCanvas.height = srcHeight;
-            const srcCtx = srcCanvas.getContext('2d');
-            srcCtx.putImageData(imageData, 0, 0);
+        // Rescale image data using WASM (proper linear-space interpolation)
+        // method: 0=Bilinear, 1=Lanczos3
+        function rescaleImageData(imageData, srcWidth, srcHeight, dstWidth, dstHeight, method) {
+            // Extract RGB from ImageData as Uint8Array
+            const srcPixels = srcWidth * srcHeight;
+            const rgb = new Uint8Array(srcPixels * 3);
+            const srcData = imageData.data;
+            for (let i = 0; i < srcPixels; i++) {
+                rgb[i * 3] = srcData[i * 4];
+                rgb[i * 3 + 1] = srcData[i * 4 + 1];
+                rgb[i * 3 + 2] = srcData[i * 4 + 2];
+            }
 
-            const dstCanvas = document.createElement('canvas');
-            dstCanvas.width = dstWidth;
-            dstCanvas.height = dstHeight;
-            const dstCtx = dstCanvas.getContext('2d');
-            dstCtx.imageSmoothingEnabled = true;
-            dstCtx.imageSmoothingQuality = 'high';
-            dstCtx.drawImage(srcCanvas, 0, 0, dstWidth, dstHeight);
+            // Rescale using WASM (handles sRGB->linear->rescale->sRGB)
+            const rescaled = rescale_srgb_wasm(rgb, srcWidth, srcHeight, dstWidth, dstHeight, method);
 
-            return dstCtx.getImageData(0, 0, dstWidth, dstHeight);
+            // Convert back to ImageData
+            const dstPixels = dstWidth * dstHeight;
+            const dstData = new Uint8ClampedArray(dstPixels * 4);
+            for (let i = 0; i < dstPixels; i++) {
+                dstData[i * 4] = Math.round(rescaled[i * 3]);
+                dstData[i * 4 + 1] = Math.round(rescaled[i * 3 + 1]);
+                dstData[i * 4 + 2] = Math.round(rescaled[i * 3 + 2]);
+                dstData[i * 4 + 3] = 255;
+            }
+
+            return new ImageData(dstData, dstWidth, dstHeight);
         }
 
         // Upscale image data using nearest neighbor
@@ -1080,8 +1100,9 @@
                 if (doDownscale) {
                     processWidth = parseInt(document.getElementById('scale-width').value) || originalWidth;
                     processHeight = parseInt(document.getElementById('scale-height').value) || originalHeight;
-                    // Downscale uses canvas (operates in sRGB space, same as CLI)
-                    processData = downscaleImageData(inputImageData, originalWidth, originalHeight, processWidth, processHeight);
+                    const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
+                    // Rescale using WASM (proper linear-space interpolation)
+                    processData = rescaleImageData(inputImageData, originalWidth, originalHeight, processWidth, processHeight, scaleMethod);
                 }
 
                 const pixelCount = processWidth * processHeight;
@@ -1377,7 +1398,9 @@
             if (doDownscale) {
                 const width = parseInt(document.getElementById('scale-width').value);
                 const height = parseInt(document.getElementById('scale-height').value);
-                cmd += ` --width ${width} --height ${height}`;
+                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
+                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos' };
+                cmd += ` --width ${width} --height ${height} --scale-method ${scaleMethodMap[scaleMethod]}`;
             }
 
             return cmd;

@@ -151,6 +151,24 @@ impl ColorSpace {
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum ScaleMethod {
+    /// Bilinear interpolation (fast, good for moderate scaling)
+    Bilinear,
+    /// Lanczos3 (high quality, recommended for significant down/upscaling)
+    #[default]
+    Lanczos,
+}
+
+impl ScaleMethod {
+    fn to_rescale_method(self) -> cra_wasm::rescale::RescaleMethod {
+        match self {
+            ScaleMethod::Bilinear => cra_wasm::rescale::RescaleMethod::Bilinear,
+            ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
 enum StrideFillArg {
     /// Fill padding with black (zeros)
     #[default]
@@ -268,6 +286,10 @@ struct Args {
     #[arg(long)]
     height: Option<u32>,
 
+    /// Scaling method for resize operations
+    #[arg(long, value_enum, default_value_t = ScaleMethod::Lanczos)]
+    scale_method: ScaleMethod,
+
     /// Enable verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -309,7 +331,7 @@ fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<f32>, Vec<f32
     Ok((r, g, b, width, height))
 }
 
-/// Resize linear RGB image using bilinear interpolation in linear space
+/// Resize linear RGB image in linear space for correct color blending
 fn resize_linear(
     r: &[f32],
     g: &[f32],
@@ -318,73 +340,44 @@ fn resize_linear(
     src_height: u32,
     target_width: Option<u32>,
     target_height: Option<u32>,
+    method: cra_wasm::rescale::RescaleMethod,
     verbose: bool,
 ) -> Result<(Vec<f32>, Vec<f32>, Vec<f32>, u32, u32), String> {
-    let (dst_width, dst_height) = match (target_width, target_height) {
-        (Some(w), Some(h)) => (w, h),
-        (Some(w), None) => {
-            let aspect = src_height as f64 / src_width as f64;
-            (w, (w as f64 * aspect).round() as u32)
-        }
-        (None, Some(h)) => {
-            let aspect = src_width as f64 / src_height as f64;
-            ((h as f64 * aspect).round() as u32, h)
-        }
-        (None, None) => return Ok((r.to_vec(), g.to_vec(), b.to_vec(), src_width, src_height)),
-    };
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale_rgb};
 
-    if dst_width == src_width && dst_height == src_height {
+    let tw = target_width.map(|w| w as usize);
+    let th = target_height.map(|h| h as usize);
+    let (dst_width, dst_height) = calculate_target_dimensions(
+        src_width as usize,
+        src_height as usize,
+        tw,
+        th,
+    );
+
+    if dst_width == src_width as usize && dst_height == src_height as usize {
         return Ok((r.to_vec(), g.to_vec(), b.to_vec(), src_width, src_height));
     }
 
     if verbose {
+        let method_name = match method {
+            cra_wasm::rescale::RescaleMethod::Bilinear => "Bilinear",
+            cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
+        };
         eprintln!(
-            "Resizing in linear RGB: {}x{} -> {}x{}",
-            src_width, src_height, dst_width, dst_height
+            "Resizing in linear RGB ({}): {}x{} -> {}x{}",
+            method_name, src_width, src_height, dst_width, dst_height
         );
     }
 
-    // Convert linear RGB to sRGB u8 for the image crate's resize
-    // (The image crate's resize works in sRGB space, so we convert, resize, then convert back)
-    // Actually, for correct linear-space resizing, we should do our own bilinear interpolation
-    // But for simplicity and quality, we'll use the image crate and accept the small error
-    // A proper implementation would do the interpolation directly in linear space
-
-    // For now, convert to sRGB, resize with high-quality filter, convert back
-    // This is a reasonable approximation since Lanczos3 is a high-quality filter
-    let src_pixels = (src_width * src_height) as usize;
-    let mut srgb_data = vec![0u8; src_pixels * 3];
-    for i in 0..src_pixels {
-        srgb_data[i * 3] = (linear_to_srgb_single(r[i]) * 255.0).round().clamp(0.0, 255.0) as u8;
-        srgb_data[i * 3 + 1] = (linear_to_srgb_single(g[i]) * 255.0).round().clamp(0.0, 255.0) as u8;
-        srgb_data[i * 3 + 2] = (linear_to_srgb_single(b[i]) * 255.0).round().clamp(0.0, 255.0) as u8;
-    }
-
-    let src_img: ImageBuffer<Rgb<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(src_width, src_height, srgb_data)
-            .ok_or_else(|| "Failed to create source image buffer".to_string())?;
-
-    let resized = image::imageops::resize(
-        &src_img,
-        dst_width,
-        dst_height,
-        image::imageops::FilterType::Lanczos3,
+    // Rescale directly in linear space for correct color blending
+    let (dst_r, dst_g, dst_b) = rescale_rgb(
+        r, g, b,
+        src_width as usize, src_height as usize,
+        dst_width, dst_height,
+        method,
     );
 
-    // Convert back to linear RGB
-    let dst_data = resized.into_raw();
-    let dst_pixels = (dst_width * dst_height) as usize;
-    let mut dst_r = Vec::with_capacity(dst_pixels);
-    let mut dst_g = Vec::with_capacity(dst_pixels);
-    let mut dst_b = Vec::with_capacity(dst_pixels);
-
-    for i in 0..dst_pixels {
-        dst_r.push(srgb_to_linear_single(dst_data[i * 3] as f32 / 255.0));
-        dst_g.push(srgb_to_linear_single(dst_data[i * 3 + 1] as f32 / 255.0));
-        dst_b.push(srgb_to_linear_single(dst_data[i * 3 + 2] as f32 / 255.0));
-    }
-
-    Ok((dst_r, dst_g, dst_b, dst_width, dst_height))
+    Ok((dst_r, dst_g, dst_b, dst_width as u32, dst_height as u32))
 }
 
 /// Convert linear RGB to grayscale (luminance) using Rec.709 coefficients
@@ -629,6 +622,7 @@ fn main() -> Result<(), String> {
         &in_r, &in_g, &in_b,
         src_width, src_height,
         args.width, args.height,
+        args.scale_method.to_rescale_method(),
         args.verbose,
     )?;
 

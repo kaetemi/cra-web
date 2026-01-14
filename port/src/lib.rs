@@ -22,6 +22,7 @@ pub mod dither_colorspace_luminosity;
 pub mod dither_common;
 mod histogram;
 pub mod output;
+pub mod rescale;
 mod rotation;
 pub mod tiled_lab;
 mod tiling;
@@ -1250,6 +1251,96 @@ pub fn linear_rgb_to_grayscale_wasm(r: Vec<f32>, g: Vec<f32>, b: Vec<f32>) -> Ve
     }
 
     gray
+}
+
+// Image Rescaling WASM Exports
+// ============================================================================
+
+/// Rescale method enum for WASM
+/// 0 = Bilinear
+/// 1 = Lanczos3
+fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
+    match method {
+        1 => rescale::RescaleMethod::Lanczos3,
+        _ => rescale::RescaleMethod::Bilinear,
+    }
+}
+
+/// Rescale sRGB image (interleaved RGB, 0-255 as u8)
+/// Converts to linear, rescales, converts back to sRGB
+/// Returns interleaved RGB as f32 in 0-255 range (ready for dithering)
+///
+/// Args:
+///     srgb: interleaved RGB u8 values
+///     src_width, src_height: source dimensions
+///     dst_width, dst_height: target dimensions
+///     method: 0=Bilinear, 1=Lanczos3
+#[wasm_bindgen]
+pub fn rescale_srgb_wasm(
+    srgb: Vec<u8>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let src_pixels = src_width * src_height;
+    let method = rescale_method_from_u8(method);
+
+    // Convert sRGB to linear RGB (interleaved f32, 0-1 range)
+    let mut linear = vec![0.0f32; src_pixels * 3];
+    for i in 0..src_pixels {
+        linear[i * 3] = color::srgb_to_linear_single(srgb[i * 3] as f32 / 255.0);
+        linear[i * 3 + 1] = color::srgb_to_linear_single(srgb[i * 3 + 1] as f32 / 255.0);
+        linear[i * 3 + 2] = color::srgb_to_linear_single(srgb[i * 3 + 2] as f32 / 255.0);
+    }
+
+    // Rescale in linear space
+    let linear_rescaled = rescale::rescale_rgb_interleaved(
+        &linear, src_width, src_height, dst_width, dst_height, method
+    );
+
+    // Convert back to sRGB (0-255 range)
+    let dst_pixels = dst_width * dst_height;
+    let mut result = vec![0.0f32; dst_pixels * 3];
+    for i in 0..dst_pixels {
+        result[i * 3] = color::linear_to_srgb_single(linear_rescaled[i * 3]) * 255.0;
+        result[i * 3 + 1] = color::linear_to_srgb_single(linear_rescaled[i * 3 + 1]) * 255.0;
+        result[i * 3 + 2] = color::linear_to_srgb_single(linear_rescaled[i * 3 + 2]) * 255.0;
+    }
+
+    result
+}
+
+/// Rescale linear RGB image (interleaved, 0-1 range)
+/// Returns interleaved RGB as f32 in 0-1 range
+#[wasm_bindgen]
+pub fn rescale_linear_wasm(
+    linear: Vec<f32>,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+) -> Vec<f32> {
+    let method = rescale_method_from_u8(method);
+    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method)
+}
+
+/// Calculate target dimensions preserving aspect ratio
+/// Returns [width, height]
+/// If both target_width and target_height are 0, returns source dimensions
+#[wasm_bindgen]
+pub fn calculate_dimensions_wasm(
+    src_width: usize,
+    src_height: usize,
+    target_width: usize,
+    target_height: usize,
+) -> Vec<usize> {
+    let tw = if target_width == 0 { None } else { Some(target_width) };
+    let th = if target_height == 0 { None } else { Some(target_height) };
+    let (w, h) = rescale::calculate_target_dimensions(src_width, src_height, tw, th);
+    vec![w, h]
 }
 
 #[cfg(test)]
