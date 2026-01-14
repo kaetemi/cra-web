@@ -204,168 +204,45 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         sendConsole(`Color-aware output: ON (${distanceSpaceNames[outputDistanceSpace] || distanceSpaceNames[1]})`);
     }
 
-    let resultRgb;
-    const startTime = performance.now();
+    // Method mapping: method name -> [methodCode, luminosityFlag, description]
+    // Method codes: 0=BasicLab, 1=BasicRgb, 2=BasicOklab, 3=CraLab, 4=CraRgb, 5=CraOklab, 6=TiledLab, 7=TiledOklab
+    // luminosityFlag: keep_luminosity for Lab/Oklab, use_perceptual for CraRgb, tiled_luminosity for Tiled
+    const methodMap = {
+        'lab':              [0, false, 'basic LAB histogram matching'],
+        'rgb':              [1, false, 'basic RGB histogram matching'],
+        'oklab':            [2, false, 'basic Oklab histogram matching'],
+        'cra_lab':          [3, false, 'CRA LAB color correction'],
+        'cra_rgb':          [4, false, 'CRA RGB color correction'],
+        'cra_rgb_perceptual': [4, true, 'CRA RGB color correction (perceptual)'],
+        'cra_oklab':        [5, false, 'CRA Oklab color correction'],
+        'cra_lab_tiled':    [6, true,  'CRA LAB tiled color correction (with tiled luminosity)'],
+        'cra_lab_tiled_ab': [6, false, 'CRA LAB tiled color correction (AB only)'],
+        'cra_oklab_tiled':  [7, true,  'CRA Oklab tiled color correction (with tiled luminosity)'],
+        'cra_oklab_tiled_ab': [7, false, 'CRA Oklab tiled color correction (AB only)'],
+    };
 
-    switch (method) {
-        case 'lab':
-            sendConsole('Running basic LAB histogram matching...');
-            resultRgb = craWasm.color_correct_basic_lab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // keep_luminosity
-                histogramMode,
-                histogramDitherMode,
-                outputDitherMode
-            );
-            break;
-
-        case 'rgb':
-            sendConsole('Running basic RGB histogram matching...');
-            resultRgb = craWasm.color_correct_basic_rgb(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                histogramMode,
-                histogramDitherMode,
-                outputDitherMode
-            );
-            break;
-
-        case 'cra_lab':
-            sendConsole('Running CRA LAB color correction...');
-            resultRgb = craWasm.color_correct_cra_lab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // keep_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        case 'cra_lab_tiled':
-            sendConsole('Running CRA LAB tiled color correction (with tiled luminosity)...');
-            resultRgb = craWasm.color_correct_tiled_lab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                true, // tiled_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        case 'cra_lab_tiled_ab':
-            sendConsole('Running CRA LAB tiled color correction (AB only)...');
-            resultRgb = craWasm.color_correct_tiled_lab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // tiled_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        case 'cra_rgb':
-            sendConsole('Running CRA RGB color correction...');
-            resultRgb = craWasm.color_correct_cra_rgb(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // use_perceptual
-                histogramMode,
-                histogramDitherMode,
-                outputDitherMode
-            );
-            break;
-
-        case 'cra_rgb_perceptual':
-            sendConsole('Running CRA RGB color correction (perceptual)...');
-            resultRgb = craWasm.color_correct_cra_rgb(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                true, // use_perceptual
-                histogramMode,
-                histogramDitherMode,
-                outputDitherMode
-            );
-            break;
-
-        case 'oklab':
-            sendConsole('Running basic Oklab histogram matching...');
-            resultRgb = craWasm.color_correct_basic_oklab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // keep_luminosity
-                histogramMode,
-                histogramDitherMode,
-                outputDitherMode
-            );
-            break;
-
-        case 'cra_oklab':
-            sendConsole('Running CRA Oklab color correction...');
-            resultRgb = craWasm.color_correct_cra_oklab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // keep_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        case 'cra_oklab_tiled':
-            sendConsole('Running CRA Oklab tiled color correction (with tiled luminosity)...');
-            resultRgb = craWasm.color_correct_tiled_oklab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                true, // tiled_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        case 'cra_oklab_tiled_ab':
-            sendConsole('Running CRA Oklab tiled color correction (AB only)...');
-            resultRgb = craWasm.color_correct_tiled_oklab(
-                inputRgb, inputImg.width, inputImg.height,
-                refRgb, refImg.width, refImg.height,
-                false, // tiled_luminosity
-                histogramMode,
-                histogramDitherMode,
-                colorAwareHistogram,
-                histogramDistanceSpace,
-                outputDitherMode,
-                colorAwareOutput,
-                outputDistanceSpace
-            );
-            break;
-
-        default:
-            throw new Error(`Unknown method: ${method}`);
+    const methodInfo = methodMap[method];
+    if (!methodInfo) {
+        throw new Error(`Unknown method: ${method}`);
     }
+
+    const [methodCode, luminosityFlag, description] = methodInfo;
+    sendConsole(`Running ${description}...`);
+
+    const startTime = performance.now();
+    const resultRgb = craWasm.color_correct_wasm(
+        inputRgb, inputImg.width, inputImg.height,
+        refRgb, refImg.width, refImg.height,
+        methodCode,
+        luminosityFlag,
+        histogramMode,
+        histogramDitherMode,
+        colorAwareHistogram,
+        histogramDistanceSpace,
+        outputDitherMode,
+        colorAwareOutput,
+        outputDistanceSpace
+    );
 
     const elapsed = performance.now() - startTime;
     sendConsole(`Processing completed in ${elapsed.toFixed(0)}ms`);
