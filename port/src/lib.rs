@@ -555,6 +555,8 @@ pub fn color_correct_basic_rgb(
 ///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
 ///     histogram_distance_space: Perceptual space for color-aware histogram dithering (0-5)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering (0-5)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -572,6 +574,8 @@ pub fn color_correct_cra_lab(
     color_aware_histogram: bool,
     histogram_distance_space: u8,
     output_dither_mode: u8,
+    color_aware_output: bool,
+    output_distance_space: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -589,6 +593,8 @@ pub fn color_correct_cra_lab(
         color_aware_histogram,
         perceptual_space_from_u8(histogram_distance_space),
         dither_mode_from_u8(output_dither_mode),
+        color_aware_output,
+        perceptual_space_from_u8(output_distance_space),
     )
 }
 
@@ -606,7 +612,11 @@ pub fn color_correct_cra_lab(
 ///     tiled_luminosity: If true, process L channel per-tile before global match
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
+///     histogram_distance_space: Perceptual space for color-aware histogram dithering (0-5)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering (0-5)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -621,7 +631,11 @@ pub fn color_correct_tiled_lab(
     tiled_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: u8,
+    color_aware_histogram: bool,
+    histogram_distance_space: u8,
     output_dither_mode: u8,
+    color_aware_output: bool,
+    output_distance_space: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -636,7 +650,11 @@ pub fn color_correct_tiled_lab(
         tiled_luminosity,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+        color_aware_histogram,
+        perceptual_space_from_u8(histogram_distance_space),
         dither_mode_from_u8(output_dither_mode),
+        color_aware_output,
+        perceptual_space_from_u8(output_distance_space),
     )
 }
 
@@ -748,7 +766,11 @@ pub fn color_correct_basic_oklab(
 ///     keep_luminosity: If true, preserve original L channel
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
+///     histogram_distance_space: Perceptual space for color-aware histogram dithering (0-5)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering (0-5)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -763,7 +785,11 @@ pub fn color_correct_cra_oklab(
     keep_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: u8,
+    color_aware_histogram: bool,
+    histogram_distance_space: u8,
     output_dither_mode: u8,
+    color_aware_output: bool,
+    output_distance_space: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -778,7 +804,11 @@ pub fn color_correct_cra_oklab(
         keep_luminosity,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+        color_aware_histogram,
+        perceptual_space_from_u8(histogram_distance_space),
         dither_mode_from_u8(output_dither_mode),
+        color_aware_output,
+        perceptual_space_from_u8(output_distance_space),
     )
 }
 
@@ -796,7 +826,11 @@ pub fn color_correct_cra_oklab(
 ///     tiled_luminosity: If true, process L channel per-tile before global match
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (default 4 = Mixed)
+///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
+///     histogram_distance_space: Perceptual space for color-aware histogram dithering (0-5)
 ///     output_dither_mode: Dither mode for final RGB output (default 2 = Jarvis)
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering (0-5)
 ///
 /// Returns:
 ///     Output image as sRGB uint8 (RGBRGB...)
@@ -811,7 +845,11 @@ pub fn color_correct_tiled_oklab(
     tiled_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: u8,
+    color_aware_histogram: bool,
+    histogram_distance_space: u8,
     output_dither_mode: u8,
+    color_aware_output: bool,
+    output_distance_space: u8,
 ) -> Vec<u8> {
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
@@ -826,7 +864,11 @@ pub fn color_correct_tiled_oklab(
         tiled_luminosity,
         histogram_mode,
         dither_mode_from_u8(histogram_dither_mode),
+        color_aware_histogram,
+        perceptual_space_from_u8(histogram_distance_space),
         dither_mode_from_u8(output_dither_mode),
+        color_aware_output,
+        perceptual_space_from_u8(output_distance_space),
     )
 }
 
@@ -1089,20 +1131,24 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        // Test without color-aware histogram
-        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2);
+        // Test without color-aware histogram, without color-aware output
+        let result = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2, false, 0);
         assert_eq!(result.len(), 12);
 
         // Test with color-aware histogram
-        let result_ca = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, true, 3, 2);
+        let result_ca = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, true, 3, 2, false, 0);
         assert_eq!(result_ca.len(), 12);
 
+        // Test with color-aware output
+        let result_co = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2, true, 1);
+        assert_eq!(result_co.len(), 12);
+
         // Test with f32 histogram endpoint-aligned
-        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 1, 4, false, 0, 2);
+        let result_f32 = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 1, 4, false, 0, 2, false, 0);
         assert_eq!(result_f32.len(), 12);
 
         // Test with f32 histogram midpoint-aligned
-        let result_mid = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 2, 4, false, 0, 2);
+        let result_mid = color_correct_cra_lab(&input, 2, 2, &reference, 2, 2, false, 2, 4, false, 0, 2, false, 0);
         assert_eq!(result_mid.len(), 12);
     }
 
@@ -1145,15 +1191,20 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
+        // Test without color-aware histogram or output
+        let result = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2, false, 0);
         assert_eq!(result.len(), 12);
 
+        // Test with color-aware output
+        let result_co = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2, true, 1);
+        assert_eq!(result_co.len(), 12);
+
         // Test with f32 histogram endpoint-aligned
-        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 1, 4, 2);
+        let result_f32 = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 1, 4, false, 0, 2, false, 0);
         assert_eq!(result_f32.len(), 12);
 
         // Test with f32 histogram midpoint-aligned
-        let result_mid = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 2, 4, 2);
+        let result_mid = color_correct_cra_oklab(&input, 2, 2, &reference, 2, 2, false, 2, 4, false, 0, 2, false, 0);
         assert_eq!(result_mid.len(), 12);
     }
 
@@ -1162,20 +1213,24 @@ mod tests {
         let input = vec![128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150];
         let reference = vec![255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0];
 
-        // Test with tiled luminosity, uint8 histogram
-        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 0, 4, 2);
+        // Test with tiled luminosity, uint8 histogram, no color-aware
+        let result = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 0, 4, false, 0, 2, false, 0);
         assert_eq!(result.len(), 12);
 
         // Test without tiled luminosity (AB only)
-        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, 2);
+        let result_ab = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, false, 0, 4, false, 0, 2, false, 0);
         assert_eq!(result_ab.len(), 12);
 
+        // Test with color-aware output
+        let result_co = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 0, 4, false, 0, 2, true, 1);
+        assert_eq!(result_co.len(), 12);
+
         // Test with f32 histogram endpoint-aligned
-        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 1, 4, 2);
+        let result_f32 = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 1, 4, false, 0, 2, false, 0);
         assert_eq!(result_f32.len(), 12);
 
         // Test with f32 histogram midpoint-aligned
-        let result_mid = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 2, 4, 2);
+        let result_mid = color_correct_tiled_oklab(&input, 2, 2, &reference, 2, 2, true, 2, 4, false, 0, 2, false, 0);
         assert_eq!(result_mid.len(), 12);
     }
 }

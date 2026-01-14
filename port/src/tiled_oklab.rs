@@ -6,6 +6,11 @@ use crate::color::{
     oklab_to_linear_rgb_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
+use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_with_mode;
+use crate::dither_colorspace_lab::{
+    lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
+};
+use crate::dither_common::PerceptualSpace;
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
@@ -85,12 +90,35 @@ fn scale_uint8_to_ab(a: &[u8], b: &[u8], ab_ranges: [[f32; 2]; 2]) -> (Vec<f32>,
     (a_oklab, b_oklab)
 }
 
+/// Build LabQuantParams from ab_ranges for OkLab
+/// Maps L: 0-1 -> 0-255, a/b: [min,max] -> 0-255
+fn oklab_quant_params_from_ranges(ab_ranges: [[f32; 2]; 2], quantize_l: bool, rotation_deg: f32) -> LabQuantParams {
+    let [a_min, a_max] = ab_ranges[0];
+    let [b_min, b_max] = ab_ranges[1];
+
+    LabQuantParams {
+        quantize_l,
+        rotation_deg,
+        scale_l: 255.0,  // L: 0-1 -> 0-255
+        offset_l: 0.0,
+        scale_a: 255.0 / (a_max - a_min),
+        offset_a: -a_min * 255.0 / (a_max - a_min),
+        scale_b: 255.0 / (b_max - b_min),
+        offset_b: -b_min * 255.0 / (b_max - b_min),
+    }
+}
+
 /// Process one iteration for a single block (AB only)
 ///
 /// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+/// color_aware: if true and histogram_mode == 0, use color-aware Lab dithering
+/// distance_space: perceptual space for color-aware dithering distance metric
+#[allow(clippy::too_many_arguments)]
 fn process_block_iteration(
+    current_l: &[f32],
     current_a: &[f32],
     current_b: &[f32],
+    ref_l: &[f32],
     ref_a: &[f32],
     ref_b: &[f32],
     block_width: usize,
@@ -101,6 +129,8 @@ fn process_block_iteration(
     histogram_mode: u8,
     block_seed: u32,
     histogram_dither_mode: DitherMode,
+    color_aware: bool,
+    distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>) {
     let block_pixels = block_width * block_height;
 
@@ -111,16 +141,16 @@ fn process_block_iteration(
         let theta_rad = deg_to_rad(theta_deg);
         let ab_ranges = compute_oklab_ab_ranges(theta_deg);
 
-        // Rotate AB
-        let (a_rot, b_rot) = rotate_ab(current_a, current_b, theta_rad);
-        let (ref_a_rot, ref_b_rot) = rotate_ab(ref_a, ref_b, theta_rad);
-
-        // Scale to 0-255 range
-        let (a_scaled, b_scaled) = scale_ab_to_255(&a_rot, &b_rot, ab_ranges);
-        let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a_rot, &ref_b_rot, ab_ranges);
-
         let (a_matched, b_matched) = if histogram_mode > 0 {
             // Use f32 histogram matching directly (no dithering/quantization)
+            // Rotate AB externally for f32 mode
+            let (a_rot, b_rot) = rotate_ab(current_a, current_b, theta_rad);
+            let (ref_a_rot, ref_b_rot) = rotate_ab(ref_a, ref_b, theta_rad);
+
+            // Scale to 0-255 range
+            let (a_scaled, b_scaled) = scale_ab_to_255(&a_rot, &b_rot, ab_ranges);
+            let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a_rot, &ref_b_rot, ab_ranges);
+
             let align_mode = if histogram_mode == 2 {
                 AlignmentMode::Midpoint
             } else {
@@ -133,9 +163,55 @@ fn process_block_iteration(
                 match_histogram_f32(&a_scaled, &ref_a_scaled, InterpolationMode::Linear, align_mode, seed_a);
             let matched_b =
                 match_histogram_f32(&b_scaled, &ref_b_scaled, InterpolationMode::Linear, align_mode, seed_b);
-            scale_255_to_ab(&matched_a, &matched_b, ab_ranges)
+            let (a_oklab, b_oklab) = scale_255_to_ab(&matched_a, &matched_b, ab_ranges);
+
+            // Rotate back
+            rotate_ab(&a_oklab, &b_oklab, -theta_rad)
+        } else if color_aware {
+            // Use color-aware Lab dithering - rotation handled internally
+            let params = oklab_quant_params_from_ranges(ab_ranges, false, theta_deg);
+            let pass_seed = block_seed.wrapping_mul(1000) + (pass_idx as u32) * 2;
+
+            // Dither input (L not quantized, but used for distance)
+            // Pass unrotated values - rotation happens inside dither function
+            let (_, input_a_u8, input_b_u8) = lab_space_dither_with_mode(
+                current_l, current_a, current_b,
+                block_width, block_height,
+                &params,
+                LabQuantSpace::OkLab,
+                distance_space,
+                histogram_dither_mode.into(),
+                pass_seed,
+            );
+
+            // Dither reference
+            let (_, ref_a_u8, ref_b_u8) = lab_space_dither_with_mode(
+                ref_l, ref_a, ref_b,
+                ref_block_width, ref_block_height,
+                &params,
+                LabQuantSpace::OkLab,
+                distance_space,
+                histogram_dither_mode.into(),
+                pass_seed + 1,
+            );
+
+            // Histogram match in rotated u8 space
+            let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
+            let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
+
+            // Convert back to OkLab and unrotate
+            let (a_oklab, b_oklab) = scale_uint8_to_ab(&matched_a, &matched_b, ab_ranges);
+            rotate_ab(&a_oklab, &b_oklab, -theta_rad)
         } else {
-            // Use binned histogram matching with dithering
+            // Use channel-independent binned histogram matching with dithering
+            // Rotate AB externally
+            let (a_rot, b_rot) = rotate_ab(current_a, current_b, theta_rad);
+            let (ref_a_rot, ref_b_rot) = rotate_ab(ref_a, ref_b, theta_rad);
+
+            // Scale to 0-255 range
+            let (a_scaled, b_scaled) = scale_ab_to_255(&a_rot, &b_rot, ab_ranges);
+            let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a_rot, &ref_b_rot, ab_ranges);
+
             // Each pass gets unique seeds: block_seed * 1000 + pass_idx * 4 + channel offset
             let pass_seed = block_seed.wrapping_mul(1000) + (pass_idx as u32) * 4;
             let input_a_u8 = dither_with_mode(&a_scaled, block_width, block_height, histogram_dither_mode, pass_seed);
@@ -145,14 +221,14 @@ fn process_block_iteration(
 
             let matched_a = match_histogram(&input_a_u8, &ref_a_u8);
             let matched_b = match_histogram(&input_b_u8, &ref_b_u8);
-            scale_uint8_to_ab(&matched_a, &matched_b, ab_ranges)
+            let (a_oklab, b_oklab) = scale_uint8_to_ab(&matched_a, &matched_b, ab_ranges);
+
+            // Rotate back
+            rotate_ab(&a_oklab, &b_oklab, -theta_rad)
         };
 
-        // Rotate back
-        let (a_back, b_back) = rotate_ab(&a_matched, &b_matched, -theta_rad);
-
-        all_corrected_a.push(a_back);
-        all_corrected_b.push(b_back);
+        all_corrected_a.push(a_matched);
+        all_corrected_b.push(b_matched);
     }
 
     // Average all corrections
@@ -170,6 +246,9 @@ fn process_block_iteration(
 /// Process one iteration for a single block (with L channel)
 ///
 /// histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+/// color_aware: if true and histogram_mode == 0, use color-aware Lab dithering
+/// distance_space: perceptual space for color-aware dithering distance metric
+#[allow(clippy::too_many_arguments)]
 fn process_block_iteration_with_l(
     current_l: &[f32],
     current_a: &[f32],
@@ -185,11 +264,15 @@ fn process_block_iteration_with_l(
     histogram_mode: u8,
     block_seed: u32,
     histogram_dither_mode: DitherMode,
+    color_aware: bool,
+    distance_space: PerceptualSpace,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     // Process AB channels
     let (avg_a, avg_b) = process_block_iteration(
+        current_l,
         current_a,
         current_b,
+        ref_l,
         ref_a,
         ref_b,
         block_width,
@@ -200,6 +283,8 @@ fn process_block_iteration_with_l(
         histogram_mode,
         block_seed,
         histogram_dither_mode,
+        color_aware,
+        distance_space,
     );
 
     // Process L channel
@@ -217,6 +302,34 @@ fn process_block_iteration_with_l(
         let matched_l =
             match_histogram_f32(&l_scaled, &ref_l_scaled, InterpolationMode::Linear, align_mode, l_seed);
         scale_255_to_l(&matched_l)
+    } else if color_aware {
+        // Use color-aware Lab dithering for L channel (no rotation for L-only)
+        let ab_ranges = compute_oklab_ab_ranges(0.0);
+        let params = oklab_quant_params_from_ranges(ab_ranges, true, 0.0);
+        let l_seed = block_seed.wrapping_mul(1000) + 500;
+
+        let (l_uint8, _, _) = lab_space_dither_with_mode(
+            current_l, current_a, current_b,
+            block_width, block_height,
+            &params,
+            LabQuantSpace::OkLab,
+            distance_space,
+            histogram_dither_mode.into(),
+            l_seed,
+        );
+
+        let (ref_l_uint8, _, _) = lab_space_dither_with_mode(
+            ref_l, ref_a, ref_b,
+            ref_block_width, ref_block_height,
+            &params,
+            LabQuantSpace::OkLab,
+            distance_space,
+            histogram_dither_mode.into(),
+            l_seed + 1,
+        );
+
+        let matched_l = match_histogram(&l_uint8, &ref_l_uint8);
+        scale_uint8_to_l(&matched_l)
     } else {
         // L channel seeds: block_seed * 1000 + 500 offset to avoid collision with AB passes
         let l_seed = block_seed.wrapping_mul(1000) + 500;
@@ -238,9 +351,16 @@ fn process_block_iteration_with_l(
 ///     ref_width, ref_height: Reference image dimensions
 ///     tiled_luminosity: If true, process L channel per-tile before global match
 ///     histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
+///     histogram_dither_mode: Dither mode for histogram preparation
+///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
+///     histogram_distance_space: Perceptual space for color-aware histogram dithering
+///     output_dither_mode: Dither mode for final RGB output
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
+#[allow(clippy::too_many_arguments)]
 pub fn color_correct_tiled_oklab(
     input_srgb: &[f32],
     ref_srgb: &[f32],
@@ -251,7 +371,11 @@ pub fn color_correct_tiled_oklab(
     tiled_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
+    color_aware_histogram: bool,
+    histogram_distance_space: PerceptualSpace,
     output_dither_mode: DitherMode,
+    color_aware_output: bool,
+    output_distance_space: PerceptualSpace,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
 
@@ -320,7 +444,9 @@ pub fn color_correct_tiled_oklab(
             block.ref_x_end,
         );
 
-        let (mut current_l, ref_l_block) = if tiled_luminosity {
+        // Extract L blocks - always needed for color-aware distance or tiled_luminosity
+        let needs_l_blocks = tiled_luminosity || color_aware_histogram;
+        let (mut current_l, ref_l_block) = if needs_l_blocks {
             (
                 extract_block_single(
                     &input_l,
@@ -361,6 +487,8 @@ pub fn color_correct_tiled_oklab(
                     histogram_mode,
                     block_idx as u32,
                     histogram_dither_mode,
+                    color_aware_histogram,
+                    histogram_distance_space,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -372,8 +500,10 @@ pub fn color_correct_tiled_oklab(
                 }
             } else {
                 let (avg_a, avg_b) = process_block_iteration(
+                    &current_l,
                     &current_a,
                     &current_b,
+                    &ref_l_block,
                     &ref_a_block,
                     &ref_b_block,
                     block_width,
@@ -384,6 +514,8 @@ pub fn color_correct_tiled_oklab(
                     histogram_mode,
                     block_idx as u32,
                     histogram_dither_mode,
+                    color_aware_histogram,
+                    histogram_distance_space,
                 );
                 let block_pixels = block_width * block_height;
                 for i in 0..block_pixels {
@@ -453,15 +585,14 @@ pub fn color_correct_tiled_oklab(
     // Final global histogram match
     let final_ab_ranges = compute_oklab_ab_ranges(0.0);
 
-    // Scale to 0-255 range
-    let l_scaled = scale_l_to_255(&final_l_input);
-    let (a_scaled, b_scaled) = scale_ab_to_255(&a_acc, &b_acc, final_ab_ranges);
-    let ref_l_scaled = scale_l_to_255(&ref_l);
-    let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b, final_ab_ranges);
-
     // Match histograms for all channels (final pass uses high seeds to avoid collision with block passes)
     let (final_l, final_a, final_b) = if histogram_mode > 0 {
         // Use f32 histogram matching directly (no dithering/quantization)
+        let l_scaled = scale_l_to_255(&final_l_input);
+        let (a_scaled, b_scaled) = scale_ab_to_255(&a_acc, &b_acc, final_ab_ranges);
+        let ref_l_scaled = scale_l_to_255(&ref_l);
+        let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b, final_ab_ranges);
+
         let align_mode = if histogram_mode == 2 {
             AlignmentMode::Midpoint
         } else {
@@ -476,9 +607,47 @@ pub fn color_correct_tiled_oklab(
         let l_oklab = scale_255_to_l(&matched_l);
         let (a_oklab, b_oklab) = scale_255_to_ab(&matched_a, &matched_b, final_ab_ranges);
         (l_oklab, a_oklab, b_oklab)
+    } else if color_aware_histogram {
+        // Use color-aware Lab dithering for final histogram matching
+        // Final pass has no rotation (0 degrees)
+        let params = oklab_quant_params_from_ranges(final_ab_ranges, true, 0.0);
+
+        // Dither input
+        let (current_l_u8, current_a_u8, current_b_u8) = lab_space_dither_with_mode(
+            &final_l_input, &a_acc, &b_acc,
+            input_width, input_height,
+            &params,
+            LabQuantSpace::OkLab,
+            histogram_distance_space,
+            histogram_dither_mode.into(),
+            10000,
+        );
+
+        // Dither reference
+        let (ref_l_u8, ref_a_u8, ref_b_u8) = lab_space_dither_with_mode(
+            &ref_l, &ref_a, &ref_b,
+            ref_width, ref_height,
+            &params,
+            LabQuantSpace::OkLab,
+            histogram_distance_space,
+            histogram_dither_mode.into(),
+            10001,
+        );
+
+        let matched_l = match_histogram(&current_l_u8, &ref_l_u8);
+        let matched_a = match_histogram(&current_a_u8, &ref_a_u8);
+        let matched_b = match_histogram(&current_b_u8, &ref_b_u8);
+        let l_oklab = scale_uint8_to_l(&matched_l);
+        let (a_oklab, b_oklab) = scale_uint8_to_ab(&matched_a, &matched_b, final_ab_ranges);
+        (l_oklab, a_oklab, b_oklab)
     } else {
-        // Use binned histogram matching with dithering
+        // Use channel-independent binned histogram matching with dithering
         // Final global pass uses 10000+ seeds to avoid collision with block passes
+        let l_scaled = scale_l_to_255(&final_l_input);
+        let (a_scaled, b_scaled) = scale_ab_to_255(&a_acc, &b_acc, final_ab_ranges);
+        let ref_l_scaled = scale_l_to_255(&ref_l);
+        let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b, final_ab_ranges);
+
         let current_l_u8 = dither_with_mode(&l_scaled, input_width, input_height, histogram_dither_mode, 10000);
         let current_a_u8 = dither_with_mode(&a_scaled, input_width, input_height, histogram_dither_mode, 10001);
         let current_b_u8 = dither_with_mode(&b_scaled, input_width, input_height, histogram_dither_mode, 10002);
@@ -500,10 +669,24 @@ pub fn color_correct_tiled_oklab(
     // Convert to sRGB and scale to 0-255
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 10006);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 10007);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 10008);
+    // Dither for final output
+    let (r_u8, g_u8, b_u8) = if color_aware_output {
+        // Use color-aware dithering (joint RGB processing with perceptual distance)
+        colorspace_aware_dither_rgb_with_mode(
+            &r_scaled, &g_scaled, &b_scaled,
+            input_width, input_height,
+            8, 8, 8,
+            output_distance_space,
+            output_dither_mode,
+            10006,
+        )
+    } else {
+        // Channel-independent dithering
+        let r = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 10006);
+        let g = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 10007);
+        let b = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 10008);
+        (r, g, b)
+    };
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

@@ -512,6 +512,56 @@
             </p>
         </div>
 
+        <div class="implementation-section" id="color-aware-histogram-section" style="display: none;">
+            <label class="toggle-container">
+                <span class="toggle-label">Color-Aware Histogram:</span>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="color-aware-histogram">
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="toggle-text" id="color-aware-histogram-label">Off</span>
+            </label>
+            <p class="impl-description">
+                When enabled, uses joint color-aware dithering for histogram quantization. Considers perceptual color distance when quantizing Lab values.
+            </p>
+            <div id="histogram-distance-space-container" style="margin-top: 10px; display: none;">
+                <label for="histogram-distance-space" style="font-size: 13px; color: #555;">Distance Space:</label>
+                <select id="histogram-distance-space" class="method-select" style="margin-top: 5px;">
+                    <option value="0">CIELAB (CIE76)</option>
+                    <option value="1" selected>* OkLab (Recommended)</option>
+                    <option value="2">CIELAB (CIE94)</option>
+                    <option value="3">CIELAB (CIEDE2000)</option>
+                    <option value="4">Linear RGB</option>
+                    <option value="5">Y'CbCr</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="implementation-section" id="color-aware-output-section" style="display: none;">
+            <label class="toggle-container">
+                <span class="toggle-label">Color-Aware Output:</span>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="color-aware-output">
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="toggle-text" id="color-aware-output-label">Off</span>
+            </label>
+            <p class="impl-description">
+                When enabled, uses joint RGB color-aware dithering for final output. Processes all three RGB channels together using perceptual color distance.
+            </p>
+            <div id="output-distance-space-container" style="margin-top: 10px; display: none;">
+                <label for="output-distance-space" style="font-size: 13px; color: #555;">Distance Space:</label>
+                <select id="output-distance-space" class="method-select" style="margin-top: 5px;">
+                    <option value="0">CIELAB (CIE76)</option>
+                    <option value="1" selected>* OkLab (Recommended)</option>
+                    <option value="2">CIELAB (CIE94)</option>
+                    <option value="3">CIELAB (CIEDE2000)</option>
+                    <option value="4">Linear RGB</option>
+                    <option value="5">Y'CbCr</option>
+                </select>
+            </div>
+        </div>
+
         <button class="process-btn" id="process-btn" disabled>Process Images</button>
 
         <div class="wasm-only-warning" id="wasm-only-warning">

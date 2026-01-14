@@ -6,6 +6,7 @@ use crate::color::{
     linear_to_srgb_scaled_channels, srgb_to_linear_channels,
 };
 use crate::dither::{dither_with_mode, DitherMode};
+use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_with_mode;
 use crate::dither_colorspace_lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
@@ -251,6 +252,8 @@ fn process_lab_iteration(
 ///     color_aware_histogram: If true and histogram_mode == 0, use color-aware Lab dithering
 ///     histogram_distance_space: Perceptual space for color-aware histogram dithering
 ///     output_dither_mode: Dither mode for final RGB output
+///     color_aware_output: If true, use color-aware dithering for final RGB output
+///     output_distance_space: Perceptual space for color-aware output dithering
 ///
 /// Returns:
 ///     Output image as sRGB uint8, flat array HxWx3
@@ -268,6 +271,8 @@ pub fn color_correct_cra_lab(
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
     output_dither_mode: DitherMode,
+    color_aware_output: bool,
+    output_distance_space: PerceptualSpace,
 ) -> Vec<u8> {
     let input_pixels = input_width * input_height;
 
@@ -425,10 +430,24 @@ pub fn color_correct_cra_lab(
     // Convert to sRGB and scale to 0-255
     let (r_scaled, g_scaled, b_scaled) = linear_to_srgb_scaled_channels(&out_r, &out_g, &out_b);
 
-    // Dither each channel for final output
-    let r_u8 = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 1006);
-    let g_u8 = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 1007);
-    let b_u8 = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 1008);
+    // Dither for final output
+    let (r_u8, g_u8, b_u8) = if color_aware_output {
+        // Use color-aware dithering (joint RGB processing with perceptual distance)
+        colorspace_aware_dither_rgb_with_mode(
+            &r_scaled, &g_scaled, &b_scaled,
+            input_width, input_height,
+            8, 8, 8,
+            output_distance_space,
+            output_dither_mode,
+            1006,
+        )
+    } else {
+        // Channel-independent dithering
+        let r = dither_with_mode(&r_scaled, input_width, input_height, output_dither_mode, 1006);
+        let g = dither_with_mode(&g_scaled, input_width, input_height, output_dither_mode, 1007);
+        let b = dither_with_mode(&b_scaled, input_width, input_height, output_dither_mode, 1008);
+        (r, g, b)
+    };
 
     // Interleave only at the very end
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)

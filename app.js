@@ -196,6 +196,7 @@ function updateMethodDescription() {
     const select = document.getElementById('method-select');
     const description = document.getElementById('method-description');
     description.textContent = METHOD_DESCRIPTIONS[select.value];
+    updateColorAwareSectionsVisibility();
     updateProcessButton();
 }
 
@@ -207,6 +208,8 @@ function updateImplementationLabel() {
     const histogramModeSection = document.getElementById('histogram-mode-section');
     const outputDitherSection = document.getElementById('output-dither-section');
     const histogramDitherSection = document.getElementById('histogram-dither-section');
+    const colorAwareHistogramSection = document.getElementById('color-aware-histogram-section');
+    const colorAwareOutputSection = document.getElementById('color-aware-output-section');
 
     if (useWasm) {
         label.textContent = 'WASM (Rust)';
@@ -221,6 +224,8 @@ function updateImplementationLabel() {
         }
         // Show/hide histogram dither based on histogram mode setting
         updateHistogramModeDescription();
+        // Update color-aware sections visibility
+        updateColorAwareSectionsVisibility();
     } else {
         label.textContent = 'Python (Pyodide)';
         description.textContent = IMPL_DESCRIPTIONS.python;
@@ -234,6 +239,13 @@ function updateImplementationLabel() {
         }
         if (histogramDitherSection) {
             histogramDitherSection.style.display = 'none';
+        }
+        // Hide color-aware sections when Python is selected
+        if (colorAwareHistogramSection) {
+            colorAwareHistogramSection.style.display = 'none';
+        }
+        if (colorAwareOutputSection) {
+            colorAwareOutputSection.style.display = 'none';
         }
     }
     updateProcessButton();
@@ -251,12 +263,72 @@ function updateHistogramModeDescription() {
     const histogramMode = document.getElementById('histogram-mode-select').value;
     const description = document.getElementById('histogram-mode-description');
     const histogramDitherSection = document.getElementById('histogram-dither-section');
+    const colorAwareHistogramSection = document.getElementById('color-aware-histogram-section');
 
     description.textContent = HISTOGRAM_MODE_DESCRIPTIONS[histogramMode] || HISTOGRAM_MODE_DESCRIPTIONS['0'];
 
-    // Show histogram dither section only when using binned histogram (mode 0)
+    // Show histogram dither section and color-aware options only when using binned histogram (mode 0)
+    const isBinned = histogramMode === '0';
     if (histogramDitherSection) {
-        histogramDitherSection.style.display = (histogramMode === '0') ? 'block' : 'none';
+        histogramDitherSection.style.display = isBinned ? 'block' : 'none';
+    }
+    if (colorAwareHistogramSection) {
+        colorAwareHistogramSection.style.display = isBinned ? 'block' : 'none';
+    }
+}
+
+// Check if current method supports color-aware options (Lab/Oklab CRA methods)
+function methodSupportsColorAware(method) {
+    return ['cra_lab', 'cra_lab_tiled', 'cra_lab_tiled_ab',
+            'cra_oklab', 'cra_oklab_tiled', 'cra_oklab_tiled_ab'].includes(method);
+}
+
+// Update color-aware histogram toggle
+function updateColorAwareHistogramToggle() {
+    const checkbox = document.getElementById('color-aware-histogram');
+    const label = document.getElementById('color-aware-histogram-label');
+    const distanceContainer = document.getElementById('histogram-distance-space-container');
+
+    if (checkbox.checked) {
+        label.textContent = 'On';
+        if (distanceContainer) distanceContainer.style.display = 'block';
+    } else {
+        label.textContent = 'Off';
+        if (distanceContainer) distanceContainer.style.display = 'none';
+    }
+}
+
+// Update color-aware output toggle
+function updateColorAwareOutputToggle() {
+    const checkbox = document.getElementById('color-aware-output');
+    const label = document.getElementById('color-aware-output-label');
+    const distanceContainer = document.getElementById('output-distance-space-container');
+
+    if (checkbox.checked) {
+        label.textContent = 'On';
+        if (distanceContainer) distanceContainer.style.display = 'block';
+    } else {
+        label.textContent = 'Off';
+        if (distanceContainer) distanceContainer.style.display = 'none';
+    }
+}
+
+// Update visibility of color-aware sections based on method and WASM mode
+function updateColorAwareSectionsVisibility() {
+    const useWasm = document.getElementById('use-wasm').checked;
+    const method = document.getElementById('method-select').value;
+    const histogramMode = document.getElementById('histogram-mode-select').value;
+    const colorAwareHistogramSection = document.getElementById('color-aware-histogram-section');
+    const colorAwareOutputSection = document.getElementById('color-aware-output-section');
+
+    const showColorAware = useWasm && methodSupportsColorAware(method);
+    const isBinned = histogramMode === '0';
+
+    if (colorAwareHistogramSection) {
+        colorAwareHistogramSection.style.display = (showColorAware && isBinned) ? 'block' : 'none';
+    }
+    if (colorAwareOutputSection) {
+        colorAwareOutputSection.style.display = showColorAware ? 'block' : 'none';
     }
 }
 
@@ -363,6 +435,12 @@ function processImages() {
     // Default: output=2 (Jarvis), histogram=4 (Mixed)
     const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '2', 10);
     const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
+    // Color-aware options
+    const colorAwareHistogram = document.getElementById('color-aware-histogram')?.checked || false;
+    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
+    const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
+    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');
     const errorMessage = document.getElementById('error-message');
@@ -389,7 +467,11 @@ function processImages() {
         useWasm: useWasm,
         histogramMode: histogramMode,
         histogramDitherMode: histogramDitherMode,
-        outputDitherMode: outputDitherMode
+        outputDitherMode: outputDitherMode,
+        colorAwareHistogram: colorAwareHistogram,
+        histogramDistanceSpace: histogramDistanceSpace,
+        colorAwareOutput: colorAwareOutput,
+        outputDistanceSpace: outputDistanceSpace
     });
 }
 
@@ -407,13 +489,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('method-select').addEventListener('change', updateMethodDescription);
     document.getElementById('use-wasm').addEventListener('change', updateImplementationLabel);
-    document.getElementById('histogram-mode-select').addEventListener('change', updateHistogramModeDescription);
+    document.getElementById('histogram-mode-select').addEventListener('change', () => {
+        updateHistogramModeDescription();
+        updateColorAwareSectionsVisibility();
+    });
     document.getElementById('output-dither-select').addEventListener('change', updateOutputDitherDescription);
     document.getElementById('histogram-dither-select').addEventListener('change', updateHistogramDitherDescription);
+    document.getElementById('color-aware-histogram').addEventListener('change', updateColorAwareHistogramToggle);
+    document.getElementById('color-aware-output').addEventListener('change', updateColorAwareOutputToggle);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Initialize histogram dither visibility based on initial histogram mode state
     updateHistogramModeDescription();
+    // Initialize color-aware sections visibility
+    updateColorAwareSectionsVisibility();
 
     // Load default images
     loadDefaultImages();

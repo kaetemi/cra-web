@@ -141,7 +141,7 @@ async function encodePng(rgbData, width, height) {
 }
 
 // Process images using WASM
-async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode) {
+async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
     sendProgress('process', 'Decoding images...', 10);
     const inputImg = await decodeImage(inputData);
     const refImg = await decodeImage(refData);
@@ -170,6 +170,17 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             6: 'Mixed (random direction)'
         };
         sendConsole(`Histogram dithering: ${ditherNames[histogramDitherMode] || ditherNames[4]}`);
+        if (colorAwareHistogram) {
+            const distanceSpaceNames = {
+                0: 'CIELAB (CIE76)',
+                1: 'OkLab',
+                2: 'CIELAB (CIE94)',
+                3: 'CIELAB (CIEDE2000)',
+                4: 'Linear RGB',
+                5: "Y'CbCr"
+            };
+            sendConsole(`Color-aware histogram: ON (${distanceSpaceNames[histogramDistanceSpace] || distanceSpaceNames[1]})`);
+        }
     }
     const outputDitherNames = {
         0: 'Floyd-Steinberg (standard)',
@@ -181,6 +192,17 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         6: 'Mixed (random direction)'
     };
     sendConsole(`Output dithering: ${outputDitherNames[outputDitherMode] || outputDitherNames[2]}`);
+    if (colorAwareOutput) {
+        const distanceSpaceNames = {
+            0: 'CIELAB (CIE76)',
+            1: 'OkLab',
+            2: 'CIELAB (CIE94)',
+            3: 'CIELAB (CIEDE2000)',
+            4: 'Linear RGB',
+            5: "Y'CbCr"
+        };
+        sendConsole(`Color-aware output: ON (${distanceSpaceNames[outputDistanceSpace] || distanceSpaceNames[1]})`);
+    }
 
     let resultRgb;
     const startTime = performance.now();
@@ -217,7 +239,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 false, // keep_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -229,7 +255,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 true, // tiled_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -241,7 +271,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 false, // tiled_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -289,7 +323,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 false, // keep_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -301,7 +339,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 true, // tiled_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -313,7 +355,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
                 false, // tiled_luminosity
                 histogramMode,
                 histogramDitherMode,
-                outputDitherMode
+                colorAwareHistogram,
+                histogramDistanceSpace,
+                outputDitherMode,
+                colorAwareOutput,
+                outputDistanceSpace
             );
             break;
 
@@ -365,12 +411,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode) {
+async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode);
+            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -400,7 +446,11 @@ self.onmessage = async function(e) {
                 data.useWasm,
                 data.histogramMode !== undefined ? data.histogramMode : 0,
                 data.histogramDitherMode !== undefined ? data.histogramDitherMode : 4,
-                data.outputDitherMode !== undefined ? data.outputDitherMode : 2
+                data.outputDitherMode !== undefined ? data.outputDitherMode : 2,
+                data.colorAwareHistogram !== undefined ? data.colorAwareHistogram : false,
+                data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
+                data.colorAwareOutput !== undefined ? data.colorAwareOutput : false,
+                data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1
             );
             break;
     }
