@@ -835,8 +835,7 @@
     <script type="module">
         import init, {
             dither_with_mode_wasm,
-            colorspace_aware_dither_wasm,
-            colorspace_aware_dither_with_mode_wasm,
+            colorspace_aware_dither_interleaved_wasm,
             colorspace_aware_dither_gray_with_mode_wasm,
             // Binary encoding functions
             format_supports_binary_wasm,
@@ -884,6 +883,7 @@
         }
 
         // Split interleaved RGB Float32Array into separate channel Float32Arrays
+        // (Used for per-channel dithering in non-perceptual mode)
         function splitRgbChannels(interleaved) {
             const pixels = interleaved.length / 3;
             const r = new Float32Array(pixels);
@@ -899,17 +899,29 @@
             return { r, g, b };
         }
 
-        // Convert sRGB ImageData to linear RGB as separate Float32Arrays (0-1 range)
+        // Convert sRGB ImageData to linear RGB as interleaved Float32Array (0-1 range)
         // Uses WASM implementation for high-precision color conversion
-        function imageDataToLinearRgb(imageData) {
+        function imageDataToLinearRgbInterleaved(imageData) {
             const rgb = extractRgbFromImageData(imageData);
-            const linearInterleaved = srgb_to_linear_wasm(rgb, imageData.width, imageData.height);
+            return srgb_to_linear_wasm(rgb, imageData.width, imageData.height);
+        }
+
+        // Convert linear RGB (interleaved, 0-1) to sRGB (0-255) as interleaved Float32Array
+        // Uses WASM implementation for high-precision color conversion
+        function linearToSrgb255Interleaved(linearInterleaved, width, height) {
+            return linear_to_srgb_wasm(linearInterleaved, width, height);
+        }
+
+        // Convert sRGB ImageData to linear RGB as separate Float32Arrays (0-1 range)
+        // (Used for per-channel dithering in non-perceptual mode)
+        function imageDataToLinearRgbChannels(imageData) {
+            const linearInterleaved = imageDataToLinearRgbInterleaved(imageData);
             return splitRgbChannels(linearInterleaved);
         }
 
-        // Convert linear RGB (0-1, separate channels) to sRGB (0-255) for dithering
-        // Uses WASM implementation for high-precision color conversion
-        function linearToSrgb255(r, g, b, width, height) {
+        // Convert linear RGB (separate channels, 0-1) to sRGB (0-255) as separate channels
+        // (Used for per-channel dithering in non-perceptual mode)
+        function linearToSrgb255Channels(r, g, b, width, height) {
             const pixels = r.length;
             // Recombine into interleaved format for WASM
             const interleaved = new Float32Array(pixels * 3);
@@ -1146,24 +1158,23 @@
                     }
                 } else {
                     // RGB mode: convert sRGB to linear, then back to sRGB for dithering
-                    // (Linear step is for future processing; WASM provides high-precision conversion)
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
                     const bitsB = parseInt(document.getElementById('bits-b').value);
                     const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
-                    // Convert sRGB -> linear RGB -> sRGB (0-255) using WASM for precision
-                    const linear = imageDataToLinearRgb(processData);
-                    const srgb = linearToSrgb255(linear.r, linear.g, linear.b, processWidth, processHeight);
-
                     if (isPerceptual) {
-                        // Color space aware dithering: process all channels jointly
+                        // Color space aware dithering: use interleaved pipeline throughout
                         const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                         const seeds = getSeeds();
 
-                        // Call color space aware dither with mode (returns interleaved RGB)
-                        const rgbDithered = colorspace_aware_dither_with_mode_wasm(
-                            srgb.r, srgb.g, srgb.b,
+                        // Convert sRGB -> linear -> sRGB (0-255) as interleaved data
+                        const linearInterleaved = imageDataToLinearRgbInterleaved(processData);
+                        const srgbInterleaved = linearToSrgb255Interleaved(linearInterleaved, processWidth, processHeight);
+
+                        // Call color space aware dither with interleaved input
+                        const rgbDithered = colorspace_aware_dither_interleaved_wasm(
+                            srgbInterleaved,
                             processWidth, processHeight,
                             bitsR, bitsG, bitsB,
                             perceptualSpace,
@@ -1178,7 +1189,10 @@
                             outputData[i * 4 + 3] = 255;
                         }
                     } else {
-                        // Standard dithering: process each channel separately
+                        // Standard dithering: process each channel separately (needs split channels)
+                        const linear = imageDataToLinearRgbChannels(processData);
+                        const srgb = linearToSrgb255Channels(linear.r, linear.g, linear.b, processWidth, processHeight);
+
                         const seeds = getSeeds();
                         const rDithered = ditherChannel(srgb.r, processWidth, processHeight, mode, seeds.r, bitsR);
                         const gDithered = ditherChannel(srgb.g, processWidth, processHeight, mode, seeds.g, bitsG);

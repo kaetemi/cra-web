@@ -246,6 +246,128 @@ pub fn colorspace_aware_dither_with_mode_wasm(
     result
 }
 
+/// Color space aware dithering with interleaved RGB input (WASM export)
+///
+/// Takes interleaved RGB data (RGBRGB...) instead of separate channels.
+/// This is more efficient as it avoids channel separation overhead.
+///
+/// Args:
+///     rgb: Interleaved RGB as f32 values in range [0, 255] (RGBRGB...)
+///     w: image width
+///     h: image height
+///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
+///     space: perceptual space (0-5, see colorspace_aware_dither_wasm)
+///     mode: dither mode (0-6, see colorspace_aware_dither_with_mode_wasm)
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn colorspace_aware_dither_interleaved_wasm(
+    rgb: Vec<f32>,
+    w: usize,
+    h: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    // Convert interleaved to Pixel4
+    let pixels = w * h;
+    let mut pixel4_data: Vec<pixel::Pixel4> = Vec::with_capacity(pixels);
+    for i in 0..pixels {
+        pixel4_data.push([rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0]);
+    }
+
+    let (r_out, g_out, b_out) = dither_colorspace_aware::colorspace_aware_dither_rgb_channels(
+        &pixel4_data,
+        w,
+        h,
+        bits_r,
+        bits_g,
+        bits_b,
+        perceptual_space_from_u8(space),
+        cs_mode,
+        seed,
+    );
+
+    // Interleave RGB channels
+    let mut result = vec![0u8; pixels * 3];
+    for i in 0..pixels {
+        result[i * 3] = r_out[i];
+        result[i * 3 + 1] = g_out[i];
+        result[i * 3 + 2] = b_out[i];
+    }
+    result
+}
+
+/// Color space aware dithering to 8-bit RGB with interleaved input (WASM export)
+///
+/// Simplified version for RGB888 output - takes interleaved input, returns interleaved output.
+/// Most efficient for web use where 8-bit output is standard.
+///
+/// Args:
+///     rgb: Interleaved RGB as f32 values in range [0, 255] (RGBRGB...)
+///     w: image width
+///     h: image height
+///     space: perceptual space (0-5)
+///     mode: dither mode (0-6)
+///     seed: random seed for mixed modes
+///
+/// Returns:
+///     Interleaved RGB uint8 array (RGBRGB...)
+#[wasm_bindgen]
+pub fn colorspace_aware_dither_rgb888_wasm(
+    rgb: Vec<f32>,
+    w: usize,
+    h: usize,
+    space: u8,
+    mode: u8,
+    seed: u32,
+) -> Vec<u8> {
+    use dither_colorspace_aware::DitherMode as CSDitherMode;
+
+    let cs_mode = match mode {
+        1 => CSDitherMode::Serpentine,
+        2 => CSDitherMode::JarvisStandard,
+        3 => CSDitherMode::JarvisSerpentine,
+        4 => CSDitherMode::MixedStandard,
+        5 => CSDitherMode::MixedSerpentine,
+        6 => CSDitherMode::MixedRandom,
+        _ => CSDitherMode::Standard,
+    };
+
+    // Convert interleaved to Pixel4
+    let pixels = w * h;
+    let mut pixel4_data: Vec<pixel::Pixel4> = Vec::with_capacity(pixels);
+    for i in 0..pixels {
+        pixel4_data.push([rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0]);
+    }
+
+    dither_colorspace_aware::colorspace_aware_dither_rgb_interleaved(
+        &pixel4_data,
+        w,
+        h,
+        perceptual_space_from_u8(space),
+        cs_mode,
+        seed,
+    )
+}
+
 /// Color space aware dithering for grayscale images (WASM export)
 ///
 /// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation,
