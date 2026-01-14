@@ -899,6 +899,12 @@
         let originalHeight = 0;
         let aspectRatio = 1;
         let updatingSize = false; // Prevent recursive updates
+        let primaryDimension = 'width'; // 'width' or 'height' - which dimension is authoritative
+
+        // Scale mode constants (must match Rust enum)
+        const SCALE_MODE_INDEPENDENT = 0;
+        const SCALE_MODE_UNIFORM_WIDTH = 1;
+        const SCALE_MODE_UNIFORM_HEIGHT = 2;
 
         // Store last dithered result for binary downloads
         let lastDitherResult = null;
@@ -979,6 +985,7 @@
         function updateSizeFromWidth() {
             if (updatingSize || !originalWidth) return;
             updatingSize = true;
+            primaryDimension = 'width';
             const width = parseInt(document.getElementById('scale-width').value) || 1;
             const height = Math.round(width / aspectRatio);
             document.getElementById('scale-height').value = height;
@@ -988,6 +995,7 @@
         function updateSizeFromHeight() {
             if (updatingSize || !originalHeight) return;
             updatingSize = true;
+            primaryDimension = 'height';
             const height = parseInt(document.getElementById('scale-height').value) || 1;
             const width = Math.round(height * aspectRatio);
             document.getElementById('scale-width').value = width;
@@ -1058,11 +1066,16 @@
 
                     // Step 3: Rescale in linear space (if needed)
                     if (doDownscale) {
+                        // Use uniform scaling based on primary dimension for exact AR preservation
+                        const scaleMode = primaryDimension === 'width'
+                            ? SCALE_MODE_UNIFORM_WIDTH
+                            : SCALE_MODE_UNIFORM_HEIGHT;
                         linearRgb = rescale_linear_rgb_wasm(
                             linearRgb,
                             currentWidth, currentHeight,
                             processWidth, processHeight,
-                            scaleMethod
+                            scaleMethod,
+                            scaleMode
                         );
                         currentWidth = processWidth;
                         currentHeight = processHeight;

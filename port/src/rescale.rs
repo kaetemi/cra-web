@@ -13,6 +13,18 @@ pub enum RescaleMethod {
     Lanczos3,
 }
 
+/// Scale mode for aspect ratio preservation
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum ScaleMode {
+    /// Independent X/Y scaling (default, can cause slight AR distortion)
+    #[default]
+    Independent,
+    /// Uniform scaling based on width (width is primary dimension)
+    UniformWidth,
+    /// Uniform scaling based on height (height is primary dimension)
+    UniformHeight,
+}
+
 impl RescaleMethod {
     pub fn from_str(s: &str) -> Option<RescaleMethod> {
         match s.to_lowercase().as_str() {
@@ -36,6 +48,30 @@ fn lanczos3(x: f32) -> f32 {
     }
 }
 
+/// Calculate scale factors based on scale mode
+fn calculate_scales(
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+) -> (f32, f32) {
+    match scale_mode {
+        ScaleMode::Independent => {
+            (src_width as f32 / dst_width as f32,
+             src_height as f32 / dst_height as f32)
+        }
+        ScaleMode::UniformWidth => {
+            let scale = src_width as f32 / dst_width as f32;
+            (scale, scale)
+        }
+        ScaleMode::UniformHeight => {
+            let scale = src_height as f32 / dst_height as f32;
+            (scale, scale)
+        }
+    }
+}
+
 /// Rescale a single channel using bilinear interpolation
 fn rescale_bilinear(
     src: &[f32],
@@ -43,11 +79,13 @@ fn rescale_bilinear(
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    scale_mode: ScaleMode,
 ) -> Vec<f32> {
     let mut dst = vec![0.0f32; dst_width * dst_height];
 
-    let scale_x = src_width as f32 / dst_width as f32;
-    let scale_y = src_height as f32 / dst_height as f32;
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
 
     // Maximum valid coordinate (for clamping)
     let max_x = (src_width - 1) as f32;
@@ -91,11 +129,13 @@ fn rescale_lanczos3(
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    scale_mode: ScaleMode,
 ) -> Vec<f32> {
     let mut dst = vec![0.0f32; dst_width * dst_height];
 
-    let scale_x = src_width as f32 / dst_width as f32;
-    let scale_y = src_height as f32 / dst_height as f32;
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
 
     // For downscaling, we need to increase the filter radius
     let filter_scale_x = scale_x.max(1.0);
@@ -173,13 +213,26 @@ pub fn rescale_channel(
     dst_height: usize,
     method: RescaleMethod,
 ) -> Vec<f32> {
+    rescale_channel_uniform(src, src_width, src_height, dst_width, dst_height, method, ScaleMode::Independent)
+}
+
+/// Rescale a single channel with uniform scale mode for perfect AR preservation
+pub fn rescale_channel_uniform(
+    src: &[f32],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+) -> Vec<f32> {
     if src_width == dst_width && src_height == dst_height {
         return src.to_vec();
     }
 
     match method {
-        RescaleMethod::Bilinear => rescale_bilinear(src, src_width, src_height, dst_width, dst_height),
-        RescaleMethod::Lanczos3 => rescale_lanczos3(src, src_width, src_height, dst_width, dst_height),
+        RescaleMethod::Bilinear => rescale_bilinear(src, src_width, src_height, dst_width, dst_height, scale_mode),
+        RescaleMethod::Lanczos3 => rescale_lanczos3(src, src_width, src_height, dst_width, dst_height, scale_mode),
     }
 }
 
@@ -193,10 +246,11 @@ pub fn rescale_rgb(
     dst_width: usize,
     dst_height: usize,
     method: RescaleMethod,
+    scale_mode: ScaleMode,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let r_out = rescale_channel(r, src_width, src_height, dst_width, dst_height, method);
-    let g_out = rescale_channel(g, src_width, src_height, dst_width, dst_height, method);
-    let b_out = rescale_channel(b, src_width, src_height, dst_width, dst_height, method);
+    let r_out = rescale_channel_uniform(r, src_width, src_height, dst_width, dst_height, method, scale_mode);
+    let g_out = rescale_channel_uniform(g, src_width, src_height, dst_width, dst_height, method, scale_mode);
+    let b_out = rescale_channel_uniform(b, src_width, src_height, dst_width, dst_height, method, scale_mode);
     (r_out, g_out, b_out)
 }
 
@@ -208,6 +262,7 @@ pub fn rescale_rgb_interleaved(
     dst_width: usize,
     dst_height: usize,
     method: RescaleMethod,
+    scale_mode: ScaleMode,
 ) -> Vec<f32> {
     let src_pixels = src_width * src_height;
 
@@ -223,7 +278,7 @@ pub fn rescale_rgb_interleaved(
     }
 
     // Rescale each channel
-    let (r_out, g_out, b_out) = rescale_rgb(&r, &g, &b, src_width, src_height, dst_width, dst_height, method);
+    let (r_out, g_out, b_out) = rescale_rgb(&r, &g, &b, src_width, src_height, dst_width, dst_height, method, scale_mode);
 
     // Interleave
     let dst_pixels = dst_width * dst_height;
@@ -271,11 +326,13 @@ fn rescale_bilinear_pixels(
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
     let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
 
-    let scale_x = src_width as f32 / dst_width as f32;
-    let scale_y = src_height as f32 / dst_height as f32;
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
 
     let max_x = (src_width - 1) as f32;
     let max_y = (src_height - 1) as f32;
@@ -315,11 +372,13 @@ fn rescale_lanczos3_pixels(
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
     let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
 
-    let scale_x = src_width as f32 / dst_width as f32;
-    let scale_y = src_height as f32 / dst_height as f32;
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
 
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
@@ -399,14 +458,15 @@ pub fn rescale(
     dst_width: usize,
     dst_height: usize,
     method: RescaleMethod,
+    scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
     if src_width == dst_width && src_height == dst_height {
         return src.to_vec();
     }
 
     match method {
-        RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height),
-        RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height),
+        RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode),
+        RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode),
     }
 }
 
@@ -571,7 +631,7 @@ mod tests {
             [0.6, 0.7, 0.8, 0.0],
             [0.9, 1.0, 0.5, 0.0],
         ];
-        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Bilinear);
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(src, dst);
     }
 
@@ -581,7 +641,7 @@ mod tests {
             [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
         ];
-        let dst = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+        let dst = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(dst.len(), 16);
 
         // All values should be in valid range
@@ -598,8 +658,8 @@ mod tests {
             [0.1, 0.2, 0.3, 0.0], [0.4, 0.5, 0.6, 0.0],
             [0.7, 0.8, 0.9, 0.0], [0.2, 0.3, 0.4, 0.0],
         ];
-        let up = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3);
-        let down = rescale(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3);
+        let up = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let down = rescale(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
 
         for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
             for c in 0..3 {
@@ -607,5 +667,29 @@ mod tests {
                 assert!(diff < 0.2, "Pixel {} channel {} drifted: {} -> {}", i, c, orig[c], result[c]);
             }
         }
+    }
+
+    #[test]
+    fn test_uniform_scale_mode() {
+        // Test that uniform scale modes produce identical scale factors
+        // 100x50 -> 200x100 should be exactly 2x in both directions with uniform mode
+        let (sx1, sy1) = calculate_scales(100, 50, 200, 100, ScaleMode::Independent);
+        assert_eq!(sx1, 0.5);
+        assert_eq!(sy1, 0.5);
+
+        // 100x50 -> 200x99 with independent: different scales
+        let (sx2, sy2) = calculate_scales(100, 50, 200, 99, ScaleMode::Independent);
+        assert!((sx2 - 0.5).abs() < 0.001);
+        assert!((sy2 - 0.505).abs() < 0.01); // 50/99 ≈ 0.505
+
+        // With UniformWidth: both use width scale
+        let (sx3, sy3) = calculate_scales(100, 50, 200, 99, ScaleMode::UniformWidth);
+        assert_eq!(sx3, sy3);
+        assert_eq!(sx3, 0.5);
+
+        // With UniformHeight: both use height scale
+        let (sx4, sy4) = calculate_scales(100, 50, 200, 99, ScaleMode::UniformHeight);
+        assert_eq!(sx4, sy4);
+        assert!((sx4 - 0.505).abs() < 0.01);
     }
 }

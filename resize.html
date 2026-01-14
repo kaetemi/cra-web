@@ -384,9 +384,15 @@
         let originalHeight = 0;
         let aspectRatio = 1;
         let updatingSize = false;
+        let primaryDimension = 'width'; // 'width' or 'height' - which dimension is authoritative
         let lastLinearResult = null;
         let lastOutputWidth = 0;
         let lastOutputHeight = 0;
+
+        // Scale mode constants (must match Rust enum)
+        const SCALE_MODE_INDEPENDENT = 0;
+        const SCALE_MODE_UNIFORM_WIDTH = 1;
+        const SCALE_MODE_UNIFORM_HEIGHT = 2;
 
         // Extract RGB from ImageData as interleaved Uint8Array
         function imageDataToU8Interleaved(imageData) {
@@ -484,6 +490,7 @@
         function updateSizeFromWidth() {
             if (updatingSize || !originalWidth) return;
             updatingSize = true;
+            primaryDimension = 'width';
             const width = parseInt(document.getElementById('target-width').value) || 1;
             const height = Math.round(width / aspectRatio);
             document.getElementById('target-height').value = height;
@@ -493,6 +500,7 @@
         function updateSizeFromHeight() {
             if (updatingSize || !originalHeight) return;
             updatingSize = true;
+            primaryDimension = 'height';
             const height = parseInt(document.getElementById('target-height').value) || 1;
             const width = Math.round(height * aspectRatio);
             document.getElementById('target-width').value = width;
@@ -533,12 +541,17 @@
                 // Step 2: Convert to linear
                 const linearRgb = srgb_to_linear_f32_wasm(srgbF32, originalWidth, originalHeight);
 
-                // Step 3: Rescale in linear space
+                // Step 3: Rescale in linear space with uniform scaling
+                // Use the primary dimension to determine scale mode for exact AR preservation
+                const scaleMode = primaryDimension === 'width'
+                    ? SCALE_MODE_UNIFORM_WIDTH
+                    : SCALE_MODE_UNIFORM_HEIGHT;
                 const linearResized = rescale_linear_rgb_wasm(
                     linearRgb,
                     originalWidth, originalHeight,
                     dstW, dstH,
-                    interpolation
+                    interpolation,
+                    scaleMode
                 );
 
                 // Step 4: Convert back to sRGB

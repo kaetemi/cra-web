@@ -388,7 +388,7 @@ fn resize_linear(
     method: cra_wasm::rescale::RescaleMethod,
     verbose: bool,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale};
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -420,6 +420,7 @@ fn resize_linear(
         src_width as usize, src_height as usize,
         dst_width, dst_height,
         method,
+        ScaleMode::Independent,
     );
 
     Ok((dst_pixels, dst_width as u32, dst_height as u32))

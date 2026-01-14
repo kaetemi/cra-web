@@ -822,9 +822,18 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
     }
 }
 
+fn scale_mode_from_u8(mode: u8) -> rescale::ScaleMode {
+    match mode {
+        1 => rescale::ScaleMode::UniformWidth,
+        2 => rescale::ScaleMode::UniformHeight,
+        _ => rescale::ScaleMode::Independent,
+    }
+}
+
 /// Rescale linear RGB image (interleaved, 0-1 range)
 /// Returns interleaved RGB as f32 in 0-1 range
 /// This is the atomic rescale function - use with linear data.
+/// scale_mode: 0=independent, 1=uniform from width, 2=uniform from height
 #[wasm_bindgen]
 pub fn rescale_linear_rgb_wasm(
     linear: Vec<f32>,
@@ -833,13 +842,16 @@ pub fn rescale_linear_rgb_wasm(
     dst_width: usize,
     dst_height: usize,
     method: u8,
+    scale_mode: u8,
 ) -> Vec<f32> {
     let method = rescale_method_from_u8(method);
-    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method)
+    let scale_mode = scale_mode_from_u8(scale_mode);
+    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method, scale_mode)
 }
 
 /// Rescale linear grayscale image (single channel, 0-1 range)
 /// Returns single channel f32 in 0-1 range
+/// scale_mode: 0=independent, 1=uniform from width, 2=uniform from height
 #[wasm_bindgen]
 pub fn rescale_linear_gray_wasm(
     linear_gray: Vec<f32>,
@@ -848,9 +860,11 @@ pub fn rescale_linear_gray_wasm(
     dst_width: usize,
     dst_height: usize,
     method: u8,
+    scale_mode: u8,
 ) -> Vec<f32> {
     let method = rescale_method_from_u8(method);
-    rescale::rescale_channel(&linear_gray, src_width, src_height, dst_width, dst_height, method)
+    let scale_mode = scale_mode_from_u8(scale_mode);
+    rescale::rescale_channel_uniform(&linear_gray, src_width, src_height, dst_width, dst_height, method, scale_mode)
 }
 
 /// Calculate target dimensions preserving aspect ratio
