@@ -23,7 +23,6 @@ pub mod dither_common;
 mod histogram;
 mod rotation;
 mod tiled_lab;
-mod tiled_oklab;
 mod tiling;
 
 // Re-export dithering function for compatibility with existing WASM code
@@ -853,7 +852,7 @@ pub fn color_correct_tiled_oklab(
     let input_srgb: Vec<f32> = input_data.iter().map(|&v| v as f32 / 255.0).collect();
     let ref_srgb: Vec<f32> = ref_data.iter().map(|&v| v as f32 / 255.0).collect();
 
-    tiled_oklab::color_correct_tiled_oklab(
+    tiled_lab::color_correct_tiled_oklab(
         &input_srgb,
         &ref_srgb,
         input_width,
