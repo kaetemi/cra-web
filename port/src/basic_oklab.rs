@@ -1,7 +1,7 @@
 /// Basic Oklab histogram matching algorithm.
 /// Analogous to basic_lab.rs but using the Oklab color space.
 
-use crate::color::{linear_rgb_to_oklab_pixel4, oklab_to_linear_rgb_pixel4};
+use crate::color::{linear_rgb_to_oklab_pixel, oklab_to_linear_rgb_pixel};
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::pixel::Pixel4;
@@ -104,7 +104,7 @@ pub fn color_correct_basic_oklab_linear(
     let mut in_b_ch = Vec::with_capacity(pixel_count);
 
     for &p in input {
-        let oklab = linear_rgb_to_oklab_pixel4(p);
+        let oklab = linear_rgb_to_oklab_pixel(p);
         in_l.push(oklab[0]);
         in_a.push(oklab[1]);
         in_b_ch.push(oklab[2]);
@@ -115,7 +115,7 @@ pub fn color_correct_basic_oklab_linear(
     let mut ref_b_ch = Vec::with_capacity(ref_count);
 
     for &p in reference {
-        let oklab = linear_rgb_to_oklab_pixel4(p);
+        let oklab = linear_rgb_to_oklab_pixel(p);
         ref_l.push(oklab[0]);
         ref_a.push(oklab[1]);
         ref_b_ch.push(oklab[2]);
@@ -190,7 +190,7 @@ pub fn color_correct_basic_oklab_linear(
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
         let oklab_pixel: Pixel4 = [final_l[i], final_a[i], final_b[i], 0.0];
-        result.push(oklab_to_linear_rgb_pixel4(oklab_pixel));
+        result.push(oklab_to_linear_rgb_pixel(oklab_pixel));
     }
     result
 }

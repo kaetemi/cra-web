@@ -39,48 +39,44 @@ pub fn linear_to_srgb(data: &mut [f32]) {
 }
 
 // ============================================================================
-// Pixel4 color space conversions
+// Pixel color space conversions
 // ============================================================================
 
-/// Convert sRGB Pixel4 (0-1 range) to linear RGB Pixel4
 #[inline]
-pub fn srgb_to_linear_pixel4(p: Pixel4) -> Pixel4 {
+fn srgb_to_linear_pixel(p: Pixel4) -> Pixel4 {
     [
         srgb_to_linear_single(p[0]),
         srgb_to_linear_single(p[1]),
         srgb_to_linear_single(p[2]),
-        p[3], // preserve alpha/padding
+        p[3],
     ]
 }
 
-/// Convert linear RGB Pixel4 to sRGB Pixel4 (0-1 range)
 #[inline]
-pub fn linear_to_srgb_pixel4(p: Pixel4) -> Pixel4 {
+fn linear_to_srgb_pixel(p: Pixel4) -> Pixel4 {
     [
         linear_to_srgb_single(p[0]),
         linear_to_srgb_single(p[1]),
         linear_to_srgb_single(p[2]),
-        p[3], // preserve alpha/padding
+        p[3],
     ]
 }
 
 /// Convert sRGB pixels to linear RGB in-place
-pub fn srgb_to_linear_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn srgb_to_linear_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = srgb_to_linear_single(p[0]);
         p[1] = srgb_to_linear_single(p[1]);
         p[2] = srgb_to_linear_single(p[2]);
-        // p[3] (alpha/padding) unchanged
     }
 }
 
 /// Convert linear RGB pixels to sRGB in-place
-pub fn linear_to_srgb_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn linear_to_srgb_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = linear_to_srgb_single(p[0]);
         p[1] = linear_to_srgb_single(p[1]);
         p[2] = linear_to_srgb_single(p[2]);
-        // p[3] (alpha/padding) unchanged
     }
 }
 
@@ -186,40 +182,38 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     (r, g, b_out)
 }
 
-/// Convert linear RGB Pixel4 to Lab Pixel4
+/// Convert linear RGB pixel to Lab pixel
 /// Returns [L, a, b, _] where L is 0-100 and a,b are roughly -127 to +127
 #[inline]
-pub fn linear_rgb_to_lab_pixel4(p: Pixel4) -> Pixel4 {
+pub fn linear_rgb_to_lab_pixel(p: Pixel4) -> Pixel4 {
     let (l, a, b) = linear_rgb_to_lab(p[0], p[1], p[2]);
     [l, a, b, p[3]]
 }
 
-/// Convert Lab Pixel4 to linear RGB Pixel4
+/// Convert Lab pixel to linear RGB pixel
 #[inline]
-pub fn lab_to_linear_rgb_pixel4(p: Pixel4) -> Pixel4 {
+pub fn lab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
     let (r, g, b) = lab_to_linear_rgb(p[0], p[1], p[2]);
     [r, g, b, p[3]]
 }
 
 /// Convert linear RGB pixels to Lab in-place
-pub fn linear_rgb_to_lab_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn linear_rgb_to_lab_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         let (l, a, b) = linear_rgb_to_lab(p[0], p[1], p[2]);
         p[0] = l;
         p[1] = a;
         p[2] = b;
-        // p[3] unchanged
     }
 }
 
 /// Convert Lab pixels to linear RGB in-place
-pub fn lab_to_linear_rgb_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn lab_to_linear_rgb_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         let (r, g, b) = lab_to_linear_rgb(p[0], p[1], p[2]);
         p[0] = r;
         p[1] = g;
         p[2] = b;
-        // p[3] unchanged
     }
 }
 
@@ -324,40 +318,38 @@ pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     (r, g, b_out)
 }
 
-/// Convert linear RGB Pixel4 to Oklab Pixel4
+/// Convert linear RGB pixel to Oklab pixel
 /// Returns [L, a, b, _] where L is 0-1 and a,b are roughly -0.4 to +0.4
 #[inline]
-pub fn linear_rgb_to_oklab_pixel4(p: Pixel4) -> Pixel4 {
+pub fn linear_rgb_to_oklab_pixel(p: Pixel4) -> Pixel4 {
     let (l, a, b) = linear_rgb_to_oklab(p[0], p[1], p[2]);
     [l, a, b, p[3]]
 }
 
-/// Convert Oklab Pixel4 to linear RGB Pixel4
+/// Convert Oklab pixel to linear RGB pixel
 #[inline]
-pub fn oklab_to_linear_rgb_pixel4(p: Pixel4) -> Pixel4 {
+pub fn oklab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
     let (r, g, b) = oklab_to_linear_rgb(p[0], p[1], p[2]);
     [r, g, b, p[3]]
 }
 
 /// Convert linear RGB pixels to Oklab in-place
-pub fn linear_rgb_to_oklab_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn linear_rgb_to_oklab_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         let (l, a, b) = linear_rgb_to_oklab(p[0], p[1], p[2]);
         p[0] = l;
         p[1] = a;
         p[2] = b;
-        // p[3] unchanged
     }
 }
 
 /// Convert Oklab pixels to linear RGB in-place
-pub fn oklab_to_linear_rgb_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn oklab_to_linear_rgb_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         let (r, g, b) = oklab_to_linear_rgb(p[0], p[1], p[2]);
         p[0] = r;
         p[1] = g;
         p[2] = b;
-        // p[3] unchanged
     }
 }
 
@@ -418,44 +410,39 @@ pub fn interleave_rgb_u8(r: &[u8], g: &[u8], b: &[u8]) -> Vec<u8> {
 }
 
 // ============================================================================
-// Pixel4 scale operations
+// Pixel scale operations
 // ============================================================================
 
-/// Scale Pixel4 values from 0-1 to 0-255 in-place
-pub fn scale_to_255_pixels_inplace(pixels: &mut [Pixel4]) {
+/// Scale pixel values from 0-1 to 0-255 in-place
+pub fn scale_to_255_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] *= 255.0;
         p[1] *= 255.0;
         p[2] *= 255.0;
-        // p[3] unchanged (alpha is typically already 0-1 or 0-255 depending on context)
     }
 }
 
-/// Scale Pixel4 values from 0-255 to 0-1 in-place
-pub fn scale_from_255_pixels_inplace(pixels: &mut [Pixel4]) {
+/// Scale pixel values from 0-255 to 0-1 in-place
+pub fn scale_from_255_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] /= 255.0;
         p[1] /= 255.0;
         p[2] /= 255.0;
-        // p[3] unchanged
     }
 }
 
-/// Scale a single Pixel4 from 0-1 to 0-255
 #[inline]
-pub fn scale_to_255_pixel4(p: Pixel4) -> Pixel4 {
+fn scale_to_255_pixel(p: Pixel4) -> Pixel4 {
     [p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3]]
 }
 
-/// Scale a single Pixel4 from 0-255 to 0-1
 #[inline]
-pub fn scale_from_255_pixel4(p: Pixel4) -> Pixel4 {
+fn scale_from_255_pixel(p: Pixel4) -> Pixel4 {
     [p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3]]
 }
 
-/// Convert linear RGB Pixel4 to sRGB and scale to 0-255 in one step
 #[inline]
-pub fn linear_to_srgb_255_pixel4(p: Pixel4) -> Pixel4 {
+fn linear_to_srgb_255_pixel(p: Pixel4) -> Pixel4 {
     [
         (linear_to_srgb_single(p[0]) * 255.0).clamp(0.0, 255.0),
         (linear_to_srgb_single(p[1]) * 255.0).clamp(0.0, 255.0),
@@ -464,9 +451,8 @@ pub fn linear_to_srgb_255_pixel4(p: Pixel4) -> Pixel4 {
     ]
 }
 
-/// Convert sRGB Pixel4 (0-255) to linear RGB (0-1)
 #[inline]
-pub fn srgb_255_to_linear_pixel4(p: Pixel4) -> Pixel4 {
+fn srgb_255_to_linear_pixel(p: Pixel4) -> Pixel4 {
     [
         srgb_to_linear_single(p[0] / 255.0),
         srgb_to_linear_single(p[1] / 255.0),
@@ -476,22 +462,20 @@ pub fn srgb_255_to_linear_pixel4(p: Pixel4) -> Pixel4 {
 }
 
 /// Convert linear RGB pixels to sRGB scaled 0-255 in-place
-pub fn linear_to_srgb_255_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn linear_to_srgb_255_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = (linear_to_srgb_single(p[0]) * 255.0).clamp(0.0, 255.0);
         p[1] = (linear_to_srgb_single(p[1]) * 255.0).clamp(0.0, 255.0);
         p[2] = (linear_to_srgb_single(p[2]) * 255.0).clamp(0.0, 255.0);
-        // p[3] unchanged
     }
 }
 
 /// Convert sRGB pixels (0-255) to linear RGB (0-1) in-place
-pub fn srgb_255_to_linear_pixels_inplace(pixels: &mut [Pixel4]) {
+pub fn srgb_255_to_linear_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = srgb_to_linear_single(p[0] / 255.0);
         p[1] = srgb_to_linear_single(p[1] / 255.0);
         p[2] = srgb_to_linear_single(p[2] / 255.0);
-        // p[3] unchanged
     }
 }
 
@@ -601,18 +585,18 @@ mod tests {
         );
     }
 
-    // ============== Pixel4 tests ==============
+    // ============== Pixel tests ==============
 
     #[test]
-    fn test_srgb_linear_pixel4_roundtrip() {
+    fn test_srgb_linear_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
             [0.0, 0.5, 1.0, 0.0],
             [0.1, 0.3, 0.7, 0.0],
             [0.04045, 0.2, 0.8, 0.0],
         ];
         for p in test_pixels {
-            let linear = srgb_to_linear_pixel4(p);
-            let back = linear_to_srgb_pixel4(linear);
+            let linear = srgb_to_linear_pixel(p);
+            let back = linear_to_srgb_pixel(linear);
             assert!((p[0] - back[0]).abs() < 1e-5, "R failed");
             assert!((p[1] - back[1]).abs() < 1e-5, "G failed");
             assert!((p[2] - back[2]).abs() < 1e-5, "B failed");
@@ -620,15 +604,15 @@ mod tests {
     }
 
     #[test]
-    fn test_lab_pixel4_roundtrip() {
+    fn test_lab_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
             [0.0, 0.0, 0.0, 0.0],
             [1.0, 1.0, 1.0, 0.0],
             [0.5, 0.3, 0.7, 0.0],
         ];
         for p in test_pixels {
-            let lab = linear_rgb_to_lab_pixel4(p);
-            let back = lab_to_linear_rgb_pixel4(lab);
+            let lab = linear_rgb_to_lab_pixel(p);
+            let back = lab_to_linear_rgb_pixel(lab);
             assert!((p[0] - back[0]).abs() < 1e-4, "R failed: {} vs {}", p[0], back[0]);
             assert!((p[1] - back[1]).abs() < 1e-4, "G failed: {} vs {}", p[1], back[1]);
             assert!((p[2] - back[2]).abs() < 1e-4, "B failed: {} vs {}", p[2], back[2]);
@@ -636,15 +620,15 @@ mod tests {
     }
 
     #[test]
-    fn test_oklab_pixel4_roundtrip() {
+    fn test_oklab_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
             [0.0, 0.0, 0.0, 0.0],
             [1.0, 1.0, 1.0, 0.0],
             [0.5, 0.3, 0.7, 0.0],
         ];
         for p in test_pixels {
-            let oklab = linear_rgb_to_oklab_pixel4(p);
-            let back = oklab_to_linear_rgb_pixel4(oklab);
+            let oklab = linear_rgb_to_oklab_pixel(p);
+            let back = oklab_to_linear_rgb_pixel(oklab);
             assert!((p[0] - back[0]).abs() < 1e-4, "R failed: {} vs {}", p[0], back[0]);
             assert!((p[1] - back[1]).abs() < 1e-4, "G failed: {} vs {}", p[1], back[1]);
             assert!((p[2] - back[2]).abs() < 1e-4, "B failed: {} vs {}", p[2], back[2]);
@@ -652,14 +636,14 @@ mod tests {
     }
 
     #[test]
-    fn test_scale_pixel4_roundtrip() {
+    fn test_scale_roundtrip() {
         let p: Pixel4 = [0.5, 0.25, 1.0, 0.0];
-        let scaled = scale_to_255_pixel4(p);
+        let scaled = scale_to_255_pixel(p);
         assert!((scaled[0] - 127.5).abs() < 1e-5);
         assert!((scaled[1] - 63.75).abs() < 1e-5);
         assert!((scaled[2] - 255.0).abs() < 1e-5);
 
-        let back = scale_from_255_pixel4(scaled);
+        let back = scale_from_255_pixel(scaled);
         assert!((p[0] - back[0]).abs() < 1e-5);
         assert!((p[1] - back[1]).abs() < 1e-5);
         assert!((p[2] - back[2]).abs() < 1e-5);
@@ -674,8 +658,8 @@ mod tests {
         let original = pixels.clone();
 
         // Test sRGB -> linear -> sRGB roundtrip in-place
-        srgb_to_linear_pixels_inplace(&mut pixels);
-        linear_to_srgb_pixels_inplace(&mut pixels);
+        srgb_to_linear_inplace(&mut pixels);
+        linear_to_srgb_inplace(&mut pixels);
 
         for (orig, result) in original.iter().zip(pixels.iter()) {
             assert!((orig[0] - result[0]).abs() < 1e-5);
@@ -685,17 +669,17 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel4_preserves_alpha() {
+    fn test_pixel_preserves_alpha() {
         let p: Pixel4 = [0.5, 0.3, 0.7, 0.99];
 
         // All conversions should preserve the alpha channel
-        assert_eq!(srgb_to_linear_pixel4(p)[3], 0.99);
-        assert_eq!(linear_to_srgb_pixel4(p)[3], 0.99);
-        assert_eq!(linear_rgb_to_lab_pixel4(p)[3], 0.99);
-        assert_eq!(lab_to_linear_rgb_pixel4(p)[3], 0.99);
-        assert_eq!(linear_rgb_to_oklab_pixel4(p)[3], 0.99);
-        assert_eq!(oklab_to_linear_rgb_pixel4(p)[3], 0.99);
-        assert_eq!(scale_to_255_pixel4(p)[3], 0.99);
-        assert_eq!(scale_from_255_pixel4(p)[3], 0.99);
+        assert_eq!(srgb_to_linear_pixel(p)[3], 0.99);
+        assert_eq!(linear_to_srgb_pixel(p)[3], 0.99);
+        assert_eq!(linear_rgb_to_lab_pixel(p)[3], 0.99);
+        assert_eq!(lab_to_linear_rgb_pixel(p)[3], 0.99);
+        assert_eq!(linear_rgb_to_oklab_pixel(p)[3], 0.99);
+        assert_eq!(oklab_to_linear_rgb_pixel(p)[3], 0.99);
+        assert_eq!(scale_to_255_pixel(p)[3], 0.99);
+        assert_eq!(scale_from_255_pixel(p)[3], 0.99);
     }
 }

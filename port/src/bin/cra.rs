@@ -26,7 +26,7 @@ use cra_wasm::dither::DitherMode as HistogramDitherMode;
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
 use cra_wasm::dither_common::PerceptualSpace;
-use cra_wasm::output::finalize_pixels_to_srgb_u8_with_options;
+use cra_wasm::output::finalize_to_srgb_u8_with_options;
 use cra_wasm::pixel::Pixel4;
 use cra_wasm::tiled_lab::{color_correct_tiled_lab_linear, color_correct_tiled_oklab_linear};
 
@@ -341,7 +341,7 @@ fn resize_linear(
     method: cra_wasm::rescale::RescaleMethod,
     verbose: bool,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale_pixels};
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -368,7 +368,7 @@ fn resize_linear(
     }
 
     // Rescale directly in linear space for correct color blending
-    let dst_pixels = rescale_pixels(
+    let dst_pixels = rescale(
         pixels,
         src_width as usize, src_height as usize,
         dst_width, dst_height,
@@ -751,7 +751,7 @@ fn main() -> Result<(), String> {
             // RGB888 - use standard output finalization (linear -> sRGB with dithering)
             let mut result_pixels = output_pixels;
             let dither_mode = Some(args.output_dither.to_histogram_dither_mode());
-            let srgb_out = finalize_pixels_to_srgb_u8_with_options(
+            let srgb_out = finalize_to_srgb_u8_with_options(
                 &mut result_pixels,
                 width_usize, height_usize,
                 dither_mode,

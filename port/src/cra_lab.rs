@@ -3,8 +3,8 @@
 /// Corresponds to color_correction_cra.py
 
 use crate::color::{
-    lab_to_linear_rgb_pixel4, linear_rgb_to_lab_pixel4,
-    linear_rgb_to_oklab_pixel4, oklab_to_linear_rgb_pixel4,
+    lab_to_linear_rgb_pixel, linear_rgb_to_lab_pixel,
+    linear_rgb_to_oklab_pixel, oklab_to_linear_rgb_pixel,
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::pixel::Pixel4;
@@ -146,8 +146,8 @@ fn pixels_to_lab_channels(
 
     for &p in pixels {
         let lab = match colorspace {
-            LabQuantSpace::CIELab => linear_rgb_to_lab_pixel4(p),
-            LabQuantSpace::OkLab => linear_rgb_to_oklab_pixel4(p),
+            LabQuantSpace::CIELab => linear_rgb_to_lab_pixel(p),
+            LabQuantSpace::OkLab => linear_rgb_to_oklab_pixel(p),
         };
         l.push(lab[0]);
         a.push(lab[1]);
@@ -169,8 +169,8 @@ fn lab_channels_to_pixels(
     for i in 0..l.len() {
         let lab: Pixel4 = [l[i], a[i], b[i], 0.0];
         let rgb = match colorspace {
-            LabQuantSpace::CIELab => lab_to_linear_rgb_pixel4(lab),
-            LabQuantSpace::OkLab => oklab_to_linear_rgb_pixel4(lab),
+            LabQuantSpace::CIELab => lab_to_linear_rgb_pixel(lab),
+            LabQuantSpace::OkLab => oklab_to_linear_rgb_pixel(lab),
         };
         result.push(rgb);
     }

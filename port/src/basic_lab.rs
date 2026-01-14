@@ -2,7 +2,7 @@
 /// Corresponds to color_correction_basic.py
 
 use crate::color::{
-    lab_to_linear_rgb_pixel4, linear_rgb_to_lab_pixel4,
+    lab_to_linear_rgb_pixel, linear_rgb_to_lab_pixel,
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
@@ -79,7 +79,7 @@ pub fn color_correct_basic_lab_linear(
     let mut in_b_ch = Vec::with_capacity(pixel_count);
 
     for &p in input {
-        let lab = linear_rgb_to_lab_pixel4(p);
+        let lab = linear_rgb_to_lab_pixel(p);
         in_l.push(lab[0]);
         in_a.push(lab[1]);
         in_b_ch.push(lab[2]);
@@ -90,7 +90,7 @@ pub fn color_correct_basic_lab_linear(
     let mut ref_b_ch = Vec::with_capacity(ref_count);
 
     for &p in reference {
-        let lab = linear_rgb_to_lab_pixel4(p);
+        let lab = linear_rgb_to_lab_pixel(p);
         ref_l.push(lab[0]);
         ref_a.push(lab[1]);
         ref_b_ch.push(lab[2]);
@@ -161,7 +161,7 @@ pub fn color_correct_basic_lab_linear(
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
         let lab_pixel: Pixel4 = [final_l[i], final_a[i], final_b[i], 0.0];
-        result.push(lab_to_linear_rgb_pixel4(lab_pixel));
+        result.push(lab_to_linear_rgb_pixel(lab_pixel));
     }
     result
 }

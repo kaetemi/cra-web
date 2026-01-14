@@ -482,10 +482,10 @@ pub fn color_correct_basic_lab(
 ) -> Vec<u8> {
     // Convert uint8 sRGB to linear RGB Pixel4
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
 
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     // Perform color correction
     let mut result = basic_lab::color_correct_basic_lab_linear(
@@ -501,7 +501,7 @@ pub fn color_correct_basic_lab(
     );
 
     // Finalize to sRGB u8 output
-    output::finalize_pixels_to_srgb_u8_dithered(
+    output::finalize_to_srgb_u8_dithered(
         &mut result,
         input_width,
         input_height,
@@ -537,10 +537,10 @@ pub fn color_correct_basic_rgb(
 ) -> Vec<u8> {
     // Convert uint8 sRGB to linear RGB Pixel4
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
 
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     // Perform color correction
     let mut result = basic_rgb::color_correct_basic_rgb_linear(
@@ -555,7 +555,7 @@ pub fn color_correct_basic_rgb(
     );
 
     // Finalize to sRGB u8 output
-    output::finalize_pixels_to_srgb_u8_dithered(
+    output::finalize_to_srgb_u8_dithered(
         &mut result,
         input_width,
         input_height,
@@ -605,9 +605,9 @@ pub fn color_correct_cra_lab(
 ) -> Vec<u8> {
     // Convert sRGB u8 to Pixel4 linear RGB
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     let mut result = cra_lab::color_correct_cra_lab_linear(
         &input_pixels,
@@ -623,7 +623,7 @@ pub fn color_correct_cra_lab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_pixels_to_srgb_u8_with_options(
+    output::finalize_to_srgb_u8_with_options(
         &mut result,
         input_width,
         input_height,
@@ -675,9 +675,9 @@ pub fn color_correct_tiled_lab(
 ) -> Vec<u8> {
     // Convert sRGB u8 to Pixel4 linear RGB
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     let mut result = tiled_lab::color_correct_tiled_lab_linear(
         &input_pixels,
@@ -693,7 +693,7 @@ pub fn color_correct_tiled_lab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_pixels_to_srgb_u8_with_options(
+    output::finalize_to_srgb_u8_with_options(
         &mut result,
         input_width,
         input_height,
@@ -736,9 +736,9 @@ pub fn color_correct_cra_rgb(
 ) -> Vec<u8> {
     // Convert sRGB u8 to Pixel4 linear RGB
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     let mut result = cra_rgb::color_correct_cra_rgb_linear(
         &input_pixels,
@@ -752,7 +752,7 @@ pub fn color_correct_cra_rgb(
         dither_mode_from_u8(histogram_dither_mode),
     );
 
-    output::finalize_pixels_to_srgb_u8_dithered(
+    output::finalize_to_srgb_u8_dithered(
         &mut result,
         input_width,
         input_height,
@@ -792,10 +792,10 @@ pub fn color_correct_basic_oklab(
 ) -> Vec<u8> {
     // Convert uint8 sRGB to linear RGB Pixel4
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
 
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     // Perform color correction
     let mut result = basic_oklab::color_correct_basic_oklab_linear(
@@ -811,7 +811,7 @@ pub fn color_correct_basic_oklab(
     );
 
     // Finalize to sRGB u8 output
-    output::finalize_pixels_to_srgb_u8_dithered(
+    output::finalize_to_srgb_u8_dithered(
         &mut result,
         input_width,
         input_height,
@@ -861,9 +861,9 @@ pub fn color_correct_cra_oklab(
 ) -> Vec<u8> {
     // Convert sRGB u8 to Pixel4 linear RGB
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     let mut result = cra_lab::color_correct_cra_oklab_linear(
         &input_pixels,
@@ -879,7 +879,7 @@ pub fn color_correct_cra_oklab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_pixels_to_srgb_u8_with_options(
+    output::finalize_to_srgb_u8_with_options(
         &mut result,
         input_width,
         input_height,
@@ -931,9 +931,9 @@ pub fn color_correct_tiled_oklab(
 ) -> Vec<u8> {
     // Convert sRGB u8 to Pixel4 linear RGB
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut input_pixels);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_pixels_inplace(&mut ref_pixels);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
 
     let mut result = tiled_lab::color_correct_tiled_oklab_linear(
         &input_pixels,
@@ -949,7 +949,7 @@ pub fn color_correct_tiled_oklab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
-    output::finalize_pixels_to_srgb_u8_with_options(
+    output::finalize_to_srgb_u8_with_options(
         &mut result,
         input_width,
         input_height,
@@ -1352,7 +1352,7 @@ pub fn calculate_dimensions_wasm(
 }
 
 // ============================================================================
-// SIMD-friendly Pixel4 WASM Exports (4-channel format)
+// SIMD-friendly WASM Exports (4-channel format)
 // ============================================================================
 
 /// Rescale sRGB image using 4-channel SIMD-friendly format
@@ -1360,7 +1360,7 @@ pub fn calculate_dimensions_wasm(
 /// Output: flat array of RGBX f32 values (0-255 scale)
 /// Performs: sRGB -> linear -> rescale -> sRGB
 #[wasm_bindgen]
-pub fn rescale_srgb_pixel4_wasm(
+pub fn rescale_srgb_4ch_wasm(
     srgb: Vec<f32>,
     src_width: usize,
     src_height: usize,
@@ -1382,8 +1382,8 @@ pub fn rescale_srgb_pixel4_wasm(
         ]);
     }
 
-    // Rescale in linear space using Pixel4 API
-    let rescaled = rescale::rescale_pixels(
+    // Rescale in linear space
+    let rescaled = rescale::rescale(
         &linear_pixels, src_width, src_height, dst_width, dst_height, method
     );
 
@@ -1404,7 +1404,7 @@ pub fn rescale_srgb_pixel4_wasm(
 /// Input: flat array of RGBX f32 values (0-1 scale), 4 values per pixel
 /// Output: flat array of RGBX f32 values (0-1 scale)
 #[wasm_bindgen]
-pub fn rescale_linear_pixel4_wasm(
+pub fn rescale_linear_4ch_wasm(
     linear: Vec<f32>,
     src_width: usize,
     src_height: usize,
@@ -1417,8 +1417,8 @@ pub fn rescale_linear_pixel4_wasm(
     // Convert flat array to Pixel4 array
     let linear_pixels = pixel::interleaved_rgba_to_pixels(&linear);
 
-    // Rescale using Pixel4 API
-    let rescaled = rescale::rescale_pixels(
+    // Rescale
+    let rescaled = rescale::rescale(
         &linear_pixels, src_width, src_height, dst_width, dst_height, method
     );
 

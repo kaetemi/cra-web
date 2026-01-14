@@ -392,7 +392,7 @@ fn rescale_lanczos3_pixels(
 }
 
 /// Rescale Pixel4 image (SIMD-friendly, linear space)
-pub fn rescale_pixels(
+pub fn rescale(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
@@ -562,26 +562,26 @@ mod tests {
         assert!(right_avg > 0.5, "Right edge should be bright: {}", right_avg);
     }
 
-    // Pixel4 tests
+    // RGB pixel rescale tests
     #[test]
-    fn test_pixel4_bilinear_identity() {
+    fn test_rgb_bilinear_identity() {
         let src = vec![
             [0.0, 0.1, 0.2, 0.0],
             [0.3, 0.4, 0.5, 0.0],
             [0.6, 0.7, 0.8, 0.0],
             [0.9, 1.0, 0.5, 0.0],
         ];
-        let dst = rescale_pixels(&src, 2, 2, 2, 2, RescaleMethod::Bilinear);
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Bilinear);
         assert_eq!(src, dst);
     }
 
     #[test]
-    fn test_pixel4_bilinear_upscale() {
+    fn test_rgb_bilinear_upscale() {
         let src = vec![
             [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
             [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
         ];
-        let dst = rescale_pixels(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+        let dst = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
         assert_eq!(dst.len(), 16);
 
         // All values should be in valid range
@@ -593,13 +593,13 @@ mod tests {
     }
 
     #[test]
-    fn test_pixel4_lanczos_roundtrip() {
+    fn test_rgb_lanczos_roundtrip() {
         let src = vec![
             [0.1, 0.2, 0.3, 0.0], [0.4, 0.5, 0.6, 0.0],
             [0.7, 0.8, 0.9, 0.0], [0.2, 0.3, 0.4, 0.0],
         ];
-        let up = rescale_pixels(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3);
-        let down = rescale_pixels(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3);
+        let up = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3);
+        let down = rescale(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3);
 
         for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
             for c in 0..3 {
