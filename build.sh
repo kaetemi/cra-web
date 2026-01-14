@@ -57,6 +57,7 @@ cp dither.html dist/
 cp resize.html dist/
 cp app.js dist/
 cp worker.js dist/
+cp resize-worker.js dist/
 cp sw.js dist/
 
 # Copy default images

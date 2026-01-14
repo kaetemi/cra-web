@@ -422,20 +422,9 @@
         </div>
     </div>
 
-    <script type="module">
-        import init, {
-            dither_output_wasm,
-            // Atomic color space conversion functions
-            unpack_u8_to_f32_wasm,
-            srgb_to_linear_f32_wasm,
-            linear_to_srgb_f32_wasm,
-            // Atomic rescaling functions (linear space)
-            rescale_linear_rgb_wasm,
-            rescale_linear_rgb_with_progress_wasm,
-            calculate_dimensions_wasm
-        } from './wasm_cra/cra_wasm.js';
-
-        let wasmReady = false;
+    <script>
+        let worker = null;
+        let workerReady = false;
         let inputImageData = null;
         let originalWidth = 0;
         let originalHeight = 0;
@@ -451,82 +440,140 @@
         const SCALE_MODE_UNIFORM_WIDTH = 1;
         const SCALE_MODE_UNIFORM_HEIGHT = 2;
 
-        // Extract RGB from ImageData as interleaved Uint8Array
-        function imageDataToU8Interleaved(imageData) {
-            const pixels = imageData.width * imageData.height;
-            const data = imageData.data;
-            const rgb = new Uint8Array(pixels * 3);
+        // Pending operation state for comparison mode
+        let pendingComparison = null;
 
-            for (let i = 0; i < pixels; i++) {
-                rgb[i * 3] = data[i * 4];
-                rgb[i * 3 + 1] = data[i * 4 + 1];
-                rgb[i * 3 + 2] = data[i * 4 + 2];
-            }
+        function initWorker() {
+            worker = new Worker('./resize-worker.js', { type: 'module' });
 
-            return rgb;
+            worker.onmessage = function(e) {
+                const { type, ...data } = e.data;
+
+                switch (type) {
+                    case 'ready':
+                        workerReady = true;
+                        document.getElementById('process-btn').disabled = !inputImageData;
+                        break;
+
+                    case 'progress':
+                        updateProgressDisplay(data.percent);
+                        break;
+
+                    case 'complete':
+                        handleResizeComplete(data);
+                        break;
+
+                    case 'error':
+                        handleResizeError(data.message);
+                        break;
+                }
+            };
+
+            worker.onerror = function(e) {
+                console.error('Worker error:', e);
+                handleResizeError('Worker error: ' + e.message);
+            };
+
+            // Initialize the worker
+            worker.postMessage({ type: 'init' });
         }
 
-        // sRGB resize using library functions (WRONG way - skips linear conversion)
-        function resizeSrgbBad(imageData, srcW, srcH, dstW, dstH, interpolation, scaleMode, ditherMode, ditherTechnique, perceptualSpace, progressCallback) {
-            // Step 1: Unpack u8 to f32 (this gives us sRGB f32 values)
-            const srgbF32 = unpack_u8_to_f32_wasm(
-                imageDataToU8Interleaved(imageData),
-                srcW,
-                srcH
-            );
+        function updateProgressDisplay(percent) {
+            const progressBar = document.getElementById('progress-bar');
+            const progressText = document.getElementById('progress-text');
 
-            // Step 2: WRONG - rescale directly in sRGB space (treating sRGB as if it were linear)
-            // This is the common mistake that causes color shifts and darkening
-            const srgbResized = progressCallback
-                ? rescale_linear_rgb_with_progress_wasm(
-                    srgbF32,
-                    srcW, srcH,
-                    dstW, dstH,
-                    interpolation,
-                    scaleMode,
-                    progressCallback
-                )
-                : rescale_linear_rgb_wasm(
-                    srgbF32,
-                    srcW, srcH,
-                    dstW, dstH,
-                    interpolation,
-                    scaleMode
-                );
-
-            // Step 3: Dither floating-point result to RGB888
-            const dithered = dither_output_wasm(
-                srgbResized,
-                dstW, dstH,
-                8, 8, 8,           // RGB888 output
-                ditherTechnique,   // 1=PerChannel, 2=ColorAware
-                ditherMode,
-                perceptualSpace,   // Distance metric for ColorAware mode
-                0                  // seed
-            );
-
-            // Convert to ImageData for display
-            const outputData = new Uint8ClampedArray(dstW * dstH * 4);
-            for (let i = 0; i < dstW * dstH; i++) {
-                outputData[i * 4] = dithered[i * 3];
-                outputData[i * 4 + 1] = dithered[i * 3 + 1];
-                outputData[i * 4 + 2] = dithered[i * 3 + 2];
-                outputData[i * 4 + 3] = 255;
+            // If in comparison mode, scale progress appropriately
+            if (pendingComparison) {
+                if (pendingComparison.stage === 'linear') {
+                    percent = Math.round(percent / 2);
+                } else {
+                    percent = 50 + Math.round(percent / 2);
+                }
             }
 
-            return new ImageData(outputData, dstW, dstH);
+            progressBar.style.width = percent + '%';
+            progressText.textContent = percent + '%';
         }
 
-        async function initWasm() {
-            try {
-                await init();
-                wasmReady = true;
-                document.getElementById('process-btn').disabled = !inputImageData;
-            } catch (e) {
-                console.error('WASM init failed:', e);
-                document.getElementById('error-message').textContent = 'Failed to load WASM module: ' + e.message;
-                document.getElementById('error-message').classList.add('visible');
+        function handleResizeComplete(data) {
+            const { outputData, width, height } = data;
+            const imageData = new ImageData(new Uint8ClampedArray(outputData), width, height);
+
+            if (pendingComparison) {
+                if (pendingComparison.stage === 'linear') {
+                    // Store linear result and start sRGB resize
+                    pendingComparison.linearResult = imageData;
+                    pendingComparison.stage = 'srgb';
+
+                    // Start sRGB (bad) resize
+                    worker.postMessage({
+                        type: 'resize-srgb',
+                        imageData: inputImageData.data,
+                        srcWidth: originalWidth,
+                        srcHeight: originalHeight,
+                        ...pendingComparison.params
+                    });
+                } else {
+                    // Both done - display comparison
+                    displayComparison(pendingComparison.linearResult, imageData, width, height);
+                    pendingComparison = null;
+                    finishProcessing();
+                }
+            } else {
+                // Single result mode
+                displaySingleResult(imageData, width, height);
+                finishProcessing();
             }
+
+            // Store for download
+            lastLinearResult = outputData;
+            lastOutputWidth = width;
+            lastOutputHeight = height;
+        }
+
+        function handleResizeError(message) {
+            console.error('Resize failed:', message);
+            document.getElementById('error-message').textContent = 'Processing failed: ' + message;
+            document.getElementById('error-message').classList.add('visible');
+            document.getElementById('loading').classList.remove('active');
+            pendingComparison = null;
+        }
+
+        function displaySingleResult(imageData, width, height) {
+            document.getElementById('single-output').style.display = 'block';
+            document.getElementById('comparison-output').style.display = 'none';
+
+            const canvas = document.getElementById('output-canvas');
+            canvas.width = width;
+            canvas.height = height;
+            canvas.getContext('2d').putImageData(imageData, 0, 0);
+
+            document.getElementById('output-info').textContent =
+                `${originalWidth}x${originalHeight} → ${width}x${height}`;
+        }
+
+        function displayComparison(linearImageData, srgbImageData, width, height) {
+            document.getElementById('single-output').style.display = 'none';
+            document.getElementById('comparison-output').style.display = 'grid';
+
+            const linearCanvas = document.getElementById('linear-canvas');
+            linearCanvas.width = width;
+            linearCanvas.height = height;
+            linearCanvas.getContext('2d').putImageData(linearImageData, 0, 0);
+
+            const srgbCanvas = document.getElementById('srgb-canvas');
+            srgbCanvas.width = width;
+            srgbCanvas.height = height;
+            srgbCanvas.getContext('2d').putImageData(srgbImageData, 0, 0);
+
+            document.getElementById('output-info').textContent =
+                `${originalWidth}x${originalHeight} → ${width}x${height}`;
+        }
+
+        function finishProcessing() {
+            document.getElementById('loading').classList.remove('active');
+            document.getElementById('output-section').style.display = 'block';
+            document.getElementById('download-btn').disabled = false;
         }
 
         function loadImage(file) {
@@ -581,8 +628,8 @@
             return { width, height };
         }
 
-        async function processImage() {
-            if (!inputImageData || !wasmReady) return;
+        function processImage() {
+            if (!inputImageData || !workerReady) return;
 
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
@@ -598,128 +645,50 @@
             progressBar.style.width = '0%';
             progressText.textContent = '0%';
 
-            // Progress callback for the rescale operation
-            const updateProgress = (progress, stage, totalStages) => {
-                // Calculate overall progress across stages
-                const stageProgress = (stage + progress) / totalStages;
-                const percent = Math.round(stageProgress * 100);
-                progressBar.style.width = percent + '%';
-                progressText.textContent = percent + '%';
+            const { width: dstW, height: dstH } = calculateOutputDimensions();
+            const interpolation = parseInt(document.getElementById('interpolation').value);
+            const ditherMode = parseInt(document.getElementById('dither-mode').value);
+            const showComparison = document.getElementById('show-comparison').checked;
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+
+            // Dither technique: 1 = PerChannel, 2 = ColorAware
+            const ditherTechnique = isPerceptual ? 2 : 1;
+
+            // Use the primary dimension to determine scale mode
+            const scaleMode = primaryDimension === 'width'
+                ? SCALE_MODE_UNIFORM_WIDTH
+                : SCALE_MODE_UNIFORM_HEIGHT;
+
+            const params = {
+                dstWidth: dstW,
+                dstHeight: dstH,
+                interpolation,
+                scaleMode,
+                ditherMode,
+                ditherTechnique,
+                perceptualSpace
             };
 
-            try {
-                const { width: dstW, height: dstH } = calculateOutputDimensions();
-                const interpolation = parseInt(document.getElementById('interpolation').value);
-                const ditherMode = parseInt(document.getElementById('dither-mode').value);
-                const showComparison = document.getElementById('show-comparison').checked;
-                const isPerceptual = document.getElementById('perceptual-toggle').checked;
-                const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-
-                // Dither technique: 1 = PerChannel, 2 = ColorAware
-                const ditherTechnique = isPerceptual ? 2 : 1;
-
-                // Total stages: 1 for linear resize, +1 if comparison enabled
-                const totalStages = showComparison ? 2 : 1;
-
-                // === LINEAR RGB RESIZE (correct way) ===
-                // Step 1: Unpack u8 to f32
-                const srgbF32 = unpack_u8_to_f32_wasm(
-                    imageDataToU8Interleaved(inputImageData),
-                    originalWidth,
-                    originalHeight
-                );
-
-                // Step 2: Convert to linear
-                const linearRgb = srgb_to_linear_f32_wasm(srgbF32, originalWidth, originalHeight);
-
-                // Step 3: Rescale in linear space with uniform scaling and progress
-                // Use the primary dimension to determine scale mode for exact AR preservation
-                const scaleMode = primaryDimension === 'width'
-                    ? SCALE_MODE_UNIFORM_WIDTH
-                    : SCALE_MODE_UNIFORM_HEIGHT;
-                const linearResized = rescale_linear_rgb_with_progress_wasm(
-                    linearRgb,
-                    originalWidth, originalHeight,
-                    dstW, dstH,
-                    interpolation,
-                    scaleMode,
-                    (progress) => updateProgress(progress, 0, totalStages)
-                );
-
-                // Step 4: Convert back to sRGB
-                const srgbResized = linear_to_srgb_f32_wasm(linearResized, dstW, dstH);
-
-                // Step 5: Dither floating-point result to RGB888
-                // Rescale output is float - dithering is essential for quality
-                const dithered = dither_output_wasm(
-                    srgbResized,
-                    dstW, dstH,
-                    8, 8, 8,           // RGB888 output
-                    ditherTechnique,   // 1=PerChannel, 2=ColorAware
-                    ditherMode,
-                    perceptualSpace,   // Distance metric for ColorAware mode
-                    0                  // seed
-                );
-
-                // Store for download
-                lastLinearResult = dithered;
-                lastOutputWidth = dstW;
-                lastOutputHeight = dstH;
-
-                // Convert to ImageData for display
-                const linearOutputData = new Uint8ClampedArray(dstW * dstH * 4);
-                for (let i = 0; i < dstW * dstH; i++) {
-                    linearOutputData[i * 4] = dithered[i * 3];
-                    linearOutputData[i * 4 + 1] = dithered[i * 3 + 1];
-                    linearOutputData[i * 4 + 2] = dithered[i * 3 + 2];
-                    linearOutputData[i * 4 + 3] = 255;
-                }
-                const linearImageData = new ImageData(linearOutputData, dstW, dstH);
-
-                // Display results
-                if (showComparison) {
-                    // Also do sRGB resize (wrong way) for comparison
-                    const srgbImageData = resizeSrgbBad(
-                        inputImageData, originalWidth, originalHeight, dstW, dstH,
-                        interpolation, scaleMode, ditherMode, ditherTechnique, perceptualSpace,
-                        (progress) => updateProgress(progress, 1, totalStages)
-                    );
-
-                    document.getElementById('single-output').style.display = 'none';
-                    document.getElementById('comparison-output').style.display = 'grid';
-
-                    const linearCanvas = document.getElementById('linear-canvas');
-                    linearCanvas.width = dstW;
-                    linearCanvas.height = dstH;
-                    linearCanvas.getContext('2d').putImageData(linearImageData, 0, 0);
-
-                    const srgbCanvas = document.getElementById('srgb-canvas');
-                    srgbCanvas.width = dstW;
-                    srgbCanvas.height = dstH;
-                    srgbCanvas.getContext('2d').putImageData(srgbImageData, 0, 0);
-                } else {
-                    document.getElementById('single-output').style.display = 'block';
-                    document.getElementById('comparison-output').style.display = 'none';
-
-                    const canvas = document.getElementById('output-canvas');
-                    canvas.width = dstW;
-                    canvas.height = dstH;
-                    canvas.getContext('2d').putImageData(linearImageData, 0, 0);
-                }
-
-                document.getElementById('output-info').textContent =
-                    `${originalWidth}x${originalHeight} → ${dstW}x${dstH}`;
-
-                outputSection.style.display = 'block';
-                document.getElementById('download-btn').disabled = false;
-
-            } catch (e) {
-                console.error('Processing failed:', e);
-                errorMsg.textContent = 'Processing failed: ' + e.message;
-                errorMsg.classList.add('visible');
-            } finally {
-                loading.classList.remove('active');
+            if (showComparison) {
+                // Set up comparison mode - will do linear first, then sRGB
+                pendingComparison = {
+                    stage: 'linear',
+                    params,
+                    linearResult: null
+                };
+            } else {
+                pendingComparison = null;
             }
+
+            // Start linear resize (correct way)
+            worker.postMessage({
+                type: 'resize',
+                imageData: inputImageData.data,
+                srcWidth: originalWidth,
+                srcHeight: originalHeight,
+                ...params
+            });
         }
 
         function downloadResult() {
@@ -730,13 +699,8 @@
             canvas.height = lastOutputHeight;
             const ctx = canvas.getContext('2d');
 
-            const imageData = new ImageData(lastOutputWidth, lastOutputHeight);
-            for (let i = 0; i < lastOutputWidth * lastOutputHeight; i++) {
-                imageData.data[i * 4] = lastLinearResult[i * 3];
-                imageData.data[i * 4 + 1] = lastLinearResult[i * 3 + 1];
-                imageData.data[i * 4 + 2] = lastLinearResult[i * 3 + 2];
-                imageData.data[i * 4 + 3] = 255;
-            }
+            // lastLinearResult is RGBA from worker
+            const imageData = new ImageData(new Uint8ClampedArray(lastLinearResult), lastOutputWidth, lastOutputHeight);
             ctx.putImageData(imageData, 0, 0);
 
             const link = document.createElement('a');
@@ -790,7 +754,7 @@
                 // Re-attach event listener to new input element
                 document.getElementById('file-input').addEventListener('change', handleFileSelect);
 
-                document.getElementById('process-btn').disabled = !wasmReady;
+                document.getElementById('process-btn').disabled = !workerReady;
                 document.getElementById('error-message').classList.remove('visible');
             } catch (err) {
                 document.getElementById('error-message').textContent = 'Failed to load image: ' + err.message;
@@ -846,7 +810,7 @@
         document.getElementById('perceptual-toggle').addEventListener('change', updatePerceptualMode);
 
         // Initialize
-        initWasm();
+        initWorker();
     </script>
 </body>
 </html>
