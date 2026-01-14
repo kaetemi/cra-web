@@ -14,6 +14,10 @@ if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
 
+# Enable SIMD optimizations for native targets
+# AVX2 provides significant speedup for image processing
+export RUSTFLAGS='-C target-feature=+avx2,+fma'
+
 # Ensure build targets are installed
 echo ""
 echo "[1/5] Checking build targets..."

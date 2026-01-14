@@ -18,12 +18,16 @@ fi
 # Step 1: Build WASM modules
 echo ""
 echo "[1/4] Building WASM modules..."
+
+# Enable SIMD for WASM builds
+export RUSTFLAGS='-C target-feature=+simd128'
+
 cd "$SCRIPT_DIR/dither"
 wasm-pack build --target web --release
 cd "$SCRIPT_DIR/port"
 wasm-pack build --target web --out-dir pkg
 cd "$SCRIPT_DIR"
-echo "WASM build complete."
+echo "WASM build complete (with SIMD enabled)."
 
 # Step 2: Create dist directory
 echo ""
