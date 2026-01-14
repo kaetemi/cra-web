@@ -365,6 +365,11 @@
             </div>
             <p class="output-info" id="output-info"></p>
         </div>
+
+        <div class="cli-command-section" id="cli-command-section" style="margin-top: 20px;">
+            <h4 style="margin-bottom: 10px; color: #555;">CLI command</h4>
+            <pre class="cli-command" id="cli-command" style="background: #1e1e1e; color: #9cdcfe; padding: 15px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></pre>
+        </div>
     </div>
 
     <script>
@@ -519,6 +524,74 @@
             document.getElementById('loading').classList.remove('active');
             document.getElementById('output-section').style.display = 'block';
             document.getElementById('download-btn').disabled = false;
+
+            // Update CLI command
+            const cliCommand = generateCliCommand();
+            document.getElementById('cli-command').textContent = cliCommand;
+        }
+
+        // Generate CLI command based on current settings
+        function generateCliCommand() {
+            const interpolation = parseInt(document.getElementById('interpolation').value);
+            const ditherMode = parseInt(document.getElementById('dither-mode').value);
+            const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
+            const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+
+            // Map interpolation to CLI names
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos' };
+
+            // Map dither mode values to CLI names
+            const modeMap = {
+                0: 'fs-standard',
+                1: 'fs-serpentine',
+                2: 'jjn-standard',
+                3: 'jjn-serpentine',
+                4: 'mixed-standard',
+                5: 'mixed-serpentine',
+                6: 'mixed-random'
+            };
+
+            // Map perceptual space values to CLI names
+            const spaceMap = {
+                0: 'lab-cie76',
+                1: 'oklab',
+                2: 'lab-cie94',
+                3: 'lab-ciede2000',
+                4: 'linear-rgb',
+                5: 'y-cb-cr'
+            };
+
+            // Use cra tool for resize (--histogram defaults to none when no --ref)
+            let cmd = 'cra -i input.png -o output.png';
+
+            // Add resize dimensions
+            if (primaryDimension === 'width') {
+                cmd += ` --width ${lastOutputWidth}`;
+            } else {
+                cmd += ` --height ${lastOutputHeight}`;
+            }
+
+            // Add scale method (only if not default lanczos)
+            if (interpolation === 0) {
+                cmd += ` --scale-method ${interpolationMap[interpolation]}`;
+            }
+
+            // Add dither mode (only if not default mixed-standard)
+            if (ditherMode !== 4) {
+                cmd += ` --output-dither ${modeMap[ditherMode]}`;
+            }
+
+            // Add colorspace if perceptual and not default oklab
+            if (isPerceptual && perceptualSpace !== 1) {
+                cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
+            }
+
+            // Add --no-color-aware-output if not using perceptual
+            if (!isPerceptual) {
+                cmd += ' --no-color-aware-output';
+            }
+
+            return cmd;
         }
 
         function loadImage(file) {

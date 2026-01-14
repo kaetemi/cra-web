@@ -827,7 +827,7 @@
         </div>
 
         <div class="cli-command-section" id="cli-command-section" style="margin-top: 20px;">
-            <h4 style="margin-bottom: 10px; color: #555;">Equivalent CLI Command</h4>
+            <h4 style="margin-bottom: 10px; color: #555;">CLI command</h4>
             <pre class="cli-command" id="cli-command" style="background: #1e1e1e; color: #9cdcfe; padding: 15px; border-radius: 8px; font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace; font-size: 13px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;"></pre>
         </div>
     </div>
@@ -1344,8 +1344,8 @@
                 5: 'y-cb-cr'
             };
 
-            // Use unified cra tool with --histogram none for dither-only mode
-            let cmd = 'cra -i input.png -o output.png --histogram none';
+            // Use cra tool for dither (--histogram defaults to none when no --ref)
+            let cmd = 'cra -i input.png -o output.png';
 
             // Add format
             if (isGrayscale) {
