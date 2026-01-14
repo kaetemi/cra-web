@@ -64,6 +64,83 @@ impl Default for OutputTechnique {
     }
 }
 
+/// Color correction method selection
+///
+/// Selects the algorithm and color space for histogram matching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorCorrectionMethod {
+    /// Basic histogram matching in LAB color space
+    /// Matches L, a, b channels independently
+    BasicLab {
+        /// If true, preserve original L channel (luminosity)
+        keep_luminosity: bool,
+    },
+    /// Basic histogram matching in RGB color space
+    /// Matches R, G, B channels independently
+    BasicRgb,
+    /// Basic histogram matching in OKLab color space
+    /// Matches L, a, b channels independently
+    /// OKLab provides better perceptual uniformity than LAB
+    BasicOklab {
+        /// If true, preserve original L channel (luminosity)
+        keep_luminosity: bool,
+    },
+    /// Chroma Rotation Averaging in LAB color space
+    /// Rotates the AB chroma plane at multiple angles, performs histogram
+    /// matching at each rotation, then averages the results
+    CraLab {
+        /// If true, preserve original L channel (luminosity)
+        keep_luminosity: bool,
+    },
+    /// Chroma Rotation Averaging in RGB color space
+    /// Rotates the RGB cube around the neutral gray axis (1,1,1)
+    CraRgb {
+        /// If true, use perceptual weighting for rotation averaging
+        use_perceptual: bool,
+    },
+    /// Chroma Rotation Averaging in OKLab color space
+    /// Like CRA LAB but uses OKLab for better perceptual uniformity
+    CraOklab {
+        /// If true, preserve original L channel (luminosity)
+        keep_luminosity: bool,
+    },
+    /// Tiled CRA in LAB color space
+    /// Divides image into overlapping tiles with Hamming window blending
+    TiledLab {
+        /// If true, process L channel per-tile before global match
+        tiled_luminosity: bool,
+    },
+    /// Tiled CRA in OKLab color space
+    /// Divides image into overlapping tiles with Hamming window blending
+    TiledOklab {
+        /// If true, process L channel per-tile before global match
+        tiled_luminosity: bool,
+    },
+}
+
+impl Default for ColorCorrectionMethod {
+    fn default() -> Self {
+        ColorCorrectionMethod::BasicOklab {
+            keep_luminosity: false,
+        }
+    }
+}
+
+/// Histogram mode for color correction
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HistogramMode {
+    /// uint8 binned histogram (256 bins)
+    /// Fastest, but quantizes to 256 levels
+    Binned,
+    /// f32 endpoint-aligned quantile matching
+    /// Preserves exact min/max of reference
+    #[default]
+    EndpointAligned,
+    /// f32 midpoint-aligned quantile matching
+    /// More statistically correct, doesn't force range expansion
+    MidpointAligned,
+}
+
 /// Dithering mode selection for color-space aware dithering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherMode {

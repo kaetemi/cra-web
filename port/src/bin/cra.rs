@@ -11,23 +11,20 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use cra_wasm::basic_lab::color_correct_basic_lab_linear;
-use cra_wasm::basic_oklab::color_correct_basic_oklab_linear;
-use cra_wasm::basic_rgb::color_correct_basic_rgb_linear;
 use cra_wasm::binary_format::{
     encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
     encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
 use cra_wasm::color::{linear_to_srgb_single, srgb_to_linear_single};
-use cra_wasm::cra_lab::{color_correct_cra_lab_linear, color_correct_cra_oklab_linear};
-use cra_wasm::cra_rgb::color_correct_cra_rgb_linear;
-use cra_wasm::dither::DitherMode as HistogramDitherMode;
+use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
-use cra_wasm::dither_common::{OutputTechnique, PerceptualSpace};
-use cra_wasm::output::{finalize_output, finalize_output_interleaved};
+use cra_wasm::dither_common::{
+    ColorCorrectionMethod, DitherMode, HistogramMode as LibHistogramMode, OutputTechnique,
+    PerceptualSpace,
+};
+use cra_wasm::output::finalize_output;
 use cra_wasm::pixel::Pixel4;
-use cra_wasm::tiled_lab::{color_correct_tiled_lab_linear, color_correct_tiled_oklab_linear};
 
 // ============================================================================
 // Enums
@@ -74,15 +71,15 @@ enum DitherMethod {
 }
 
 impl DitherMethod {
-    fn to_histogram_dither_mode(self) -> HistogramDitherMode {
+    fn to_dither_mode(self) -> DitherMode {
         match self {
-            DitherMethod::FsStandard => HistogramDitherMode::Standard,
-            DitherMethod::FsSerpentine => HistogramDitherMode::Serpentine,
-            DitherMethod::JjnStandard => HistogramDitherMode::JarvisStandard,
-            DitherMethod::JjnSerpentine => HistogramDitherMode::JarvisSerpentine,
-            DitherMethod::MixedStandard => HistogramDitherMode::MixedStandard,
-            DitherMethod::MixedSerpentine => HistogramDitherMode::MixedSerpentine,
-            DitherMethod::MixedRandom => HistogramDitherMode::MixedRandom,
+            DitherMethod::FsStandard => DitherMode::Standard,
+            DitherMethod::FsSerpentine => DitherMode::Serpentine,
+            DitherMethod::JjnStandard => DitherMode::JarvisStandard,
+            DitherMethod::JjnSerpentine => DitherMode::JarvisSerpentine,
+            DitherMethod::MixedStandard => DitherMode::MixedStandard,
+            DitherMethod::MixedSerpentine => DitherMode::MixedSerpentine,
+            DitherMethod::MixedRandom => DitherMode::MixedRandom,
         }
     }
 
@@ -111,11 +108,11 @@ enum HistogramMode {
 }
 
 impl HistogramMode {
-    fn to_u8(self) -> u8 {
+    fn to_lib_mode(self) -> LibHistogramMode {
         match self {
-            HistogramMode::Binned => 0,
-            HistogramMode::F32Endpoint => 1,
-            HistogramMode::F32Midpoint => 2,
+            HistogramMode::Binned => LibHistogramMode::Binned,
+            HistogramMode::F32Endpoint => LibHistogramMode::EndpointAligned,
+            HistogramMode::F32Midpoint => LibHistogramMode::MidpointAligned,
         }
     }
 }
@@ -165,6 +162,26 @@ impl ScaleMethod {
             ScaleMethod::Bilinear => cra_wasm::rescale::RescaleMethod::Bilinear,
             ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
         }
+    }
+}
+
+/// Build ColorCorrectionMethod from CLI arguments
+fn build_correction_method(
+    method: Method,
+    keep_luminosity: bool,
+    tiled_luminosity: bool,
+    use_perceptual: bool,
+) -> Option<ColorCorrectionMethod> {
+    match method {
+        Method::None => None,
+        Method::BasicLab => Some(ColorCorrectionMethod::BasicLab { keep_luminosity }),
+        Method::BasicRgb => Some(ColorCorrectionMethod::BasicRgb),
+        Method::BasicOklab => Some(ColorCorrectionMethod::BasicOklab { keep_luminosity }),
+        Method::CraLab => Some(ColorCorrectionMethod::CraLab { keep_luminosity }),
+        Method::CraRgb => Some(ColorCorrectionMethod::CraRgb { use_perceptual }),
+        Method::CraOklab => Some(ColorCorrectionMethod::CraOklab { keep_luminosity }),
+        Method::TiledLab => Some(ColorCorrectionMethod::TiledLab { tiled_luminosity }),
+        Method::TiledOklab => Some(ColorCorrectionMethod::TiledOklab { tiled_luminosity }),
     }
 }
 
@@ -549,10 +566,21 @@ fn main() -> Result<(), String> {
         ColorSpace::Oklab
     });
 
-    let histogram_mode = args.histogram_mode.to_u8();
-    let histogram_dither = args.histogram_dither.to_histogram_dither_mode();
-    let histogram_distance_space = args.histogram_distance_space.to_perceptual_space();
+    let histogram_options = HistogramOptions {
+        mode: args.histogram_mode.to_lib_mode(),
+        dither_mode: args.histogram_dither.to_dither_mode(),
+        color_aware: args.color_aware_histogram,
+        color_aware_space: args.histogram_distance_space.to_perceptual_space(),
+    };
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
+
+    // Build the correction method (None if method is None)
+    let correction_method = build_correction_method(
+        method,
+        args.keep_luminosity,
+        args.tiled_luminosity,
+        args.perceptual,
+    );
 
     if args.verbose {
         eprintln!("Method: {:?}", method);
@@ -638,90 +666,17 @@ fn main() -> Result<(), String> {
         let ref_width_usize = ref_width as usize;
         let ref_height_usize = ref_height as usize;
 
-        // Apply color correction (operates in linear RGB, returns linear RGB Pixel4)
-        // For functions not yet refactored to Pixel4, convert to/from channels
-        let output_pixels: Vec<Pixel4> = match method {
-            Method::None => unreachable!(),
-            Method::BasicLab => color_correct_basic_lab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.keep_luminosity,
-                histogram_mode,
-                histogram_dither,
-            ),
-            Method::BasicRgb => color_correct_basic_rgb_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                histogram_mode,
-                histogram_dither,
-            ),
-            Method::BasicOklab => color_correct_basic_oklab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.keep_luminosity,
-                histogram_mode,
-                histogram_dither,
-            ),
-            Method::CraLab => color_correct_cra_lab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.keep_luminosity,
-                histogram_mode,
-                histogram_dither,
-                args.color_aware_histogram,
-                histogram_distance_space,
-            ),
-            Method::CraRgb => color_correct_cra_rgb_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.perceptual,
-                histogram_mode,
-                histogram_dither,
-            ),
-            Method::CraOklab => color_correct_cra_oklab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.keep_luminosity,
-                histogram_mode,
-                histogram_dither,
-                args.color_aware_histogram,
-                histogram_distance_space,
-            ),
-            Method::TiledLab => color_correct_tiled_lab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.tiled_luminosity,
-                histogram_mode,
-                histogram_dither,
-                args.color_aware_histogram,
-                histogram_distance_space,
-            ),
-            Method::TiledOklab => color_correct_tiled_oklab_linear(
-                &input_pixels,
-                &ref_pixels,
-                width_usize, height_usize,
-                ref_width_usize, ref_height_usize,
-                args.tiled_luminosity,
-                histogram_mode,
-                histogram_dither,
-                args.color_aware_histogram,
-                histogram_distance_space,
-            ),
-        };
+        // Apply color correction using unified API
+        let output_pixels = color_correct(
+            &input_pixels,
+            &ref_pixels,
+            width_usize,
+            height_usize,
+            ref_width_usize,
+            ref_height_usize,
+            correction_method.expect("Method should not be None when reference is provided"),
+            histogram_options,
+        );
 
         // Now dither linear RGB to sRGB output
         if format.is_grayscale {

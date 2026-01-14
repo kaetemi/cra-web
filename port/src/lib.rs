@@ -13,6 +13,7 @@ pub mod color;
 mod color_distance;
 pub mod colorspace_derived;
 pub mod colorspace_primary;
+pub mod correction;
 pub mod cra_lab;
 pub mod cra_rgb;
 pub mod dither;
@@ -765,6 +766,147 @@ pub fn color_correct_tiled_oklab(
         perceptual_space_from_u8(histogram_distance_space),
     );
 
+    output::finalize_to_srgb_u8_with_options(
+        &mut result,
+        input_width,
+        input_height,
+        Some(dither_mode_from_u8(output_dither_mode)),
+        color_aware_output,
+        perceptual_space_from_u8(output_distance_space),
+        0, // seed
+    )
+}
+
+// ============================================================================
+// Unified Color Correction API (WASM export)
+// ============================================================================
+
+/// Convert u8 to ColorCorrectionMethod for WASM interface
+/// 0 = BasicLab (keep_luminosity = luminosity_flag)
+/// 1 = BasicRgb
+/// 2 = BasicOklab (keep_luminosity = luminosity_flag)
+/// 3 = CraLab (keep_luminosity = luminosity_flag)
+/// 4 = CraRgb (use_perceptual = luminosity_flag)
+/// 5 = CraOklab (keep_luminosity = luminosity_flag)
+/// 6 = TiledLab (tiled_luminosity = luminosity_flag)
+/// 7 = TiledOklab (tiled_luminosity = luminosity_flag)
+fn correction_method_from_u8(
+    method: u8,
+    luminosity_flag: bool,
+) -> dither_common::ColorCorrectionMethod {
+    use dither_common::ColorCorrectionMethod;
+    match method {
+        0 => ColorCorrectionMethod::BasicLab {
+            keep_luminosity: luminosity_flag,
+        },
+        1 => ColorCorrectionMethod::BasicRgb,
+        2 => ColorCorrectionMethod::BasicOklab {
+            keep_luminosity: luminosity_flag,
+        },
+        3 => ColorCorrectionMethod::CraLab {
+            keep_luminosity: luminosity_flag,
+        },
+        4 => ColorCorrectionMethod::CraRgb {
+            use_perceptual: luminosity_flag,
+        },
+        5 => ColorCorrectionMethod::CraOklab {
+            keep_luminosity: luminosity_flag,
+        },
+        6 => ColorCorrectionMethod::TiledLab {
+            tiled_luminosity: luminosity_flag,
+        },
+        _ => ColorCorrectionMethod::TiledOklab {
+            tiled_luminosity: luminosity_flag,
+        },
+    }
+}
+
+/// Convert u8 to HistogramMode for WASM interface
+/// 0 = Binned (uint8 256-bin histogram)
+/// 1 = EndpointAligned (f32, preserves reference min/max)
+/// 2 = MidpointAligned (f32, statistically correct quantiles)
+fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
+    use dither_common::HistogramMode;
+    match mode {
+        0 => HistogramMode::Binned,
+        2 => HistogramMode::MidpointAligned,
+        _ => HistogramMode::EndpointAligned,
+    }
+}
+
+/// Unified color correction (WASM export)
+///
+/// Single entry point for all color correction methods. Takes sRGB uint8 input
+/// and returns sRGB uint8 output.
+///
+/// Args:
+///     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+///     input_width, input_height: Input image dimensions
+///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+///     ref_width, ref_height: Reference image dimensions
+///     method: Color correction method (0-7, see correction_method_from_u8)
+///     luminosity_flag: Method-specific flag (keep_luminosity, use_perceptual, or tiled_luminosity)
+///     histogram_mode: 0 = binned, 1 = endpoint-aligned, 2 = midpoint-aligned
+///     histogram_dither_mode: Dither mode for histogram processing (0-6)
+///     color_aware_histogram: Enable color-aware histogram dithering (CRA/Tiled only)
+///     histogram_distance_space: Perceptual space for histogram dithering (0-5)
+///     output_dither_mode: Dither mode for final RGB output (0-6)
+///     color_aware_output: Enable color-aware output dithering
+///     output_distance_space: Perceptual space for output dithering (0-5)
+///
+/// Returns:
+///     Output image as sRGB uint8 (RGBRGB...)
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn color_correct_wasm(
+    input_data: &[u8],
+    input_width: usize,
+    input_height: usize,
+    ref_data: &[u8],
+    ref_width: usize,
+    ref_height: usize,
+    method: u8,
+    luminosity_flag: bool,
+    histogram_mode: u8,
+    histogram_dither_mode: u8,
+    color_aware_histogram: bool,
+    histogram_distance_space: u8,
+    output_dither_mode: u8,
+    color_aware_output: bool,
+    output_distance_space: u8,
+) -> Vec<u8> {
+    use correction::HistogramOptions;
+
+    // Convert sRGB u8 to Pixel4 linear RGB
+    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
+    color::srgb_255_to_linear_inplace(&mut input_pixels);
+    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
+    color::srgb_255_to_linear_inplace(&mut ref_pixels);
+
+    // Build method enum
+    let correction_method = correction_method_from_u8(method, luminosity_flag);
+
+    // Build histogram options
+    let histogram_options = HistogramOptions {
+        mode: histogram_mode_from_u8(histogram_mode),
+        dither_mode: dither_mode_from_u8(histogram_dither_mode),
+        color_aware: color_aware_histogram,
+        color_aware_space: perceptual_space_from_u8(histogram_distance_space),
+    };
+
+    // Perform color correction
+    let mut result = correction::color_correct(
+        &input_pixels,
+        &ref_pixels,
+        input_width,
+        input_height,
+        ref_width,
+        ref_height,
+        correction_method,
+        histogram_options,
+    );
+
+    // Finalize to sRGB u8 output
     output::finalize_to_srgb_u8_with_options(
         &mut result,
         input_width,
