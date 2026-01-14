@@ -455,13 +455,15 @@
                     pendingComparison.linearResult = imageData;
                     pendingComparison.stage = 'srgb';
 
-                    // Start sRGB (bad) resize
+                    // Start sRGB (bad) resize - use simple Floyd-Steinberg without color-awareness
                     worker.postMessage({
                         type: 'resize-srgb',
                         imageData: inputImageData.data,
                         srcWidth: originalWidth,
                         srcHeight: originalHeight,
-                        ...pendingComparison.params
+                        ...pendingComparison.params,
+                        ditherMode: 0,        // Floyd-Steinberg standard (not mixed)
+                        ditherTechnique: 1    // PerChannel (not ColorAware)
                     });
                 } else {
                     // Both done - display comparison
