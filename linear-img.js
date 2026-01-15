@@ -402,27 +402,32 @@ class LinearImg extends HTMLElement {
             return;
         }
 
-        // Check cache
+        // Check cache (only for WASM path - GPU is fast enough to skip caching)
         const cacheKey = getCacheKey(this._src, outputWidth, outputHeight, this._method, dpr);
-        const cached = resultCache.get(cacheKey);
-        if (cached) {
-            this._displayResult(cached, outputWidth, outputHeight, dpr);
-            return;
+        const willUseGPU = this._method === 'lanczos' && gpuAvailable !== false && this._sourceImageData;
+        if (!willUseGPU) {
+            const cached = resultCache.get(cacheKey);
+            if (cached) {
+                this._displayResult(cached, outputWidth, outputHeight, dpr);
+                return;
+            }
         }
 
         this._processing = true;
 
         try {
             let imageData;
+            let usedGPU = false;
 
             // Try GPU path for Lanczos (GPU only supports Lanczos, not bilinear)
             const gpu = this._method === 'lanczos' ? await getGPU() : null;
 
             if (gpu && this._sourceImageData) {
-                // Use WebGPU acceleration
+                // Use WebGPU acceleration (no caching - GPU is fast enough)
                 console.log('[linear-img] Resizing (GPU):', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
 
                 imageData = await gpu.resize(this._sourceImageData, outputWidth, outputHeight);
+                usedGPU = true;
             } else {
                 // Fall back to WASM worker
                 console.log('[linear-img] Resizing (WASM):', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
@@ -443,7 +448,10 @@ class LinearImg extends HTMLElement {
                 );
             }
 
-            cacheResult(cacheKey, imageData);
+            // Only cache WASM results (GPU is fast enough to not need caching)
+            if (!usedGPU) {
+                cacheResult(cacheKey, imageData);
+            }
 
             // Display if dimensions and DPR still match
             const { outputWidth: currentW, outputHeight: currentH, dpr: currentDpr } = this._calculateOutputDimensions();
@@ -453,7 +461,7 @@ class LinearImg extends HTMLElement {
             }
 
             this.dispatchEvent(new CustomEvent('load', {
-                detail: { width: outputWidth, height: outputHeight, dpr, backend: gpu ? 'gpu' : 'wasm' }
+                detail: { width: outputWidth, height: outputHeight, dpr, backend: usedGPU ? 'gpu' : 'wasm' }
             }));
 
         } catch (err) {
