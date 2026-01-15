@@ -92,15 +92,16 @@ pub fn linear_rgb_to_luminance(r: f32, g: f32, b: f32) -> f32 {
     r * cs::YCBCR_KR + g * cs::YCBCR_KG + b * cs::YCBCR_KB
 }
 
-/// Convert linear RGB Pixel4 array (0-1 range) to grayscale (sRGB 0-255)
+/// Convert linear RGB Pixel4 array (0-1 range) to linear grayscale (0-1)
 ///
-/// Pipeline: linear RGB -> luminance (Rec.709) -> sRGB -> scale to 0-255
+/// Only computes luminance using Rec.709 coefficients.
+/// Does NOT apply gamma correction or denormalization.
+/// Use linear_to_srgb_single + denormalize separately for sRGB output.
 pub fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
     let mut gray = Vec::with_capacity(pixels.len());
 
     for p in pixels {
-        let luminance = linear_rgb_to_luminance(p[0], p[1], p[2]);
-        gray.push(linear_to_srgb_single(luminance) * 255.0);
+        gray.push(linear_rgb_to_luminance(p[0], p[1], p[2]));
     }
 
     gray
@@ -494,21 +495,21 @@ fn srgb_255_to_linear_pixel(p: Pixel4) -> Pixel4 {
     ]
 }
 
-/// Convert linear RGB pixels to sRGB scaled 0-255 in-place
-pub fn linear_to_srgb_255_inplace(pixels: &mut [Pixel4]) {
+/// Normalize pixels from 0-255 to 0-1 range in-place
+pub fn normalize_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
-        p[0] = (linear_to_srgb_single(p[0]) * 255.0).clamp(0.0, 255.0);
-        p[1] = (linear_to_srgb_single(p[1]) * 255.0).clamp(0.0, 255.0);
-        p[2] = (linear_to_srgb_single(p[2]) * 255.0).clamp(0.0, 255.0);
+        p[0] /= 255.0;
+        p[1] /= 255.0;
+        p[2] /= 255.0;
     }
 }
 
-/// Convert sRGB pixels (0-255) to linear RGB (0-1) in-place
-pub fn srgb_255_to_linear_inplace(pixels: &mut [Pixel4]) {
+/// Denormalize pixels from 0-1 to 0-255 range in-place
+pub fn denormalize_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
-        p[0] = srgb_to_linear_single(p[0] / 255.0);
-        p[1] = srgb_to_linear_single(p[1] / 255.0);
-        p[2] = srgb_to_linear_single(p[2] / 255.0);
+        p[0] = (p[0] * 255.0).clamp(0.0, 255.0);
+        p[1] = (p[1] * 255.0).clamp(0.0, 255.0);
+        p[2] = (p[2] * 255.0).clamp(0.0, 255.0);
     }
 }
 

@@ -15,7 +15,7 @@ use cra_wasm::binary_format::{
     encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
     encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
-use cra_wasm::color::{linear_pixels_to_grayscale, srgb_to_linear_single};
+use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -333,15 +333,27 @@ fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32,
     }
 
     // Convert sRGB u8 to linear RGB Pixel4
+    // Step 1: Unpack u8 to f32 (0-255)
+    // Step 2: Normalize f32 (0-255 -> 0-1)
+    // Step 3: sRGB gamma to linear (0-1 -> 0-1)
     let pixel_count = (width * height) as usize;
     let mut pixels = Vec::with_capacity(pixel_count);
 
     for i in 0..pixel_count {
-        // Normalize to 0-1 then convert sRGB to linear
-        let r = srgb_to_linear_single(data[i * 3] as f32 / 255.0);
-        let g = srgb_to_linear_single(data[i * 3 + 1] as f32 / 255.0);
-        let b = srgb_to_linear_single(data[i * 3 + 2] as f32 / 255.0);
-        pixels.push([r, g, b, 0.0]);
+        // Unpack u8 to f32, normalize 0-255 to 0-1, then convert sRGB to linear
+        let r_255 = data[i * 3] as f32;
+        let g_255 = data[i * 3 + 1] as f32;
+        let b_255 = data[i * 3 + 2] as f32;
+
+        let r_norm = r_255 / 255.0;
+        let g_norm = g_255 / 255.0;
+        let b_norm = b_255 / 255.0;
+
+        let r_linear = srgb_to_linear_single(r_norm);
+        let g_linear = srgb_to_linear_single(g_norm);
+        let b_linear = srgb_to_linear_single(b_norm);
+
+        pixels.push([r_linear, g_linear, b_linear, 0.0]);
     }
 
     Ok((pixels, width, height))
@@ -484,9 +496,19 @@ fn dither_pixels(
     let pixel_count = width * height;
 
     if format.is_grayscale {
-        let gray = linear_pixels_to_grayscale(&pixels);
+        // Step 1: Convert linear RGB to linear grayscale (luminance only)
+        let linear_gray = linear_pixels_to_grayscale(&pixels);
+
+        // Step 2: Convert linear to sRGB (gamma)
+        // Step 3: Denormalize to 0-255
+        let srgb_gray: Vec<f32> = linear_gray
+            .iter()
+            .map(|&l| linear_to_srgb_single(l) * 255.0)
+            .collect();
+
+        // Step 4: Dither grayscale
         let gray_out = dither_grayscale(
-            &gray, width, height, format.bits_r, colorspace, dither_mode, seed,
+            &srgb_gray, width, height, format.bits_r, colorspace, dither_mode, seed,
         );
         DitherResult {
             interleaved: gray_out.clone(),

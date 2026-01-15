@@ -372,10 +372,16 @@ pub fn color_correct_wasm(
     use correction::HistogramOptions;
 
     // Convert sRGB u8 to Pixel4 linear RGB
+    // Step 1: Unpack u8 to Pixel4 (0-255)
+    // Step 2: Normalize (0-255 -> 0-1)
+    // Step 3: sRGB to linear (gamma conversion)
     let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::srgb_255_to_linear_inplace(&mut input_pixels);
+    color::normalize_inplace(&mut input_pixels);
+    color::srgb_to_linear_inplace(&mut input_pixels);
+
     let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::srgb_255_to_linear_inplace(&mut ref_pixels);
+    color::normalize_inplace(&mut ref_pixels);
+    color::srgb_to_linear_inplace(&mut ref_pixels);
 
     // Build method enum
     let correction_method = correction_method_from_u8(method, luminosity_flag);
@@ -629,9 +635,11 @@ pub fn encode_channel_row_aligned_stride_wasm(
 // Pipeline: u8 → unpack → sRGB f32 → linear → [process] → sRGB f32 → dither/pack
 //
 // Functions:
-// - unpack_u8_to_f32_wasm: u8 → sRGB f32 (no color conversion)
-// - srgb_to_linear_f32_wasm: sRGB f32 → linear f32
-// - linear_to_srgb_f32_wasm: linear f32 → sRGB f32
+// - unpack_u8_to_f32_wasm: u8 0-255 → f32 0-255 (type conversion only)
+// - normalize_f32_wasm: f32 0-255 → f32 0-1 (normalization only)
+// - denormalize_f32_wasm: f32 0-1 → f32 0-255 (denormalization only)
+// - srgb_to_linear_f32_wasm: f32 0-1 sRGB → f32 0-1 linear (gamma only)
+// - linear_to_srgb_f32_wasm: f32 0-1 linear → f32 0-1 sRGB (gamma only)
 // - linear_rgb_to_grayscale_wasm: linear RGB → linear L
 // - histogram_match_channel_wasm: single channel histogram matching
 // - histogram_match_rgb_wasm: RGB histogram matching (3 channels)
@@ -639,7 +647,7 @@ pub fn encode_channel_row_aligned_stride_wasm(
 // The only time linear conversion is skipped is when there's no processing
 // (dither only).
 
-/// Unpack u8 image data to f32 (no color space conversion)
+/// Unpack u8 image data to f32 (no normalization, no color space conversion)
 /// Input: interleaved RGB u8 (0-255)
 /// Output: interleaved RGB f32 (0-255 scale, still sRGB)
 #[wasm_bindgen]
@@ -656,8 +664,42 @@ pub fn unpack_u8_to_f32_wasm(data: Vec<u8>, width: usize, height: usize) -> Vec<
     result
 }
 
-/// Convert sRGB f32 (0-255) to linear RGB f32 (0-1)
-/// Input: interleaved RGB f32 (0-255 scale, sRGB)
+/// Normalize f32 from 0-255 to 0-1 range (no color space conversion)
+/// Input: interleaved RGB f32 (0-255 scale)
+/// Output: interleaved RGB f32 (0-1 scale)
+#[wasm_bindgen]
+pub fn normalize_f32_wasm(data: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut result = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        result[i * 3] = data[i * 3] / 255.0;
+        result[i * 3 + 1] = data[i * 3 + 1] / 255.0;
+        result[i * 3 + 2] = data[i * 3 + 2] / 255.0;
+    }
+
+    result
+}
+
+/// Denormalize f32 from 0-1 to 0-255 range (no color space conversion)
+/// Input: interleaved RGB f32 (0-1 scale)
+/// Output: interleaved RGB f32 (0-255 scale)
+#[wasm_bindgen]
+pub fn denormalize_f32_wasm(data: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
+    let pixels = width * height;
+    let mut result = vec![0.0f32; pixels * 3];
+
+    for i in 0..pixels {
+        result[i * 3] = data[i * 3] * 255.0;
+        result[i * 3 + 1] = data[i * 3 + 1] * 255.0;
+        result[i * 3 + 2] = data[i * 3 + 2] * 255.0;
+    }
+
+    result
+}
+
+/// Convert sRGB f32 (0-1) to linear RGB f32 (0-1)
+/// Input: interleaved RGB f32 (0-1 scale, sRGB)
 /// Output: interleaved RGB f32 (0-1 scale, linear)
 #[wasm_bindgen]
 pub fn srgb_to_linear_f32_wasm(srgb: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
@@ -665,26 +707,26 @@ pub fn srgb_to_linear_f32_wasm(srgb: Vec<f32>, width: usize, height: usize) -> V
     let mut linear = vec![0.0f32; pixels * 3];
 
     for i in 0..pixels {
-        linear[i * 3] = color::srgb_to_linear_single(srgb[i * 3] / 255.0);
-        linear[i * 3 + 1] = color::srgb_to_linear_single(srgb[i * 3 + 1] / 255.0);
-        linear[i * 3 + 2] = color::srgb_to_linear_single(srgb[i * 3 + 2] / 255.0);
+        linear[i * 3] = color::srgb_to_linear_single(srgb[i * 3]);
+        linear[i * 3 + 1] = color::srgb_to_linear_single(srgb[i * 3 + 1]);
+        linear[i * 3 + 2] = color::srgb_to_linear_single(srgb[i * 3 + 2]);
     }
 
     linear
 }
 
-/// Convert linear RGB f32 (0-1) to sRGB f32 (0-255)
+/// Convert linear RGB f32 (0-1) to sRGB f32 (0-1)
 /// Input: interleaved RGB f32 (0-1 scale, linear)
-/// Output: interleaved RGB f32 (0-255 scale, sRGB)
+/// Output: interleaved RGB f32 (0-1 scale, sRGB)
 #[wasm_bindgen]
 pub fn linear_to_srgb_f32_wasm(linear: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
     let pixels = width * height;
     let mut srgb = vec![0.0f32; pixels * 3];
 
     for i in 0..pixels {
-        srgb[i * 3] = color::linear_to_srgb_single(linear[i * 3]) * 255.0;
-        srgb[i * 3 + 1] = color::linear_to_srgb_single(linear[i * 3 + 1]) * 255.0;
-        srgb[i * 3 + 2] = color::linear_to_srgb_single(linear[i * 3 + 2]) * 255.0;
+        srgb[i * 3] = color::linear_to_srgb_single(linear[i * 3]);
+        srgb[i * 3 + 1] = color::linear_to_srgb_single(linear[i * 3 + 1]);
+        srgb[i * 3 + 2] = color::linear_to_srgb_single(linear[i * 3 + 2]);
     }
 
     srgb
@@ -709,15 +751,23 @@ pub fn linear_rgb_to_grayscale_wasm(linear_rgb: Vec<f32>, width: usize, height: 
     gray
 }
 
-/// Convert linear grayscale (0-1) to sRGB grayscale (0-255)
+/// Convert linear grayscale (0-1) to sRGB grayscale (0-1)
 /// Input: single channel f32 (0-1 scale, linear)
-/// Output: single channel f32 (0-255 scale, sRGB)
+/// Output: single channel f32 (0-1 scale, sRGB)
 #[wasm_bindgen]
 pub fn linear_gray_to_srgb_f32_wasm(linear_gray: Vec<f32>) -> Vec<f32> {
     linear_gray
         .iter()
-        .map(|&l| color::linear_to_srgb_single(l) * 255.0)
+        .map(|&l| color::linear_to_srgb_single(l))
         .collect()
+}
+
+/// Denormalize grayscale f32 from 0-1 to 0-255 range
+/// Input: single channel f32 (0-1 scale)
+/// Output: single channel f32 (0-255 scale)
+#[wasm_bindgen]
+pub fn denormalize_gray_f32_wasm(gray: Vec<f32>) -> Vec<f32> {
+    gray.iter().map(|&g| g * 255.0).collect()
 }
 
 // ============================================================================

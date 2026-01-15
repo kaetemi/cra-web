@@ -62,13 +62,16 @@ function processResize(params) {
             rgbData[i * 3 + 2] = imageData[i * 4 + 2];
         }
 
-        // Step 1: Unpack u8 to f32
-        const srgbF32 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
+        // Step 1: Unpack u8 to f32 (0-255)
+        const srgbF32_255 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
 
-        // Step 2: Convert to linear
+        // Step 2: Normalize to 0-1
+        const srgbF32 = craWasm.normalize_f32_wasm(srgbF32_255, srcWidth, srcHeight);
+
+        // Step 3: Convert sRGB to linear
         const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbF32, srcWidth, srcHeight);
 
-        // Step 3: Rescale in linear space with progress
+        // Step 4: Rescale in linear space with progress
         const linearResized = craWasm.rescale_linear_rgb_with_progress_wasm(
             linearRgb,
             srcWidth, srcHeight,
@@ -80,14 +83,17 @@ function processResize(params) {
 
         sendProgress(85);
 
-        // Step 4: Convert back to sRGB
+        // Step 5: Convert linear back to sRGB (0-1)
         const srgbResized = craWasm.linear_to_srgb_f32_wasm(linearResized, dstWidth, dstHeight);
+
+        // Step 6: Denormalize to 0-255
+        const srgbResized_255 = craWasm.denormalize_f32_wasm(srgbResized, dstWidth, dstHeight);
 
         sendProgress(90);
 
-        // Step 5: Dither to RGB888
+        // Step 7: Dither to RGB888
         const dithered = craWasm.dither_output_wasm(
-            srgbResized,
+            srgbResized_255,
             dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,
@@ -145,10 +151,13 @@ function processSrgbResize(params) {
             rgbData[i * 3 + 2] = imageData[i * 4 + 2];
         }
 
-        // Step 1: Unpack u8 to f32 (sRGB values)
-        const srgbF32 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
+        // Step 1: Unpack u8 to f32 (0-255)
+        const srgbF32_255 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
 
-        // Step 2: WRONG - rescale directly in sRGB space
+        // Step 2: Normalize to 0-1 (still sRGB)
+        const srgbF32 = craWasm.normalize_f32_wasm(srgbF32_255, srcWidth, srcHeight);
+
+        // Step 3: WRONG - rescale directly in sRGB space (no linear conversion)
         const srgbResized = craWasm.rescale_linear_rgb_with_progress_wasm(
             srgbF32,
             srcWidth, srcHeight,
@@ -158,11 +167,14 @@ function processSrgbResize(params) {
             (progress) => sendProgress(Math.round(progress * 80))
         );
 
+        // Step 4: Denormalize to 0-255
+        const srgbResized_255 = craWasm.denormalize_f32_wasm(srgbResized, dstWidth, dstHeight);
+
         sendProgress(90);
 
-        // Step 3: Dither to RGB888
+        // Step 5: Dither to RGB888
         const dithered = craWasm.dither_output_wasm(
-            srgbResized,
+            srgbResized_255,
             dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,

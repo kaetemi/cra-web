@@ -7,7 +7,7 @@
 /// The primary API is `finalize_output` which takes linear RGB and an `OutputTechnique`
 /// enum to select the dithering method.
 
-use crate::color::{interleave_rgb_u8, linear_to_srgb_255_inplace};
+use crate::color::{denormalize_inplace, interleave_rgb_u8, linear_to_srgb_inplace};
 use crate::dither::{dither_with_mode, dither_with_mode_bits, DitherMode};
 use crate::dither_colorspace_aware::{
     colorspace_aware_dither_rgb_channels, colorspace_aware_dither_rgb_with_mode,
@@ -26,7 +26,8 @@ use crate::pixel::{pixels_to_channels, pixels_to_srgb_u8, Pixel4};
 ///     Interleaved sRGB uint8 data (RGBRGB...)
 pub fn finalize_to_srgb_u8(pixels: &mut [Pixel4]) -> Vec<u8> {
     // Convert linear to sRGB 0-255 in place
-    linear_to_srgb_255_inplace(pixels);
+    linear_to_srgb_inplace(pixels);
+    denormalize_inplace(pixels);
 
     // Convert to u8 output
     pixels_to_srgb_u8(pixels)
@@ -50,7 +51,8 @@ pub fn finalize_to_srgb_u8_dithered(
     seed: u32,
 ) -> Vec<u8> {
     // Convert linear to sRGB 0-255 in place
-    linear_to_srgb_255_inplace(pixels);
+    linear_to_srgb_inplace(pixels);
+    denormalize_inplace(pixels);
 
     // Extract channels for dithering
     let (r_scaled, g_scaled, b_scaled) = pixels_to_channels(pixels);
@@ -86,7 +88,8 @@ pub fn finalize_to_srgb_u8_color_aware(
     seed: u32,
 ) -> Vec<u8> {
     // Convert linear to sRGB 0-255 in place
-    linear_to_srgb_255_inplace(pixels);
+    linear_to_srgb_inplace(pixels);
+    denormalize_inplace(pixels);
 
     // Extract channels for color-aware dithering
     let (r_scaled, g_scaled, b_scaled) = pixels_to_channels(pixels);
@@ -260,7 +263,8 @@ pub fn finalize_output(
     seed: u32,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     // Convert linear RGB to sRGB 0-255 in place
-    linear_to_srgb_255_inplace(pixels);
+    linear_to_srgb_inplace(pixels);
+    denormalize_inplace(pixels);
 
     // Apply dithering
     dither_output(pixels, width, height, bits_r, bits_g, bits_b, technique, seed)
