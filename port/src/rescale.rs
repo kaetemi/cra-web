@@ -322,7 +322,19 @@ pub fn rescale_rgb_interleaved(
     rescale_rgb_interleaved_with_progress(src, src_width, src_height, dst_width, dst_height, method, scale_mode, None)
 }
 
+/// Check if a number is a power of 2
+#[inline]
+fn is_power_of_2(n: usize) -> bool {
+    n > 0 && (n & (n - 1)) == 0
+}
+
 /// Calculate target dimensions preserving aspect ratio
+///
+/// When both width and height are specified, checks if they're within 1 pixel
+/// of uniform aspect ratio. If so, picks the "best" primary dimension:
+/// 1. Power of 2 takes precedence
+/// 2. Clean division of source dimension takes precedence
+/// 3. Otherwise, largest dimension is primary
 pub fn calculate_target_dimensions(
     src_width: usize,
     src_height: usize,
@@ -330,7 +342,47 @@ pub fn calculate_target_dimensions(
     target_height: Option<usize>,
 ) -> (usize, usize) {
     match (target_width, target_height) {
-        (Some(w), Some(h)) => (w, h),
+        (Some(w), Some(h)) => {
+            // Calculate what uniform AR would give us from each dimension
+            let h_from_w = (w as f64 * src_height as f64 / src_width as f64).round() as usize;
+            let w_from_h = (h as f64 * src_width as f64 / src_height as f64).round() as usize;
+
+            // Check if both dimensions are within 1 pixel of uniform AR
+            let h_close = (h as isize - h_from_w as isize).abs() <= 1;
+            let w_close = (w as isize - w_from_h as isize).abs() <= 1;
+
+            if h_close || w_close {
+                // Pick the best primary dimension
+                let width_is_pow2 = is_power_of_2(w);
+                let height_is_pow2 = is_power_of_2(h);
+                let width_divides = src_width % w == 0;
+                let height_divides = src_height % h == 0;
+
+                let use_width_as_primary = if width_is_pow2 && !height_is_pow2 {
+                    true
+                } else if height_is_pow2 && !width_is_pow2 {
+                    false
+                } else if width_divides && !height_divides {
+                    true
+                } else if height_divides && !width_divides {
+                    false
+                } else {
+                    // Default: use larger dimension as primary
+                    w >= h
+                };
+
+                if use_width_as_primary {
+                    let aspect = src_height as f64 / src_width as f64;
+                    (w, (w as f64 * aspect).round() as usize)
+                } else {
+                    let aspect = src_width as f64 / src_height as f64;
+                    ((h as f64 * aspect).round() as usize, h)
+                }
+            } else {
+                // Dimensions are too different from AR - use exact values (intentional distortion)
+                (w, h)
+            }
+        }
         (Some(w), None) => {
             let aspect = src_height as f64 / src_width as f64;
             (w, (w as f64 * aspect).round() as usize)
@@ -625,7 +677,7 @@ mod tests {
         assert_eq!(w, 50);
         assert_eq!(h, 25);
 
-        // Both
+        // Both - exact AR match, larger dimension (width) is primary
         let (w, h) = calculate_target_dimensions(100, 50, Some(200), Some(100));
         assert_eq!(w, 200);
         assert_eq!(h, 100);
@@ -634,6 +686,57 @@ mod tests {
         let (w, h) = calculate_target_dimensions(100, 50, None, None);
         assert_eq!(w, 100);
         assert_eq!(h, 50);
+    }
+
+    #[test]
+    fn test_calculate_dimensions_smart_primary() {
+        // Power of 2 takes precedence: height=256 is pow2, width=512 is also pow2
+        // Both pow2 -> larger wins, so width=512 is primary
+        let (w, h) = calculate_target_dimensions(1024, 512, Some(512), Some(256));
+        assert_eq!(w, 512);
+        assert_eq!(h, 256);
+
+        // Power of 2 takes precedence: only height=256 is pow2
+        // 1920x1080 -> 455x256 (height is pow2, width is not)
+        let (w, h) = calculate_target_dimensions(1920, 1080, Some(455), Some(256));
+        assert_eq!(h, 256); // Height is primary (pow2)
+        assert_eq!(w, (256.0_f64 * 1920.0 / 1080.0).round() as usize); // Width calculated from height
+
+        // Power of 2 takes precedence: only width=512 is pow2
+        // 1920x1080 -> 512x288
+        let (w, h) = calculate_target_dimensions(1920, 1080, Some(512), Some(288));
+        assert_eq!(w, 512); // Width is primary (pow2)
+        assert_eq!(h, (512.0_f64 * 1080.0 / 1920.0).round() as usize); // Height calculated from width
+
+        // Clean division: 1000x500 -> 250x125 (250 divides 1000, 125 divides 500)
+        // Both divide cleanly, larger wins
+        let (w, h) = calculate_target_dimensions(1000, 500, Some(250), Some(125));
+        assert_eq!(w, 250);
+        assert_eq!(h, 125);
+
+        // Clean division: 1000x500 -> 200x100 (200 divides 1000, 100 divides 500)
+        // Width is larger, so primary
+        let (w, h) = calculate_target_dimensions(1000, 500, Some(200), Some(100));
+        assert_eq!(w, 200);
+        assert_eq!(h, 100);
+
+        // Clean division wins over larger: 999x500 -> 200x100
+        // 200 doesn't divide 999, but 100 divides 500 -> height is primary
+        let (w, h) = calculate_target_dimensions(999, 500, Some(200), Some(100));
+        assert_eq!(h, 100); // Height is primary (clean division)
+        assert_eq!(w, (100.0_f64 * 999.0 / 500.0).round() as usize);
+
+        // Intentional distortion: dimensions far from AR are kept exact
+        // 100x50 (2:1) -> 200x200 (1:1) - very different AR
+        let (w, h) = calculate_target_dimensions(100, 50, Some(200), Some(200));
+        assert_eq!(w, 200);
+        assert_eq!(h, 200); // Kept exact - intentional squish
+
+        // Within 1 pixel tolerance: 100x50 -> 200x99
+        // h_from_w = 200 * 50 / 100 = 100, diff = |99-100| = 1 (within tolerance)
+        let (w, h) = calculate_target_dimensions(100, 50, Some(200), Some(99));
+        assert_eq!(w, 200); // Width is primary (larger)
+        assert_eq!(h, 100); // Corrected to proper AR
     }
 
     #[test]
