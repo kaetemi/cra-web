@@ -96,9 +96,9 @@ async function requestResizePixels(pixelData, srcWidth, srcHeight, dstWidth, dst
     });
 }
 
-// Get cache key
-function getCacheKey(src, width, height, method) {
-    return `${src}:${width}:${height}:${method}`;
+// Get cache key (includes DPR for pixel-perfect caching)
+function getCacheKey(src, width, height, method, dpr) {
+    return `${src}:${width}:${height}:${method}:${dpr}`;
 }
 
 // Add to cache with LRU eviction
@@ -155,9 +155,9 @@ class LinearImg extends HTMLElement {
         this._preview = document.createElement('img');
         this._preview.style.cssText = 'display: block; width: 100%; height: 100%; object-fit: contain;';
 
-        // Canvas for final output
+        // Canvas for final output (pointer-events: none lets right-clicks pass to preview)
         this._canvas = document.createElement('canvas');
-        this._canvas.style.cssText = 'display: none; position: absolute; top: 0; left: 0;';
+        this._canvas.style.cssText = 'display: none; position: absolute; top: 0; left: 0; pointer-events: none;';
 
         this._container.appendChild(this._preview);
         this._container.appendChild(this._canvas);
@@ -178,14 +178,44 @@ class LinearImg extends HTMLElement {
         this.shadowRoot.appendChild(this._container);
 
         // ResizeObserver to detect size changes
+        // Note: we also need to watch devicePixelRatio for zoom changes
         this._resizeObserver = new ResizeObserver(entries => {
             for (const entry of entries) {
                 const { width, height } = entry.contentRect;
                 if (width > 0 && height > 0) {
-                    this._handleResize(Math.round(width), Math.round(height));
+                    this._handleResize(width, height);
                 }
             }
         });
+
+        // Watch for devicePixelRatio changes (browser zoom)
+        this._dprMediaQuery = null;
+        this._setupDprWatcher();
+    }
+
+    _setupDprWatcher() {
+        // Watch for devicePixelRatio changes using matchMedia
+        // This fires when browser zoom changes
+        const updateDpr = () => {
+            // Remove old listener
+            if (this._dprMediaQuery) {
+                this._dprMediaQuery.removeEventListener('change', this._dprChangeHandler);
+            }
+            // Create new query for current DPR
+            this._dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+            this._dprChangeHandler = () => {
+                console.log('[linear-img] devicePixelRatio changed to:', window.devicePixelRatio);
+                // Force recalculation with new DPR
+                if (this._displayWidth && this._displayHeight) {
+                    this._lastDpr = null;  // Force re-render
+                    this._scheduleResize();
+                }
+                updateDpr();  // Re-setup for next change
+            };
+            this._dprMediaQuery.addEventListener('change', this._dprChangeHandler);
+        };
+        updateDpr();
+        this._lastDpr = window.devicePixelRatio;
     }
 
     connectedCallback() {
@@ -195,6 +225,9 @@ class LinearImg extends HTMLElement {
 
     disconnectedCallback() {
         this._resizeObserver.disconnect();
+        if (this._dprMediaQuery) {
+            this._dprMediaQuery.removeEventListener('change', this._dprChangeHandler);
+        }
     }
 
     attributeChangedCallback(name, oldValue, newValue) {
@@ -265,7 +298,7 @@ class LinearImg extends HTMLElement {
         // Show preview immediately using browser scaling
         this._preview.src = this._src;
         this._preview.style.display = 'block';
-        this._preview.style.visibility = 'visible';  // Reset visibility
+        this._preview.style.opacity = '1';  // Reset opacity
         this._canvas.style.display = 'none';
 
         try {
@@ -343,24 +376,24 @@ class LinearImg extends HTMLElement {
             return;
         }
 
-        const { outputWidth, outputHeight } = this._calculateOutputDimensions();
-        console.log('[linear-img] Output dimensions:', outputWidth, 'x', outputHeight);
+        const { outputWidth, outputHeight, dpr } = this._calculateOutputDimensions();
+        console.log('[linear-img] Output dimensions:', outputWidth, 'x', outputHeight, 'at DPR:', dpr);
 
         // Skip if output would be same as natural size
         if (outputWidth === this._naturalWidth && outputHeight === this._naturalHeight) {
             console.log('[linear-img] Same as natural size, showing preview');
             this._preview.style.display = 'block';
-            this._preview.style.visibility = 'visible';
+            this._preview.style.opacity = '1';
             this._canvas.style.display = 'none';
             return;
         }
 
         // Check cache
-        const cacheKey = getCacheKey(this._src, outputWidth, outputHeight, this._method);
+        const cacheKey = getCacheKey(this._src, outputWidth, outputHeight, this._method, dpr);
         const cached = resultCache.get(cacheKey);
         if (cached) {
             console.log('[linear-img] Using cached result');
-            this._displayResult(cached, outputWidth, outputHeight);
+            this._displayResult(cached, outputWidth, outputHeight, dpr);
             return;
         }
 
@@ -387,17 +420,17 @@ class LinearImg extends HTMLElement {
 
             cacheResult(cacheKey, imageData);
 
-            // Display if dimensions still match
-            const { outputWidth: currentW, outputHeight: currentH } = this._calculateOutputDimensions();
-            if (currentW === outputWidth && currentH === outputHeight) {
+            // Display if dimensions and DPR still match
+            const { outputWidth: currentW, outputHeight: currentH, dpr: currentDpr } = this._calculateOutputDimensions();
+            if (currentW === outputWidth && currentH === outputHeight && currentDpr === dpr) {
                 console.log('[linear-img] Displaying result');
-                this._displayResult(imageData, outputWidth, outputHeight);
+                this._displayResult(imageData, outputWidth, outputHeight, dpr);
             } else {
                 console.log('[linear-img] Dimensions changed during processing, not displaying');
             }
 
             this.dispatchEvent(new CustomEvent('load', {
-                detail: { width: outputWidth, height: outputHeight }
+                detail: { width: outputWidth, height: outputHeight, dpr }
             }));
 
         } catch (err) {
@@ -414,13 +447,15 @@ class LinearImg extends HTMLElement {
     }
 
     _calculateOutputDimensions() {
-        const displayW = this._displayWidth;
-        const displayH = this._displayHeight;
+        const dpr = window.devicePixelRatio || 1;
+        // Convert CSS pixels to physical pixels for pixel-perfect rendering
+        const displayW = Math.round(this._displayWidth * dpr);
+        const displayH = Math.round(this._displayHeight * dpr);
         const naturalW = this._naturalWidth;
         const naturalH = this._naturalHeight;
 
         if (!naturalW || !naturalH) {
-            return { outputWidth: displayW, outputHeight: displayH };
+            return { outputWidth: displayW, outputHeight: displayH, dpr };
         }
 
         const displayAspect = displayW / displayH;
@@ -458,31 +493,38 @@ class LinearImg extends HTMLElement {
 
         return {
             outputWidth: Math.max(1, outputWidth),
-            outputHeight: Math.max(1, outputHeight)
+            outputHeight: Math.max(1, outputHeight),
+            dpr
         };
     }
 
-    _displayResult(imageData, width, height) {
+    _displayResult(imageData, width, height, dpr) {
+        // Canvas dimensions are in physical pixels
         this._canvas.width = width;
         this._canvas.height = height;
 
         const ctx = this._canvas.getContext('2d');
         ctx.putImageData(imageData, 0, 0);
 
-        // Position canvas
+        // CSS dimensions are physical pixels / DPR
+        const cssWidth = width / dpr;
+        const cssHeight = height / dpr;
+
+        // Position canvas (in CSS pixels)
         const displayW = this._displayWidth;
         const displayH = this._displayHeight;
 
-        const left = Math.round((displayW - width) / 2);
-        const top = Math.round((displayH - height) / 2);
+        const left = Math.round((displayW - cssWidth) / 2);
+        const top = Math.round((displayH - cssHeight) / 2);
         this._canvas.style.left = left + 'px';
         this._canvas.style.top = top + 'px';
-        this._canvas.style.width = width + 'px';
-        this._canvas.style.height = height + 'px';
+        this._canvas.style.width = cssWidth + 'px';
+        this._canvas.style.height = cssHeight + 'px';
 
         // Show canvas, keep preview invisible but in layout (prevents collapse)
+        // Use opacity: 0 (not visibility: hidden) so it still receives right-clicks
         this._canvas.style.display = 'block';
-        this._preview.style.visibility = 'hidden';  // Hidden but still takes space
+        this._preview.style.opacity = '0';
         this._preview.style.display = 'block';
     }
 
