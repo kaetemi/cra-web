@@ -244,13 +244,9 @@ struct Args {
     #[arg(short, long)]
     output: Option<PathBuf>,
 
-    /// Output raw binary file path (optional) - packed pixel data
+    /// Output raw binary file path (optional) - respects --stride for row alignment
     #[arg(long)]
     output_raw: Option<PathBuf>,
-
-    /// Output row-aligned raw binary file path (optional) - each row padded to stride boundary
-    #[arg(long)]
-    output_raw_r: Option<PathBuf>,
 
     /// Output metadata JSON file path (optional)
     #[arg(long)]
@@ -906,17 +902,16 @@ fn main() -> Result<(), String> {
     // Check if at least one output is specified
     if args.output.is_none()
         && args.output_raw.is_none()
-        && args.output_raw_r.is_none()
         && args.output_meta.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-raw, --output-raw-r, or --output-meta"
+            "No output specified. Use --output, --output-raw, or --output-meta"
                 .to_string(),
         );
     }
 
     // Check binary output compatibility
-    if (args.output_raw.is_some() || args.output_raw_r.is_some()) && !format.supports_binary() {
+    if args.output_raw.is_some() && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
             format.name, format.total_bits
@@ -1069,42 +1064,31 @@ fn main() -> Result<(), String> {
         outputs.push(("png".to_string(), png_path.clone(), size));
     }
 
-    // Helper to write binary output file
-    let fill = args.stride_fill.to_stride_fill();
-
-    // Write packed binary output
+    // Write binary output (respects --stride setting, default 1 = packed)
     if let Some(ref bin_path) = args.output_raw {
+        let fill = args.stride_fill.to_stride_fill();
+        let row_aligned = args.stride > 1;
+
         if args.verbose {
-            eprintln!("Writing binary (packed): {}", bin_path.display());
+            if row_aligned {
+                eprintln!(
+                    "Writing binary (stride={}, fill={:?}): {}",
+                    args.stride, args.stride_fill, bin_path.display()
+                );
+            } else {
+                eprintln!("Writing binary (packed): {}", bin_path.display());
+            }
         }
 
-        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, false, 1, fill);
+        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, row_aligned, args.stride, fill);
 
         let mut file = File::create(bin_path)
             .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
         file.write_all(&bin_data)
             .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
-        outputs.push(("binary_packed".to_string(), bin_path.clone(), bin_data.len()));
-    }
-
-    // Write row-aligned binary output
-    if let Some(ref bin_r_path) = args.output_raw_r {
-        if args.verbose {
-            eprintln!(
-                "Writing binary (row-aligned, stride={}, fill={:?}): {}",
-                args.stride, args.stride_fill, bin_r_path.display()
-            );
-        }
-
-        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, true, args.stride, fill);
-
-        let mut file = File::create(bin_r_path)
-            .map_err(|e| format!("Failed to create {}: {}", bin_r_path.display(), e))?;
-        file.write_all(&bin_data)
-            .map_err(|e| format!("Failed to write {}: {}", bin_r_path.display(), e))?;
-
-        outputs.push(("binary_row_aligned".to_string(), bin_r_path.clone(), bin_data.len()));
+        let label = if row_aligned { "binary_row_aligned" } else { "binary_packed" };
+        outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
     }
 
     // Write metadata JSON
