@@ -12,8 +12,8 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
-    encode_gray_packed, encode_gray_row_aligned_stride, encode_rgb_packed,
-    encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
+    encode_channel_row_aligned_stride, encode_gray_packed, encode_gray_row_aligned_stride,
+    encode_rgb_packed, encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
 };
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
@@ -247,6 +247,18 @@ struct Args {
     /// Output raw binary file path (optional) - respects --stride for row alignment
     #[arg(long)]
     output_raw: Option<PathBuf>,
+
+    /// Output raw binary for red channel only (optional) - respects --stride
+    #[arg(long)]
+    output_raw_r: Option<PathBuf>,
+
+    /// Output raw binary for green channel only (optional) - respects --stride
+    #[arg(long)]
+    output_raw_g: Option<PathBuf>,
+
+    /// Output raw binary for blue channel only (optional) - respects --stride
+    #[arg(long)]
+    output_raw_b: Option<PathBuf>,
 
     /// Output metadata JSON file path (optional)
     #[arg(long)]
@@ -900,12 +912,16 @@ fn main() -> Result<(), String> {
     }
 
     // Check if at least one output is specified
+    let has_channel_output = args.output_raw_r.is_some()
+        || args.output_raw_g.is_some()
+        || args.output_raw_b.is_some();
     if args.output.is_none()
         && args.output_raw.is_none()
+        && !has_channel_output
         && args.output_meta.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-raw, or --output-meta"
+            "No output specified. Use --output, --output-raw, --output-raw-r/g/b, or --output-meta"
                 .to_string(),
         );
     }
@@ -916,6 +932,14 @@ fn main() -> Result<(), String> {
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
             format.name, format.total_bits
         ));
+    }
+
+    // Check channel output compatibility (requires RGB format, not grayscale)
+    if has_channel_output && format.is_grayscale {
+        return Err(
+            "Separate channel outputs (--output-raw-r/g/b) require RGB format, not grayscale"
+                .to_string(),
+        );
     }
 
     // Validate stride
@@ -1089,6 +1113,61 @@ fn main() -> Result<(), String> {
 
         let label = if row_aligned { "binary_row_aligned" } else { "binary_packed" };
         outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
+    }
+
+    // Write separate channel outputs (R, G, B)
+    let fill = args.stride_fill.to_stride_fill();
+    let row_aligned = args.stride > 1;
+
+    if let Some(ref path) = args.output_raw_r {
+        if let Some(ref r_data) = dither_result.r {
+            if args.verbose {
+                eprintln!("Writing red channel binary: {}", path.display());
+            }
+            let bin_data = encode_channel_row_aligned_stride(
+                r_data, width_usize, height_usize, format.bits_r, args.stride, fill,
+            );
+            let mut file = File::create(path)
+                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+            file.write_all(&bin_data)
+                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+            let label = if row_aligned { "binary_r_row_aligned" } else { "binary_r" };
+            outputs.push((label.to_string(), path.clone(), bin_data.len()));
+        }
+    }
+
+    if let Some(ref path) = args.output_raw_g {
+        if let Some(ref g_data) = dither_result.g {
+            if args.verbose {
+                eprintln!("Writing green channel binary: {}", path.display());
+            }
+            let bin_data = encode_channel_row_aligned_stride(
+                g_data, width_usize, height_usize, format.bits_g, args.stride, fill,
+            );
+            let mut file = File::create(path)
+                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+            file.write_all(&bin_data)
+                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+            let label = if row_aligned { "binary_g_row_aligned" } else { "binary_g" };
+            outputs.push((label.to_string(), path.clone(), bin_data.len()));
+        }
+    }
+
+    if let Some(ref path) = args.output_raw_b {
+        if let Some(ref b_data) = dither_result.b {
+            if args.verbose {
+                eprintln!("Writing blue channel binary: {}", path.display());
+            }
+            let bin_data = encode_channel_row_aligned_stride(
+                b_data, width_usize, height_usize, format.bits_b, args.stride, fill,
+            );
+            let mut file = File::create(path)
+                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+            file.write_all(&bin_data)
+                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+            let label = if row_aligned { "binary_b_row_aligned" } else { "binary_b" };
+            outputs.push((label.to_string(), path.clone(), bin_data.len()));
+        }
     }
 
     // Write metadata JSON
