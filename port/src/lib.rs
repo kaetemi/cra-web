@@ -34,6 +34,23 @@ pub use dither::floyd_steinberg_dither;
 use dither_common::DitherMode;
 use dither_common::PerceptualSpace;
 
+// ============================================================================
+// Helper functions for interleaved RGB ↔ Pixel4 conversion
+// ============================================================================
+
+/// Convert interleaved RGB f32 to Vec<Pixel4>
+fn interleaved_to_pixel4(rgb: &[f32]) -> Vec<pixel::Pixel4> {
+    let pixels = rgb.len() / 3;
+    (0..pixels)
+        .map(|i| [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0])
+        .collect()
+}
+
+/// Convert Vec<Pixel4> to interleaved RGB f32
+fn pixel4_to_interleaved(pixels: &[pixel::Pixel4]) -> Vec<f32> {
+    pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
+}
+
 /// Convert u8 to DitherMode for WASM interface
 /// 0 = Floyd-Steinberg Standard
 /// 1 = Floyd-Steinberg Serpentine
@@ -158,15 +175,8 @@ pub fn dither_output_wasm(
         },
     };
 
-    // Convert interleaved to Pixel4
-    let pixels = w * h;
-    let mut pixel4_data: Vec<pixel::Pixel4> = Vec::with_capacity(pixels);
-    for i in 0..pixels {
-        pixel4_data.push([rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0]);
-    }
-
     output::dither_output_interleaved(
-        &pixel4_data,
+        &interleaved_to_pixel4(&rgb),
         w,
         h,
         bits_r,
@@ -359,22 +369,9 @@ pub fn color_correct_wasm(
 ) -> Vec<f32> {
     use correction::HistogramOptions;
 
-    // Convert interleaved f32 to Pixel4
-    let input_pixels = input_width * input_height;
-    let ref_pixels = ref_width * ref_height;
+    let input_pixel4 = interleaved_to_pixel4(&input_linear);
+    let ref_pixel4 = interleaved_to_pixel4(&ref_linear);
 
-    let input_pixel4: Vec<pixel::Pixel4> = (0..input_pixels)
-        .map(|i| [input_linear[i * 3], input_linear[i * 3 + 1], input_linear[i * 3 + 2], 0.0])
-        .collect();
-
-    let ref_pixel4: Vec<pixel::Pixel4> = (0..ref_pixels)
-        .map(|i| [ref_linear[i * 3], ref_linear[i * 3 + 1], ref_linear[i * 3 + 2], 0.0])
-        .collect();
-
-    // Build method enum
-    let correction_method = correction_method_from_u8(method, luminosity_flag);
-
-    // Build histogram options
     let histogram_options = HistogramOptions {
         mode: histogram_mode_from_u8(histogram_mode),
         dither_mode: dither_mode_from_u8(histogram_dither_mode),
@@ -382,7 +379,6 @@ pub fn color_correct_wasm(
         colorspace_aware_space: perceptual_space_from_u8(histogram_distance_space),
     };
 
-    // Perform color correction
     let result = correction::color_correct(
         &input_pixel4,
         &ref_pixel4,
@@ -390,19 +386,11 @@ pub fn color_correct_wasm(
         input_height,
         ref_width,
         ref_height,
-        correction_method,
+        correction_method_from_u8(method, luminosity_flag),
         histogram_options,
     );
 
-    // Convert Pixel4 back to interleaved f32
-    let mut output = vec![0.0f32; input_pixels * 3];
-    for (i, pixel) in result.iter().enumerate() {
-        output[i * 3] = pixel[0];
-        output[i * 3 + 1] = pixel[1];
-        output[i * 3 + 2] = pixel[2];
-    }
-
-    output
+    pixel4_to_interleaved(&result)
 }
 
 // ============================================================================
@@ -1016,22 +1004,16 @@ mod tests {
     use super::*;
 
     // Helper to convert u8 to linear f32 for testing
-    fn u8_to_linear_f32(data: &[u8], width: usize, height: usize) -> Vec<f32> {
+    fn u8_to_linear_f32(data: &[u8]) -> Vec<f32> {
         let mut pixels = pixel::srgb_u8_to_pixels(data);
         color::normalize_inplace(&mut pixels);
         color::srgb_to_linear_inplace(&mut pixels);
-        // Convert to interleaved f32
-        pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
+        pixel4_to_interleaved(&pixels)
     }
 
     // Helper to convert linear f32 to sRGB u8 with dithering
     fn linear_f32_to_u8(data: &[f32], width: usize, height: usize, dither_mode: u8, colorspace_aware: bool, space: u8) -> Vec<u8> {
-        // Convert interleaved f32 to Pixel4
-        let pixels: usize = width * height;
-        let mut pixel4: Vec<pixel::Pixel4> = (0..pixels)
-            .map(|i| [data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 0.0])
-            .collect();
-        // Finalize to sRGB u8 output
+        let mut pixel4 = interleaved_to_pixel4(data);
         output::finalize_to_srgb_u8_with_options(
             &mut pixel4,
             width,
@@ -1053,11 +1035,9 @@ mod tests {
         ca_hist: bool, hist_space: u8,
         out_dither: u8, ca_out: bool, out_space: u8,
     ) -> Vec<u8> {
-        // Step 1: Convert inputs to linear f32
-        let input_linear = u8_to_linear_f32(input, iw, ih);
-        let ref_linear = u8_to_linear_f32(reference, rw, rh);
+        let input_linear = u8_to_linear_f32(input);
+        let ref_linear = u8_to_linear_f32(reference);
 
-        // Step 2: Call color_correct_wasm (now takes linear f32)
         let result_linear = color_correct_wasm(
             input_linear, iw, ih,
             ref_linear, rw, rh,
@@ -1065,7 +1045,6 @@ mod tests {
             ca_hist, hist_space,
         );
 
-        // Step 3: Convert result back to sRGB u8 with dithering
         linear_f32_to_u8(&result_linear, iw, ih, out_dither, ca_out, out_space)
     }
 
