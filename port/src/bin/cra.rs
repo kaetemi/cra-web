@@ -7,7 +7,7 @@
 
 use clap::{Parser, ValueEnum};
 use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, ImageDecoder, ImageReader, Luma, Rgb};
-use lcms2::{Intent, PixelFormat, Profile, Tag, TagSignature, Transform};
+use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -355,46 +355,27 @@ fn load_image_with_icc(path: &PathBuf) -> Result<(DynamicImage, Option<Vec<u8>>)
     Ok((img, icc_profile))
 }
 
-/// Check if an ICC profile has linear TRC (gamma 1.0) on all channels
-fn is_profile_linear(profile: &Profile) -> bool {
-    // Check if all RGB TRCs are linear
-    let r_tag = profile.read_tag(TagSignature::RedTRCTag);
-    if let Tag::ToneCurve(r_trc) = r_tag {
-        if !r_trc.is_linear() {
-            return false;
-        }
-    } else {
-        return false;
-    }
+/// Check if an ICC profile is effectively sRGB by comparing test colors
+fn is_profile_srgb(icc_bytes: &[u8], verbose: bool) -> bool {
+    let src_profile = match ColorProfile::new_from_slice(icc_bytes) {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
 
-    let g_tag = profile.read_tag(TagSignature::GreenTRCTag);
-    if let Tag::ToneCurve(g_trc) = g_tag {
-        if !g_trc.is_linear() {
-            return false;
-        }
-    } else {
-        return false;
-    }
+    let srgb = ColorProfile::new_srgb();
 
-    let b_tag = profile.read_tag(TagSignature::BlueTRCTag);
-    if let Tag::ToneCurve(b_trc) = b_tag {
-        if !b_trc.is_linear() {
-            return false;
-        }
-    } else {
-        return false;
-    }
+    // Create transform from profile to sRGB using 8-bit for comparison
+    let transform = match src_profile.create_transform_8bit(
+        Layout::Rgb,
+        &srgb,
+        Layout::Rgb,
+        TransformOptions::default(),
+    ) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
 
-    true
-}
-
-/// Check if an ICC profile is effectively sRGB by comparing primaries and TRC
-fn is_profile_srgb(profile: &Profile, verbose: bool) -> bool {
-    // Create reference sRGB profile
-    let srgb = Profile::new_srgb();
-
-    // Compare using a transform - if it's identity-like, it's sRGB
-    // We'll sample a few test colors and check if they're unchanged
+    // Test colors to verify identity transform
     let test_colors: &[[u8; 3]] = &[
         [0, 0, 0],       // Black
         [255, 255, 255], // White
@@ -405,22 +386,13 @@ fn is_profile_srgb(profile: &Profile, verbose: bool) -> bool {
         [192, 64, 32],   // Random color
     ];
 
-    // Transform from profile to sRGB
-    let transform = match Transform::new(
-        profile,
-        PixelFormat::RGB_8,
-        &srgb,
-        PixelFormat::RGB_8,
-        Intent::RelativeColorimetric,
-    ) {
-        Ok(t) => t,
-        Err(_) => return false,
-    };
-
     for color in test_colors {
-        let mut output = [[0u8; 3]];
-        transform.transform_pixels(&[*color], &mut output);
-        let output = output[0];
+        let input: Vec<u8> = color.to_vec();
+        let mut output = vec![0u8; 3];
+
+        if transform.transform(&input, &mut output).is_err() {
+            return false;
+        }
 
         // Allow small tolerance for rounding
         let max_diff = color.iter()
@@ -440,7 +412,18 @@ fn is_profile_srgb(profile: &Profile, verbose: bool) -> bool {
     true
 }
 
-/// Convert image data from ICC profile to linear sRGB using lcms2 (float path)
+/// Create a linear sRGB profile (sRGB primaries with gamma 1.0)
+fn make_linear_srgb_profile() -> ColorProfile {
+    let mut profile = ColorProfile::new_srgb(); // TODO: Check if this using the real sRGB D65 white point or the IEC one
+    // Replace sRGB transfer curves with linear (gamma 1.0)
+    let linear_curve = ToneReprCurve::Parametric(vec![1.0]);
+    profile.red_trc = Some(linear_curve.clone());
+    profile.green_trc = Some(linear_curve.clone());
+    profile.blue_trc = Some(linear_curve);
+    profile
+}
+
+/// Convert image data from ICC profile to linear sRGB using moxcms (float path)
 /// Input is already normalized f32 (0-1 range), output is linear sRGB f32 (0-1 range)
 fn convert_icc_to_linear_srgb_float(
     input_pixels: &[[f32; 3]],
@@ -449,39 +432,46 @@ fn convert_icc_to_linear_srgb_float(
     icc_profile: &[u8],
     verbose: bool,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    let src_profile = Profile::new_icc(icc_profile)
+    let src_profile = ColorProfile::new_from_slice(icc_profile)
         .map_err(|e| format!("Failed to parse ICC profile: {:?}", e))?;
 
-    // Create sRGB profile - we'll apply linearization ourselves after transform
-    let srgb = Profile::new_srgb();
+    // Transform directly to linear sRGB (sRGB primaries, gamma 1.0)
+    let linear_srgb = make_linear_srgb_profile();
 
     // Transform in float space - no integer intermediates!
-    let transform = Transform::new(
-        &src_profile,
-        PixelFormat::RGB_FLT,
-        &srgb,
-        PixelFormat::RGB_FLT,
-        Intent::RelativeColorimetric,
+    let transform = src_profile.create_transform_f32(
+        Layout::Rgb,
+        &linear_srgb,
+        Layout::Rgb,
+        TransformOptions::default(),
     ).map_err(|e| format!("Failed to create transform: {:?}", e))?;
 
     let pixel_count = (width * height) as usize;
-    let mut output_pixels: Vec<[f32; 3]> = vec![[0.0f32; 3]; pixel_count];
 
-    transform.transform_pixels(input_pixels, &mut output_pixels);
+    // Flatten input to contiguous f32 slice for moxcms
+    let input_flat: Vec<f32> = input_pixels.iter()
+        .flat_map(|p| [p[0], p[1], p[2]])
+        .collect();
+
+    let mut output_flat = vec![0.0f32; pixel_count * 3];
+
+    // Transform row by row as moxcms expects
+    let row_size = width as usize * 3;
+    for (src_row, dst_row) in input_flat.chunks_exact(row_size)
+        .zip(output_flat.chunks_exact_mut(row_size))
+    {
+        transform.transform(src_row, dst_row)
+            .map_err(|e| format!("Transform failed: {:?}", e))?;
+    }
 
     if verbose {
-        eprintln!("  Converted via ICC profile to sRGB (float path, no integer intermediates)");
+        eprintln!("  Converted via ICC profile to linear sRGB (float path)");
     }
 
-    // Now convert sRGB (0-1) to linear (0-1)
-    let mut pixels = Vec::with_capacity(pixel_count);
-    for pixel in output_pixels {
-        let r_linear = srgb_to_linear_single(pixel[0]);
-        let g_linear = srgb_to_linear_single(pixel[1]);
-        let b_linear = srgb_to_linear_single(pixel[2]);
-
-        pixels.push([r_linear, g_linear, b_linear, 0.0]);
-    }
+    // Convert flat output to Pixel4 (already linear, no gamma needed)
+    let pixels: Vec<Pixel4> = output_flat.chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2], 0.0])
+        .collect();
 
     Ok((pixels, width, height))
 }
@@ -552,28 +542,16 @@ fn determine_effective_profile(
         }
         InputColorProfile::Auto => {
             if let Some(ref icc) = icc_profile {
-                if let Ok(profile) = Profile::new_icc(icc) {
-                    if is_profile_linear(&profile) {
-                        if verbose {
-                            eprintln!("  Auto-detected: linear RGB profile");
-                        }
-                        InputColorProfile::Linear
-                    } else if is_profile_srgb(&profile, verbose) {
-                        if verbose {
-                            eprintln!("  Auto-detected: sRGB-compatible profile");
-                        }
-                        InputColorProfile::Srgb
-                    } else {
-                        if verbose {
-                            eprintln!("  Auto-detected: non-sRGB profile, using lcms2");
-                        }
-                        InputColorProfile::Icc
-                    }
-                } else {
+                if is_profile_srgb(icc, verbose) {
                     if verbose {
-                        eprintln!("  Failed to parse ICC profile, assuming sRGB");
+                        eprintln!("  Auto-detected: sRGB-compatible profile");
                     }
                     InputColorProfile::Srgb
+                } else {
+                    if verbose {
+                        eprintln!("  Auto-detected: non-sRGB profile, using moxcms");
+                    }
+                    InputColorProfile::Icc
                 }
             } else {
                 if verbose {
@@ -1146,8 +1124,7 @@ fn main() -> Result<(), String> {
         InputColorProfile::Auto => {
             // Check if file has a non-sRGB ICC profile
             input_icc.as_ref()
-                .and_then(|icc_data| Profile::new_icc(icc_data).ok())
-                .map(|profile| !is_profile_srgb(&profile, args.verbose))
+                .map(|icc_data| !is_profile_srgb(icc_data, args.verbose))
                 .unwrap_or(false)
         }
         InputColorProfile::Icc => {
