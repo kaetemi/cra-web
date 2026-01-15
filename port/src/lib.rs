@@ -678,16 +678,16 @@ pub fn normalize_f32_wasm(data: Vec<f32>, width: usize, height: usize) -> Vec<f3
 
 /// Denormalize f32 from 0-1 to 0-255 range (no color space conversion)
 /// Input: interleaved RGB f32 (0-1 scale)
-/// Output: interleaved RGB f32 (0-255 scale)
+/// Output: interleaved RGB f32 (0-255 scale, clamped)
 #[wasm_bindgen]
 pub fn denormalize_f32_wasm(data: Vec<f32>, width: usize, height: usize) -> Vec<f32> {
     let pixels = width * height;
     let mut result = vec![0.0f32; pixels * 3];
 
     for i in 0..pixels {
-        result[i * 3] = data[i * 3] * 255.0;
-        result[i * 3 + 1] = data[i * 3 + 1] * 255.0;
-        result[i * 3 + 2] = data[i * 3 + 2] * 255.0;
+        result[i * 3] = (data[i * 3] * 255.0).clamp(0.0, 255.0);
+        result[i * 3 + 1] = (data[i * 3 + 1] * 255.0).clamp(0.0, 255.0);
+        result[i * 3 + 2] = (data[i * 3 + 2] * 255.0).clamp(0.0, 255.0);
     }
 
     result
