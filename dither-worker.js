@@ -82,10 +82,8 @@ function processDither(params) {
         const pixelCount = processWidth * processHeight;
         const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-        // For storing channel data for download
-        let rChannel = null;
-        let gChannel = null;
-        let bChannel = null;
+        // For storing data for download
+        let rgbInterleaved = null;
         let grayChannel = null;
 
         const technique = isPerceptual ? 2 : 1;
@@ -161,15 +159,11 @@ function processDither(params) {
                 );
                 const rgbDithered = ditheredBuffer.to_vec();
 
-                // Store channels for download
-                rChannel = new Uint8Array(pixelCount);
-                gChannel = new Uint8Array(pixelCount);
-                bChannel = new Uint8Array(pixelCount);
+                // Keep interleaved data for binary export
+                rgbInterleaved = new Uint8Array(rgbDithered);
 
+                // Convert to RGBA for display
                 for (let i = 0; i < pixelCount; i++) {
-                    rChannel[i] = rgbDithered[i * 3];
-                    gChannel[i] = rgbDithered[i * 3 + 1];
-                    bChannel[i] = rgbDithered[i * 3 + 2];
                     outputData[i * 4] = rgbDithered[i * 3];
                     outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
                     outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
@@ -189,15 +183,11 @@ function processDither(params) {
             );
             const rgbDithered = ditheredBuffer.to_vec();
 
-            // Store channels for download
-            rChannel = new Uint8Array(pixelCount);
-            gChannel = new Uint8Array(pixelCount);
-            bChannel = new Uint8Array(pixelCount);
+            // Keep interleaved data for binary export
+            rgbInterleaved = new Uint8Array(rgbDithered);
 
+            // Convert to RGBA for display
             for (let i = 0; i < pixelCount; i++) {
-                rChannel[i] = rgbDithered[i * 3];
-                gChannel[i] = rgbDithered[i * 3 + 1];
-                bChannel[i] = rgbDithered[i * 3 + 2];
                 outputData[i * 4] = rgbDithered[i * 3];
                 outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
                 outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
@@ -217,9 +207,7 @@ function processDither(params) {
             bitsG: isGrayscale ? bitsGray : bitsG,
             bitsB: isGrayscale ? bitsGray : bitsB,
             mode: mode,
-            rChannel: rChannel,
-            gChannel: gChannel,
-            bChannel: bChannel,
+            rgbInterleaved: rgbInterleaved,
             grayChannel: grayChannel
         });
 

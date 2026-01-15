@@ -939,9 +939,7 @@
                 perceptualSpace: document.getElementById('perceptual-toggle').checked ?
                     parseInt(document.getElementById('perceptual-space').value) : null,
                 seed: parseInt(document.getElementById('seed-input').value) || 0,
-                rChannel: result.rChannel,
-                gChannel: result.gChannel,
-                bChannel: result.bChannel,
+                rgbInterleaved: result.rgbInterleaved,
                 grayChannel: result.grayChannel
             };
 
@@ -1495,9 +1493,7 @@
                     );
                 } else {
                     rawData = encode_rgb_packed_wasm(
-                        lastDitherResult.rChannel,
-                        lastDitherResult.gChannel,
-                        lastDitherResult.bChannel,
+                        lastDitherResult.rgbInterleaved,
                         lastDitherResult.width,
                         lastDitherResult.height,
                         lastDitherResult.bitsR,
@@ -1519,9 +1515,7 @@
                     );
                 } else {
                     rawData = encode_rgb_row_aligned_stride_wasm(
-                        lastDitherResult.rChannel,
-                        lastDitherResult.gChannel,
-                        lastDitherResult.bChannel,
+                        lastDitherResult.rgbInterleaved,
                         lastDitherResult.width,
                         lastDitherResult.height,
                         lastDitherResult.bitsR,
@@ -1548,16 +1542,19 @@
         });
 
         // Per-channel download handler helper - respects stride setting
-        function downloadChannel(channelName, channelData, bits) {
-            if (!lastDitherResult || !channelData) return;
+        // channel: 0=R, 1=G, 2=B (3=A for RGBA)
+        function downloadChannel(channelName, channelIndex, bits) {
+            if (!lastDitherResult || !lastDitherResult.rgbInterleaved) return;
 
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
 
             const rawData = encode_channel_row_aligned_stride_wasm(
-                channelData,
+                lastDitherResult.rgbInterleaved,
                 lastDitherResult.width,
                 lastDitherResult.height,
+                3,  // num_channels (RGB)
+                channelIndex,
                 bits,
                 stride,
                 fill
@@ -1569,11 +1566,11 @@
         }
 
         document.getElementById('download-r-btn').addEventListener('click', () =>
-            downloadChannel('R', lastDitherResult?.rChannel, lastDitherResult?.bitsR));
+            downloadChannel('R', 0, lastDitherResult?.bitsR));
         document.getElementById('download-g-btn').addEventListener('click', () =>
-            downloadChannel('G', lastDitherResult?.gChannel, lastDitherResult?.bitsG));
+            downloadChannel('G', 1, lastDitherResult?.bitsG));
         document.getElementById('download-b-btn').addEventListener('click', () =>
-            downloadChannel('B', lastDitherResult?.bChannel, lastDitherResult?.bitsB));
+            downloadChannel('B', 2, lastDitherResult?.bitsB));
 
         // Initialize
         initWasm();

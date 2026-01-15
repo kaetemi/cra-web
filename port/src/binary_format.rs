@@ -781,40 +781,101 @@ pub fn encode_gray_row_aligned(
     encode_gray_row_aligned_stride(gray_data, width, height, bits, 1, StrideFill::Black)
 }
 
-/// Write packed binary output for a single channel
-pub fn encode_channel_packed(
-    channel_data: &[u8],
+/// Write row-aligned binary output for a single channel extracted from interleaved data
+/// interleaved_data: Interleaved pixel data (e.g., RGBRGB... or RGBARGBA...)
+/// num_channels: Number of channels in the interleaved data (3 for RGB, 4 for RGBA)
+/// channel: Which channel to extract (0=R, 1=G, 2=B, 3=A)
+/// Reads directly from interleaved data without creating intermediate buffer
+pub fn encode_channel_from_interleaved_row_aligned_stride(
+    interleaved_data: &[u8],
     width: usize,
     height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    // Single channel encoding is identical to grayscale
-    encode_gray_packed(channel_data, width, height, bits)
-}
-
-/// Write row-aligned binary output for a single channel with configurable stride
-/// fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
-pub fn encode_channel_row_aligned_stride(
-    channel_data: &[u8],
-    width: usize,
-    height: usize,
+    num_channels: usize,
+    channel: usize,
     bits: u8,
     stride: usize,
     fill: StrideFill,
 ) -> Vec<u8> {
-    // Single channel encoding is identical to grayscale
-    encode_gray_row_aligned_stride(channel_data, width, height, bits, stride, fill)
-}
+    let total_bits = bits as usize;
 
-/// Write row-aligned binary output for a single channel
-/// This is a convenience wrapper with stride=1 (no additional alignment beyond byte boundary) and black fill
-pub fn encode_channel_row_aligned(
-    channel_data: &[u8],
-    width: usize,
-    height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    encode_gray_row_aligned_stride(channel_data, width, height, bits, 1, StrideFill::Black)
+    if total_bits >= 8 {
+        // Byte-aligned pixels
+        let raw_bytes_per_row = width;
+        let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+        let padding = aligned_bytes_per_row - raw_bytes_per_row;
+        let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+        for y in 0..height {
+            let last_val = interleaved_data[(y * width + width - 1) * num_channels + channel];
+            for x in 0..width {
+                output.push(interleaved_data[(y * width + x) * num_channels + channel]);
+            }
+            match fill {
+                StrideFill::Black => {
+                    for _ in 0..padding {
+                        output.push(0);
+                    }
+                }
+                StrideFill::Repeat => {
+                    for _ in 0..padding {
+                        output.push(last_val);
+                    }
+                }
+            }
+        }
+        return output;
+    }
+
+    // Sub-byte pixels - pack each row separately with padding
+    let pixels_per_byte = 8 / total_bits;
+    let raw_bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+    for y in 0..height {
+        let mut current_byte: u8 = 0;
+        let mut bits_in_byte: usize = 0;
+
+        // Get last pixel for repeat fill
+        let last_val = encode_gray_pixel(interleaved_data[(y * width + width - 1) * num_channels + channel], bits) as u8;
+
+        for x in 0..width {
+            let val = encode_gray_pixel(interleaved_data[(y * width + x) * num_channels + channel], bits);
+
+            // Pack from MSB to LSB
+            let shift = 8 - bits_in_byte - total_bits;
+            current_byte |= (val as u8) << shift;
+            bits_in_byte += total_bits;
+
+            if bits_in_byte == 8 {
+                output.push(current_byte);
+                current_byte = 0;
+                bits_in_byte = 0;
+            }
+        }
+
+        // Flush remaining bits at end of row
+        if bits_in_byte > 0 {
+            output.push(current_byte);
+        }
+
+        // Add padding bytes to align row to stride
+        match fill {
+            StrideFill::Black => {
+                for _ in 0..padding {
+                    output.push(0);
+                }
+            }
+            StrideFill::Repeat => {
+                for _ in 0..padding {
+                    output.push(last_val);
+                }
+            }
+        }
+    }
+
+    output
 }
 
 /// Check if a format string is valid

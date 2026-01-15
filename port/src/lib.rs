@@ -774,26 +774,6 @@ pub fn encode_gray_row_aligned_wasm(
 }
 
 #[wasm_bindgen]
-pub fn encode_channel_packed_wasm(
-    channel_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    binary_format::encode_channel_packed(&channel_data, width, height, bits)
-}
-
-#[wasm_bindgen]
-pub fn encode_channel_row_aligned_wasm(
-    channel_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    binary_format::encode_channel_row_aligned(&channel_data, width, height, bits)
-}
-
-#[wasm_bindgen]
 pub fn is_valid_stride_wasm(stride: usize) -> bool {
     binary_format::is_valid_stride(stride)
 }
@@ -832,16 +812,22 @@ pub fn encode_gray_row_aligned_stride_wasm(
 }
 
 #[wasm_bindgen]
+/// Encode a single channel from interleaved data to row-aligned binary format
+/// Input: Interleaved u8 data (e.g., RGBRGB... or RGBARGBA...)
+/// num_channels: Number of channels in the interleaved data (3 for RGB, 4 for RGBA)
+/// channel: Which channel to extract (0=R, 1=G, 2=B, 3=A)
 pub fn encode_channel_row_aligned_stride_wasm(
-    channel_data: Vec<u8>,
+    interleaved_data: Vec<u8>,
     width: usize,
     height: usize,
+    num_channels: u8,
+    channel: u8,
     bits: u8,
     stride: usize,
     fill: u8,
 ) -> Vec<u8> {
-    binary_format::encode_channel_row_aligned_stride(
-        &channel_data, width, height, bits, stride, binary_format::StrideFill::from_u8(fill)
+    binary_format::encode_channel_from_interleaved_row_aligned_stride(
+        &interleaved_data, width, height, num_channels as usize, channel as usize, bits, stride, binary_format::StrideFill::from_u8(fill)
     )
 }
 
