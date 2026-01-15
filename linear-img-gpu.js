@@ -277,7 +277,12 @@ class LanczosGPU {
             throw new Error('No WebGPU adapter found');
         }
 
-        this.device = await adapter.requestDevice();
+        // Request higher storage buffer size limit for large images (up to 512MB)
+        this.device = await adapter.requestDevice({
+            requiredLimits: {
+                maxStorageBufferBindingSize: Math.min(512 * 1024 * 1024, adapter.limits.maxStorageBufferBindingSize)
+            }
+        });
 
         // Create shader modules
         const srgbToLinearModule = this.device.createShaderModule({
