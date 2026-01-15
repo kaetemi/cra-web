@@ -218,7 +218,7 @@ pub fn colorspace_aware_dither_gray_wasm(
 /// with error diffusion in linear luminosity space.
 /// Input is sRGB gamma-encoded grayscale (0-255).
 ///
-/// Supports the same 7 dithering modes as the RGB version:
+/// Supports the same 8 dithering modes as the RGB version:
 /// - 0: Floyd-Steinberg Standard
 /// - 1: Floyd-Steinberg Serpentine
 /// - 2: Jarvis-Judice-Ninke Standard
@@ -226,6 +226,7 @@ pub fn colorspace_aware_dither_gray_wasm(
 /// - 4: Mixed Standard
 /// - 5: Mixed Serpentine
 /// - 6: Mixed Random
+/// - 7: None (no error diffusion, nearest-level quantization only)
 ///
 /// Args:
 ///     gray_channel: Grayscale channel as f32 values in range [0, 255]
@@ -233,7 +234,7 @@ pub fn colorspace_aware_dither_gray_wasm(
 ///     h: image height
 ///     bits: output bit depth (1-8)
 ///     space: perceptual space (0 = CIELAB/CIE76, 1 = OKLab, 2 = CIELAB/CIE94, 3 = CIELAB/CIEDE2000, 4 = LinearRGB, 5 = YCbCr)
-///     mode: dither mode (0-6, see above)
+///     mode: dither mode (0-7, see above)
 ///     seed: random seed for mixed modes
 ///
 /// Returns:
@@ -249,17 +250,6 @@ pub fn colorspace_aware_dither_gray_with_mode_wasm(
     seed: u32,
 ) -> Vec<u8> {
     use dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
-    use dither_colorspace_aware::DitherMode as CSDitherMode;
-
-    let cs_mode = match mode {
-        1 => CSDitherMode::Serpentine,
-        2 => CSDitherMode::JarvisStandard,
-        3 => CSDitherMode::JarvisSerpentine,
-        4 => CSDitherMode::MixedStandard,
-        5 => CSDitherMode::MixedSerpentine,
-        6 => CSDitherMode::MixedRandom,
-        _ => CSDitherMode::Standard,
-    };
 
     colorspace_aware_dither_gray_with_mode(
         &gray_channel,
@@ -267,7 +257,7 @@ pub fn colorspace_aware_dither_gray_with_mode_wasm(
         h,
         bits,
         perceptual_space_from_u8(space),
-        cs_mode,
+        dither_mode_from_u8(mode),
         seed,
     )
 }
