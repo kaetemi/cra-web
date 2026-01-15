@@ -28,6 +28,7 @@ pub fn color_correct_basic_rgb_linear(
     ref_height: usize,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let pixel_count = input.len();
 
@@ -50,6 +51,10 @@ pub fn color_correct_basic_rgb_linear(
         ref_r_scaled.push((p[0] * 255.0).clamp(0.0, 255.0));
         ref_g_scaled.push((p[1] * 255.0).clamp(0.0, 255.0));
         ref_b_scaled.push((p[2] * 255.0).clamp(0.0, 255.0));
+    }
+
+    if let Some(ref mut cb) = progress {
+        cb(0.1);
     }
 
     // Match histograms
@@ -87,6 +92,10 @@ pub fn color_correct_basic_rgb_linear(
         )
     };
 
+    if let Some(ref mut cb) = progress {
+        cb(0.8);
+    }
+
     // Reconstruct Pixel4 array, scaling back to 0-1 range
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
@@ -97,5 +106,10 @@ pub fn color_correct_basic_rgb_linear(
             0.0,
         ));
     }
+
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
     result
 }

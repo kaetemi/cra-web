@@ -382,6 +382,7 @@ pub fn color_correct_wasm(
         ref_height,
         correction_method_from_u8(method, luminosity_flag),
         histogram_options,
+        None,
     );
 
     BufferF32x4::new(result)

@@ -94,6 +94,7 @@ pub fn color_correct_basic_oklab_linear(
     keep_luminosity: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let pixel_count = input.len();
     let ref_count = reference.len();
@@ -133,6 +134,10 @@ pub fn color_correct_basic_oklab_linear(
     let (in_a_scaled, in_b_scaled) = scale_ab_to_255(&in_a, &in_b_ch);
     let ref_l_scaled = scale_l_to_255(&ref_l);
     let (ref_a_scaled, ref_b_scaled) = scale_ab_to_255(&ref_a, &ref_b_ch);
+
+    if let Some(ref mut cb) = progress {
+        cb(0.1);
+    }
 
     // Match histograms
     // histogram_mode: 0 = uint8 binned, 1 = f32 endpoint-aligned, 2 = f32 midpoint-aligned
@@ -186,12 +191,21 @@ pub fn color_correct_basic_oklab_linear(
         }
     };
 
+    if let Some(ref mut cb) = progress {
+        cb(0.8);
+    }
+
     // Convert Oklab back to linear RGB as Pixel4 array
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
         let oklab_pixel = Pixel4::new(final_l[i], final_a[i], final_b[i], 0.0);
         result.push(oklab_to_linear_rgb_pixel(oklab_pixel));
     }
+
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
     result
 }
 

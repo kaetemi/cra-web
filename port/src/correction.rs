@@ -63,6 +63,7 @@ impl HistogramOptions {
 /// * `ref_width`, `ref_height` - Reference image dimensions
 /// * `method` - Color correction method selection
 /// * `histogram_options` - Histogram matching options
+/// * `progress` - Optional progress callback (receives 0.0 to 1.0)
 ///
 /// # Returns
 /// Output image as linear RGB Pixel4 array (0-1 range)
@@ -76,6 +77,7 @@ pub fn color_correct(
     ref_height: usize,
     method: ColorCorrectionMethod,
     histogram_options: HistogramOptions,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let hist_mode = histogram_options.mode_as_u8();
     let hist_dither = histogram_options.dither_mode;
@@ -94,6 +96,7 @@ pub fn color_correct(
                 keep_luminosity,
                 hist_mode,
                 hist_dither,
+                progress,
             )
         }
         ColorCorrectionMethod::BasicRgb => {
@@ -106,6 +109,7 @@ pub fn color_correct(
                 ref_height,
                 hist_mode,
                 hist_dither,
+                progress,
             )
         }
         ColorCorrectionMethod::BasicOklab { keep_luminosity } => {
@@ -119,6 +123,7 @@ pub fn color_correct(
                 keep_luminosity,
                 hist_mode,
                 hist_dither,
+                progress,
             )
         }
         ColorCorrectionMethod::CraLab { keep_luminosity } => {
@@ -134,6 +139,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                progress,
             )
         }
         ColorCorrectionMethod::CraRgb { use_perceptual } => {
@@ -147,6 +153,7 @@ pub fn color_correct(
                 use_perceptual,
                 hist_mode,
                 hist_dither,
+                progress,
             )
         }
         ColorCorrectionMethod::CraOklab { keep_luminosity } => {
@@ -162,6 +169,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                progress,
             )
         }
         ColorCorrectionMethod::TiledLab { tiled_luminosity } => {
@@ -177,6 +185,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                progress,
             )
         }
         ColorCorrectionMethod::TiledOklab { tiled_luminosity } => {
@@ -192,6 +201,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                progress,
             )
         }
     }

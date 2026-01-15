@@ -446,6 +446,7 @@ pub fn color_correct_tiled_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
 
@@ -458,6 +459,11 @@ pub fn color_correct_tiled_linear(
 
     // Generate tile blocks
     let blocks = generate_tile_blocks(input_height, input_width, ref_height, ref_width);
+    let num_blocks = blocks.len();
+
+    if let Some(ref mut cb) = progress {
+        cb(0.05);
+    }
 
     // Initialize accumulators
     let mut a_acc = vec![0.0f32; input_pixels];
@@ -637,6 +643,11 @@ pub fn color_correct_tiled_linear(
                 block.x_end,
             );
         }
+
+        // Report progress: block processing is 5% to 85% (80% total for blocks)
+        if let Some(ref mut cb) = progress {
+            cb(0.05 + 0.80 * (block_idx + 1) as f32 / num_blocks as f32);
+        }
     }
 
     // Normalize accumulated results
@@ -728,6 +739,10 @@ pub fn color_correct_tiled_linear(
         (l_lab, a_lab, b_lab)
     };
 
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
     // Convert LAB back to linear RGB (Pixel4 array)
     lab_channels_to_pixels(&final_l, &final_a, &final_b, colorspace)
 }
@@ -746,6 +761,7 @@ pub fn color_correct_tiled_lab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_tiled_linear(
         input,
@@ -760,6 +776,7 @@ pub fn color_correct_tiled_lab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        progress,
     )
 }
 
@@ -777,6 +794,7 @@ pub fn color_correct_tiled_oklab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_tiled_linear(
         input,
@@ -791,5 +809,6 @@ pub fn color_correct_tiled_oklab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        progress,
     )
 }

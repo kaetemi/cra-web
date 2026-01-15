@@ -346,6 +346,7 @@ pub fn color_correct_cra_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
 
@@ -360,8 +361,13 @@ pub fn color_correct_cra_linear(
     // Store current L (may be modified)
     let current_l = original_l.clone();
 
+    if let Some(ref mut cb) = progress {
+        cb(0.05);
+    }
+
     // Iterative refinement
     // Each iteration gets a unique seed range: iteration_idx * 100 + pass seeds
+    let num_iterations = BLEND_FACTORS.len();
     for (iter_idx, &blend_factor) in BLEND_FACTORS.iter().enumerate() {
         let (avg_a, avg_b) = process_lab_iteration(
             &current_l,
@@ -387,6 +393,11 @@ pub fn color_correct_cra_linear(
         for i in 0..input_pixels {
             current_a[i] = current_a[i] * (1.0 - blend_factor) + avg_a[i] * blend_factor;
             current_b[i] = current_b[i] * (1.0 - blend_factor) + avg_b[i] * blend_factor;
+        }
+
+        // Report progress: iterations are 5% to 85% (80% total for iterations)
+        if let Some(ref mut cb) = progress {
+            cb(0.05 + 0.80 * (iter_idx + 1) as f32 / num_iterations as f32);
         }
     }
 
@@ -494,6 +505,10 @@ pub fn color_correct_cra_linear(
         }
     };
 
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
     // Convert Lab back to linear RGB (colorspace-aware)
     lab_channels_to_pixels(&final_l, &final_a, &final_b, colorspace)
 }
@@ -512,6 +527,7 @@ pub fn color_correct_cra_lab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_cra_linear(
         input,
@@ -526,6 +542,7 @@ pub fn color_correct_cra_lab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        progress,
     )
 }
 
@@ -543,6 +560,7 @@ pub fn color_correct_cra_oklab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_cra_linear(
         input,
@@ -557,5 +575,6 @@ pub fn color_correct_cra_oklab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        progress,
     )
 }

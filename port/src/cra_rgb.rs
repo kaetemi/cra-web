@@ -199,6 +199,7 @@ pub fn color_correct_cra_rgb_linear(
     use_perceptual: bool,
     histogram_mode: u8,
     histogram_dither_mode: DitherMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
     let ref_pixels = ref_width * ref_height;
@@ -234,8 +235,13 @@ pub fn color_correct_cra_rgb_linear(
         (input_linear.clone(), ref_linear.clone())
     };
 
+    if let Some(ref mut cb) = progress {
+        cb(0.05);
+    }
+
     // Iterative refinement
     // Each iteration gets a unique seed range: iteration_idx * 100 + pass seeds
+    let num_iterations = BLEND_FACTORS.len();
     for (iter_idx, &blend_factor) in BLEND_FACTORS.iter().enumerate() {
         let rgb_result = process_rgb_iteration(
             &current,
@@ -254,6 +260,11 @@ pub fn color_correct_cra_rgb_linear(
         // Blend with current
         for i in 0..(input_pixels * 3) {
             current[i] = current[i] * (1.0 - blend_factor) + rgb_result[i] * blend_factor;
+        }
+
+        // Report progress: iterations are 5% to 85% (80% total for iterations)
+        if let Some(ref mut cb) = progress {
+            cb(0.05 + 0.80 * (iter_idx + 1) as f32 / num_iterations as f32);
         }
     }
 
@@ -340,5 +351,10 @@ pub fn color_correct_cra_rgb_linear(
             0.0,
         ));
     }
+
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
     result
 }

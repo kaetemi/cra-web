@@ -1021,7 +1021,8 @@ fn main() -> Result<(), String> {
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 
-            color_correct(
+            let mut correction_progress = |p: f32| print_progress("Color Correct", p);
+            let corrected = color_correct(
                 &input_pixels,
                 &ref_pixels,
                 width_usize,
@@ -1030,7 +1031,12 @@ fn main() -> Result<(), String> {
                 ref_height_usize,
                 correction_method.expect("Method should not be None when reference is provided"),
                 histogram_options,
-            )
+                if args.progress { Some(&mut correction_progress) } else { None },
+            );
+            if args.progress {
+                clear_progress();
+            }
+            corrected
         } else {
             input_pixels
         };
