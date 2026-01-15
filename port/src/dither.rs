@@ -236,6 +236,23 @@ impl DitherKernel for JarvisJudiceNinke {
     }
 }
 
+/// No-op kernel that discards error (no diffusion).
+/// Each pixel is independently quantized to nearest level.
+/// Produces banding but useful as a baseline for comparison.
+struct NoneKernel;
+
+impl DitherKernel for NoneKernel {
+    const PAD_LEFT: usize = 0;
+    const PAD_RIGHT: usize = 0;
+    const PAD_BOTTOM: usize = 0;
+
+    #[inline]
+    fn apply_ltr(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
+
+    #[inline]
+    fn apply_rtl(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
+}
+
 // ============================================================================
 // Buffer helpers
 // ============================================================================
@@ -563,6 +580,7 @@ pub fn dither_with_mode_bits(
     };
 
     match mode {
+        DitherMode::None => dither_standard::<NoneKernel>(img, width, height, quant),
         DitherMode::Standard => dither_standard::<FloydSteinberg>(img, width, height, quant),
         DitherMode::Serpentine => dither_serpentine::<FloydSteinberg>(img, width, height, quant),
         DitherMode::JarvisStandard => dither_standard::<JarvisJudiceNinke>(img, width, height, quant),

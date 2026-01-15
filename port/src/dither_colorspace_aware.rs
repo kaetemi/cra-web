@@ -496,6 +496,47 @@ impl RgbDitherKernel for JarvisJudiceNinke {
     }
 }
 
+/// No-op kernel that discards error (no diffusion).
+/// Each pixel is independently quantized to the perceptually nearest level.
+/// Produces banding but useful as a baseline for comparison.
+struct NoneKernel;
+
+impl RgbDitherKernel for NoneKernel {
+    const PAD_LEFT: usize = 0;
+    const PAD_RIGHT: usize = 0;
+    const PAD_BOTTOM: usize = 0;
+
+    #[inline]
+    fn apply_ltr(
+        _err_r: &mut [Vec<f32>],
+        _err_g: &mut [Vec<f32>],
+        _err_b: &mut [Vec<f32>],
+        _bx: usize,
+        _y: usize,
+        _err_r_val: f32,
+        _err_g_val: f32,
+        _err_b_val: f32,
+    ) {}
+
+    #[inline]
+    fn apply_rtl(
+        _err_r: &mut [Vec<f32>],
+        _err_g: &mut [Vec<f32>],
+        _err_b: &mut [Vec<f32>],
+        _bx: usize,
+        _y: usize,
+        _err_r_val: f32,
+        _err_g_val: f32,
+        _err_b_val: f32,
+    ) {}
+
+    #[inline]
+    fn apply_single_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+
+    #[inline]
+    fn apply_single_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+}
+
 /// Apply kernel for a single channel based on runtime selection.
 #[inline]
 fn apply_single_channel_kernel(
@@ -1046,6 +1087,14 @@ pub fn colorspace_aware_dither_rgb_with_mode(
 
     // Dispatch to appropriate generic scan function
     match mode {
+        DitherMode::None => {
+            dither_standard_rgb::<NoneKernel>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, pad_left,
+            );
+        }
         DitherMode::Standard => {
             dither_standard_rgb::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel,

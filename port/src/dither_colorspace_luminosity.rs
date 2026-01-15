@@ -302,6 +302,22 @@ impl GrayDitherKernel for JarvisJudiceNinke {
     }
 }
 
+/// No-op kernel that discards error (no diffusion).
+/// Each pixel is independently quantized to the perceptually nearest level.
+struct NoneKernel;
+
+impl GrayDitherKernel for NoneKernel {
+    const PAD_LEFT: usize = 0;
+    const PAD_RIGHT: usize = 0;
+    const PAD_BOTTOM: usize = 0;
+
+    #[inline]
+    fn apply_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+
+    #[inline]
+    fn apply_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+}
+
 /// Apply kernel based on runtime selection
 #[inline]
 fn apply_mixed_kernel(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32, use_jjn: bool, is_rtl: bool) {
@@ -651,6 +667,12 @@ pub fn colorspace_aware_dither_gray_with_mode(
     let hashed_seed = wang_hash(seed);
 
     match mode {
+        DitherMode::None => {
+            dither_standard_gray::<NoneKernel>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left,
+            );
+        }
         DitherMode::Standard => {
             dither_standard_gray::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,

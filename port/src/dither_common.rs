@@ -144,6 +144,9 @@ pub enum HistogramMode {
 /// Dithering mode selection for color-space aware dithering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DitherMode {
+    /// No error diffusion - each pixel quantized independently
+    /// Produces banding but useful as a baseline or for testing
+    None,
     /// Floyd-Steinberg: Standard left-to-right scanning (default)
     #[default]
     Standard,
