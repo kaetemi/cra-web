@@ -181,7 +181,7 @@ function processDither(params) {
 
                 sendProgress(70, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed);
-                const rgbDithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+                const rgbDithered = ditheredBuffer.to_vec();
 
                 // Store channels for download
                 rChannel = new Uint8Array(pixelCount);
@@ -206,7 +206,7 @@ function processDither(params) {
 
             sendProgress(50, 'Dithering RGB...');
             const ditheredBuffer = craWasm.dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed);
-            const rgbDithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+            const rgbDithered = ditheredBuffer.to_vec();
 
             // Store channels for download
             rChannel = new Uint8Array(pixelCount);

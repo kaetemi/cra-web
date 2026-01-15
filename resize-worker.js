@@ -126,7 +126,7 @@ function processResize(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+        const dithered = ditheredBuffer.to_vec();
 
         sendProgress(100);
 
@@ -209,7 +209,7 @@ function processSrgbResize(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+        const dithered = ditheredBuffer.to_vec();
 
         sendProgress(100);
 
@@ -291,7 +291,7 @@ function processResizePixels(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+        const dithered = ditheredBuffer.to_vec();
 
         sendProgress(100);
 

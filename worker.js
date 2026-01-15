@@ -334,8 +334,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         0  // seed
     );
 
-    // Extract final u8 RGB data
-    const resultRgb = craWasm.to_u8_rgb_wasm(ditheredBuffer);
+    // Extract final u8 RGB data (dither_rgb_wasm returns BufferU8 directly)
+    const resultRgb = ditheredBuffer.to_vec();
 
     const elapsed = performance.now() - startTime;
     sendConsole(`Processing completed in ${elapsed.toFixed(0)}ms`);

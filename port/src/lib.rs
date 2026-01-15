@@ -446,8 +446,9 @@ pub fn calculate_dimensions_wasm(
 // Dithering
 // ============================================================================
 
-/// Dither RGB image (expects sRGB 0-255 in Pixel4 format)
-/// Returns BufferF32x4 with quantized values in sRGB 0-255
+/// Dither RGB image and return quantized u8 RGB data directly
+/// Input: BufferF32x4 with sRGB 0-255 values
+/// Output: BufferU8 with interleaved RGB u8 values (3 bytes per pixel)
 #[wasm_bindgen]
 pub fn dither_rgb_wasm(
     buf: &BufferF32x4,
@@ -460,7 +461,7 @@ pub fn dither_rgb_wasm(
     mode: u8,
     space: u8,
     seed: u32,
-) -> BufferF32x4 {
+) -> BufferU8 {
     use dither_common::OutputTechnique;
 
     let dither_mode = dither_mode_from_u8(mode);
@@ -486,18 +487,7 @@ pub fn dither_rgb_wasm(
         seed,
     );
 
-    // Convert u8 back to Pixel4 with 0-255 values
-    let pixel_count = width * height;
-    let result_pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(
-            result_u8[i * 3] as f32,
-            result_u8[i * 3 + 1] as f32,
-            result_u8[i * 3 + 2] as f32,
-            0.0
-        ))
-        .collect();
-
-    BufferF32x4::new(result_pixels)
+    BufferU8::new(result_u8)
 }
 
 /// Dither grayscale image (expects sRGB 0-255 in f32 format)
@@ -545,27 +535,6 @@ pub fn dither_gray_wasm(
     BufferU8::new(result)
 }
 
-// ============================================================================
-// Output Extraction
-// ============================================================================
-
-/// Extract u8 RGB from Pixel4 buffer (values should already be 0-255)
-#[wasm_bindgen]
-pub fn to_u8_rgb_wasm(buf: &BufferF32x4) -> Vec<u8> {
-    pixel::pixels_to_srgb_u8(buf.as_slice())
-}
-
-/// Extract u8 RGBA from Pixel4 buffer (values should already be 0-255)
-#[wasm_bindgen]
-pub fn to_u8_rgba_wasm(buf: &BufferF32x4) -> Vec<u8> {
-    pixel::pixels_to_srgb_u8_rgba(buf.as_slice())
-}
-
-/// Extract u8 from BufferF32 (rounds and clamps to 0-255)
-#[wasm_bindgen]
-pub fn gray_to_u8_wasm(buf: &BufferF32) -> Vec<u8> {
-    buf.as_slice().iter().map(|&v| v.round().clamp(0.0, 255.0) as u8).collect()
-}
 
 // ============================================================================
 // Binary Format Encoding (takes final u8 data)

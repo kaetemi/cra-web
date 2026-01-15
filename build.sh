@@ -63,6 +63,7 @@ cp linear-img-demo.html dist/
 cp linear-img-gpu-demo.html dist/
 cp app.js dist/
 cp worker.js dist/
+cp dither-worker.js dist/
 cp resize-worker.js dist/
 cp linear-img.js dist/
 cp linear-img-gpu.js dist/
