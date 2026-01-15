@@ -9,9 +9,8 @@
 
 use crate::color::{denormalize_inplace, interleave_rgb_u8, linear_to_srgb_inplace};
 use crate::dither::{dither_with_mode, dither_with_mode_bits, DitherMode};
-use crate::dither_colorspace_aware::{
-    colorspace_aware_dither_rgb_channels, colorspace_aware_dither_rgb_with_mode,
-};
+use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_channels;
+use crate::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
 use crate::dither_common::{OutputTechnique, PerceptualSpace};
 use crate::pixel::{pixels_to_channels, pixels_to_srgb_u8, Pixel4};
 
@@ -91,20 +90,16 @@ pub fn finalize_to_srgb_u8_color_aware(
     linear_to_srgb_inplace(pixels);
     denormalize_inplace(pixels);
 
-    // Extract channels for color-aware dithering
-    let (r_scaled, g_scaled, b_scaled) = pixels_to_channels(pixels);
-
     // Color-aware dithering (joint RGB processing)
-    let (r_u8, g_u8, b_u8) = colorspace_aware_dither_rgb_with_mode(
-        &r_scaled,
-        &g_scaled,
-        &b_scaled,
+    let (r_u8, g_u8, b_u8) = colorspace_aware_dither_rgb_channels(
+        pixels,
         width,
         height,
         8, 8, 8, // Full 8-bit output
         distance_space,
         dither_mode.into(),
         seed,
+        None,
     );
 
     // Interleave channels
@@ -162,6 +157,7 @@ pub fn finalize_to_srgb_u8_with_options(
 ///     bits_r, bits_g, bits_b: Output bit depth per channel (1-8)
 ///     technique: Dithering technique selection
 ///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Tuple of (R, G, B) channel vectors as u8
@@ -174,10 +170,11 @@ pub fn dither_output(
     bits_b: u8,
     technique: OutputTechnique,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     match technique {
         OutputTechnique::None => {
-            // Simple quantization without dithering
+            // Simple quantization without dithering - no progress needed
             let (r, g, b) = pixels_to_channels(srgb_pixels);
             let r_u8: Vec<u8> = r.iter().map(|v| quantize_no_dither(*v, bits_r)).collect();
             let g_u8: Vec<u8> = g.iter().map(|v| quantize_no_dither(*v, bits_g)).collect();
@@ -185,7 +182,7 @@ pub fn dither_output(
             (r_u8, g_u8, b_u8)
         }
         OutputTechnique::PerChannel { mode } => {
-            // Per-channel error diffusion
+            // Per-channel error diffusion - progress not supported yet
             let (r, g, b) = pixels_to_channels(srgb_pixels);
             let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r);
             let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g);
@@ -193,7 +190,7 @@ pub fn dither_output(
             (r_u8, g_u8, b_u8)
         }
         OutputTechnique::ColorspaceAware { mode, space } => {
-            // Joint RGB color-aware dithering
+            // Joint RGB color-aware dithering with progress
             colorspace_aware_dither_rgb_channels(
                 srgb_pixels,
                 width,
@@ -204,6 +201,7 @@ pub fn dither_output(
                 space,
                 mode,
                 seed,
+                progress,
             )
         }
     }
@@ -219,6 +217,7 @@ pub fn dither_output(
 ///     bits_r, bits_g, bits_b: Output bit depth per channel (1-8)
 ///     technique: Dithering technique selection
 ///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Interleaved RGB u8 data (RGBRGB...)
@@ -231,8 +230,9 @@ pub fn dither_output_interleaved(
     bits_b: u8,
     technique: OutputTechnique,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let (r, g, b) = dither_output(srgb_pixels, width, height, bits_r, bits_g, bits_b, technique, seed);
+    let (r, g, b) = dither_output(srgb_pixels, width, height, bits_r, bits_g, bits_b, technique, seed, progress);
     interleave_rgb_u8(&r, &g, &b)
 }
 
@@ -249,6 +249,7 @@ pub fn dither_output_interleaved(
 ///     bits_r, bits_g, bits_b: Output bit depth per channel (1-8, use 8 for RGB888)
 ///     technique: Dithering technique selection
 ///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Tuple of (R, G, B) channel vectors as u8
@@ -261,13 +262,14 @@ pub fn finalize_output(
     bits_b: u8,
     technique: OutputTechnique,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     // Convert linear RGB to sRGB 0-255 in place
     linear_to_srgb_inplace(pixels);
     denormalize_inplace(pixels);
 
     // Apply dithering
-    dither_output(pixels, width, height, bits_r, bits_g, bits_b, technique, seed)
+    dither_output(pixels, width, height, bits_r, bits_g, bits_b, technique, seed, progress)
 }
 
 /// Finalize linear RGB to interleaved sRGB u8 output (unified API).
@@ -280,6 +282,7 @@ pub fn finalize_output(
 ///     bits_r, bits_g, bits_b: Output bit depth per channel (1-8, use 8 for RGB888)
 ///     technique: Dithering technique selection
 ///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Interleaved sRGB u8 data (RGBRGB...)
@@ -292,8 +295,9 @@ pub fn finalize_output_interleaved(
     bits_b: u8,
     technique: OutputTechnique,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let (r, g, b) = finalize_output(pixels, width, height, bits_r, bits_g, bits_b, technique, seed);
+    let (r, g, b) = finalize_output(pixels, width, height, bits_r, bits_g, bits_b, technique, seed, progress);
     interleave_rgb_u8(&r, &g, &b)
 }
 
@@ -304,4 +308,57 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
     let scaled = (value / 255.0 * max_level as f32).round() as u8;
     // Bit-replicate to 8 bits
     crate::dither_common::bit_replicate(scaled, bits)
+}
+
+// ============================================================================
+// Unified Grayscale Output API
+// ============================================================================
+
+/// Dither sRGB 0-255 grayscale data to the specified bit depth.
+///
+/// This is the core grayscale dithering function that takes already-converted sRGB data.
+/// Use this when you have sRGB 0-255 grayscale values.
+///
+/// Args:
+///     gray_channel: Grayscale input as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits: Output bit depth (1-8)
+///     technique: Dithering technique selection
+///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
+///
+/// Returns:
+///     Grayscale output as u8
+pub fn dither_output_gray(
+    gray_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits: u8,
+    technique: OutputTechnique,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    match technique {
+        OutputTechnique::None => {
+            // Simple quantization without dithering - no progress needed
+            gray_channel.iter().map(|v| quantize_no_dither(*v, bits)).collect()
+        }
+        OutputTechnique::PerChannel { mode } => {
+            // Per-channel error diffusion (same as color-aware for grayscale)
+            crate::dither::dither_with_mode_bits(gray_channel, width, height, mode, seed, bits)
+        }
+        OutputTechnique::ColorspaceAware { mode, space } => {
+            // Color-aware dithering for grayscale
+            colorspace_aware_dither_gray_with_mode(
+                gray_channel,
+                width,
+                height,
+                bits,
+                space,
+                mode,
+                seed,
+                progress,
+            )
+        }
+    }
 }

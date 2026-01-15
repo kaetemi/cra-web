@@ -599,6 +599,7 @@ fn dither_standard_rgb<K: RgbDitherKernel>(
     width: usize,
     height: usize,
     pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         for x in 0..width {
@@ -613,6 +614,9 @@ fn dither_standard_rgb<K: RgbDitherKernel>(
             b_out[idx] = best_b;
 
             K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -634,6 +638,7 @@ fn dither_serpentine_rgb<K: RgbDitherKernel>(
     width: usize,
     height: usize,
     pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         if y % 2 == 1 {
@@ -667,6 +672,9 @@ fn dither_serpentine_rgb<K: RgbDitherKernel>(
                 K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
             }
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 }
 
@@ -689,6 +697,7 @@ fn dither_mixed_standard_rgb(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         for x in 0..width {
@@ -708,6 +717,9 @@ fn dither_mixed_standard_rgb(
             let use_jjn_g = pixel_hash & 2 != 0;
             let use_jjn_b = pixel_hash & 4 != 0;
             apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -730,6 +742,7 @@ fn dither_mixed_serpentine_rgb(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         if y % 2 == 1 {
@@ -769,6 +782,9 @@ fn dither_mixed_serpentine_rgb(
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 }
 
@@ -790,6 +806,7 @@ fn dither_mixed_random_rgb(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
@@ -831,6 +848,9 @@ fn dither_mixed_random_rgb(
                 let use_jjn_b = pixel_hash & 4 != 0;
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -1010,6 +1030,7 @@ pub fn colorspace_aware_dither_rgb(
         space,
         DitherMode::Standard,
         0, // seed not used for Standard mode
+        None,
     )
 }
 
@@ -1026,6 +1047,7 @@ pub fn colorspace_aware_dither_rgb(
 ///     space: Perceptual color space for distance calculation
 ///     mode: Dithering algorithm and scanning mode
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     (r_out, g_out, b_out): Output channels as u8
@@ -1041,6 +1063,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
     space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let quant_r = PerceptualQuantParams::new(bits_r);
     let quant_g = PerceptualQuantParams::new(bits_g);
@@ -1086,13 +1109,14 @@ pub fn colorspace_aware_dither_rgb_with_mode(
     let hashed_seed = wang_hash(seed);
 
     // Dispatch to appropriate generic scan function
+    // Note: We move `progress` into the called function since only one match arm executes
     match mode {
         DitherMode::None => {
             dither_standard_rgb::<NoneKernel>(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::Standard => {
@@ -1100,7 +1124,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::Serpentine => {
@@ -1108,7 +1132,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::JarvisStandard => {
@@ -1116,7 +1140,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::JarvisSerpentine => {
@@ -1124,7 +1148,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::MixedStandard => {
@@ -1132,7 +1156,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
         DitherMode::MixedSerpentine => {
@@ -1140,7 +1164,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
         DitherMode::MixedRandom => {
@@ -1148,7 +1172,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
     }
@@ -1175,6 +1199,7 @@ use crate::pixel::{pixels_to_channels, Pixel4};
 ///     space: perceptual color space for distance calculation
 ///     mode: dither algorithm and scan pattern
 ///     seed: random seed for mixed modes
+///     progress: optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Tuple of (R, G, B) u8 vectors
@@ -1188,9 +1213,10 @@ pub fn colorspace_aware_dither_rgb_channels(
     space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let (r, g, b) = pixels_to_channels(pixels);
-    colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, bits_r, bits_g, bits_b, space, mode, seed)
+    colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, bits_r, bits_g, bits_b, space, mode, seed, progress)
 }
 
 /// Color-aware dither for Pixel4 array (sRGB 0-255 range) to interleaved u8.
@@ -1205,6 +1231,7 @@ pub fn colorspace_aware_dither_rgb_channels(
 ///     space: perceptual color space for distance calculation
 ///     mode: dither algorithm and scan pattern
 ///     seed: random seed for mixed modes
+///     progress: optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Interleaved RGB u8 data (RGBRGB...)
@@ -1215,9 +1242,10 @@ pub fn colorspace_aware_dither_rgb_interleaved(
     space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let (r, g, b) = pixels_to_channels(pixels);
-    let (r_u8, g_u8, b_u8) = colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, 8, 8, 8, space, mode, seed);
+    let (r_u8, g_u8, b_u8) = colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, 8, 8, 8, space, mode, seed, progress);
     interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
 }
 
@@ -1345,7 +1373,7 @@ mod tests {
 
         for mode in modes {
             let (r_out, g_out, b_out) = colorspace_aware_dither_rgb_with_mode(
-                &r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::LabCIE76, mode, 42
+                &r, &g, &b, 10, 10, 2, 2, 2, PerceptualSpace::LabCIE76, mode, 42, None
             );
 
             assert_eq!(r_out.len(), 100, "Mode {:?} produced wrong length", mode);
@@ -1365,10 +1393,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Serpentine, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Serpentine, 0, None
         );
 
         // Results should differ
@@ -1384,10 +1412,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0, None
         );
 
         // Results should differ
@@ -1403,13 +1431,13 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_fs, g_fs, b_fs) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let (r_jjn, g_jjn, b_jjn) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0, None
         );
         let (r_mix, g_mix, b_mix) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42, None
         );
 
         // Mixed should differ from both pure algorithms
@@ -1428,10 +1456,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42, None
         );
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42, None
         );
 
         // Same seed should produce identical results
@@ -1447,10 +1475,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r1, g1, b1) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42, None
         );
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 99
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 99, None
         );
 
         // Different seeds should produce different results
@@ -1466,13 +1494,13 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedStandard, 42, None
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedSerpentine, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedSerpentine, 42, None
         );
         let (r_rand, g_rand, b_rand) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedRandom, 42
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::MixedRandom, 42, None
         );
 
         let std_combined: Vec<u8> = r_std.iter().chain(g_std.iter()).chain(b_std.iter()).copied().collect();
@@ -1495,7 +1523,7 @@ mod tests {
         let (r1, g1, b1) = colorspace_aware_dither_rgb(&r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76);
         // New API with Standard mode
         let (r2, g2, b2) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
 
         // Should produce identical results
@@ -1511,10 +1539,10 @@ mod tests {
         let b: Vec<f32> = (0..100).map(|i| ((i + 66) % 100) as f32 * 2.55).collect();
 
         let (r_std, g_std, b_std) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisStandard, 0, None
         );
         let (r_serp, g_serp, b_serp) = colorspace_aware_dither_rgb_with_mode(
-            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisSerpentine, 0
+            &r, &g, &b, 10, 10, 5, 5, 5, PerceptualSpace::LabCIE76, DitherMode::JarvisSerpentine, 0, None
         );
 
         // JJN standard and serpentine should produce different results

@@ -528,6 +528,7 @@ pub fn dither_rgb_wasm(
         bits_b,
         output_technique,
         seed,
+        None,
     );
 
     BufferU8::new(result_u8)
@@ -559,9 +560,117 @@ pub fn dither_gray_wasm(
             perceptual_space,
             dither_mode,
             seed,
+            None,
         )
     } else if technique == 1 {
         // Per-channel dithering
+        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits)
+    } else {
+        // No dithering - just quantize (round to nearest level)
+        let levels = 1u32 << bits;
+        let max_level = (levels - 1) as f32;
+        buf.as_slice().iter()
+            .map(|&v| {
+                let level = ((v / 255.0) * max_level + 0.5) as u8;
+                dither_common::bit_replicate(level.min(max_level as u8), bits)
+            })
+            .collect()
+    };
+
+    BufferU8::new(result)
+}
+
+/// Dither RGB image with progress callback
+/// Input: BufferF32x4 with sRGB 0-255 values
+/// Output: BufferU8 with interleaved RGB u8 values (3 bytes per pixel)
+/// Progress callback is called after each row with progress (0.0 to 1.0)
+#[wasm_bindgen]
+pub fn dither_rgb_with_progress_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+    progress_callback: &js_sys::Function,
+) -> BufferU8 {
+    use dither_common::OutputTechnique;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let output_technique = match technique {
+        0 => OutputTechnique::None,
+        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        _ => OutputTechnique::ColorspaceAware {
+            mode: dither_mode,
+            space: perceptual_space,
+        },
+    };
+
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result_u8 = output::dither_output_interleaved(
+        buf.as_slice(),
+        width,
+        height,
+        bits_r,
+        bits_g,
+        bits_b,
+        output_technique,
+        seed,
+        Some(&mut progress_fn),
+    );
+
+    BufferU8::new(result_u8)
+}
+
+/// Dither grayscale image with progress callback (expects sRGB 0-255 in f32 format)
+/// Returns BufferU8 with quantized values
+/// Progress callback is called after each row with progress (0.0 to 1.0)
+#[wasm_bindgen]
+pub fn dither_gray_with_progress_wasm(
+    buf: &BufferF32,
+    width: usize,
+    height: usize,
+    bits: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+    progress_callback: &js_sys::Function,
+) -> BufferU8 {
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result = if technique >= 2 {
+        // Colorspace-aware dithering with progress
+        dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode(
+            buf.as_slice(),
+            width,
+            height,
+            bits,
+            perceptual_space,
+            dither_mode,
+            seed,
+            Some(&mut progress_fn),
+        )
+    } else if technique == 1 {
+        // Per-channel dithering - no progress support yet
         dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits)
     } else {
         // No dithering - just quantize (round to nearest level)

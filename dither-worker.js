@@ -130,7 +130,10 @@ function processDither(params) {
                 craWasm.gray_denormalize_wasm(grayBuffer);
 
                 sendProgress(70, 'Dithering grayscale...');
-                const ditheredBuffer = craWasm.dither_gray_wasm(grayBuffer, currentWidth, currentHeight, bitsGray, technique, mode, perceptualSpace, seed);
+                const ditheredBuffer = craWasm.dither_gray_with_progress_wasm(
+                    grayBuffer, currentWidth, currentHeight, bitsGray, technique, mode, perceptualSpace, seed,
+                    (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering grayscale...')
+                );
                 const grayDithered = ditheredBuffer.to_vec();
 
                 // Store for download
@@ -152,7 +155,10 @@ function processDither(params) {
                 craWasm.denormalize_wasm(buffer);
 
                 sendProgress(70, 'Dithering RGB...');
-                const ditheredBuffer = craWasm.dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed);
+                const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
+                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                    (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering RGB...')
+                );
                 const rgbDithered = ditheredBuffer.to_vec();
 
                 // Store channels for download
@@ -177,7 +183,10 @@ function processDither(params) {
             let buffer = loadedImage.to_srgb_255_buffer();
 
             sendProgress(50, 'Dithering RGB...');
-            const ditheredBuffer = craWasm.dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed);
+            const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
+                buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering RGB...')
+            );
             const rgbDithered = ditheredBuffer.to_vec();
 
             // Store channels for download

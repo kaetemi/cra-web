@@ -99,20 +99,19 @@ function processResize(params) {
         sendProgress(90);
 
         // Step 7: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb_wasm(
+        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
             resizedBuffer,
             dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,
             ditherMode,
             perceptualSpace,
-            0
+            0,
+            (progress) => sendProgress(90 + Math.round(progress * 10))  // 90-100% for dither
         );
 
         // Extract final RGB u8 data
         const dithered = ditheredBuffer.to_vec();
-
-        sendProgress(100);
 
         // Convert to RGBA for ImageData
         const dstPixels = dstWidth * dstHeight;
@@ -188,20 +187,19 @@ function processSrgbResize(params) {
         sendProgress(90);
 
         // Step 5: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb_wasm(
+        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
             resizedBuffer,
             dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,
             ditherMode,
             perceptualSpace,
-            0
+            0,
+            (progress) => sendProgress(90 + Math.round(progress * 10))  // 90-100% for dither
         );
 
         // Extract final RGB u8 data
         const dithered = ditheredBuffer.to_vec();
-
-        sendProgress(100);
 
         // Convert to RGBA for ImageData
         const dstPixels = dstWidth * dstHeight;
@@ -270,20 +268,19 @@ function processResizePixels(params) {
         sendProgress(90);
 
         // Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb_wasm(
+        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
             resizedBuffer,
             dstWidth, dstHeight,
             8, 8, 8,
             2,  // ColorAware
             4,  // Mixed
             1,  // OKLab
-            0   // seed
+            0,  // seed
+            (progress) => sendProgress(90 + Math.round(progress * 10))  // 90-100% for dither
         );
 
         // Extract final RGB u8 data
         const dithered = ditheredBuffer.to_vec();
-
-        sendProgress(100);
 
         // Convert to RGBA for ImageData
         const dstPixels = dstWidth * dstHeight;

@@ -425,6 +425,7 @@ fn dither_standard_gray<K: GrayDitherKernel>(
     width: usize,
     height: usize,
     pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         for x in 0..width {
@@ -434,6 +435,9 @@ fn dither_standard_gray<K: GrayDitherKernel>(
             let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
             out[idx] = best_gray;
             K::apply_ltr(err_buf, bx, y, err_val);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -447,6 +451,7 @@ fn dither_serpentine_gray<K: GrayDitherKernel>(
     width: usize,
     height: usize,
     pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         if y % 2 == 1 {
@@ -468,6 +473,9 @@ fn dither_serpentine_gray<K: GrayDitherKernel>(
                 K::apply_ltr(err_buf, bx, y, err_val);
             }
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 }
 
@@ -481,6 +489,7 @@ fn dither_mixed_standard_gray(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         for x in 0..width {
@@ -493,6 +502,9 @@ fn dither_mixed_standard_gray(
             let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 != 0;
             apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -507,6 +519,7 @@ fn dither_mixed_serpentine_gray(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         if y % 2 == 1 {
@@ -534,6 +547,9 @@ fn dither_mixed_serpentine_gray(
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 }
 
@@ -547,6 +563,7 @@ fn dither_mixed_random_gray(
     height: usize,
     pad_left: usize,
     hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     for y in 0..height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
@@ -576,6 +593,9 @@ fn dither_mixed_random_gray(
                 let use_jjn = pixel_hash & 1 != 0;
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 }
@@ -612,6 +632,7 @@ pub fn colorspace_aware_dither_gray(
         space,
         DitherMode::Standard,
         0,
+        None,
     )
 }
 
@@ -627,6 +648,7 @@ pub fn colorspace_aware_dither_gray(
 ///     space: Perceptual color space for distance calculation
 ///     mode: Dithering algorithm and scanning mode
 ///     seed: Random seed for mixed modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     Output grayscale as u8
@@ -638,6 +660,7 @@ pub fn colorspace_aware_dither_gray_with_mode(
     space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let quant = GrayQuantParams::new(bits);
     let linear_lut = build_linear_lut();
@@ -666,53 +689,54 @@ pub fn colorspace_aware_dither_gray_with_mode(
 
     let hashed_seed = wang_hash(seed);
 
+    // Note: We move `progress` into the called function since only one match arm executes
     match mode {
         DitherMode::None => {
             dither_standard_gray::<NoneKernel>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::Standard => {
             dither_standard_gray::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::Serpentine => {
             dither_serpentine_gray::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::JarvisStandard => {
             dither_standard_gray::<JarvisJudiceNinke>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::JarvisSerpentine => {
             dither_serpentine_gray::<JarvisJudiceNinke>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left,
+                width, height, pad_left, progress,
             );
         }
         DitherMode::MixedStandard => {
             dither_mixed_standard_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
         DitherMode::MixedSerpentine => {
             dither_mixed_serpentine_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
         DitherMode::MixedRandom => {
             dither_mixed_random_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed,
+                width, height, pad_left, hashed_seed, progress,
             );
         }
     }
@@ -769,7 +793,7 @@ mod tests {
 
         for mode in modes {
             let result = colorspace_aware_dither_gray_with_mode(
-                &gray, 10, 10, 2, PerceptualSpace::OkLab, mode, 42
+                &gray, 10, 10, 2, PerceptualSpace::OkLab, mode, 42, None
             );
             assert_eq!(result.len(), 100, "Mode {:?} produced wrong length", mode);
             for &v in &result {
@@ -799,10 +823,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result1 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
         );
         let result2 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
         );
 
         assert_eq!(result1, result2, "Same seed should produce identical results");
@@ -813,10 +837,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result1 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
         );
         let result2 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 99
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::MixedStandard, 99, None
         );
 
         assert_ne!(result1, result2, "Different seeds should produce different results");
@@ -827,10 +851,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result_std = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Standard, 0, None
         );
         let result_serp = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Serpentine, 0
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Serpentine, 0, None
         );
 
         assert_ne!(result_std, result_serp, "Standard and serpentine should differ");
@@ -843,10 +867,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result_cie76 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let result_cie94 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::LabCIE94, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE94, DitherMode::Standard, 0, None
         );
 
         assert_eq!(result_cie76, result_cie94,
@@ -860,10 +884,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result_cie76 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let result_ciede2000 = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::LabCIEDE2000, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::LabCIEDE2000, DitherMode::Standard, 0, None
         );
 
         // They use different distance formulas, so results may differ
@@ -878,10 +902,10 @@ mod tests {
         let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
 
         let result_lab = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::LabCIE76, DitherMode::Standard, 0, None
         );
         let result_oklab = colorspace_aware_dither_gray_with_mode(
-            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Standard, 0
+            &gray, 10, 10, 4, PerceptualSpace::OkLab, DitherMode::Standard, 0, None
         );
 
         // They may or may not differ depending on the specific gradient,
