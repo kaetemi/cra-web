@@ -13,7 +13,6 @@ pub mod binary_format;
 pub mod color;
 mod color_distance;
 pub mod colorspace_derived;
-pub mod colorspace_primary;
 pub mod correction;
 pub mod cra_lab;
 pub mod cra_rgb;

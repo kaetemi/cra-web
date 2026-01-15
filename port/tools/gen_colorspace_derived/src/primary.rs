@@ -2,7 +2,7 @@
 //!
 //! These are the authoritative constants from standards documents and published research.
 //! All values are stored in f64 for maximum precision during derivation.
-//! Derived constants (XYZ matrices, etc.) are computed from these in colorspace_derived.rs.
+//! Derived constants (XYZ matrices, etc.) are computed from these by the generator.
 //!
 //! Sources:
 //! - ITU-R BT.709-6 (sRGB primaries, D65)
