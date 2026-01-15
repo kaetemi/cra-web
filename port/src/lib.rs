@@ -982,6 +982,16 @@ pub fn decode_image_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
         .map_err(|e| JsValue::from_str(&e))
 }
 
+/// Decode image directly to sRGB f32 0-255 scale (no 0-1 intermediate)
+/// Use this for sRGB-direct paths where no color processing is needed.
+/// Returns: [width, height, has_icc (0/1), is_16bit (0/1), ...pixel_data]
+/// Pixel data is interleaved RGB f32 in 0-255 range, ready for dithering.
+#[wasm_bindgen]
+pub fn decode_image_srgb_255_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
+    decode::decode_image_to_srgb_255(&file_bytes)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
 /// Get ICC profile from raw file bytes (if present)
 /// Returns empty Vec if no profile found
 #[wasm_bindgen]

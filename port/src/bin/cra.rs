@@ -18,8 +18,8 @@ use cra_wasm::binary_format::{
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
-    image_to_f32_normalized, is_profile_srgb_verbose, load_image_from_path,
-    transform_icc_to_linear_srgb_pixels,
+    image_to_f32_normalized, image_to_f32_srgb_255_pixels, is_profile_srgb_verbose,
+    load_image_from_path, transform_icc_to_linear_srgb_pixels,
 };
 use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
 use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -482,54 +482,26 @@ fn convert_to_linear(
 /// Use when only dithering is needed (no resize, no color correction)
 fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, u32) {
     let (width, height) = img.dimensions();
-    let color_type = img.color();
-    let pixel_count = (width * height) as usize;
 
     if verbose {
         eprintln!("  Dimensions: {}x{}", width, height);
-        eprintln!("  Color type: {:?}", color_type);
-    }
-
-    // Keep as sRGB 0-255 in Pixel4 format
-    // For 16-bit sources: divide by 65535 then multiply by 255 (equivalent to /257)
-    // This preserves more precision than going through integer intermediate
-    let mut pixels = Vec::with_capacity(pixel_count);
-
-    match color_type {
-        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::La16 | ColorType::L16 => {
-            // 16-bit source: scale to 0-255 without integer intermediate
-            let rgb16 = img.to_rgb16();
-            let data = rgb16.as_raw();
-
-            if verbose {
-                eprintln!("  Using 16-bit precision path (scaling to 0-255)");
-            }
-
-            for i in 0..pixel_count {
-                // Divide by 65535, multiply by 255 = divide by ~257.0
-                let r = data[i * 3] as f32 / 65535.0 * 255.0;
-                let g = data[i * 3 + 1] as f32 / 65535.0 * 255.0;
-                let b = data[i * 3 + 2] as f32 / 65535.0 * 255.0;
-                pixels.push([r, g, b, 0.0]);
-            }
-        }
-        _ => {
-            // 8-bit source (or palette which expands to 8-bit)
-            let rgb8 = img.to_rgb8();
-            let data = rgb8.as_raw();
-
-            if verbose {
-                eprintln!("  Using 8-bit path");
-            }
-
-            for i in 0..pixel_count {
-                let r = data[i * 3] as f32;
-                let g = data[i * 3 + 1] as f32;
-                let b = data[i * 3 + 2] as f32;
-                pixels.push([r, g, b, 0.0]);
-            }
+        eprintln!("  Color type: {:?}", img.color());
+        let is_16bit = matches!(
+            img.color(),
+            ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+        );
+        if is_16bit {
+            eprintln!("  Using 16-bit precision path (scaling to 0-255)");
+        } else {
+            eprintln!("  Using 8-bit path");
         }
     }
+
+    // Use shared function: 8-bit → f32 direct, 16-bit → f32 * 255.0 / 65535.0
+    let pixels: Vec<Pixel4> = image_to_f32_srgb_255_pixels(img)
+        .into_iter()
+        .map(|[r, g, b]| [r, g, b, 0.0])
+        .collect();
 
     (pixels, width, height)
 }

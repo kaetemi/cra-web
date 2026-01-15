@@ -112,6 +112,54 @@ pub fn image_to_f32_interleaved(img: &DynamicImage) -> Vec<f32> {
         .collect()
 }
 
+/// Convert DynamicImage directly to f32 sRGB 0-255 scale (no 0-1 intermediate)
+/// Returns array of [r, g, b] for CLI compatibility.
+/// - 8-bit: u8 as f32 (direct cast)
+/// - 16-bit: u16 * 255.0 / 65535.0 directly to 0-255
+pub fn image_to_f32_srgb_255_pixels(img: &DynamicImage) -> Vec<[f32; 3]> {
+    let (width, height) = img.dimensions();
+    let pixel_count = (width * height) as usize;
+
+    let is_16bit = matches!(
+        img.color(),
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+    );
+
+    if is_16bit {
+        // 16-bit: scale from 0-65535 to 0-255
+        let rgb16 = img.to_rgb16();
+        let data = rgb16.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 3] as f32 * 255.0 / 65535.0,
+                data[i * 3 + 1] as f32 * 255.0 / 65535.0,
+                data[i * 3 + 2] as f32 * 255.0 / 65535.0,
+            ])
+            .collect()
+    } else {
+        // 8-bit: u8 directly as f32 (no arithmetic needed)
+        let rgb8 = img.to_rgb8();
+        let data = rgb8.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 3] as f32,
+                data[i * 3 + 1] as f32,
+                data[i * 3 + 2] as f32,
+            ])
+            .collect()
+    }
+}
+
+/// Convert DynamicImage directly to interleaved f32 sRGB 0-255 scale (for WASM)
+/// - 8-bit: u8 as f32 (direct cast)
+/// - 16-bit: u16 * 255.0 / 65535.0 directly to 0-255
+pub fn image_to_f32_srgb_255(img: &DynamicImage) -> Vec<f32> {
+    image_to_f32_srgb_255_pixels(img)
+        .into_iter()
+        .flat_map(|[r, g, b]| [r, g, b])
+        .collect()
+}
+
 // ============================================================================
 // ICC Profile Handling
 // ============================================================================
@@ -271,6 +319,29 @@ pub fn decode_image_to_f32(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
 
     // Build result: [width, height, has_icc, is_16bit, ...pixels]
     let pixel_count = (width * height) as usize;
+    let mut result = Vec::with_capacity(4 + pixel_count * 3);
+    result.push(width as f32);
+    result.push(height as f32);
+    result.push(if decoded.icc_profile.is_some() { 1.0 } else { 0.0 });
+    result.push(if decoded.is_16bit { 1.0 } else { 0.0 });
+    result.extend(pixels);
+
+    Ok(result)
+}
+
+/// Decode image from raw bytes directly to sRGB f32 0-255 scale
+/// This avoids the 0-1 intermediate when no color processing is needed.
+/// Returns: [width as f32, height as f32, has_icc (0.0/1.0), is_16bit (0.0/1.0), ...pixel_data]
+/// Pixel data is interleaved RGB f32 in 0-255 range
+pub fn decode_image_to_srgb_255(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
+    let decoded = load_image_from_bytes(file_bytes)?;
+    let (width, height) = decoded.image.dimensions();
+    let pixel_count = (width * height) as usize;
+
+    // Convert directly to f32 0-255 without 0-1 intermediate
+    let pixels = image_to_f32_srgb_255(&decoded.image);
+
+    // Build result: [width, height, has_icc, is_16bit, ...pixels]
     let mut result = Vec::with_capacity(4 + pixel_count * 3);
     result.push(width as f32);
     result.push(height as f32);

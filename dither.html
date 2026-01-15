@@ -849,7 +849,8 @@
             encode_channel_packed_wasm,
             encode_channel_row_aligned_stride_wasm,
             // Precise image decoding (preserves 16-bit, extracts ICC)
-            decode_image_wasm,
+            decode_image_wasm,           // Returns f32 0-1 (for linear processing path)
+            decode_image_srgb_255_wasm,  // Returns f32 0-255 (for sRGB-direct path)
             // Atomic color space conversion functions
             denormalize_f32_wasm,
             srgb_to_linear_f32_wasm,
@@ -873,9 +874,8 @@
             };
         }
 
-        // Decode image using WASM (preserves 16-bit precision)
-        // Returns: { width, height, pixels (f32 0-1 interleaved RGB), is16bit }
-        function decodeImagePrecise(fileBytes) {
+        // Decode image to f32 0-1 (for linear processing path)
+        function decodeToNormalized(fileBytes) {
             const result = decode_image_wasm(new Uint8Array(fileBytes));
             const width = result[0];
             const height = result[1];
@@ -885,9 +885,19 @@
             return { width, height, hasIcc, is16bit, pixels };
         }
 
+        // Decode image directly to f32 0-255 (for sRGB-direct path, no intermediate)
+        function decodeToSrgb255(fileBytes) {
+            const result = decode_image_srgb_255_wasm(new Uint8Array(fileBytes));
+            const width = result[0];
+            const height = result[1];
+            const hasIcc = result[2] > 0.5;
+            const is16bit = result[3] > 0.5;
+            const pixels = result.slice(4); // Interleaved RGB f32 (0-255)
+            return { width, height, hasIcc, is16bit, pixels };
+        }
+
         let wasmReady = false;
-        let inputFileBytes = null;      // Raw file bytes for precise decoding
-        let inputPixelsF32 = null;      // Decoded f32 0-1 pixels (cached)
+        let inputFileBytes = null;      // Raw file bytes (decoded on demand based on processing mode)
         let inputWidth = 0;
         let inputHeight = 0;
         let originalWidth = 0;
@@ -1006,9 +1016,9 @@
 
         // Process the image using atomic pipeline
         // Pipeline decisions:
-        // - RGB without rescale: f32 0-1 → denormalize to 0-255 → dither (skip linear)
-        // - RGB with rescale: f32 0-1 → linear → rescale → sRGB → denormalize → dither
-        // - Grayscale: f32 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
+        // - RGB without rescale: decode to f32 0-255 → dither directly (no intermediate)
+        // - RGB with rescale: decode to f32 0-1 → linear → rescale → sRGB → denormalize → dither
+        // - Grayscale: decode to f32 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
         async function processImage() {
             if (!inputFileBytes) return;
 
@@ -1045,13 +1055,14 @@
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-                // Use cached decoded pixels (f32 0-1 sRGB)
-                let srgbNorm = inputPixelsF32;
                 let currentWidth = originalWidth;
                 let currentHeight = originalHeight;
 
                 if (needsLinear) {
-                    // Input srgbNorm is already f32 0-1 from precise decode
+                    // Decode to f32 0-1 for linear processing
+                    const decoded = decodeToNormalized(inputFileBytes);
+                    let srgbNorm = decoded.pixels;
+
                     // Step 1: Convert to linear
                     let linearRgb = srgb_to_linear_f32_wasm(srgbNorm, currentWidth, currentHeight);
 
@@ -1142,9 +1153,11 @@
                         }
                     }
                 } else {
-                    // No linear processing needed - direct sRGB dithering (preserves 16-bit precision)
-                    // srgbNorm is f32 0-1, denormalize to 0-255 for dithering
-                    const srgbF32_255 = denormalize_f32_wasm(srgbNorm, currentWidth, currentHeight);
+                    // sRGB-direct path: decode directly to f32 0-255, no intermediate
+                    // 8-bit: u8 as f32 (no arithmetic)
+                    // 16-bit: u16 * 255.0 / 65535.0 (single operation)
+                    const decoded = decodeToSrgb255(inputFileBytes);
+                    const srgbF32_255 = decoded.pixels;
 
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
@@ -1421,15 +1434,14 @@
             if (!file) return;
 
             try {
-                // Load file bytes for precise WASM decoding
+                // Load file bytes (decoded on demand in processImage based on mode)
                 const fileBytes = await loadImageBytes(file);
 
-                // Decode with WASM (preserves 16-bit precision)
-                const decoded = decodeImagePrecise(fileBytes);
+                // Quick decode just to get dimensions (using 0-255 path, no processing)
+                const decoded = decodeToSrgb255(fileBytes);
 
-                // Store for processing
+                // Store raw bytes for processing
                 inputFileBytes = fileBytes;
-                inputPixelsF32 = decoded.pixels;
                 inputWidth = decoded.width;
                 inputHeight = decoded.height;
                 originalWidth = decoded.width;
@@ -1459,7 +1471,7 @@
                 updateProcessButton();
 
                 if (decoded.is16bit) {
-                    console.log('Loaded 16-bit image with precise decoding');
+                    console.log('Loaded 16-bit image');
                 }
             } catch (err) {
                 console.error('Failed to load image:', err);
