@@ -1389,7 +1389,7 @@
             // Use cra tool for dither (--histogram defaults to none when no --ref)
             let cmd = 'cra -i input.png -o output.png';
 
-            // Add format
+            // Add format (only if not default RGB888)
             if (isGrayscale) {
                 const bitsGray = parseInt(document.getElementById('bits-gray').value);
                 cmd += ` --format L${bitsGray}`;
@@ -1397,20 +1397,31 @@
                 const bitsR = parseInt(document.getElementById('bits-r').value);
                 const bitsG = parseInt(document.getElementById('bits-g').value);
                 const bitsB = parseInt(document.getElementById('bits-b').value);
-                cmd += ` --format RGB${bitsR}${bitsG}${bitsB}`;
+                if (bitsR !== 8 || bitsG !== 8 || bitsB !== 8) {
+                    cmd += ` --format RGB${bitsR}${bitsG}${bitsB}`;
+                }
             }
 
-            // Add dither mode
-            cmd += ` --output-dither ${modeMap[mode]}`;
+            // Add dither mode (only if not default mixed-standard)
+            if (mode !== 4) {
+                cmd += ` --output-dither ${modeMap[mode]}`;
+            }
 
-            // Add colorspace if perceptual
+            // Add colorspace-aware output options
             if (isPerceptual) {
                 const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
+                // Default is oklab for RGB, lab-cie94 for grayscale
+                const defaultSpace = isGrayscale ? 2 : 1; // 2 = lab-cie94, 1 = oklab
+                if (perceptualSpace !== defaultSpace) {
+                    cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
+                }
+            } else {
+                // Colorspace-aware is ON by default, add flag to disable
+                cmd += ' --no-colorspace-aware-output';
             }
 
-            // Add seed for mixed modes
-            if (mode >= 4 && mode <= 6) {
+            // Add seed for mixed modes (only if not default 12345)
+            if (mode >= 4 && mode <= 6 && seed !== 12345) {
                 cmd += ` --seed ${seed}`;
             }
 
@@ -1420,7 +1431,11 @@
                 const height = parseInt(document.getElementById('scale-height').value);
                 const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
                 const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos' };
-                cmd += ` --width ${width} --height ${height} --scale-method ${scaleMethodMap[scaleMethod]}`;
+                cmd += ` --width ${width} --height ${height}`;
+                // Only add scale method if not default lanczos
+                if (scaleMethod !== 1) {
+                    cmd += ` --scale-method ${scaleMethodMap[scaleMethod]}`;
+                }
             }
 
             return cmd;

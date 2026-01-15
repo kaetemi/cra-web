@@ -174,7 +174,10 @@ function generateCliCommand() {
     };
 
     let cmd = `cra -i input.png -r reference.png -o output.png`;
-    cmd += ` --histogram ${methodMap[method] || 'cra-lab'}`;
+    // Add histogram method only if not default cra-oklab (which is CLI default when reference provided)
+    if (method !== 'cra_oklab') {
+        cmd += ` --histogram ${methodMap[method] || 'cra-lab'}`;
+    }
 
     // Add keep-luminosity for basic-lab, basic-oklab, cra-lab, cra-oklab if not tiled
     if (['lab', 'oklab', 'cra_lab', 'cra_oklab'].includes(method)) {
@@ -191,20 +194,27 @@ function generateCliCommand() {
         cmd += ' --perceptual';
     }
 
-    // Add histogram mode
-    cmd += ` --histogram-mode ${histogramModeMap[histogramMode]}`;
+    // Add histogram mode (only if not default binned)
+    if (histogramMode !== 0) {
+        cmd += ` --histogram-mode ${histogramModeMap[histogramMode]}`;
+    }
 
-    // Add output dither
-    cmd += ` --output-dither ${ditherMap[outputDitherMode]}`;
+    // Add output dither (only if not default mixed-standard)
+    if (outputDitherMode !== 4) {
+        cmd += ` --output-dither ${ditherMap[outputDitherMode]}`;
+    }
 
-    // Add histogram dither only if binned mode
-    if (histogramMode === 0) {
+    // Add histogram dither only if binned mode and not default mixed-standard
+    if (histogramMode === 0 && histogramDitherMode !== 4) {
         cmd += ` --histogram-dither ${ditherMap[histogramDitherMode]}`;
+    }
 
-        // Colorspace-aware histogram is default, add flag only if disabled
-        if (!colorAwareHistogram && methodSupportsColorAware(method)) {
+    // Colorspace-aware histogram options (only applies to binned mode)
+    if (histogramMode === 0 && methodSupportsColorAware(method)) {
+        if (!colorAwareHistogram) {
+            // Colorspace-aware is default ON, add flag only if disabled
             cmd += ' --no-colorspace-aware-histogram';
-        } else if (colorAwareHistogram && methodSupportsColorAware(method) && histogramDistanceSpace !== 1) {
+        } else if (histogramDistanceSpace !== 1) {
             // Add distance space only if non-default (1 = Oklab)
             cmd += ` --histogram-distance-space ${spaceMap[histogramDistanceSpace]}`;
         }
