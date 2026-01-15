@@ -53,26 +53,38 @@ impl ColorFormat {
             });
         }
 
-        // RGB formats: RGB565, RGB111, RGB332, RGB888, etc.
+        // RGB formats: RGB8 (shorthand for RGB888), RGB565, RGB111, RGB332, RGB888, etc.
         if format_upper.starts_with("RGB") {
             let bits_str = &format_upper[3..];
 
-            if bits_str.len() != 3 {
-                return Err(format!(
-                    "Invalid RGB format '{}': expected RGB followed by 3 digits (e.g., RGB565)",
-                    format
-                ));
-            }
-
-            let bits_r: u8 = bits_str[0..1]
-                .parse()
-                .map_err(|_| format!("Invalid red bit count in '{}'", format))?;
-            let bits_g: u8 = bits_str[1..2]
-                .parse()
-                .map_err(|_| format!("Invalid green bit count in '{}'", format))?;
-            let bits_b: u8 = bits_str[2..3]
-                .parse()
-                .map_err(|_| format!("Invalid blue bit count in '{}'", format))?;
+            let (bits_r, bits_g, bits_b): (u8, u8, u8) = match bits_str.len() {
+                // Single digit: same bits for all channels (RGB8 = RGB888)
+                1 => {
+                    let bits: u8 = bits_str
+                        .parse()
+                        .map_err(|_| format!("Invalid bit count in '{}'", format))?;
+                    (bits, bits, bits)
+                }
+                // Three digits: individual channel bits (RGB565)
+                3 => {
+                    let r: u8 = bits_str[0..1]
+                        .parse()
+                        .map_err(|_| format!("Invalid red bit count in '{}'", format))?;
+                    let g: u8 = bits_str[1..2]
+                        .parse()
+                        .map_err(|_| format!("Invalid green bit count in '{}'", format))?;
+                    let b: u8 = bits_str[2..3]
+                        .parse()
+                        .map_err(|_| format!("Invalid blue bit count in '{}'", format))?;
+                    (r, g, b)
+                }
+                _ => {
+                    return Err(format!(
+                        "Invalid RGB format '{}': expected RGB followed by 1 digit (e.g., RGB8) or 3 digits (e.g., RGB565)",
+                        format
+                    ));
+                }
+            };
 
             if bits_r < 1 || bits_r > 8 {
                 return Err(format!("Red bits must be 1-8, got {}", bits_r));
@@ -819,6 +831,22 @@ mod tests {
         let rgb111 = ColorFormat::parse("RGB111").unwrap();
         assert_eq!(rgb111.total_bits, 3);
         assert!(!rgb111.supports_binary()); // 3 bits doesn't fit neatly
+
+        // Single digit shorthand: RGB8 = RGB888
+        let rgb8 = ColorFormat::parse("RGB8").unwrap();
+        assert_eq!(rgb8.bits_r, 8);
+        assert_eq!(rgb8.bits_g, 8);
+        assert_eq!(rgb8.bits_b, 8);
+        assert_eq!(rgb8.total_bits, 24);
+        assert!(!rgb8.is_grayscale);
+        assert!(rgb8.supports_binary());
+
+        // RGB5 = RGB555
+        let rgb5 = ColorFormat::parse("RGB5").unwrap();
+        assert_eq!(rgb5.bits_r, 5);
+        assert_eq!(rgb5.bits_g, 5);
+        assert_eq!(rgb5.bits_b, 5);
+        assert_eq!(rgb5.total_bits, 15);
     }
 
     #[test]

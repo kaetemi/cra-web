@@ -264,7 +264,8 @@ struct Args {
     #[arg(long)]
     output_meta: Option<PathBuf>,
 
-    /// Output format: RGB with bit counts (e.g., RGB332, RGB565, RGB888) or L with bits (e.g., L4, L8)
+    /// Output format: RGB with bit counts (e.g., RGB8, RGB332, RGB565, RGB888) or L with bits (e.g., L4, L8).
+    /// Single digit means same for all channels (RGB8 = RGB888, RGB5 = RGB555).
     #[arg(short, long, default_value = "RGB888")]
     format: String,
 
