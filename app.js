@@ -174,7 +174,7 @@ function generateCliCommand() {
     };
 
     let cmd = `cra -i input.png -r reference.png -o output.png`;
-    cmd += ` --method ${methodMap[method] || 'cra-lab'}`;
+    cmd += ` --histogram ${methodMap[method] || 'cra-lab'}`;
 
     // Add keep-luminosity for basic-lab, basic-oklab, cra-lab, cra-oklab if not tiled
     if (['lab', 'oklab', 'cra_lab', 'cra_oklab'].includes(method)) {
