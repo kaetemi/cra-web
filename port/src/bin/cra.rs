@@ -271,6 +271,10 @@ struct Args {
     #[arg(short, long)]
     r#ref: Option<PathBuf>,
 
+    /// Reference color profile handling
+    #[arg(long, value_enum, default_value_t = InputColorProfile::Auto)]
+    ref_profile: InputColorProfile,
+
     /// Output PNG image path (optional)
     #[arg(short, long)]
     output: Option<PathBuf>,
@@ -1012,12 +1016,12 @@ fn main() -> Result<(), String> {
         let pixels_to_dither = if needs_reference {
             // Load reference and apply color correction
             let ref_path = args.r#ref.as_ref().unwrap();
-            // Reference image always assumed sRGB (color correction target)
+            // Load reference with specified profile handling (default: Auto detects ICC)
             if args.verbose {
                 eprintln!("Loading: {}", ref_path.display());
             }
             let decoded_ref = load_image_from_path(ref_path)?;
-            let (ref_pixels, ref_width, ref_height) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, InputColorProfile::Srgb, args.verbose)?;
+            let (ref_pixels, ref_width, ref_height) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, args.verbose)?;
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 

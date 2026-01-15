@@ -319,4 +319,4 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
 
 ## 8. Known Limitations
 
-- **Reference image profile**: Currently assumes sRGB. Should use the same ICC detection as input images. (Bug to fix)
+None currently documented.
