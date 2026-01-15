@@ -719,11 +719,11 @@ pub fn format_is_grayscale_wasm(format: &str) -> bool {
     binary_format::format_is_grayscale(format)
 }
 
+/// Encode interleaved RGB data to packed binary format
+/// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]
 pub fn encode_rgb_packed_wasm(
-    r_data: Vec<u8>,
-    g_data: Vec<u8>,
-    b_data: Vec<u8>,
+    rgb_data: Vec<u8>,
     width: usize,
     height: usize,
     bits_r: u8,
@@ -736,21 +736,21 @@ pub fn encode_rgb_packed_wasm(
     } else {
         binary_format::StrideFill::Repeat
     };
-    binary_format::encode_rgb_packed(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b, fill_mode)
+    binary_format::encode_rgb_packed(&rgb_data, width, height, bits_r, bits_g, bits_b, fill_mode)
 }
 
+/// Encode interleaved RGB data to row-aligned binary format
+/// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]
 pub fn encode_rgb_row_aligned_wasm(
-    r_data: Vec<u8>,
-    g_data: Vec<u8>,
-    b_data: Vec<u8>,
+    rgb_data: Vec<u8>,
     width: usize,
     height: usize,
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
 ) -> Vec<u8> {
-    binary_format::encode_rgb_row_aligned(&r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b)
+    binary_format::encode_rgb_row_aligned(&rgb_data, width, height, bits_r, bits_g, bits_b)
 }
 
 #[wasm_bindgen]
@@ -798,11 +798,11 @@ pub fn is_valid_stride_wasm(stride: usize) -> bool {
     binary_format::is_valid_stride(stride)
 }
 
+/// Encode interleaved RGB data to row-aligned binary format with configurable stride
+/// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]
 pub fn encode_rgb_row_aligned_stride_wasm(
-    r_data: Vec<u8>,
-    g_data: Vec<u8>,
-    b_data: Vec<u8>,
+    rgb_data: Vec<u8>,
     width: usize,
     height: usize,
     bits_r: u8,
@@ -812,7 +812,7 @@ pub fn encode_rgb_row_aligned_stride_wasm(
     fill: u8,
 ) -> Vec<u8> {
     binary_format::encode_rgb_row_aligned_stride(
-        &r_data, &g_data, &b_data, width, height, bits_r, bits_g, bits_b,
+        &rgb_data, width, height, bits_r, bits_g, bits_b,
         stride, binary_format::StrideFill::from_u8(fill)
     )
 }

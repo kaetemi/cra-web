@@ -242,10 +242,11 @@ pub fn encode_channel_pixel(value: u8, bits: u8) -> u32 {
 ///
 /// Each pixel is encoded as R6 G6 B6 (R in MSB, B in LSB = 18 bits)
 /// The 4 pixels are packed sequentially into the 72-bit block.
+///
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
 pub fn encode_rgb666_packed(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
     fill: StrideFill,
@@ -258,9 +259,9 @@ pub fn encode_rgb666_packed(
 
     // Get last pixel for repeat fill
     let last_idx = total_pixels - 1;
-    let last_r = (r_data[last_idx] >> 2) as u32;
-    let last_g = (g_data[last_idx] >> 2) as u32;
-    let last_b = (b_data[last_idx] >> 2) as u32;
+    let last_r = (rgb_data[last_idx * 3] >> 2) as u32;
+    let last_g = (rgb_data[last_idx * 3 + 1] >> 2) as u32;
+    let last_b = (rgb_data[last_idx * 3 + 2] >> 2) as u32;
     let last_rgb6: u32 = last_b | (last_g << 6) | (last_r << 12);
 
     let mut pixel_idx = 0;
@@ -277,9 +278,9 @@ pub fn encode_rgb666_packed(
                 }
             } else {
                 let idx = pixel_idx + i;
-                let r = (r_data[idx] >> 2) as u32; // 6 bits
-                let g = (g_data[idx] >> 2) as u32; // 6 bits
-                let b = (b_data[idx] >> 2) as u32; // 6 bits
+                let r = (rgb_data[idx * 3] >> 2) as u32; // 6 bits
+                let g = (rgb_data[idx * 3 + 1] >> 2) as u32; // 6 bits
+                let b = (rgb_data[idx * 3 + 2] >> 2) as u32; // 6 bits
                 b | (g << 6) | (r << 12)
             };
 
@@ -302,12 +303,12 @@ pub fn encode_rgb666_packed(
 
 /// Encode RGB666 data with row alignment and configurable stride
 ///
-/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
-/// fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
+///     stride: Row stride alignment in bytes (must be power of 2, 1-128)
+///     fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
 pub fn encode_rgb666_row_aligned_stride(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
     stride: usize,
@@ -326,9 +327,9 @@ pub fn encode_rgb666_row_aligned_stride(
 
         // Get last pixel for repeat fill
         let last_idx = row_start + width - 1;
-        let last_r = (r_data[last_idx] >> 2) as u32;
-        let last_g = (g_data[last_idx] >> 2) as u32;
-        let last_b = (b_data[last_idx] >> 2) as u32;
+        let last_r = (rgb_data[last_idx * 3] >> 2) as u32;
+        let last_g = (rgb_data[last_idx * 3 + 1] >> 2) as u32;
+        let last_b = (rgb_data[last_idx * 3 + 2] >> 2) as u32;
         let last_rgb6: u32 = last_b | (last_g << 6) | (last_r << 12);
 
         while x < width {
@@ -343,9 +344,9 @@ pub fn encode_rgb666_row_aligned_stride(
                     }
                 } else {
                     let idx = row_start + x + i;
-                    let r = (r_data[idx] >> 2) as u32;
-                    let g = (g_data[idx] >> 2) as u32;
-                    let b = (b_data[idx] >> 2) as u32;
+                    let r = (rgb_data[idx * 3] >> 2) as u32;
+                    let g = (rgb_data[idx * 3 + 1] >> 2) as u32;
+                    let b = (rgb_data[idx * 3 + 2] >> 2) as u32;
                     b | (g << 6) | (r << 12)
                 };
 
@@ -389,23 +390,26 @@ pub fn encode_rgb666_row_aligned_stride(
 
 /// Encode RGB666 data with row alignment (each row padded to 9-byte boundary for 4-pixel groups)
 /// This is a convenience wrapper with stride=1 (no additional alignment) and black fill
+///
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
 pub fn encode_rgb666_row_aligned(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
 ) -> Vec<u8> {
-    encode_rgb666_row_aligned_stride(r_data, g_data, b_data, width, height, 1, StrideFill::Black)
+    encode_rgb666_row_aligned_stride(rgb_data, width, height, 1, StrideFill::Black)
 }
 
 /// Write packed binary output for RGB data (continuous bit stream, no row padding)
 ///
-/// fill: How to fill partial groups (only applies to RGB666's 4-pixel grouping)
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b: Output bit depth per channel
+///     fill: How to fill partial groups (only applies to RGB666's 4-pixel grouping)
 pub fn encode_rgb_packed(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
     bits_r: u8,
@@ -415,7 +419,7 @@ pub fn encode_rgb_packed(
 ) -> Vec<u8> {
     // Special case: RGB666 uses 4-pixel-to-9-byte packing
     if bits_r == 6 && bits_g == 6 && bits_b == 6 {
-        return encode_rgb666_packed(r_data, g_data, b_data, width, height, fill);
+        return encode_rgb666_packed(rgb_data, width, height, fill);
     }
 
     let total_bits = (bits_r + bits_g + bits_b) as usize;
@@ -428,7 +432,10 @@ pub fn encode_rgb_packed(
         output.reserve(total_pixels * bytes_per_pixel);
 
         for i in 0..total_pixels {
-            let val = encode_rgb_pixel(r_data[i], g_data[i], b_data[i], bits_r, bits_g, bits_b);
+            let r = rgb_data[i * 3];
+            let g = rgb_data[i * 3 + 1];
+            let b = rgb_data[i * 3 + 2];
+            let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
             // Write little-endian (LSB first)
             for byte_idx in 0..bytes_per_pixel {
                 output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
@@ -444,7 +451,10 @@ pub fn encode_rgb_packed(
         let mut bits_in_byte: usize = 0;
 
         for i in 0..total_pixels {
-            let val = encode_rgb_pixel(r_data[i], g_data[i], b_data[i], bits_r, bits_g, bits_b);
+            let r = rgb_data[i * 3];
+            let g = rgb_data[i * 3 + 1];
+            let b = rgb_data[i * 3 + 2];
+            let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
 
             // Pack from MSB to LSB
             let shift = 8 - bits_in_byte - total_bits;
@@ -469,12 +479,14 @@ pub fn encode_rgb_packed(
 
 /// Write row-aligned binary output for RGB data with configurable stride
 ///
-/// stride: Row stride alignment in bytes (must be power of 2, 1-128)
-/// fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b: Output bit depth per channel
+///     stride: Row stride alignment in bytes (must be power of 2, 1-128)
+///     fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
 pub fn encode_rgb_row_aligned_stride(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
     bits_r: u8,
@@ -485,7 +497,7 @@ pub fn encode_rgb_row_aligned_stride(
 ) -> Vec<u8> {
     // Special case: RGB666 uses 4-pixel-to-9-byte packing
     if bits_r == 6 && bits_g == 6 && bits_b == 6 {
-        return encode_rgb666_row_aligned_stride(r_data, g_data, b_data, width, height, stride, fill);
+        return encode_rgb666_row_aligned_stride(rgb_data, width, height, stride, fill);
     }
 
     let total_bits = (bits_r + bits_g + bits_b) as usize;
@@ -501,11 +513,17 @@ pub fn encode_rgb_row_aligned_stride(
         for y in 0..height {
             // Get last pixel for repeat fill
             let last_i = y * width + width - 1;
-            let last_val = encode_rgb_pixel(r_data[last_i], g_data[last_i], b_data[last_i], bits_r, bits_g, bits_b);
+            let last_r = rgb_data[last_i * 3];
+            let last_g = rgb_data[last_i * 3 + 1];
+            let last_b = rgb_data[last_i * 3 + 2];
+            let last_val = encode_rgb_pixel(last_r, last_g, last_b, bits_r, bits_g, bits_b);
 
             for x in 0..width {
                 let i = y * width + x;
-                let val = encode_rgb_pixel(r_data[i], g_data[i], b_data[i], bits_r, bits_g, bits_b);
+                let r = rgb_data[i * 3];
+                let g = rgb_data[i * 3 + 1];
+                let b = rgb_data[i * 3 + 2];
+                let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
                 // Write little-endian (LSB first)
                 for byte_idx in 0..bytes_per_pixel {
                     output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
@@ -543,11 +561,17 @@ pub fn encode_rgb_row_aligned_stride(
 
         // Get last pixel for repeat fill
         let last_i = y * width + width - 1;
-        let last_val = encode_rgb_pixel(r_data[last_i], g_data[last_i], b_data[last_i], bits_r, bits_g, bits_b) as u8;
+        let last_r = rgb_data[last_i * 3];
+        let last_g = rgb_data[last_i * 3 + 1];
+        let last_b = rgb_data[last_i * 3 + 2];
+        let last_val = encode_rgb_pixel(last_r, last_g, last_b, bits_r, bits_g, bits_b) as u8;
 
         for x in 0..width {
             let i = y * width + x;
-            let val = encode_rgb_pixel(r_data[i], g_data[i], b_data[i], bits_r, bits_g, bits_b);
+            let r = rgb_data[i * 3];
+            let g = rgb_data[i * 3 + 1];
+            let b = rgb_data[i * 3 + 2];
+            let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
 
             // Pack from MSB to LSB
             let shift = 8 - bits_in_byte - total_bits;
@@ -587,17 +611,18 @@ pub fn encode_rgb_row_aligned_stride(
 
 /// Write row-aligned binary output for RGB data (each row padded to byte boundary)
 /// This is a convenience wrapper with stride=1 (no additional alignment beyond byte boundary) and black fill
+///
+/// Args:
+///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
 pub fn encode_rgb_row_aligned(
-    r_data: &[u8],
-    g_data: &[u8],
-    b_data: &[u8],
+    rgb_data: &[u8],
     width: usize,
     height: usize,
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
 ) -> Vec<u8> {
-    encode_rgb_row_aligned_stride(r_data, g_data, b_data, width, height, bits_r, bits_g, bits_b, 1, StrideFill::Black)
+    encode_rgb_row_aligned_stride(rgb_data, width, height, bits_r, bits_g, bits_b, 1, StrideFill::Black)
 }
 
 /// Write packed binary output for grayscale data
@@ -903,6 +928,17 @@ mod tests {
         assert!(rgb666.is_rgb666());
     }
 
+    /// Helper to create interleaved RGB from separate channels
+    fn interleave(r: &[u8], g: &[u8], b: &[u8]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(r.len() * 3);
+        for i in 0..r.len() {
+            result.push(r[i]);
+            result.push(g[i]);
+            result.push(b[i]);
+        }
+        result
+    }
+
     #[test]
     fn test_rgb666_packing() {
         // Test RGB666 packing with 4 pixels -> 9 bytes
@@ -910,12 +946,13 @@ mod tests {
         let r = vec![255, 0, 128, 64];
         let g = vec![0, 255, 128, 192];
         let b = vec![128, 64, 255, 0];
+        let rgb = interleave(&r, &g, &b);
 
-        let packed = encode_rgb666_packed(&r, &g, &b, 4, 1, StrideFill::Black);
+        let packed = encode_rgb666_packed(&rgb, 4, 1, StrideFill::Black);
         assert_eq!(packed.len(), 9); // 4 pixels -> 9 bytes
 
         // Test encode_rgb_packed automatically routes to RGB666
-        let packed2 = encode_rgb_packed(&r, &g, &b, 4, 1, 6, 6, 6, StrideFill::Black);
+        let packed2 = encode_rgb_packed(&rgb, 4, 1, 6, 6, 6, StrideFill::Black);
         assert_eq!(packed2.len(), 9);
         assert_eq!(packed, packed2);
     }
@@ -926,17 +963,13 @@ mod tests {
         // Formula: ceil(pixels / 4) * 9
 
         // 64x64 = 4096 pixels -> 1024 groups -> 9216 bytes
-        let r = vec![128u8; 4096];
-        let g = vec![128u8; 4096];
-        let b = vec![128u8; 4096];
-        let packed = encode_rgb666_packed(&r, &g, &b, 64, 64, StrideFill::Black);
+        let rgb: Vec<u8> = vec![128u8; 4096 * 3]; // 128 for all R, G, B
+        let packed = encode_rgb666_packed(&rgb, 64, 64, StrideFill::Black);
         assert_eq!(packed.len(), 9216);
 
         // 5 pixels -> 2 groups (1 full, 1 partial) -> 18 bytes
-        let r5 = vec![128u8; 5];
-        let g5 = vec![128u8; 5];
-        let b5 = vec![128u8; 5];
-        let packed5 = encode_rgb666_packed(&r5, &g5, &b5, 5, 1, StrideFill::Black);
+        let rgb5: Vec<u8> = vec![128u8; 5 * 3];
+        let packed5 = encode_rgb666_packed(&rgb5, 5, 1, StrideFill::Black);
         assert_eq!(packed5.len(), 18); // ceil(5/4) * 9 = 2 * 9 = 18
     }
 
@@ -946,17 +979,16 @@ mod tests {
         // 5 pixels wide, 1 row: last group has 1 real pixel + 3 padding pixels
 
         // Use a distinctive last pixel: R=252 (6-bit: 63), G=0, B=0
-        let mut r = vec![0u8; 5];
-        let g = vec![0u8; 5];
-        let b = vec![0u8; 5];
-        r[4] = 252; // Last pixel is bright red
+        // First 4 pixels are black (0,0,0), last pixel is bright red (252,0,0)
+        let mut rgb = vec![0u8; 5 * 3];
+        rgb[4 * 3] = 252; // Last pixel R = 252
 
         // With Black fill, partial group positions should be zeros
-        let black_fill = encode_rgb666_row_aligned_stride(&r, &g, &b, 5, 1, 1, StrideFill::Black);
+        let black_fill = encode_rgb666_row_aligned_stride(&rgb, 5, 1, 1, StrideFill::Black);
         assert_eq!(black_fill.len(), 18); // 2 groups * 9 bytes
 
         // With Repeat fill, partial group positions should repeat the last pixel
-        let repeat_fill = encode_rgb666_row_aligned_stride(&r, &g, &b, 5, 1, 1, StrideFill::Repeat);
+        let repeat_fill = encode_rgb666_row_aligned_stride(&rgb, 5, 1, 1, StrideFill::Repeat);
         assert_eq!(repeat_fill.len(), 18);
 
         // The outputs should differ (partial pixels are filled differently)
@@ -983,21 +1015,20 @@ mod tests {
         // Test that packed version also supports fill mode
         // 5 pixels total: last group has 1 real pixel + 3 padding pixels
 
-        let mut r = vec![0u8; 5];
-        let g = vec![0u8; 5];
-        let b = vec![0u8; 5];
-        r[4] = 252; // Last pixel is bright red
+        // First 4 pixels are black (0,0,0), last pixel is bright red (252,0,0)
+        let mut rgb = vec![0u8; 5 * 3];
+        rgb[4 * 3] = 252; // Last pixel R = 252
 
-        let black_fill = encode_rgb666_packed(&r, &g, &b, 5, 1, StrideFill::Black);
-        let repeat_fill = encode_rgb666_packed(&r, &g, &b, 5, 1, StrideFill::Repeat);
+        let black_fill = encode_rgb666_packed(&rgb, 5, 1, StrideFill::Black);
+        let repeat_fill = encode_rgb666_packed(&rgb, 5, 1, StrideFill::Repeat);
 
         assert_eq!(black_fill.len(), 18);
         assert_eq!(repeat_fill.len(), 18);
         assert_ne!(black_fill, repeat_fill);
 
         // Also test through encode_rgb_packed routing
-        let black_via_rgb = encode_rgb_packed(&r, &g, &b, 5, 1, 6, 6, 6, StrideFill::Black);
-        let repeat_via_rgb = encode_rgb_packed(&r, &g, &b, 5, 1, 6, 6, 6, StrideFill::Repeat);
+        let black_via_rgb = encode_rgb_packed(&rgb, 5, 1, 6, 6, 6, StrideFill::Black);
+        let repeat_via_rgb = encode_rgb_packed(&rgb, 5, 1, 6, 6, 6, StrideFill::Repeat);
 
         assert_eq!(black_fill, black_via_rgb);
         assert_eq!(repeat_fill, repeat_via_rgb);
