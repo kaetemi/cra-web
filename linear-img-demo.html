@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>&lt;linear-img&gt; Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+
+        .info-box {
+            background: #e8f4f8;
+            border: 1px solid #b8d4e3;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #2c5282;
+        }
+
+        .upload-box {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 20px;
+        }
+
+        .upload-box:hover {
+            border-color: #3498db;
+            background: #f8f9fa;
+        }
+
+        .upload-box.has-image {
+            border-style: solid;
+            border-color: #27ae60;
+            padding: 15px;
+        }
+
+        input[type="file"] {
+            display: none;
+        }
+
+        .comparison-section {
+            margin-top: 30px;
+        }
+
+        .comparison-section h3 {
+            margin-bottom: 15px;
+            color: #555;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .comparison-box {
+            text-align: center;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafafa;
+        }
+
+        .comparison-box h4 {
+            margin: 0 0 10px 0;
+            color: #555;
+            font-size: 14px;
+        }
+
+        .comparison-box .image-container {
+            background: #eee;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 200px;
+        }
+
+        .comparison-box img,
+        .comparison-box linear-img {
+            max-width: 100%;
+            display: block;
+        }
+
+        .comparison-box .caption {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #888;
+        }
+
+        .size-controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .size-controls label {
+            font-weight: 500;
+        }
+
+        .size-controls input[type="range"] {
+            width: 200px;
+        }
+
+        .size-controls span {
+            min-width: 60px;
+            font-family: monospace;
+        }
+
+        .loading-indicator {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            display: none;
+        }
+
+        .loading-indicator.active {
+            display: block;
+        }
+
+        .example-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .example-box {
+            text-align: center;
+        }
+
+        .example-box linear-img {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .example-box .size-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+
+        pre {
+            background: #1e1e1e;
+            color: #9cdcfe;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+        }
+
+        @media (max-width: 768px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>&lt;linear-img&gt; Element</h1>
+    <p class="subtitle">Drop-in image element with correct linear RGB resizing</p>
+
+    <div class="container">
+        <div class="info-box">
+            <strong>How it works:</strong> The <code>&lt;linear-img&gt;</code> custom element displays images using
+            proper linear RGB interpolation instead of the browser's sRGB scaling. This prevents the darkening
+            and color shifts that occur with standard <code>&lt;img&gt;</code> tags when images are resized.
+        </div>
+
+        <h3>Usage</h3>
+        <pre>&lt;script type="module" src="linear-img.js"&gt;&lt;/script&gt;
+
+&lt;linear-img src="photo.jpg" width="200" height="150"&gt;&lt;/linear-img&gt;
+&lt;linear-img src="photo.jpg" style="width: 50%;"&gt;&lt;/linear-img&gt;
+&lt;linear-img src="photo.jpg" method="bilinear" fit="cover"&gt;&lt;/linear-img&gt;</pre>
+    </div>
+
+    <div class="container">
+        <h3>Interactive Comparison</h3>
+        <p style="color: #666; margin-bottom: 20px;">
+            Upload an image to compare browser scaling vs linear RGB scaling at various sizes.
+            Look for darkening in gradients and color shifts in the browser-scaled version.
+        </p>
+
+        <div class="upload-box" id="upload-box">
+            <label style="font-weight: 600; color: #555;">Drop image here or click to upload</label>
+            <p style="color: #888; font-size: 14px; margin-top: 10px;">Supports PNG, JPG, WebP</p>
+            <input type="file" id="file-input" accept="image/*">
+        </div>
+
+        <div id="controls" style="display: none;">
+            <div class="size-controls">
+                <label>Display size:</label>
+                <input type="range" id="size-slider" min="32" max="512" value="200">
+                <span id="size-value">200px</span>
+            </div>
+
+            <div class="comparison-grid">
+                <div class="comparison-box">
+                    <h4>Browser Scaling (sRGB - incorrect)</h4>
+                    <div class="image-container" id="browser-container">
+                        <img id="browser-img" alt="Browser scaled">
+                    </div>
+                    <p class="caption">Standard &lt;img&gt; element with CSS sizing</p>
+                </div>
+                <div class="comparison-box">
+                    <h4>Linear RGB Scaling (correct)</h4>
+                    <div class="image-container" id="linear-container" style="position: relative;">
+                        <linear-img id="linear-img"></linear-img>
+                        <div class="loading-indicator" id="loading">Processing...</div>
+                    </div>
+                    <p class="caption">&lt;linear-img&gt; element with WASM processing</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container" id="multi-size-section" style="display: none;">
+        <h3>Multiple Sizes</h3>
+        <p style="color: #666; margin-bottom: 15px;">
+            The same image at different sizes, all using correct linear RGB scaling:
+        </p>
+        <div class="example-grid" id="example-grid">
+            <!-- Filled dynamically -->
+        </div>
+    </div>
+
+    <script type="module">
+        import './linear-img.js';
+
+        let imageSrc = null;
+
+        const uploadBox = document.getElementById('upload-box');
+        const fileInput = document.getElementById('file-input');
+        const controls = document.getElementById('controls');
+        const sizeSlider = document.getElementById('size-slider');
+        const sizeValue = document.getElementById('size-value');
+        const browserImg = document.getElementById('browser-img');
+        const linearImg = document.getElementById('linear-img');
+        const loadingIndicator = document.getElementById('loading');
+        const multiSizeSection = document.getElementById('multi-size-section');
+        const exampleGrid = document.getElementById('example-grid');
+
+        // Upload handling
+        uploadBox.addEventListener('click', () => fileInput.click());
+
+        uploadBox.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadBox.style.borderColor = '#3498db';
+        });
+
+        uploadBox.addEventListener('dragleave', () => {
+            uploadBox.style.borderColor = '';
+        });
+
+        uploadBox.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadBox.style.borderColor = '';
+            const file = e.dataTransfer.files[0];
+            if (file && file.type.startsWith('image/')) {
+                handleFile(file);
+            }
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleFile(file);
+        });
+
+        function handleFile(file) {
+            const url = URL.createObjectURL(file);
+            imageSrc = url;
+
+            // Update upload box
+            uploadBox.classList.add('has-image');
+            uploadBox.innerHTML = `
+                <p style="color: #27ae60; font-weight: 600;">Image loaded: ${file.name}</p>
+                <p style="color: #888; font-size: 13px;">Click to change</p>
+                <input type="file" id="file-input" accept="image/*">
+            `;
+            document.getElementById('file-input').addEventListener('change', (e) => {
+                const f = e.target.files[0];
+                if (f) handleFile(f);
+            });
+
+            // Show controls
+            controls.style.display = 'block';
+            multiSizeSection.style.display = 'block';
+
+            // Set images
+            updateImages();
+            updateMultiSizeExamples();
+        }
+
+        function updateImages() {
+            if (!imageSrc) return;
+
+            const size = parseInt(sizeSlider.value);
+            sizeValue.textContent = size + 'px';
+
+            // Browser image
+            browserImg.src = imageSrc;
+            browserImg.style.width = size + 'px';
+            browserImg.style.height = 'auto';
+
+            // Linear image
+            linearImg.setAttribute('src', imageSrc);
+            linearImg.setAttribute('width', size);
+            linearImg.removeAttribute('height'); // Let it auto-calculate
+
+            // Show loading
+            loadingIndicator.classList.add('active');
+        }
+
+        // Listen for linear-img completion
+        linearImg.addEventListener('load', () => {
+            loadingIndicator.classList.remove('active');
+        });
+
+        sizeSlider.addEventListener('input', updateImages);
+
+        function updateMultiSizeExamples() {
+            if (!imageSrc) return;
+
+            const sizes = [64, 128, 200, 300];
+            exampleGrid.innerHTML = '';
+
+            for (const size of sizes) {
+                const box = document.createElement('div');
+                box.className = 'example-box';
+                box.innerHTML = `
+                    <linear-img src="${imageSrc}" width="${size}"></linear-img>
+                    <div class="size-label">${size}px</div>
+                `;
+                exampleGrid.appendChild(box);
+            }
+        }
+    </script>
+</body>
+</html>

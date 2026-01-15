@@ -5,19 +5,22 @@
 let wasmReady = false;
 let craWasm = null;
 
+// Current request ID for tracking concurrent requests
+let currentRequestId = null;
+
 // Send progress update to main thread
 function sendProgress(percent) {
-    self.postMessage({ type: 'progress', percent });
+    self.postMessage({ type: 'progress', percent, requestId: currentRequestId });
 }
 
 // Send error to main thread
 function sendError(error) {
-    self.postMessage({ type: 'error', message: error.message || String(error) });
+    self.postMessage({ type: 'error', message: error.message || String(error), requestId: currentRequestId });
 }
 
 // Send completion to main thread
 function sendComplete(outputData, width, height) {
-    self.postMessage({ type: 'complete', outputData, width, height });
+    self.postMessage({ type: 'complete', outputData, width, height, requestId: currentRequestId });
 }
 
 // Initialize WASM
@@ -220,7 +223,10 @@ function processSrgbResize(params) {
 
 // Handle messages from main thread
 self.onmessage = function(e) {
-    const { type, ...data } = e.data;
+    const { type, requestId, ...data } = e.data;
+
+    // Track request ID for response routing
+    currentRequestId = requestId || null;
 
     switch (type) {
         case 'init':
