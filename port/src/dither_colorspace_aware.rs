@@ -878,7 +878,7 @@ fn process_pixel(
     for r_level in r_min..=r_max {
         for g_level in g_min..=g_max {
             for b_level in b_min..=b_max {
-                let lab_candidate = if let Some(ref lut) = ctx.lab_lut {
+                let lab_candidate = if let Some(lut) = ctx.lab_lut {
                     // Same bit depths: use LUT
                     let n = ctx.quant_r.num_levels;
                     let lut_idx = r_level * n * n + g_level * n + b_level;

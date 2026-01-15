@@ -382,7 +382,7 @@ fn determine_effective_profile(
             }
         }
         InputColorProfile::Auto => {
-            if let Some(ref icc) = icc_profile {
+            if let Some(icc) = icc_profile {
                 if is_profile_srgb_verbose(icc, verbose) {
                     if verbose {
                         eprintln!("  Auto-detected: sRGB-compatible profile");
@@ -417,7 +417,7 @@ fn convert_to_linear(
         eprintln!("  Input profile mode: {:?}", profile_mode);
         eprintln!("  Dimensions: {}x{}", width, height);
         eprintln!("  Color type: {:?}", img.color());
-        if let Some(ref icc) = icc_profile {
+        if let Some(icc) = icc_profile {
             eprintln!("  ICC profile: {} bytes", icc.len());
         } else {
             eprintln!("  ICC profile: none");
