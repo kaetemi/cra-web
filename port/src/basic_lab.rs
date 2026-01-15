@@ -160,7 +160,7 @@ pub fn color_correct_basic_lab_linear(
     // Convert LAB back to linear RGB as Pixel4 array
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
-        let lab_pixel: Pixel4 = [final_l[i], final_a[i], final_b[i], 0.0];
+        let lab_pixel = Pixel4::new(final_l[i], final_a[i], final_b[i], 0.0);
         result.push(lab_to_linear_rgb_pixel(lab_pixel));
     }
     result

@@ -309,19 +309,6 @@ pub fn rescale_rgb(
     (r_out, g_out, b_out)
 }
 
-/// Rescale interleaved RGB image (linear space, f32 values in 0-1 range)
-pub fn rescale_rgb_interleaved(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-) -> Vec<f32> {
-    rescale_rgb_interleaved_with_progress(src, src_width, src_height, dst_width, dst_height, method, scale_mode, None)
-}
-
 /// Check if a number is a power of 2
 #[inline]
 fn is_power_of_2(n: usize) -> bool {
@@ -412,7 +399,7 @@ fn rescale_bilinear_pixels(
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
@@ -460,13 +447,13 @@ fn lanczos3_resample_row_pixel4_precomputed(
     kernel_weights: &[KernelWeights],
 ) -> Vec<Pixel4> {
     let dst_len = kernel_weights.len();
-    let mut dst = vec![[0.0f32; 4]; dst_len];
+    let mut dst = vec![Pixel4::default(); dst_len];
 
     for (dst_i, kw) in kernel_weights.iter().enumerate() {
         if kw.weights.is_empty() {
             dst[dst_i] = src[kw.fallback_idx];
         } else {
-            let mut sum = [0.0f32; 4];
+            let mut sum = Pixel4::default();
             for (i, &weight) in kw.weights.iter().enumerate() {
                 let sample = src[kw.start_idx + i];
                 sum[0] += sample[0] * weight;
@@ -508,7 +495,7 @@ fn rescale_lanczos3_pixels(
 
     // Pass 1: Horizontal resample each row (src_width -> dst_width)
     // Progress: 0% to 50%
-    let mut temp = vec![[0.0f32; 4]; dst_width * src_height];
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
         let dst_row = lanczos3_resample_row_pixel4_precomputed(src_row, &h_weights);
@@ -521,7 +508,7 @@ fn rescale_lanczos3_pixels(
 
     // Pass 2: Vertical resample each column (src_height -> dst_height)
     // Progress: 50% to 100%
-    let mut dst = vec![[0.0f32; 4]; dst_width * dst_height];
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
     for x in 0..dst_width {
         // Extract column
         let col: Vec<Pixel4> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
@@ -574,42 +561,6 @@ pub fn rescale_with_progress(
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
     }
-}
-
-/// Rescale interleaved RGB image with optional progress callback (linear space, f32 values in 0-1 range)
-pub fn rescale_rgb_interleaved_with_progress(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-    progress: Option<&mut dyn FnMut(f32)>,
-) -> Vec<f32> {
-    let src_pixels = src_width * src_height;
-
-    // Convert interleaved to Pixel4
-    let mut pixels: Vec<Pixel4> = Vec::with_capacity(src_pixels);
-    for i in 0..src_pixels {
-        pixels.push([src[i * 3], src[i * 3 + 1], src[i * 3 + 2], 0.0]);
-    }
-
-    // Rescale with progress
-    let result_pixels = rescale_with_progress(
-        &pixels, src_width, src_height, dst_width, dst_height, method, scale_mode, progress
-    );
-
-    // Convert back to interleaved
-    let dst_pixels = dst_width * dst_height;
-    let mut dst = Vec::with_capacity(dst_pixels * 3);
-    for p in result_pixels {
-        dst.push(p[0]);
-        dst.push(p[1]);
-        dst.push(p[2]);
-    }
-
-    dst
 }
 
 #[cfg(test)]
@@ -819,10 +770,10 @@ mod tests {
     #[test]
     fn test_rgb_bilinear_identity() {
         let src = vec![
-            [0.0, 0.1, 0.2, 0.0],
-            [0.3, 0.4, 0.5, 0.0],
-            [0.6, 0.7, 0.8, 0.0],
-            [0.9, 1.0, 0.5, 0.0],
+            Pixel4::new(0.0, 0.1, 0.2, 0.0),
+            Pixel4::new(0.3, 0.4, 0.5, 0.0),
+            Pixel4::new(0.6, 0.7, 0.8, 0.0),
+            Pixel4::new(0.9, 1.0, 0.5, 0.0),
         ];
         let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(src, dst);
@@ -831,8 +782,8 @@ mod tests {
     #[test]
     fn test_rgb_bilinear_upscale() {
         let src = vec![
-            [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
-            [0.0, 0.0, 0.0, 0.0], [1.0, 1.0, 1.0, 0.0],
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
         ];
         let dst = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(dst.len(), 16);
@@ -848,8 +799,8 @@ mod tests {
     #[test]
     fn test_rgb_lanczos_roundtrip() {
         let src = vec![
-            [0.1, 0.2, 0.3, 0.0], [0.4, 0.5, 0.6, 0.0],
-            [0.7, 0.8, 0.9, 0.0], [0.2, 0.3, 0.4, 0.0],
+            Pixel4::new(0.1, 0.2, 0.3, 0.0), Pixel4::new(0.4, 0.5, 0.6, 0.0),
+            Pixel4::new(0.7, 0.8, 0.9, 0.0), Pixel4::new(0.2, 0.3, 0.4, 0.0),
         ];
         let up = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3, ScaleMode::Independent);
         let down = rescale(&up, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
@@ -903,7 +854,7 @@ mod tests {
                 let r = x as f32 / (src_w - 1) as f32;
                 let g = y as f32 / (src_h - 1) as f32;
                 let b = ((x + y) as f32 / (src_w + src_h - 2) as f32).min(1.0);
-                src.push([r, g, b, 0.0]);
+                src.push(Pixel4::new(r, g, b, 0.0));
             }
         }
 
@@ -942,7 +893,7 @@ mod tests {
         for y in 0..src_h {
             for x in 0..src_w {
                 let v = if (x + y) % 2 == 0 { 0.0 } else { 1.0 };
-                src.push([v, v, v, 0.0]);
+                src.push(Pixel4::new(v, v, v, 0.0));
             }
         }
 

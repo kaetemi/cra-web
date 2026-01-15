@@ -90,12 +90,12 @@ pub fn color_correct_basic_rgb_linear(
     // Reconstruct Pixel4 array, scaling back to 0-1 range
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
-        result.push([
+        result.push(Pixel4::new(
             matched_r[i] / 255.0,
             matched_g[i] / 255.0,
             matched_b[i] / 255.0,
             0.0,
-        ]);
+        ));
     }
     result
 }

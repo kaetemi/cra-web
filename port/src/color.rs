@@ -45,23 +45,23 @@ pub fn linear_to_srgb(data: &mut [f32]) {
 #[cfg(test)]
 #[inline]
 fn srgb_to_linear_pixel(p: Pixel4) -> Pixel4 {
-    [
+    Pixel4::new(
         srgb_to_linear_single(p[0]),
         srgb_to_linear_single(p[1]),
         srgb_to_linear_single(p[2]),
         p[3],
-    ]
+    )
 }
 
 #[cfg(test)]
 #[inline]
 fn linear_to_srgb_pixel(p: Pixel4) -> Pixel4 {
-    [
+    Pixel4::new(
         linear_to_srgb_single(p[0]),
         linear_to_srgb_single(p[1]),
         linear_to_srgb_single(p[2]),
         p[3],
-    ]
+    )
 }
 
 /// Convert sRGB pixels to linear RGB in-place
@@ -215,14 +215,14 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
 #[inline]
 pub fn linear_rgb_to_lab_pixel(p: Pixel4) -> Pixel4 {
     let (l, a, b) = linear_rgb_to_lab(p[0], p[1], p[2]);
-    [l, a, b, p[3]]
+    Pixel4::new(l, a, b, p[3])
 }
 
 /// Convert Lab pixel to linear RGB pixel
 #[inline]
 pub fn lab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
     let (r, g, b) = lab_to_linear_rgb(p[0], p[1], p[2]);
-    [r, g, b, p[3]]
+    Pixel4::new(r, g, b, p[3])
 }
 
 /// Convert linear RGB pixels to Lab in-place
@@ -351,14 +351,14 @@ pub fn oklab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
 #[inline]
 pub fn linear_rgb_to_oklab_pixel(p: Pixel4) -> Pixel4 {
     let (l, a, b) = linear_rgb_to_oklab(p[0], p[1], p[2]);
-    [l, a, b, p[3]]
+    Pixel4::new(l, a, b, p[3])
 }
 
 /// Convert Oklab pixel to linear RGB pixel
 #[inline]
 pub fn oklab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
     let (r, g, b) = oklab_to_linear_rgb(p[0], p[1], p[2]);
-    [r, g, b, p[3]]
+    Pixel4::new(r, g, b, p[3])
 }
 
 /// Convert linear RGB pixels to Oklab in-place
@@ -462,37 +462,37 @@ pub fn scale_from_255_inplace(pixels: &mut [Pixel4]) {
 #[cfg(test)]
 #[inline]
 fn scale_to_255_pixel(p: Pixel4) -> Pixel4 {
-    [p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3]]
+    Pixel4::new(p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3])
 }
 
 #[cfg(test)]
 #[inline]
 fn scale_from_255_pixel(p: Pixel4) -> Pixel4 {
-    [p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3]]
+    Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3])
 }
 
 #[cfg(test)]
 #[allow(dead_code)]
 #[inline]
 fn linear_to_srgb_255_pixel(p: Pixel4) -> Pixel4 {
-    [
+    Pixel4::new(
         (linear_to_srgb_single(p[0]) * 255.0).clamp(0.0, 255.0),
         (linear_to_srgb_single(p[1]) * 255.0).clamp(0.0, 255.0),
         (linear_to_srgb_single(p[2]) * 255.0).clamp(0.0, 255.0),
         p[3],
-    ]
+    )
 }
 
 #[cfg(test)]
 #[allow(dead_code)]
 #[inline]
 fn srgb_255_to_linear_pixel(p: Pixel4) -> Pixel4 {
-    [
+    Pixel4::new(
         srgb_to_linear_single(p[0] / 255.0),
         srgb_to_linear_single(p[1] / 255.0),
         srgb_to_linear_single(p[2] / 255.0),
         p[3],
-    ]
+    )
 }
 
 /// Normalize pixels from 0-255 to 0-1 range in-place
@@ -624,9 +624,9 @@ mod tests {
     #[test]
     fn test_srgb_linear_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
-            [0.0, 0.5, 1.0, 0.0],
-            [0.1, 0.3, 0.7, 0.0],
-            [0.04045, 0.2, 0.8, 0.0],
+            Pixel4::new(0.0, 0.5, 1.0, 0.0),
+            Pixel4::new(0.1, 0.3, 0.7, 0.0),
+            Pixel4::new(0.04045, 0.2, 0.8, 0.0),
         ];
         for p in test_pixels {
             let linear = srgb_to_linear_pixel(p);
@@ -640,9 +640,9 @@ mod tests {
     #[test]
     fn test_lab_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 1.0, 1.0, 0.0],
-            [0.5, 0.3, 0.7, 0.0],
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.5, 0.3, 0.7, 0.0),
         ];
         for p in test_pixels {
             let lab = linear_rgb_to_lab_pixel(p);
@@ -656,9 +656,9 @@ mod tests {
     #[test]
     fn test_oklab_pixel_roundtrip() {
         let test_pixels: [Pixel4; 3] = [
-            [0.0, 0.0, 0.0, 0.0],
-            [1.0, 1.0, 1.0, 0.0],
-            [0.5, 0.3, 0.7, 0.0],
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.5, 0.3, 0.7, 0.0),
         ];
         for p in test_pixels {
             let oklab = linear_rgb_to_oklab_pixel(p);
@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_scale_roundtrip() {
-        let p: Pixel4 = [0.5, 0.25, 1.0, 0.0];
+        let p = Pixel4::new(0.5, 0.25, 1.0, 0.0);
         let scaled = scale_to_255_pixel(p);
         assert!((scaled[0] - 127.5).abs() < 1e-5);
         assert!((scaled[1] - 63.75).abs() < 1e-5);
@@ -686,8 +686,8 @@ mod tests {
     #[test]
     fn test_inplace_conversions() {
         let mut pixels: Vec<Pixel4> = vec![
-            [0.0, 0.5, 1.0, 0.0],
-            [0.2, 0.4, 0.8, 0.0],
+            Pixel4::new(0.0, 0.5, 1.0, 0.0),
+            Pixel4::new(0.2, 0.4, 0.8, 0.0),
         ];
         let original = pixels.clone();
 
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn test_pixel_preserves_alpha() {
-        let p: Pixel4 = [0.5, 0.3, 0.7, 0.99];
+        let p = Pixel4::new(0.5, 0.3, 0.7, 0.99);
 
         // All conversions should preserve the alpha channel
         assert_eq!(srgb_to_linear_pixel(p)[3], 0.99);

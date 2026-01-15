@@ -169,7 +169,7 @@ fn lab_channels_to_pixels(
     let mut result = Vec::with_capacity(l.len());
 
     for i in 0..l.len() {
-        let lab: Pixel4 = [l[i], a[i], b[i], 0.0];
+        let lab = Pixel4::new(l[i], a[i], b[i], 0.0);
         let rgb = match colorspace {
             LabQuantSpace::CIELab => lab_to_linear_rgb_pixel(lab),
             LabQuantSpace::OkLab => oklab_to_linear_rgb_pixel(lab),

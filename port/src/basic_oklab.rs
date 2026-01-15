@@ -189,7 +189,7 @@ pub fn color_correct_basic_oklab_linear(
     // Convert Oklab back to linear RGB as Pixel4 array
     let mut result = Vec::with_capacity(pixel_count);
     for i in 0..pixel_count {
-        let oklab_pixel: Pixel4 = [final_l[i], final_a[i], final_b[i], 0.0];
+        let oklab_pixel = Pixel4::new(final_l[i], final_a[i], final_b[i], 0.0);
         result.push(oklab_to_linear_rgb_pixel(oklab_pixel));
     }
     result

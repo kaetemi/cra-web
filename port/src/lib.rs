@@ -10,6 +10,7 @@ pub mod basic_lab;
 pub mod basic_oklab;
 pub mod basic_rgb;
 pub mod binary_format;
+pub mod buffer;
 pub mod color;
 mod color_distance;
 pub mod colorspace_derived;
@@ -42,7 +43,7 @@ use dither_common::PerceptualSpace;
 fn interleaved_to_pixel4(rgb: &[f32]) -> Vec<pixel::Pixel4> {
     let pixels = rgb.len() / 3;
     (0..pixels)
-        .map(|i| [rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0])
+        .map(|i| pixel::Pixel4::new(rgb[i * 3], rgb[i * 3 + 1], rgb[i * 3 + 2], 0.0))
         .collect()
 }
 
@@ -872,7 +873,17 @@ pub fn rescale_linear_rgb_wasm(
 ) -> Vec<f32> {
     let method = rescale_method_from_u8(method);
     let scale_mode = scale_mode_from_u8(scale_mode);
-    rescale::rescale_rgb_interleaved(&linear, src_width, src_height, dst_width, dst_height, method, scale_mode)
+
+    // Convert interleaved to Pixel4
+    let pixels = interleaved_to_pixel4(&linear);
+
+    // Rescale
+    let result_pixels = rescale::rescale(
+        &pixels, src_width, src_height, dst_width, dst_height, method, scale_mode
+    );
+
+    // Convert back to interleaved
+    pixel4_to_interleaved(&result_pixels)
 }
 
 /// Rescale linear grayscale image (single channel, 0-1 range)
@@ -936,10 +947,17 @@ pub fn rescale_linear_rgb_with_progress_wasm(
         let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
     };
 
-    rescale::rescale_rgb_interleaved_with_progress(
-        &linear, src_width, src_height, dst_width, dst_height, method, scale_mode,
+    // Convert interleaved to Pixel4
+    let pixels = interleaved_to_pixel4(&linear);
+
+    // Rescale with progress
+    let result_pixels = rescale::rescale_with_progress(
+        &pixels, src_width, src_height, dst_width, dst_height, method, scale_mode,
         Some(&mut progress_fn)
-    )
+    );
+
+    // Convert back to interleaved
+    pixel4_to_interleaved(&result_pixels)
 }
 
 // ============================================================================

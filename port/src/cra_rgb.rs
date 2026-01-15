@@ -333,12 +333,12 @@ pub fn color_correct_cra_rgb_linear(
     // Convert interleaved RGB back to Pixel4 array
     let mut result = Vec::with_capacity(input_pixels);
     for i in 0..input_pixels {
-        result.push([
+        result.push(Pixel4::new(
             final_scaled[i * 3],
             final_scaled[i * 3 + 1],
             final_scaled[i * 3 + 2],
             0.0,
-        ]);
+        ));
     }
     result
 }
