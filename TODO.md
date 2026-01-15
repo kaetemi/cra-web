@@ -1,0 +1,2 @@
+- Output profile. Only really need to support sRGB and linear RGB at 8-bit currently
+- Alpha channel. This is important
