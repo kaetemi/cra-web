@@ -352,7 +352,47 @@ pub fn decode_image_to_srgb_255(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
     Ok(result)
 }
 
-/// Extract ICC profile from image file bytes
+/// Image metadata without pixel data
+pub struct ImageMetadata {
+    pub width: u32,
+    pub height: u32,
+    pub has_icc: bool,
+    pub is_16bit: bool,
+}
+
+/// Get image metadata and ICC profile without decoding pixels
+/// This is much faster than full decode for just getting dimensions/profile info
+pub fn get_metadata_and_icc(file_bytes: &[u8]) -> Result<(ImageMetadata, Option<Vec<u8>>), String> {
+    let cursor = Cursor::new(file_bytes);
+    let reader = ImageReader::new(cursor)
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to detect format: {}", e))?;
+
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| format!("Failed to create decoder: {}", e))?;
+
+    // Get ICC profile and dimensions from decoder (no pixel decode needed)
+    let icc_profile = decoder.icc_profile().ok().flatten();
+    let (width, height) = decoder.dimensions();
+    let color_type = decoder.color_type();
+
+    let is_16bit = matches!(
+        color_type,
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+    );
+
+    let metadata = ImageMetadata {
+        width,
+        height,
+        has_icc: icc_profile.is_some(),
+        is_16bit,
+    };
+
+    Ok((metadata, icc_profile))
+}
+
+/// Extract ICC profile from image file bytes (without decoding pixels)
 pub fn extract_icc_profile(file_bytes: &[u8]) -> Option<Vec<u8>> {
-    load_image_from_bytes(file_bytes).ok()?.icc_profile
+    get_metadata_and_icc(file_bytes).ok()?.1
 }

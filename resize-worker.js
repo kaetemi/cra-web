@@ -36,28 +36,7 @@ async function initialize() {
     }
 }
 
-// Decode image from raw file bytes using WASM - returns BufferF32x4 and metadata
-function decodeImagePrecise(fileBytes) {
-    // Get metadata
-    const metadata = craWasm.decode_metadata_wasm(new Uint8Array(fileBytes));
-    const width = metadata[0];
-    const height = metadata[1];
-    const hasIcc = metadata[2] > 0.5;
-    const is16bit = metadata[3] > 0.5;
-
-    // Decode to BufferF32x4 (Pixel4 format, normalized 0-1)
-    const buffer = craWasm.decode_image_wasm(new Uint8Array(fileBytes));
-
-    return { width, height, hasIcc, is16bit, buffer };
-}
-
-// Check if image has non-sRGB ICC profile
-function hasNonSrgbIcc(fileBytes, decoded) {
-    if (!decoded.hasIcc) return false;
-    const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
-    if (iccProfile.length === 0) return false;
-    return !craWasm.is_icc_profile_srgb_wasm(iccProfile);
-}
+// No separate decode functions needed - use LoadedImage pattern directly
 
 // Process resize request (with precise WASM decoding)
 function processResize(params) {
@@ -75,20 +54,25 @@ function processResize(params) {
             scaleMode,
             ditherMode,
             ditherTechnique,
-            perceptualSpace
+            perceptualSpace,
+            inputIsLinear  // True if input is already linear (normal maps, data textures)
         } = params;
 
-        // Decode image with WASM (preserves 16-bit precision)
-        const decoded = decodeImagePrecise(fileBytes);
-        const srcWidth = decoded.width;
-        const srcHeight = decoded.height;
-        let buffer = decoded.buffer;
+        // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
+        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+        const srcWidth = loadedImage.width;
+        const srcHeight = loadedImage.height;
 
-        // Convert to linear (either via ICC or sRGB gamma)
-        if (hasNonSrgbIcc(fileBytes, decoded)) {
+        // Resize always needs linear path
+        let buffer = loadedImage.to_normalized_buffer();
+
+        // Convert to linear (either via ICC, sRGB gamma, or already linear)
+        if (loadedImage.has_non_srgb_icc) {
             // ICC profile → linear sRGB
-            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            const iccProfile = loadedImage.get_icc_profile();
             craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
+        } else if (inputIsLinear) {
+            // Input is already linear - no conversion needed
         } else {
             // sRGB → linear
             craWasm.srgb_to_linear_wasm(buffer);
@@ -165,21 +149,27 @@ function processSrgbResize(params) {
             scaleMode,
             ditherMode,
             ditherTechnique,
-            perceptualSpace
+            perceptualSpace,
+            inputIsLinear
         } = params;
 
-        // Decode image with WASM (preserves 16-bit precision)
-        const decoded = decodeImagePrecise(fileBytes);
-        const srcWidth = decoded.width;
-        const srcHeight = decoded.height;
-        let buffer = decoded.buffer;
+        // Single load - keeps u8/u16 pixels, converts on demand
+        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+        const srcWidth = loadedImage.width;
+        const srcHeight = loadedImage.height;
+        let buffer = loadedImage.to_normalized_buffer();
 
-        // If non-sRGB ICC, convert to sRGB first (so comparison is fair)
-        if (hasNonSrgbIcc(fileBytes, decoded)) {
-            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+        // Handle color profile conversion for fair comparison
+        if (loadedImage.has_non_srgb_icc) {
+            // ICC profile → linear sRGB → sRGB
+            const iccProfile = loadedImage.get_icc_profile();
             craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
             craWasm.linear_to_srgb_wasm(buffer);
+        } else if (inputIsLinear) {
+            // Input is already linear, convert to sRGB for the "bad" sRGB resize
+            craWasm.linear_to_srgb_wasm(buffer);
         }
+        // else: already sRGB, no conversion needed
 
         // WRONG - rescale directly in sRGB space (no linear conversion)
         // This demonstrates the incorrect result for comparison

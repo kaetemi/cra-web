@@ -838,11 +838,9 @@
 
     <script type="module">
         import './linear-img.js';
-        // Only import binary encoding functions - processing is done in worker
+        // Only import functions needed for main thread - processing is done in worker
         import init, {
-            decode_metadata_wasm,
-            extract_icc_profile_wasm,
-            is_icc_profile_srgb_wasm,
+            decode_metadata_with_icc_check_wasm,
             format_supports_binary_wasm,
             format_total_bits_wasm,
             encode_rgb_packed_wasm,
@@ -894,12 +892,6 @@
             worker.postMessage({ type: 'init' });
         }
 
-        // Check if image has non-sRGB ICC profile (for auto color management)
-        function checkNonSrgbIcc(fileBytes, hasIcc) {
-            if (!hasIcc) return false;
-            const iccProfile = extract_icc_profile_wasm(new Uint8Array(fileBytes));
-            return iccProfile.length > 0 && !is_icc_profile_srgb_wasm(iccProfile);
-        }
 
         // Handle dither completion from worker
         function handleDitherComplete(result) {
@@ -1334,15 +1326,15 @@
                 // Load file bytes (decoded on demand in worker based on mode)
                 const fileBytes = await loadImageBytes(file);
 
-                // Quick metadata decode to get dimensions and ICC info
-                const metadata = decode_metadata_wasm(new Uint8Array(fileBytes));
+                // Get metadata and ICC check in single parse (no pixel decode)
+                const metadata = decode_metadata_with_icc_check_wasm(new Uint8Array(fileBytes));
                 const width = metadata[0];
                 const height = metadata[1];
-                const hasIcc = metadata[2] > 0.5;
+                const hasNonSrgbIcc = metadata[2] > 0.5;
                 const is16bit = metadata[3] > 0.5;
 
-                // Check for non-sRGB ICC profile (auto detection)
-                inputHasNonSrgbIcc = checkNonSrgbIcc(fileBytes, hasIcc);
+                // Store ICC info for worker
+                inputHasNonSrgbIcc = hasNonSrgbIcc;
                 if (inputHasNonSrgbIcc) {
                     console.log('Detected non-sRGB ICC profile - will use color management');
                 }

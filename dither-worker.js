@@ -32,50 +32,15 @@ async function initialize() {
     }
 }
 
-// Decode image to BufferF32x4 (Pixel4 0-1) for linear processing path
-function decodeToNormalized(fileBytes) {
-    const metadata = craWasm.decode_metadata_wasm(new Uint8Array(fileBytes));
-    const buffer = craWasm.decode_image_wasm(new Uint8Array(fileBytes));
-    return {
-        width: metadata[0],
-        height: metadata[1],
-        hasIcc: metadata[2] > 0.5,
-        is16bit: metadata[3] > 0.5,
-        buffer: buffer
-    };
-}
-
-// Decode image to BufferF32x4 (Pixel4 0-255) for sRGB-direct path
-function decodeToSrgb255(fileBytes) {
-    const metadata = craWasm.decode_metadata_wasm(new Uint8Array(fileBytes));
-    const buffer = craWasm.decode_image_srgb_255_wasm(new Uint8Array(fileBytes));
-    return {
-        width: metadata[0],
-        height: metadata[1],
-        hasIcc: metadata[2] > 0.5,
-        is16bit: metadata[3] > 0.5,
-        buffer: buffer
-    };
-}
-
-// Check if image has non-sRGB ICC profile
-function checkNonSrgbIcc(fileBytes, hasIcc) {
-    if (!hasIcc) return false;
-    const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
-    return iccProfile.length > 0 && !craWasm.is_icc_profile_srgb_wasm(iccProfile);
-}
-
-// Get ICC profile
-function getIccProfile(fileBytes) {
-    return craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
-}
-
 // Scale mode constants (must match Rust enum)
 const SCALE_MODE_INDEPENDENT = 0;
 const SCALE_MODE_UNIFORM_WIDTH = 1;
 const SCALE_MODE_UNIFORM_HEIGHT = 2;
 
 // Process dither request
+// Uses single-load pattern following CLI's dual-path approach:
+// - Linear path: load normalized (0-1) + ICC profile, process, then dither
+// - sRGB direct path: load sRGB (0-255) directly, dither only (no linear conversion)
 function processDither(params) {
     if (!wasmReady) {
         sendError(new Error('WASM not ready'));
@@ -87,7 +52,7 @@ function processDither(params) {
             fileBytes,
             originalWidth,
             originalHeight,
-            inputHasNonSrgbIcc,
+            inputIsLinear,  // True if input is already linear (normal maps, data textures)
             isGrayscale,
             doDownscale,
             processWidth,
@@ -104,17 +69,18 @@ function processDither(params) {
             seed
         } = params;
 
-        sendProgress(5, 'Decoding image...');
+        sendProgress(5, 'Loading image...');
 
-        // Determine if linear processing is needed
-        const needsLinear = isGrayscale || doDownscale || inputHasNonSrgbIcc;
+        // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
+        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+
+        // Determine if linear processing is needed (matches CLI pattern)
+        // Use loaded image's ICC check (single decode, no separate metadata call needed)
+        // inputIsLinear counts as needing the linear path (already in linear, process there)
+        const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || inputIsLinear;
 
         const pixelCount = processWidth * processHeight;
         const outputData = new Uint8ClampedArray(pixelCount * 4);
-
-        // Track current dimensions as we process
-        let currentWidth = originalWidth;
-        let currentHeight = originalHeight;
 
         // For storing channel data for download
         let rChannel = null;
@@ -124,16 +90,22 @@ function processDither(params) {
 
         const technique = isPerceptual ? 2 : 1;
 
+        // Track current dimensions as we process
+        let currentWidth = originalWidth;
+        let currentHeight = originalHeight;
+
         if (needsLinear) {
-            sendProgress(10, 'Decoding with linear processing...');
-            const decoded = decodeToNormalized(fileBytes);
-            let buffer = decoded.buffer;
+            // Linear path: convert to normalized (0-1)
+            sendProgress(10, 'Converting to normalized format...');
+            let buffer = loadedImage.to_normalized_buffer();
 
             sendProgress(20, 'Converting to linear color space...');
-            // Step 1: Convert to linear (either via ICC or sRGB gamma)
-            if (inputHasNonSrgbIcc) {
-                const iccProfile = getIccProfile(fileBytes);
+            // Step 1: Convert to linear (either via ICC, sRGB gamma, or already linear)
+            if (loadedImage.has_non_srgb_icc) {
+                const iccProfile = loadedImage.get_icc_profile();
                 craWasm.transform_icc_to_linear_srgb_wasm(buffer, currentWidth, currentHeight, iccProfile);
+            } else if (inputIsLinear) {
+                // Input is already linear (normal maps, data textures) - no conversion needed
             } else {
                 craWasm.srgb_to_linear_wasm(buffer);
             }
@@ -199,10 +171,10 @@ function processDither(params) {
                 }
             }
         } else {
-            // sRGB-direct path: decode directly to 0-255, no intermediate
-            sendProgress(10, 'Decoding (sRGB direct)...');
-            const decoded = decodeToSrgb255(fileBytes);
-            let buffer = decoded.buffer;
+            // sRGB-direct path: bypass 0-1 range and linear conversion entirely
+            // Convert directly to sRGB 0-255 (no normalization, no linear conversion)
+            sendProgress(10, 'Converting to sRGB 0-255...');
+            let buffer = loadedImage.to_srgb_255_buffer();
 
             sendProgress(50, 'Dithering RGB...');
             const ditheredBuffer = craWasm.dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed);

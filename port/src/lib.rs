@@ -6,6 +6,7 @@
 
 use wasm_bindgen::prelude::*;
 use js_sys;
+use image::GenericImageView;
 
 pub mod basic_lab;
 pub mod basic_oklab;
@@ -107,71 +108,125 @@ fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
 // Image Decoding - Returns BufferF32x4
 // ============================================================================
 
-/// Decode image from raw file bytes to BufferF32x4 (Pixel4 format, normalized 0-1)
-/// Returns: [width, height, has_icc (0/1), is_16bit (0/1)]
+/// Loaded image - holds decoded pixels (u8/u16) and ICC profile
+/// Converts to appropriate f32 format on demand (like CLI's DecodedImage pattern)
 #[wasm_bindgen]
-pub fn decode_image_wasm(file_bytes: Vec<u8>) -> Result<BufferF32x4, JsValue> {
-    let result = decode::decode_image_to_f32(&file_bytes)
-        .map_err(|e| JsValue::from_str(&e))?;
-
-    if result.len() < 4 {
-        return Err(JsValue::from_str("Invalid decode result"));
-    }
-
-    let width = result[0] as usize;
-    let height = result[1] as usize;
-    let pixel_data = &result[4..];
-    let pixel_count = width * height;
-
-    if pixel_data.len() != pixel_count * 3 {
-        return Err(JsValue::from_str("Pixel data size mismatch"));
-    }
-
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(pixel_data[i * 3], pixel_data[i * 3 + 1], pixel_data[i * 3 + 2], 0.0))
-        .collect();
-
-    Ok(BufferF32x4::new(pixels))
+pub struct LoadedImage {
+    // Store the DynamicImage for on-demand conversion
+    image: image::DynamicImage,
+    icc_profile: Option<Vec<u8>>,
+    width: u32,
+    height: u32,
+    is_16bit: bool,
+    has_non_srgb_icc: bool,
 }
 
-/// Decode image directly to sRGB 0-255 scale (for dither-only paths)
 #[wasm_bindgen]
-pub fn decode_image_srgb_255_wasm(file_bytes: Vec<u8>) -> Result<BufferF32x4, JsValue> {
-    let result = decode::decode_image_to_srgb_255(&file_bytes)
-        .map_err(|e| JsValue::from_str(&e))?;
-
-    if result.len() < 4 {
-        return Err(JsValue::from_str("Invalid decode result"));
+impl LoadedImage {
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.width
     }
 
-    let width = result[0] as usize;
-    let height = result[1] as usize;
-    let pixel_data = &result[4..];
-    let pixel_count = width * height;
-
-    if pixel_data.len() != pixel_count * 3 {
-        return Err(JsValue::from_str("Pixel data size mismatch"));
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.height
     }
 
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(pixel_data[i * 3], pixel_data[i * 3 + 1], pixel_data[i * 3 + 2], 0.0))
-        .collect();
+    #[wasm_bindgen(getter)]
+    pub fn is_16bit(&self) -> bool {
+        self.is_16bit
+    }
 
-    Ok(BufferF32x4::new(pixels))
+    #[wasm_bindgen(getter)]
+    pub fn has_non_srgb_icc(&self) -> bool {
+        self.has_non_srgb_icc
+    }
+
+    /// Get ICC profile bytes (only if has_non_srgb_icc is true)
+    pub fn get_icc_profile(&self) -> Option<Vec<u8>> {
+        self.icc_profile.clone()
+    }
+
+    /// Convert to normalized f32 (0-1) for linear processing path
+    /// Call this when needs_linear is true
+    pub fn to_normalized_buffer(&self) -> BufferF32x4 {
+        let normalized = decode::image_to_f32_normalized(&self.image);
+        let pixels: Vec<Pixel4> = normalized.into_iter()
+            .map(|[r, g, b]| Pixel4::new(r, g, b, 0.0))
+            .collect();
+        BufferF32x4::new(pixels)
+    }
+
+    /// Convert directly to sRGB f32 (0-255) for dither-only path
+    /// Call this when needs_linear is false (no resize, no grayscale, no ICC)
+    pub fn to_srgb_255_buffer(&self) -> BufferF32x4 {
+        let srgb_pixels = decode::image_to_f32_srgb_255_pixels(&self.image);
+        let pixels: Vec<Pixel4> = srgb_pixels.into_iter()
+            .map(|[r, g, b]| Pixel4::new(r, g, b, 0.0))
+            .collect();
+        BufferF32x4::new(pixels)
+    }
 }
 
-/// Get decode metadata without the pixel data
+/// Load image once - returns LoadedImage that can be converted to either format
+/// Single decode, then call to_normalized_buffer() or to_srgb_255_buffer()
+#[wasm_bindgen]
+pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
+    let decoded = decode::load_image_from_bytes(&file_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let (width, height) = decoded.image.dimensions();
+
+    // Check if ICC is non-sRGB
+    let has_non_srgb_icc = decoded.icc_profile.as_ref()
+        .map(|icc| !icc.is_empty() && !decode::is_profile_srgb(icc))
+        .unwrap_or(false);
+
+    Ok(LoadedImage {
+        image: decoded.image,
+        icc_profile: if has_non_srgb_icc { decoded.icc_profile } else { None },
+        width,
+        height,
+        is_16bit: decoded.is_16bit,
+        has_non_srgb_icc,
+    })
+}
+
+/// Get decode metadata without the pixel data (fast - no pixel decoding)
 /// Returns: [width, height, has_icc (0/1), is_16bit (0/1)]
 #[wasm_bindgen]
 pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
-    let result = decode::decode_image_to_f32(&file_bytes)
+    let (metadata, _) = decode::get_metadata_and_icc(&file_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
-    if result.len() < 4 {
-        return Err(JsValue::from_str("Invalid decode result"));
-    }
+    Ok(vec![
+        metadata.width as f32,
+        metadata.height as f32,
+        if metadata.has_icc { 1.0 } else { 0.0 },
+        if metadata.is_16bit { 1.0 } else { 0.0 },
+    ])
+}
 
-    Ok(vec![result[0], result[1], result[2], result[3]])
+/// Get metadata and check if ICC profile is non-sRGB (single parse)
+/// Returns: [width, height, has_non_srgb_icc (0/1), is_16bit (0/1)]
+/// This combines decode_metadata + extract_icc + is_icc_srgb check in one call
+#[wasm_bindgen]
+pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
+    let (metadata, icc_profile) = decode::get_metadata_and_icc(&file_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let has_non_srgb_icc = match icc_profile {
+        Some(ref icc) if !icc.is_empty() => !decode::is_profile_srgb(icc),
+        _ => false,
+    };
+
+    Ok(vec![
+        metadata.width as f32,
+        metadata.height as f32,
+        if has_non_srgb_icc { 1.0 } else { 0.0 },
+        if metadata.is_16bit { 1.0 } else { 0.0 },
+    ])
 }
 
 /// Create BufferF32x4 from interleaved RGBA f32 data (values 0-1)
@@ -211,18 +266,6 @@ pub fn create_buffer_from_rgb_wasm(data: Vec<f32>, pixel_count: usize) -> Result
 // ============================================================================
 // ICC Profile Handling
 // ============================================================================
-
-/// Extract ICC profile from file bytes
-#[wasm_bindgen]
-pub fn extract_icc_profile_wasm(file_bytes: Vec<u8>) -> Vec<u8> {
-    decode::extract_icc_profile(&file_bytes).unwrap_or_default()
-}
-
-/// Check if ICC profile is sRGB
-#[wasm_bindgen]
-pub fn is_icc_profile_srgb_wasm(icc_bytes: Vec<u8>) -> bool {
-    decode::is_profile_srgb(&icc_bytes)
-}
 
 /// Transform image from ICC profile to linear sRGB (in-place)
 #[wasm_bindgen]

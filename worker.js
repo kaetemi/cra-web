@@ -93,22 +93,20 @@ async function loadScript(scriptName) {
     currentScript = scriptName;
 }
 
-// Decode image using WASM - returns BufferF32x4 and metadata
+// Decode image using WASM - returns LoadedImage with metadata and pixel access
 function decodeImagePrecise(data) {
-    // Get metadata first
-    const metadata = craWasm.decode_metadata_wasm(new Uint8Array(data));
-    const width = metadata[0];
-    const height = metadata[1];
-    const hasIcc = metadata[2] > 0.5;
-    const is16bit = metadata[3] > 0.5;
+    // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
+    const loadedImage = craWasm.load_image_wasm(new Uint8Array(data));
 
-    // Decode to BufferF32x4 (Pixel4 format, normalized 0-1)
-    const buffer = craWasm.decode_image_wasm(new Uint8Array(data));
-
-    // Extract ICC profile if present
-    const iccProfile = hasIcc ? craWasm.extract_icc_profile_wasm(new Uint8Array(data)) : null;
-
-    return { width, height, hasIcc, is16bit, buffer, iccProfile };
+    return {
+        width: loadedImage.width,
+        height: loadedImage.height,
+        hasIcc: loadedImage.has_non_srgb_icc,  // Only true if non-sRGB
+        is16bit: loadedImage.is_16bit,
+        // Convert to normalized (0-1) for color correction
+        buffer: loadedImage.to_normalized_buffer(),
+        iccProfile: loadedImage.has_non_srgb_icc ? loadedImage.get_icc_profile() : null
+    };
 }
 
 // Legacy decode using Canvas API (fallback, loses precision)
@@ -265,25 +263,17 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     let inputAlreadyLinear = false;
     let refAlreadyLinear = false;
 
-    // Check if ICC transform is needed for input
+    // Apply ICC transform if present (iccProfile only exists if non-sRGB)
     if (inputImg.iccProfile && inputImg.iccProfile.length > 0) {
-        const isInputSrgb = craWasm.is_icc_profile_srgb_wasm(inputImg.iccProfile);
-        if (!isInputSrgb) {
-            sendConsole('  Applying ICC transform to input...');
-            // Transform directly to linear sRGB (in-place)
-            craWasm.transform_icc_to_linear_srgb_wasm(inputBuffer, inputImg.width, inputImg.height, inputImg.iccProfile);
-            inputAlreadyLinear = true;
-        }
+        sendConsole('  Applying ICC transform to input...');
+        craWasm.transform_icc_to_linear_srgb_wasm(inputBuffer, inputImg.width, inputImg.height, inputImg.iccProfile);
+        inputAlreadyLinear = true;
     }
 
-    // Check if ICC transform is needed for reference
     if (refImg.iccProfile && refImg.iccProfile.length > 0) {
-        const isRefSrgb = craWasm.is_icc_profile_srgb_wasm(refImg.iccProfile);
-        if (!isRefSrgb) {
-            sendConsole('  Applying ICC transform to reference...');
-            craWasm.transform_icc_to_linear_srgb_wasm(refBuffer, refImg.width, refImg.height, refImg.iccProfile);
-            refAlreadyLinear = true;
-        }
+        sendConsole('  Applying ICC transform to reference...');
+        craWasm.transform_icc_to_linear_srgb_wasm(refBuffer, refImg.width, refImg.height, refImg.iccProfile);
+        refAlreadyLinear = true;
     }
 
     // Convert to linear if not already done by ICC transform
