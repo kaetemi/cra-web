@@ -6,7 +6,7 @@
 //! All processing occurs in linear RGB space for correct color math.
 
 use clap::{Parser, ValueEnum};
-use image::{GenericImageView, ImageBuffer, Luma, Rgb};
+use image::{ColorType, GenericImageView, ImageBuffer, Luma, Rgb};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -325,35 +325,62 @@ fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32,
     let img = image::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
 
     let (width, height) = img.dimensions();
-    let rgb_img = img.to_rgb8();
-    let data = rgb_img.as_raw();
+    let color_type = img.color();
+    let pixel_count = (width * height) as usize;
 
     if verbose {
         eprintln!("  Dimensions: {}x{}", width, height);
+        eprintln!("  Color type: {:?}", color_type);
     }
 
-    // Convert sRGB u8 to linear RGB Pixel4
-    // Step 1: Unpack u8 to f32 (0-255)
-    // Step 2: Normalize f32 (0-255 -> 0-1)
-    // Step 3: sRGB gamma to linear (0-1 -> 0-1)
-    let pixel_count = (width * height) as usize;
+    // Convert sRGB to linear RGB Pixel4
+    // For 16-bit sources: divide directly by 65535.0 to preserve precision
+    // For 8-bit sources: divide by 255.0
     let mut pixels = Vec::with_capacity(pixel_count);
 
-    for i in 0..pixel_count {
-        // Unpack u8 to f32, normalize 0-255 to 0-1, then convert sRGB to linear
-        let r_255 = data[i * 3] as f32;
-        let g_255 = data[i * 3 + 1] as f32;
-        let b_255 = data[i * 3 + 2] as f32;
+    match color_type {
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::La16 | ColorType::L16 => {
+            // 16-bit source: convert directly to 0-1 without integer intermediate
+            let rgb16 = img.to_rgb16();
+            let data = rgb16.as_raw();
 
-        let r_norm = r_255 / 255.0;
-        let g_norm = g_255 / 255.0;
-        let b_norm = b_255 / 255.0;
+            if verbose {
+                eprintln!("  Using 16-bit precision path (dividing by 65535)");
+            }
 
-        let r_linear = srgb_to_linear_single(r_norm);
-        let g_linear = srgb_to_linear_single(g_norm);
-        let b_linear = srgb_to_linear_single(b_norm);
+            for i in 0..pixel_count {
+                let r_norm = data[i * 3] as f32 / 65535.0;
+                let g_norm = data[i * 3 + 1] as f32 / 65535.0;
+                let b_norm = data[i * 3 + 2] as f32 / 65535.0;
 
-        pixels.push([r_linear, g_linear, b_linear, 0.0]);
+                let r_linear = srgb_to_linear_single(r_norm);
+                let g_linear = srgb_to_linear_single(g_norm);
+                let b_linear = srgb_to_linear_single(b_norm);
+
+                pixels.push([r_linear, g_linear, b_linear, 0.0]);
+            }
+        }
+        _ => {
+            // 8-bit source (or palette which expands to 8-bit)
+            let rgb8 = img.to_rgb8();
+            let data = rgb8.as_raw();
+
+            if verbose {
+                eprintln!("  Using 8-bit precision path (dividing by 255)");
+            }
+
+            for i in 0..pixel_count {
+                let r_norm = data[i * 3] as f32 / 255.0;
+                let g_norm = data[i * 3 + 1] as f32 / 255.0;
+                let b_norm = data[i * 3 + 2] as f32 / 255.0;
+
+                let r_linear = srgb_to_linear_single(r_norm);
+                let g_linear = srgb_to_linear_single(g_norm);
+                let b_linear = srgb_to_linear_single(b_norm);
+
+                pixels.push([r_linear, g_linear, b_linear, 0.0]);
+            }
+        }
     }
 
     Ok((pixels, width, height))
@@ -369,22 +396,53 @@ fn load_image_srgb(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u
     let img = image::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
 
     let (width, height) = img.dimensions();
-    let rgb_img = img.to_rgb8();
-    let data = rgb_img.as_raw();
+    let color_type = img.color();
+    let pixel_count = (width * height) as usize;
 
     if verbose {
         eprintln!("  Dimensions: {}x{}", width, height);
+        eprintln!("  Color type: {:?}", color_type);
     }
 
     // Keep as sRGB 0-255 in Pixel4 format
-    let pixel_count = (width * height) as usize;
+    // For 16-bit sources: divide by 65535 then multiply by 255 (equivalent to /257)
+    // This preserves more precision than going through integer intermediate
     let mut pixels = Vec::with_capacity(pixel_count);
 
-    for i in 0..pixel_count {
-        let r = data[i * 3] as f32;
-        let g = data[i * 3 + 1] as f32;
-        let b = data[i * 3 + 2] as f32;
-        pixels.push([r, g, b, 0.0]);
+    match color_type {
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::La16 | ColorType::L16 => {
+            // 16-bit source: scale to 0-255 without integer intermediate
+            let rgb16 = img.to_rgb16();
+            let data = rgb16.as_raw();
+
+            if verbose {
+                eprintln!("  Using 16-bit precision path (scaling to 0-255)");
+            }
+
+            for i in 0..pixel_count {
+                // Divide by 65535, multiply by 255 = divide by ~257.0
+                let r = data[i * 3] as f32 / 65535.0 * 255.0;
+                let g = data[i * 3 + 1] as f32 / 65535.0 * 255.0;
+                let b = data[i * 3 + 2] as f32 / 65535.0 * 255.0;
+                pixels.push([r, g, b, 0.0]);
+            }
+        }
+        _ => {
+            // 8-bit source (or palette which expands to 8-bit)
+            let rgb8 = img.to_rgb8();
+            let data = rgb8.as_raw();
+
+            if verbose {
+                eprintln!("  Using 8-bit path");
+            }
+
+            for i in 0..pixel_count {
+                let r = data[i * 3] as f32;
+                let g = data[i * 3 + 1] as f32;
+                let b = data[i * 3 + 2] as f32;
+                pixels.push([r, g, b, 0.0]);
+            }
+        }
     }
 
     Ok((pixels, width, height))
