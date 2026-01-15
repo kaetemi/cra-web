@@ -6,7 +6,8 @@
 //! All processing occurs in linear RGB space for correct color math.
 
 use clap::{Parser, ValueEnum};
-use image::{ColorType, GenericImageView, ImageBuffer, Luma, Rgb};
+use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, ImageDecoder, ImageReader, Luma, Rgb};
+use lcms2::{Intent, PixelFormat, Profile, Tag, TagSignature, Transform};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -147,6 +148,19 @@ impl ColorSpace {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq)]
+enum InputColorProfile {
+    /// Assume standard sRGB input, use builtin gamma functions (default)
+    #[default]
+    Srgb,
+    /// Assume linear RGB input (for normal maps, height maps, data textures)
+    Linear,
+    /// Auto-detect: check ICC profile, use lcms2 if non-sRGB
+    Auto,
+    /// Always use embedded ICC profile via lcms2 (even if sRGB)
+    Icc,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
 enum ScaleMethod {
     /// Bilinear interpolation (fast, good for moderate scaling)
@@ -214,6 +228,10 @@ struct Args {
     /// Input image path
     #[arg(short, long)]
     input: PathBuf,
+
+    /// Input color profile handling
+    #[arg(long, value_enum, default_value_t = InputColorProfile::Srgb)]
+    input_profile: InputColorProfile,
 
     /// Reference image path (optional - required for histogram matching methods)
     #[arg(short, long)]
@@ -313,88 +331,325 @@ struct Args {
 }
 
 // ============================================================================
-// Linear RGB Image Processing
+// ICC Profile Handling
 // ============================================================================
 
-/// Load image and convert to linear RGB channels (f32, 0-1 range)
-fn load_image_linear(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    if verbose {
-        eprintln!("Loading: {}", path.display());
+/// Load image with ICC profile extraction in one pass
+/// Uses image crate's decoder API to avoid opening file multiple times
+fn load_image_with_icc(path: &PathBuf) -> Result<(DynamicImage, Option<Vec<u8>>), String> {
+    let reader = ImageReader::open(path)
+        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to detect format for {}: {}", path.display(), e))?;
+
+    let mut decoder = reader
+        .into_decoder()
+        .map_err(|e| format!("Failed to create decoder for {}: {}", path.display(), e))?;
+
+    // Extract ICC profile before decoding (supported for PNG, JPEG, AVIF)
+    let icc_profile = decoder.icc_profile().ok().flatten();
+
+    let img = DynamicImage::from_decoder(decoder)
+        .map_err(|e| format!("Failed to decode {}: {}", path.display(), e))?;
+
+    Ok((img, icc_profile))
+}
+
+/// Check if an ICC profile has linear TRC (gamma 1.0) on all channels
+fn is_profile_linear(profile: &Profile) -> bool {
+    // Check if all RGB TRCs are linear
+    let r_tag = profile.read_tag(TagSignature::RedTRCTag);
+    if let Tag::ToneCurve(r_trc) = r_tag {
+        if !r_trc.is_linear() {
+            return false;
+        }
+    } else {
+        return false;
     }
 
-    let img = image::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let g_tag = profile.read_tag(TagSignature::GreenTRCTag);
+    if let Tag::ToneCurve(g_trc) = g_tag {
+        if !g_trc.is_linear() {
+            return false;
+        }
+    } else {
+        return false;
+    }
 
-    let (width, height) = img.dimensions();
-    let color_type = img.color();
+    let b_tag = profile.read_tag(TagSignature::BlueTRCTag);
+    if let Tag::ToneCurve(b_trc) = b_tag {
+        if !b_trc.is_linear() {
+            return false;
+        }
+    } else {
+        return false;
+    }
+
+    true
+}
+
+/// Check if an ICC profile is effectively sRGB by comparing primaries and TRC
+fn is_profile_srgb(profile: &Profile, verbose: bool) -> bool {
+    // Create reference sRGB profile
+    let srgb = Profile::new_srgb();
+
+    // Compare using a transform - if it's identity-like, it's sRGB
+    // We'll sample a few test colors and check if they're unchanged
+    let test_colors: &[[u8; 3]] = &[
+        [0, 0, 0],       // Black
+        [255, 255, 255], // White
+        [255, 0, 0],     // Red
+        [0, 255, 0],     // Green
+        [0, 0, 255],     // Blue
+        [128, 128, 128], // Mid gray
+        [192, 64, 32],   // Random color
+    ];
+
+    // Transform from profile to sRGB
+    let transform = match Transform::new(
+        profile,
+        PixelFormat::RGB_8,
+        &srgb,
+        PixelFormat::RGB_8,
+        Intent::RelativeColorimetric,
+    ) {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+
+    for color in test_colors {
+        let mut output = [[0u8; 3]];
+        transform.transform_pixels(&[*color], &mut output);
+        let output = output[0];
+
+        // Allow small tolerance for rounding
+        let max_diff = color.iter()
+            .zip(output.iter())
+            .map(|(a, b)| (*a as i16 - *b as i16).abs())
+            .max()
+            .unwrap_or(0);
+
+        if max_diff > 1 {
+            if verbose {
+                eprintln!("  Profile differs from sRGB: {:?} -> {:?} (diff={})", color, output, max_diff);
+            }
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Convert image data from ICC profile to linear sRGB using lcms2 (float path)
+/// Input is already normalized f32 (0-1 range), output is linear sRGB f32 (0-1 range)
+fn convert_icc_to_linear_srgb_float(
+    input_pixels: &[[f32; 3]],
+    width: u32,
+    height: u32,
+    icc_profile: &[u8],
+    verbose: bool,
+) -> Result<(Vec<Pixel4>, u32, u32), String> {
+    let src_profile = Profile::new_icc(icc_profile)
+        .map_err(|e| format!("Failed to parse ICC profile: {:?}", e))?;
+
+    // Create sRGB profile - we'll apply linearization ourselves after transform
+    let srgb = Profile::new_srgb();
+
+    // Transform in float space - no integer intermediates!
+    let transform = Transform::new(
+        &src_profile,
+        PixelFormat::RGB_FLT,
+        &srgb,
+        PixelFormat::RGB_FLT,
+        Intent::RelativeColorimetric,
+    ).map_err(|e| format!("Failed to create transform: {:?}", e))?;
+
     let pixel_count = (width * height) as usize;
+    let mut output_pixels: Vec<[f32; 3]> = vec![[0.0f32; 3]; pixel_count];
+
+    transform.transform_pixels(input_pixels, &mut output_pixels);
 
     if verbose {
-        eprintln!("  Dimensions: {}x{}", width, height);
-        eprintln!("  Color type: {:?}", color_type);
+        eprintln!("  Converted via ICC profile to sRGB (float path, no integer intermediates)");
     }
 
-    // Convert sRGB to linear RGB Pixel4
-    // For 16-bit sources: divide directly by 65535.0 to preserve precision
-    // For 8-bit sources: divide by 255.0
+    // Now convert sRGB (0-1) to linear (0-1)
     let mut pixels = Vec::with_capacity(pixel_count);
+    for pixel in output_pixels {
+        let r_linear = srgb_to_linear_single(pixel[0]);
+        let g_linear = srgb_to_linear_single(pixel[1]);
+        let b_linear = srgb_to_linear_single(pixel[2]);
 
-    match color_type {
-        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::La16 | ColorType::L16 => {
-            // 16-bit source: convert directly to 0-1 without integer intermediate
-            let rgb16 = img.to_rgb16();
-            let data = rgb16.as_raw();
-
-            if verbose {
-                eprintln!("  Using 16-bit precision path (dividing by 65535)");
-            }
-
-            for i in 0..pixel_count {
-                let r_norm = data[i * 3] as f32 / 65535.0;
-                let g_norm = data[i * 3 + 1] as f32 / 65535.0;
-                let b_norm = data[i * 3 + 2] as f32 / 65535.0;
-
-                let r_linear = srgb_to_linear_single(r_norm);
-                let g_linear = srgb_to_linear_single(g_norm);
-                let b_linear = srgb_to_linear_single(b_norm);
-
-                pixels.push([r_linear, g_linear, b_linear, 0.0]);
-            }
-        }
-        _ => {
-            // 8-bit source (or palette which expands to 8-bit)
-            let rgb8 = img.to_rgb8();
-            let data = rgb8.as_raw();
-
-            if verbose {
-                eprintln!("  Using 8-bit precision path (dividing by 255)");
-            }
-
-            for i in 0..pixel_count {
-                let r_norm = data[i * 3] as f32 / 255.0;
-                let g_norm = data[i * 3 + 1] as f32 / 255.0;
-                let b_norm = data[i * 3 + 2] as f32 / 255.0;
-
-                let r_linear = srgb_to_linear_single(r_norm);
-                let g_linear = srgb_to_linear_single(g_norm);
-                let b_linear = srgb_to_linear_single(b_norm);
-
-                pixels.push([r_linear, g_linear, b_linear, 0.0]);
-            }
-        }
+        pixels.push([r_linear, g_linear, b_linear, 0.0]);
     }
 
     Ok((pixels, width, height))
 }
 
-/// Load image as sRGB (f32, 0-255 range) - no color space conversion
-/// Use when only dithering is needed (no resize, no color correction)
-fn load_image_srgb(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u32), String> {
+// ============================================================================
+// Linear RGB Image Processing
+// ============================================================================
+
+/// Convert DynamicImage to normalized f32 RGB (0-1 range)
+/// Handles both 8-bit and 16-bit sources with appropriate precision
+fn image_to_normalized_f32(img: &image::DynamicImage, verbose: bool) -> Vec<[f32; 3]> {
+    let color_type = img.color();
+    let (width, height) = img.dimensions();
+    let pixel_count = (width * height) as usize;
+
+    let is_16bit = matches!(
+        color_type,
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::La16 | ColorType::L16
+    );
+
+    if is_16bit {
+        let rgb16 = img.to_rgb16();
+        let data = rgb16.as_raw();
+        if verbose {
+            eprintln!("  Converting 16-bit to float (dividing by 65535)");
+        }
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 3] as f32 / 65535.0,
+                data[i * 3 + 1] as f32 / 65535.0,
+                data[i * 3 + 2] as f32 / 65535.0,
+            ])
+            .collect()
+    } else {
+        let rgb8 = img.to_rgb8();
+        let data = rgb8.as_raw();
+        if verbose {
+            eprintln!("  Converting 8-bit to float (dividing by 255)");
+        }
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 3] as f32 / 255.0,
+                data[i * 3 + 1] as f32 / 255.0,
+                data[i * 3 + 2] as f32 / 255.0,
+            ])
+            .collect()
+    }
+}
+
+/// Determine effective color profile mode based on ICC profile detection
+fn determine_effective_profile(
+    profile_mode: InputColorProfile,
+    icc_profile: &Option<Vec<u8>>,
+    verbose: bool,
+) -> InputColorProfile {
+    match profile_mode {
+        InputColorProfile::Srgb => InputColorProfile::Srgb,
+        InputColorProfile::Linear => InputColorProfile::Linear,
+        InputColorProfile::Icc => {
+            if icc_profile.is_some() {
+                InputColorProfile::Icc
+            } else {
+                if verbose {
+                    eprintln!("  No ICC profile found, falling back to sRGB");
+                }
+                InputColorProfile::Srgb
+            }
+        }
+        InputColorProfile::Auto => {
+            if let Some(ref icc) = icc_profile {
+                if let Ok(profile) = Profile::new_icc(icc) {
+                    if is_profile_linear(&profile) {
+                        if verbose {
+                            eprintln!("  Auto-detected: linear RGB profile");
+                        }
+                        InputColorProfile::Linear
+                    } else if is_profile_srgb(&profile, verbose) {
+                        if verbose {
+                            eprintln!("  Auto-detected: sRGB-compatible profile");
+                        }
+                        InputColorProfile::Srgb
+                    } else {
+                        if verbose {
+                            eprintln!("  Auto-detected: non-sRGB profile, using lcms2");
+                        }
+                        InputColorProfile::Icc
+                    }
+                } else {
+                    if verbose {
+                        eprintln!("  Failed to parse ICC profile, assuming sRGB");
+                    }
+                    InputColorProfile::Srgb
+                }
+            } else {
+                if verbose {
+                    eprintln!("  No ICC profile, assuming sRGB");
+                }
+                InputColorProfile::Srgb
+            }
+        }
+    }
+}
+
+/// Convert pre-loaded image to linear RGB channels (f32, 0-1 range)
+fn convert_to_linear(
+    img: &DynamicImage,
+    icc_profile: &Option<Vec<u8>>,
+    profile_mode: InputColorProfile,
+    verbose: bool,
+) -> Result<(Vec<Pixel4>, u32, u32), String> {
+    let (width, height) = img.dimensions();
+
     if verbose {
-        eprintln!("Loading: {}", path.display());
+        eprintln!("  Input profile mode: {:?}", profile_mode);
+        eprintln!("  Dimensions: {}x{}", width, height);
+        eprintln!("  Color type: {:?}", img.color());
+        if let Some(ref icc) = icc_profile {
+            eprintln!("  ICC profile: {} bytes", icc.len());
+        } else {
+            eprintln!("  ICC profile: none");
+        }
     }
 
-    let img = image::open(path).map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+    let effective_mode = determine_effective_profile(profile_mode, icc_profile, verbose);
 
+    // Convert to normalized f32 (0-1) - single code path for all modes
+    let normalized = image_to_normalized_f32(&img, verbose);
+
+    // Apply color space conversion based on effective mode
+    match effective_mode {
+        InputColorProfile::Icc => {
+            // ICC transform in float space
+            let icc = icc_profile.as_ref().expect("ICC mode requires profile");
+            convert_icc_to_linear_srgb_float(&normalized, width, height, icc, verbose)
+        }
+        InputColorProfile::Linear => {
+            // Already linear, just convert to Pixel4
+            if verbose {
+                eprintln!("  Input is linear, no gamma conversion");
+            }
+            let pixels: Vec<Pixel4> = normalized
+                .into_iter()
+                .map(|[r, g, b]| [r, g, b, 0.0])
+                .collect();
+            Ok((pixels, width, height))
+        }
+        InputColorProfile::Srgb | InputColorProfile::Auto => {
+            // sRGB input - apply gamma decode
+            if verbose {
+                eprintln!("  Applying sRGB gamma decode");
+            }
+            let pixels: Vec<Pixel4> = normalized
+                .into_iter()
+                .map(|[r, g, b]| [
+                    srgb_to_linear_single(r),
+                    srgb_to_linear_single(g),
+                    srgb_to_linear_single(b),
+                    0.0,
+                ])
+                .collect();
+            Ok((pixels, width, height))
+        }
+    }
+}
+
+/// Convert pre-loaded image to sRGB (f32, 0-255 range) - no color space conversion
+/// Use when only dithering is needed (no resize, no color correction)
+fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, u32) {
     let (width, height) = img.dimensions();
     let color_type = img.color();
     let pixel_count = (width * height) as usize;
@@ -445,7 +700,7 @@ fn load_image_srgb(path: &PathBuf, verbose: bool) -> Result<(Vec<Pixel4>, u32, u
         }
     }
 
-    Ok((pixels, width, height))
+    (pixels, width, height)
 }
 
 /// Resize linear RGB image in linear space for correct color blending
@@ -873,10 +1128,35 @@ fn main() -> Result<(), String> {
         ));
     }
 
+    // Pre-load input image with ICC profile (single file open)
+    if args.verbose {
+        eprintln!("Loading: {}", args.input.display());
+    }
+    let (input_img, input_icc) = load_image_with_icc(&args.input)?;
+
     // Determine if linear-space processing is needed
-    // Grayscale requires linear for correct luminance computation
+    // - Grayscale requires linear for correct luminance computation
+    // - Non-sRGB input profiles require linear path for proper color handling
     let needs_resize = args.width.is_some() || args.height.is_some();
-    let needs_linear = needs_reference || needs_resize || format.is_grayscale;
+
+    // Check if ICC profile processing is actually needed (based on file contents, not just CLI flag)
+    let needs_profile_processing = match args.input_profile {
+        InputColorProfile::Srgb => false,
+        InputColorProfile::Linear => true, // User says input is linear, we need to skip gamma decode
+        InputColorProfile::Auto => {
+            // Check if file has a non-sRGB ICC profile
+            input_icc.as_ref()
+                .and_then(|icc_data| Profile::new_icc(icc_data).ok())
+                .map(|profile| !is_profile_srgb(&profile, args.verbose))
+                .unwrap_or(false)
+        }
+        InputColorProfile::Icc => {
+            // Check if file has any ICC profile
+            input_icc.is_some()
+        }
+    };
+
+    let needs_linear = needs_reference || needs_resize || format.is_grayscale || needs_profile_processing;
 
     // Process image based on whether linear space is needed
     let (dither_result, width, height) = if needs_linear {
@@ -885,7 +1165,7 @@ fn main() -> Result<(), String> {
             eprintln!("Processing in linear RGB space...");
         }
 
-        let (input_pixels, src_width, src_height) = load_image_linear(&args.input, args.verbose)?;
+        let (input_pixels, src_width, src_height) = convert_to_linear(&input_img, &input_icc, args.input_profile, args.verbose)?;
 
         // Resize in linear RGB space
         let (input_pixels, width, height) = resize_linear(
@@ -902,7 +1182,12 @@ fn main() -> Result<(), String> {
         let pixels_to_dither = if needs_reference {
             // Load reference and apply color correction
             let ref_path = args.r#ref.as_ref().unwrap();
-            let (ref_pixels, ref_width, ref_height) = load_image_linear(ref_path, args.verbose)?;
+            // Reference image always assumed sRGB (color correction target)
+            if args.verbose {
+                eprintln!("Loading: {}", ref_path.display());
+            }
+            let (ref_img, ref_icc) = load_image_with_icc(ref_path)?;
+            let (ref_pixels, ref_width, ref_height) = convert_to_linear(&ref_img, &ref_icc, InputColorProfile::Srgb, args.verbose)?;
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 
@@ -939,7 +1224,7 @@ fn main() -> Result<(), String> {
             eprintln!("Dithering RGB channels (sRGB path)...");
         }
 
-        let (input_pixels, width, height) = load_image_srgb(&args.input, args.verbose)?;
+        let (input_pixels, width, height) = convert_to_srgb_255(&input_img, args.verbose);
 
         let result = dither_pixels_srgb_rgb(
             input_pixels,
