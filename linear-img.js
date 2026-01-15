@@ -112,15 +112,12 @@ function cacheResult(key, imageData) {
 
 // Extract pixels from an image using canvas
 function getImagePixels(img) {
-    console.log('[linear-img] Extracting pixels from image:', img.naturalWidth, 'x', img.naturalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    console.log('[linear-img] Got pixel data, length:', imageData.data.length);
-    return imageData;
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
 // Custom element definition
@@ -194,28 +191,21 @@ class LinearImg extends HTMLElement {
     }
 
     _setupDprWatcher() {
-        // Watch for devicePixelRatio changes using matchMedia
-        // This fires when browser zoom changes
+        // Watch for devicePixelRatio changes (browser zoom)
         const updateDpr = () => {
-            // Remove old listener
             if (this._dprMediaQuery) {
                 this._dprMediaQuery.removeEventListener('change', this._dprChangeHandler);
             }
-            // Create new query for current DPR
             this._dprMediaQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
             this._dprChangeHandler = () => {
-                console.log('[linear-img] devicePixelRatio changed to:', window.devicePixelRatio);
-                // Force recalculation with new DPR
                 if (this._displayWidth && this._displayHeight) {
-                    this._lastDpr = null;  // Force re-render
                     this._scheduleResize();
                 }
-                updateDpr();  // Re-setup for next change
+                updateDpr();
             };
             this._dprMediaQuery.addEventListener('change', this._dprChangeHandler);
         };
         updateDpr();
-        this._lastDpr = window.devicePixelRatio;
     }
 
     connectedCallback() {
@@ -283,46 +273,30 @@ class LinearImg extends HTMLElement {
         if (!this._src) return;
 
         // Skip if already loaded this src or currently loading
-        if (this._src === this._loadedSrc) {
-            console.log('[linear-img] Already loaded this src, skipping');
-            return;
-        }
-        if (this._loading) {
-            console.log('[linear-img] Already loading, skipping');
-            return;
-        }
+        if (this._src === this._loadedSrc || this._loading) return;
 
-        console.log('[linear-img] _loadImage called, src length:', this._src.length);
         this._loading = true;
 
         // Show preview immediately using browser scaling
         this._preview.src = this._src;
         this._preview.style.display = 'block';
-        this._preview.style.opacity = '1';  // Reset opacity
+        this._preview.style.opacity = '1';
         this._canvas.style.display = 'none';
 
         try {
             // Wait for image to load
             await new Promise((resolve, reject) => {
                 if (this._preview.complete && this._preview.naturalWidth > 0) {
-                    console.log('[linear-img] Image already complete');
                     resolve();
                 } else {
-                    this._preview.onload = () => {
-                        console.log('[linear-img] Image onload fired');
-                        resolve();
-                    };
-                    this._preview.onerror = (e) => {
-                        console.error('[linear-img] Image onerror fired', e);
-                        reject(new Error('Failed to load image'));
-                    };
+                    this._preview.onload = resolve;
+                    this._preview.onerror = () => reject(new Error('Failed to load image'));
                 }
             });
 
             this._naturalWidth = this._preview.naturalWidth;
             this._naturalHeight = this._preview.naturalHeight;
-            this._loadedSrc = this._src;  // Mark as loaded
-            console.log('[linear-img] Natural size:', this._naturalWidth, 'x', this._naturalHeight);
+            this._loadedSrc = this._src;
 
             // Extract pixels via canvas
             const imageData = getImagePixels(this._preview);
@@ -330,16 +304,14 @@ class LinearImg extends HTMLElement {
 
             // Trigger resize with current display dimensions
             const rect = this.getBoundingClientRect();
-            console.log('[linear-img] Bounding rect:', rect.width, 'x', rect.height);
             if (rect.width > 0 && rect.height > 0) {
                 this._displayWidth = Math.round(rect.width);
                 this._displayHeight = Math.round(rect.height);
-                // Call _scheduleResize directly since we now have pixel data
                 this._scheduleResize();
             }
 
         } catch (err) {
-            console.error('[linear-img] Failed to load image:', err);
+            console.error('[linear-img] Load failed:', err);
             this.dispatchEvent(new CustomEvent('error', { detail: err }));
         } finally {
             this._loading = false;
@@ -370,18 +342,14 @@ class LinearImg extends HTMLElement {
     }
 
     async _doResize() {
-        console.log('[linear-img] _doResize called');
         if (!this._pixelData || this._displayWidth <= 0 || this._displayHeight <= 0) {
-            console.log('[linear-img] _doResize early return - no pixel data or zero dimensions');
             return;
         }
 
         const { outputWidth, outputHeight, dpr } = this._calculateOutputDimensions();
-        console.log('[linear-img] Output dimensions:', outputWidth, 'x', outputHeight, 'at DPR:', dpr);
 
         // Skip if output would be same as natural size
         if (outputWidth === this._naturalWidth && outputHeight === this._naturalHeight) {
-            console.log('[linear-img] Same as natural size, showing preview');
             this._preview.style.display = 'block';
             this._preview.style.opacity = '1';
             this._canvas.style.display = 'none';
@@ -392,13 +360,12 @@ class LinearImg extends HTMLElement {
         const cacheKey = getCacheKey(this._src, outputWidth, outputHeight, this._method, dpr);
         const cached = resultCache.get(cacheKey);
         if (cached) {
-            console.log('[linear-img] Using cached result');
             this._displayResult(cached, outputWidth, outputHeight, dpr);
             return;
         }
 
         this._processing = true;
-        console.log('[linear-img] Starting resize:', this._naturalWidth, 'x', this._naturalHeight, '->', outputWidth, 'x', outputHeight);
+        console.log('[linear-img] Resizing:', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
 
         try {
             const result = await requestResizePixels(
@@ -409,8 +376,6 @@ class LinearImg extends HTMLElement {
                 outputHeight,
                 this._method
             );
-
-            console.log('[linear-img] Resize complete, result:', result.width, 'x', result.height, 'data length:', result.outputData.length);
 
             const imageData = new ImageData(
                 new Uint8ClampedArray(result.outputData),
@@ -423,10 +388,8 @@ class LinearImg extends HTMLElement {
             // Display if dimensions and DPR still match
             const { outputWidth: currentW, outputHeight: currentH, dpr: currentDpr } = this._calculateOutputDimensions();
             if (currentW === outputWidth && currentH === outputHeight && currentDpr === dpr) {
-                console.log('[linear-img] Displaying result');
+                console.log('[linear-img] Done:', outputWidth, 'x', outputHeight);
                 this._displayResult(imageData, outputWidth, outputHeight, dpr);
-            } else {
-                console.log('[linear-img] Dimensions changed during processing, not displaying');
             }
 
             this.dispatchEvent(new CustomEvent('load', {
@@ -435,7 +398,6 @@ class LinearImg extends HTMLElement {
 
         } catch (err) {
             console.error('[linear-img] Resize failed:', err);
-            // Keep showing browser-scaled preview on error
         } finally {
             this._processing = false;
 

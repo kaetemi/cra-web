@@ -224,26 +224,13 @@ function processSrgbResize(params) {
 // Process resize from raw RGBA pixels (from canvas, already u8 sRGB)
 // Simpler path that bypasses file decoding - for use with browser-loaded images
 function processResizePixels(params) {
-    console.log('[resize-worker] processResizePixels called');
     if (!wasmReady) {
-        console.error('[resize-worker] WASM not ready');
         sendError(new Error('WASM not ready'));
         return;
     }
 
     try {
-        const {
-            pixelData,   // Uint8ClampedArray RGBA from canvas
-            srcWidth,
-            srcHeight,
-            dstWidth,
-            dstHeight,
-            interpolation,
-            scaleMode
-        } = params;
-
-        console.log('[resize-worker] Params:', srcWidth, 'x', srcHeight, '->', dstWidth, 'x', dstHeight);
-        console.log('[resize-worker] pixelData type:', pixelData?.constructor?.name, 'length:', pixelData?.length);
+        const { pixelData, srcWidth, srcHeight, dstWidth, dstHeight, interpolation, scaleMode } = params;
 
         // Convert RGBA u8 to RGB f32 normalized (0-1)
         const pixelCount = srcWidth * srcHeight;
@@ -253,16 +240,13 @@ function processResizePixels(params) {
             srgbNorm[i * 3 + 1] = pixelData[i * 4 + 1] / 255.0;
             srgbNorm[i * 3 + 2] = pixelData[i * 4 + 2] / 255.0;
         }
-        console.log('[resize-worker] Converted to normalized RGB');
 
         // Convert sRGB to linear
         const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbNorm, srcWidth, srcHeight);
-        console.log('[resize-worker] Converted to linear RGB');
 
         sendProgress(20);
 
         // Rescale in linear space
-        console.log('[resize-worker] Starting rescale');
         const linearResized = craWasm.rescale_linear_rgb_with_progress_wasm(
             linearRgb,
             srcWidth, srcHeight,
@@ -271,22 +255,18 @@ function processResizePixels(params) {
             scaleMode,
             (progress) => sendProgress(20 + Math.round(progress * 60))
         );
-        console.log('[resize-worker] Rescale complete, linearResized length:', linearResized?.length);
 
         sendProgress(85);
 
         // Convert linear back to sRGB
         const srgbResized = craWasm.linear_to_srgb_f32_wasm(linearResized, dstWidth, dstHeight);
-        console.log('[resize-worker] Converted back to sRGB');
 
         // Denormalize to 0-255
         const srgbResized_255 = craWasm.denormalize_f32_wasm(srgbResized, dstWidth, dstHeight);
-        console.log('[resize-worker] Denormalized to 0-255');
 
         sendProgress(90);
 
-        // Dither to RGB888 (using good defaults)
-        console.log('[resize-worker] Starting dither');
+        // Dither to RGB888
         const dithered = craWasm.dither_output_wasm(
             srgbResized_255,
             dstWidth, dstHeight,
@@ -298,7 +278,6 @@ function processResizePixels(params) {
         );
 
         sendProgress(100);
-        console.log('[resize-worker] Dither complete, dithered length:', dithered?.length);
 
         // Convert to RGBA for ImageData
         const dstPixels = dstWidth * dstHeight;
@@ -310,11 +289,10 @@ function processResizePixels(params) {
             outputData[i * 4 + 3] = 255;
         }
 
-        console.log('[resize-worker] Sending complete, output length:', outputData.length);
         sendComplete(outputData, dstWidth, dstHeight);
 
     } catch (error) {
-        console.error('[resize-worker] processResizePixels error:', error);
+        console.error('[resize-worker] Error:', error);
         sendError(error);
     }
 }
@@ -322,10 +300,6 @@ function processResizePixels(params) {
 // Handle messages from main thread
 self.onmessage = function(e) {
     const { type, requestId, ...data } = e.data;
-
-    console.log('[resize-worker] Received message:', type, 'requestId:', requestId);
-
-    // Track request ID for response routing
     currentRequestId = requestId || null;
 
     switch (type) {
@@ -341,7 +315,5 @@ self.onmessage = function(e) {
         case 'resize-pixels':
             processResizePixels(data);
             break;
-        default:
-            console.warn('[resize-worker] Unknown message type:', type);
     }
 };
