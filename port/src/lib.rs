@@ -1,10 +1,8 @@
 /// CRA (Chroma Rotation Averaging) Color Correction - Rust/WASM Port
 ///
-/// This crate provides WASM-compatible implementations of various color correction
-/// algorithms, ported from the original Python scripts.
-///
-/// All image processing uses ImageBuffer/GrayBuffer as opaque handles to avoid
-/// copying data across the WASM boundary at every function call.
+/// All WASM-exported functions use the `_wasm` suffix.
+/// Buffer types (BufferF32x4, BufferF32, BufferU8) are pure opaque data containers.
+/// Width/height are passed as parameters, not stored in buffers.
 
 use wasm_bindgen::prelude::*;
 use js_sys;
@@ -35,7 +33,7 @@ mod tiling;
 
 pub mod decode;
 
-use buffer::{ImageBuffer, GrayBuffer};
+use buffer::{BufferF32x4, BufferF32, BufferU8};
 use dither_common::{DitherMode, PerceptualSpace};
 use pixel::Pixel4;
 
@@ -106,41 +104,39 @@ fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
 }
 
 // ============================================================================
-// Image Decoding - Returns ImageBuffer
+// Image Decoding - Returns BufferF32x4
 // ============================================================================
 
-/// Decode image from raw file bytes to ImageBuffer (Pixel4 format, normalized 0-1)
-/// The buffer is ready for srgb_to_linear conversion.
+/// Decode image from raw file bytes to BufferF32x4 (Pixel4 format, normalized 0-1)
+/// Returns: [width, height, has_icc (0/1), is_16bit (0/1)]
 #[wasm_bindgen]
-pub fn decode_image(file_bytes: Vec<u8>) -> Result<ImageBuffer, JsValue> {
+pub fn decode_image_wasm(file_bytes: Vec<u8>) -> Result<BufferF32x4, JsValue> {
     let result = decode::decode_image_to_f32(&file_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
-    // Result format: [width, height, has_icc, is_16bit, ...pixels]
     if result.len() < 4 {
         return Err(JsValue::from_str("Invalid decode result"));
     }
 
-    let width = result[0] as u32;
-    let height = result[1] as u32;
+    let width = result[0] as usize;
+    let height = result[1] as usize;
     let pixel_data = &result[4..];
-    let pixel_count = (width as usize) * (height as usize);
+    let pixel_count = width * height;
 
     if pixel_data.len() != pixel_count * 3 {
         return Err(JsValue::from_str("Pixel data size mismatch"));
     }
 
-    // Convert to Pixel4
     let pixels: Vec<Pixel4> = (0..pixel_count)
         .map(|i| Pixel4::new(pixel_data[i * 3], pixel_data[i * 3 + 1], pixel_data[i * 3 + 2], 0.0))
         .collect();
 
-    Ok(ImageBuffer::from_pixel4(pixels, width, height))
+    Ok(BufferF32x4::new(pixels))
 }
 
 /// Decode image directly to sRGB 0-255 scale (for dither-only paths)
 #[wasm_bindgen]
-pub fn decode_image_srgb_255(file_bytes: Vec<u8>) -> Result<ImageBuffer, JsValue> {
+pub fn decode_image_srgb_255_wasm(file_bytes: Vec<u8>) -> Result<BufferF32x4, JsValue> {
     let result = decode::decode_image_to_srgb_255(&file_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
@@ -148,10 +144,10 @@ pub fn decode_image_srgb_255(file_bytes: Vec<u8>) -> Result<ImageBuffer, JsValue
         return Err(JsValue::from_str("Invalid decode result"));
     }
 
-    let width = result[0] as u32;
-    let height = result[1] as u32;
+    let width = result[0] as usize;
+    let height = result[1] as usize;
     let pixel_data = &result[4..];
-    let pixel_count = (width as usize) * (height as usize);
+    let pixel_count = width * height;
 
     if pixel_data.len() != pixel_count * 3 {
         return Err(JsValue::from_str("Pixel data size mismatch"));
@@ -161,50 +157,13 @@ pub fn decode_image_srgb_255(file_bytes: Vec<u8>) -> Result<ImageBuffer, JsValue
         .map(|i| Pixel4::new(pixel_data[i * 3], pixel_data[i * 3 + 1], pixel_data[i * 3 + 2], 0.0))
         .collect();
 
-    Ok(ImageBuffer::from_pixel4(pixels, width, height))
-}
-
-/// Create ImageBuffer from interleaved RGBA f32 data (values 0-1)
-/// Useful for creating buffers from canvas-extracted pixel data
-#[wasm_bindgen]
-pub fn create_buffer_from_rgba(data: Vec<f32>, width: u32, height: u32) -> Result<ImageBuffer, JsValue> {
-    let pixel_count = (width as usize) * (height as usize);
-    if data.len() != pixel_count * 4 {
-        return Err(JsValue::from_str(&format!(
-            "Data length {} doesn't match {}x{}x4 = {}",
-            data.len(), width, height, pixel_count * 4
-        )));
-    }
-
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]))
-        .collect();
-
-    Ok(ImageBuffer::from_pixel4(pixels, width, height))
-}
-
-/// Create ImageBuffer from interleaved RGB f32 data (values 0-1)
-#[wasm_bindgen]
-pub fn create_buffer_from_rgb(data: Vec<f32>, width: u32, height: u32) -> Result<ImageBuffer, JsValue> {
-    let pixel_count = (width as usize) * (height as usize);
-    if data.len() != pixel_count * 3 {
-        return Err(JsValue::from_str(&format!(
-            "Data length {} doesn't match {}x{}x3 = {}",
-            data.len(), width, height, pixel_count * 3
-        )));
-    }
-
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 0.0))
-        .collect();
-
-    Ok(ImageBuffer::from_pixel4(pixels, width, height))
+    Ok(BufferF32x4::new(pixels))
 }
 
 /// Get decode metadata without the pixel data
 /// Returns: [width, height, has_icc (0/1), is_16bit (0/1)]
 #[wasm_bindgen]
-pub fn decode_metadata(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
+pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
     let result = decode::decode_image_to_f32(&file_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
@@ -215,81 +174,100 @@ pub fn decode_metadata(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
     Ok(vec![result[0], result[1], result[2], result[3]])
 }
 
+/// Create BufferF32x4 from interleaved RGBA f32 data (values 0-1)
+#[wasm_bindgen]
+pub fn create_buffer_from_rgba_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
+    if data.len() != pixel_count * 4 {
+        return Err(JsValue::from_str(&format!(
+            "Data length {} doesn't match pixel_count*4 = {}",
+            data.len(), pixel_count * 4
+        )));
+    }
+
+    let pixels: Vec<Pixel4> = (0..pixel_count)
+        .map(|i| Pixel4::new(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]))
+        .collect();
+
+    Ok(BufferF32x4::new(pixels))
+}
+
+/// Create BufferF32x4 from interleaved RGB f32 data (values 0-1)
+#[wasm_bindgen]
+pub fn create_buffer_from_rgb_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
+    if data.len() != pixel_count * 3 {
+        return Err(JsValue::from_str(&format!(
+            "Data length {} doesn't match pixel_count*3 = {}",
+            data.len(), pixel_count * 3
+        )));
+    }
+
+    let pixels: Vec<Pixel4> = (0..pixel_count)
+        .map(|i| Pixel4::new(data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 0.0))
+        .collect();
+
+    Ok(BufferF32x4::new(pixels))
+}
+
+// ============================================================================
+// ICC Profile Handling
+// ============================================================================
+
 /// Extract ICC profile from file bytes
 #[wasm_bindgen]
-pub fn extract_icc_profile(file_bytes: Vec<u8>) -> Vec<u8> {
+pub fn extract_icc_profile_wasm(file_bytes: Vec<u8>) -> Vec<u8> {
     decode::extract_icc_profile(&file_bytes).unwrap_or_default()
 }
 
 /// Check if ICC profile is sRGB
 #[wasm_bindgen]
-pub fn is_icc_profile_srgb(icc_bytes: Vec<u8>) -> bool {
+pub fn is_icc_profile_srgb_wasm(icc_bytes: Vec<u8>) -> bool {
     decode::is_profile_srgb(&icc_bytes)
 }
 
 /// Transform image from ICC profile to linear sRGB (in-place)
 #[wasm_bindgen]
-pub fn transform_icc_to_linear_srgb(buf: &mut ImageBuffer, icc_bytes: Vec<u8>) -> Result<(), JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    let (width, height) = buf.dimensions();
-
-    // Extract interleaved for transform
+pub fn transform_icc_to_linear_srgb_wasm(buf: &mut BufferF32x4, width: usize, height: usize, icc_bytes: Vec<u8>) -> Result<(), JsValue> {
+    let pixels = buf.as_slice();
     let interleaved: Vec<f32> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
 
-    let result = decode::transform_icc_to_linear_srgb(
-        &interleaved, width as usize, height as usize, &icc_bytes
-    ).map_err(|e| JsValue::from_str(&e))?;
+    let result = decode::transform_icc_to_linear_srgb(&interleaved, width, height, &icc_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
 
-    // Convert back to Pixel4
-    let pixel_count = (width as usize) * (height as usize);
+    let pixel_count = width * height;
     let new_pixels: Vec<Pixel4> = (0..pixel_count)
         .map(|i| Pixel4::new(result[i * 3], result[i * 3 + 1], result[i * 3 + 2], 0.0))
         .collect();
 
-    buf.set_pixel4(new_pixels);
+    *buf = BufferF32x4::new(new_pixels);
     Ok(())
 }
 
 // ============================================================================
-// Color Space Conversions (in-place on ImageBuffer)
+// Color Space Conversions (in-place on BufferF32x4)
 // ============================================================================
 
 /// Convert sRGB (0-1) to linear RGB (0-1) in-place
 #[wasm_bindgen]
-pub fn srgb_to_linear(buf: &mut ImageBuffer) -> Result<(), JsValue> {
-    let pixels = buf.as_pixel4_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-    color::srgb_to_linear_inplace(pixels);
-    Ok(())
+pub fn srgb_to_linear_wasm(buf: &mut BufferF32x4) {
+    color::srgb_to_linear_inplace(buf.as_mut_slice());
 }
 
 /// Convert linear RGB (0-1) to sRGB (0-1) in-place
 #[wasm_bindgen]
-pub fn linear_to_srgb(buf: &mut ImageBuffer) -> Result<(), JsValue> {
-    let pixels = buf.as_pixel4_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-    color::linear_to_srgb_inplace(pixels);
-    Ok(())
+pub fn linear_to_srgb_wasm(buf: &mut BufferF32x4) {
+    color::linear_to_srgb_inplace(buf.as_mut_slice());
 }
 
 /// Normalize from 0-255 to 0-1 in-place
 #[wasm_bindgen]
-pub fn normalize(buf: &mut ImageBuffer) -> Result<(), JsValue> {
-    let pixels = buf.as_pixel4_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-    color::normalize_inplace(pixels);
-    Ok(())
+pub fn normalize_wasm(buf: &mut BufferF32x4) {
+    color::normalize_inplace(buf.as_mut_slice());
 }
 
 /// Denormalize from 0-1 to 0-255 in-place
 #[wasm_bindgen]
-pub fn denormalize(buf: &mut ImageBuffer) -> Result<(), JsValue> {
-    let pixels = buf.as_pixel4_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-    color::denormalize_inplace(pixels);
-    Ok(())
+pub fn denormalize_wasm(buf: &mut BufferF32x4) {
+    color::denormalize_inplace(buf.as_mut_slice());
 }
 
 // ============================================================================
@@ -298,40 +276,27 @@ pub fn denormalize(buf: &mut ImageBuffer) -> Result<(), JsValue> {
 
 /// Convert linear RGB to linear grayscale (luminance)
 #[wasm_bindgen]
-pub fn rgb_to_grayscale(buf: &ImageBuffer) -> Result<GrayBuffer, JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    let gray: Vec<f32> = pixels.iter()
+pub fn rgb_to_grayscale_wasm(buf: &BufferF32x4) -> BufferF32 {
+    let gray: Vec<f32> = buf.as_slice().iter()
         .map(|p| color::linear_rgb_to_luminance(p[0], p[1], p[2]))
         .collect();
-
-    let (w, h) = buf.dimensions();
-    Ok(GrayBuffer::from_f32_internal(gray, w, h))
+    BufferF32::new(gray)
 }
 
 /// Convert linear grayscale to sRGB grayscale (gamma encode) in-place
 #[wasm_bindgen]
-pub fn gray_linear_to_srgb(buf: &mut GrayBuffer) -> Result<(), JsValue> {
-    let data = buf.as_f32_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be f32 format"))?;
-
-    for v in data.iter_mut() {
+pub fn gray_linear_to_srgb_wasm(buf: &mut BufferF32) {
+    for v in buf.as_mut_slice().iter_mut() {
         *v = color::linear_to_srgb_single(*v);
     }
-    Ok(())
 }
 
 /// Denormalize grayscale from 0-1 to 0-255 in-place
 #[wasm_bindgen]
-pub fn gray_denormalize(buf: &mut GrayBuffer) -> Result<(), JsValue> {
-    let data = buf.as_f32_mut()
-        .ok_or_else(|| JsValue::from_str("Buffer must be f32 format"))?;
-
-    for v in data.iter_mut() {
+pub fn gray_denormalize_wasm(buf: &mut BufferF32) {
+    for v in buf.as_mut_slice().iter_mut() {
         *v *= 255.0;
     }
-    Ok(())
 }
 
 // ============================================================================
@@ -342,25 +307,21 @@ pub fn gray_denormalize(buf: &mut GrayBuffer) -> Result<(), JsValue> {
 /// Input/output are linear RGB (0-1) in Pixel4 format
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
-pub fn color_correct(
-    input: &ImageBuffer,
-    reference: &ImageBuffer,
+pub fn color_correct_wasm(
+    input: &BufferF32x4,
+    reference: &BufferF32x4,
+    input_width: usize,
+    input_height: usize,
+    ref_width: usize,
+    ref_height: usize,
     method: u8,
     luminosity_flag: bool,
     histogram_mode: u8,
     histogram_dither_mode: u8,
     colorspace_aware_histogram: bool,
     histogram_distance_space: u8,
-) -> Result<ImageBuffer, JsValue> {
+) -> BufferF32x4 {
     use correction::HistogramOptions;
-
-    let input_pixels = input.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Input must be pixel4 format"))?;
-    let ref_pixels = reference.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Reference must be pixel4 format"))?;
-
-    let (iw, ih) = input.dimensions();
-    let (rw, rh) = reference.dimensions();
 
     let histogram_options = HistogramOptions {
         mode: histogram_mode_from_u8(histogram_mode),
@@ -370,17 +331,17 @@ pub fn color_correct(
     };
 
     let result = correction::color_correct(
-        input_pixels,
-        ref_pixels,
-        iw as usize,
-        ih as usize,
-        rw as usize,
-        rh as usize,
+        input.as_slice(),
+        reference.as_slice(),
+        input_width,
+        input_height,
+        ref_width,
+        ref_height,
         correction_method_from_u8(method, luminosity_flag),
         histogram_options,
     );
 
-    Ok(ImageBuffer::from_pixel4(result, iw, ih))
+    BufferF32x4::new(result)
 }
 
 // ============================================================================
@@ -391,46 +352,39 @@ pub fn color_correct(
 /// method: 0=Bilinear, 1=Lanczos3
 /// scale_mode: 0=Independent, 1=UniformWidth, 2=UniformHeight
 #[wasm_bindgen]
-pub fn rescale_rgb(
-    buf: &ImageBuffer,
-    dst_width: u32,
-    dst_height: u32,
+pub fn rescale_rgb_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
     method: u8,
     scale_mode: u8,
-) -> Result<ImageBuffer, JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    let (sw, sh) = buf.dimensions();
-
+) -> BufferF32x4 {
     let result = rescale::rescale(
-        pixels,
-        sw as usize,
-        sh as usize,
-        dst_width as usize,
-        dst_height as usize,
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
         rescale_method_from_u8(method),
         scale_mode_from_u8(scale_mode),
     );
-
-    Ok(ImageBuffer::from_pixel4(result, dst_width, dst_height))
+    BufferF32x4::new(result)
 }
 
 /// Rescale with progress callback
 #[wasm_bindgen]
-pub fn rescale_rgb_with_progress(
-    buf: &ImageBuffer,
-    dst_width: u32,
-    dst_height: u32,
+pub fn rescale_rgb_with_progress_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
     method: u8,
     scale_mode: u8,
     progress_callback: &js_sys::Function,
-) -> Result<ImageBuffer, JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    let (sw, sh) = buf.dimensions();
-
+) -> BufferF32x4 {
     let js_this = wasm_bindgen::JsValue::NULL;
     let callback = progress_callback.clone();
     let mut progress_fn = |progress: f32| {
@@ -438,49 +392,45 @@ pub fn rescale_rgb_with_progress(
     };
 
     let result = rescale::rescale_with_progress(
-        pixels,
-        sw as usize,
-        sh as usize,
-        dst_width as usize,
-        dst_height as usize,
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
         rescale_method_from_u8(method),
         scale_mode_from_u8(scale_mode),
         Some(&mut progress_fn),
     );
 
-    Ok(ImageBuffer::from_pixel4(result, dst_width, dst_height))
+    BufferF32x4::new(result)
 }
 
 /// Rescale grayscale image
 #[wasm_bindgen]
-pub fn rescale_gray(
-    buf: &GrayBuffer,
-    dst_width: u32,
-    dst_height: u32,
+pub fn rescale_gray_wasm(
+    buf: &BufferF32,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
     method: u8,
     scale_mode: u8,
-) -> Result<GrayBuffer, JsValue> {
-    let data = buf.as_f32()
-        .ok_or_else(|| JsValue::from_str("Buffer must be f32 format"))?;
-
-    let (sw, sh) = buf.dimensions();
-
+) -> BufferF32 {
     let result = rescale::rescale_channel_uniform(
-        data,
-        sw as usize,
-        sh as usize,
-        dst_width as usize,
-        dst_height as usize,
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
         rescale_method_from_u8(method),
         scale_mode_from_u8(scale_mode),
     );
-
-    Ok(GrayBuffer::from_f32_internal(result, dst_width, dst_height))
+    BufferF32::new(result)
 }
 
 /// Calculate target dimensions preserving aspect ratio
 #[wasm_bindgen]
-pub fn calculate_dimensions(
+pub fn calculate_dimensions_wasm(
     src_width: u32,
     src_height: u32,
     target_width: u32,
@@ -497,10 +447,12 @@ pub fn calculate_dimensions(
 // ============================================================================
 
 /// Dither RGB image (expects sRGB 0-255 in Pixel4 format)
-/// Returns ImageBuffer with quantized values in sRGB 0-255
+/// Returns BufferF32x4 with quantized values in sRGB 0-255
 #[wasm_bindgen]
-pub fn dither_rgb(
-    buf: &ImageBuffer,
+pub fn dither_rgb_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
@@ -508,13 +460,9 @@ pub fn dither_rgb(
     mode: u8,
     space: u8,
     seed: u32,
-) -> Result<ImageBuffer, JsValue> {
+) -> BufferF32x4 {
     use dither_common::OutputTechnique;
 
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    let (w, h) = buf.dimensions();
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
 
@@ -528,9 +476,9 @@ pub fn dither_rgb(
     };
 
     let result_u8 = output::dither_output_interleaved(
-        pixels,
-        w as usize,
-        h as usize,
+        buf.as_slice(),
+        width,
+        height,
         bits_r,
         bits_g,
         bits_b,
@@ -539,7 +487,7 @@ pub fn dither_rgb(
     );
 
     // Convert u8 back to Pixel4 with 0-255 values
-    let pixel_count = (w as usize) * (h as usize);
+    let pixel_count = width * height;
     let result_pixels: Vec<Pixel4> = (0..pixel_count)
         .map(|i| Pixel4::new(
             result_u8[i * 3] as f32,
@@ -549,37 +497,52 @@ pub fn dither_rgb(
         ))
         .collect();
 
-    Ok(ImageBuffer::from_pixel4(result_pixels, w, h))
+    BufferF32x4::new(result_pixels)
 }
 
 /// Dither grayscale image (expects sRGB 0-255 in f32 format)
-/// Returns GrayBuffer with u8 quantized values
+/// Returns BufferU8 with quantized values
 #[wasm_bindgen]
-pub fn dither_gray(
-    buf: &GrayBuffer,
+pub fn dither_gray_wasm(
+    buf: &BufferF32,
+    width: usize,
+    height: usize,
     bits: u8,
+    technique: u8,
     mode: u8,
     space: u8,
     seed: u32,
-) -> Result<GrayBuffer, JsValue> {
-    let data = buf.as_f32()
-        .ok_or_else(|| JsValue::from_str("Buffer must be f32 format"))?;
-
-    let (w, h) = buf.dimensions();
+) -> BufferU8 {
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
 
-    let result = dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode(
-        data,
-        w as usize,
-        h as usize,
-        bits,
-        perceptual_space,
-        dither_mode,
-        seed,
-    );
+    let result = if technique >= 2 {
+        // Colorspace-aware dithering
+        dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode(
+            buf.as_slice(),
+            width,
+            height,
+            bits,
+            perceptual_space,
+            dither_mode,
+            seed,
+        )
+    } else if technique == 1 {
+        // Per-channel dithering
+        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits)
+    } else {
+        // No dithering - just quantize (round to nearest level)
+        let levels = 1u32 << bits;
+        let max_level = (levels - 1) as f32;
+        buf.as_slice().iter()
+            .map(|&v| {
+                let level = ((v / 255.0) * max_level + 0.5) as u8;
+                dither_common::bit_replicate(level.min(max_level as u8), bits)
+            })
+            .collect()
+    };
 
-    Ok(GrayBuffer::from_u8_internal(result, w, h))
+    BufferU8::new(result)
 }
 
 // ============================================================================
@@ -588,32 +551,20 @@ pub fn dither_gray(
 
 /// Extract u8 RGB from Pixel4 buffer (values should already be 0-255)
 #[wasm_bindgen]
-pub fn to_u8_rgb(buf: &ImageBuffer) -> Result<Vec<u8>, JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    Ok(pixel::pixels_to_srgb_u8(pixels))
+pub fn to_u8_rgb_wasm(buf: &BufferF32x4) -> Vec<u8> {
+    pixel::pixels_to_srgb_u8(buf.as_slice())
 }
 
 /// Extract u8 RGBA from Pixel4 buffer (values should already be 0-255)
 #[wasm_bindgen]
-pub fn to_u8_rgba(buf: &ImageBuffer) -> Result<Vec<u8>, JsValue> {
-    let pixels = buf.as_pixel4()
-        .ok_or_else(|| JsValue::from_str("Buffer must be pixel4 format"))?;
-
-    Ok(pixel::pixels_to_srgb_u8_rgba(pixels))
+pub fn to_u8_rgba_wasm(buf: &BufferF32x4) -> Vec<u8> {
+    pixel::pixels_to_srgb_u8_rgba(buf.as_slice())
 }
 
-/// Extract u8 from GrayBuffer
+/// Extract u8 from BufferF32 (rounds and clamps to 0-255)
 #[wasm_bindgen]
-pub fn gray_to_u8(buf: &GrayBuffer) -> Vec<u8> {
-    match buf.as_u8() {
-        Some(data) => data.clone(),
-        None => match buf.as_f32() {
-            Some(data) => data.iter().map(|&v| v.round().clamp(0.0, 255.0) as u8).collect(),
-            None => Vec::new(),
-        }
-    }
+pub fn gray_to_u8_wasm(buf: &BufferF32) -> Vec<u8> {
+    buf.as_slice().iter().map(|&v| v.round().clamp(0.0, 255.0) as u8).collect()
 }
 
 // ============================================================================
@@ -621,34 +572,34 @@ pub fn gray_to_u8(buf: &GrayBuffer) -> Vec<u8> {
 // ============================================================================
 
 #[wasm_bindgen]
-pub fn is_valid_format(format: &str) -> bool {
+pub fn is_valid_format_wasm(format: &str) -> bool {
     binary_format::is_valid_format(format)
 }
 
 #[wasm_bindgen]
-pub fn format_supports_binary(format: &str) -> bool {
+pub fn format_supports_binary_wasm(format: &str) -> bool {
     binary_format::format_supports_binary(format)
 }
 
 #[wasm_bindgen]
-pub fn format_is_rgb666(format: &str) -> bool {
+pub fn format_is_rgb666_wasm(format: &str) -> bool {
     binary_format::ColorFormat::parse(format)
         .map(|f| f.is_rgb666())
         .unwrap_or(false)
 }
 
 #[wasm_bindgen]
-pub fn format_total_bits(format: &str) -> u8 {
+pub fn format_total_bits_wasm(format: &str) -> u8 {
     binary_format::format_total_bits(format).unwrap_or(0)
 }
 
 #[wasm_bindgen]
-pub fn format_is_grayscale(format: &str) -> bool {
+pub fn format_is_grayscale_wasm(format: &str) -> bool {
     binary_format::format_is_grayscale(format)
 }
 
 #[wasm_bindgen]
-pub fn encode_rgb_packed(
+pub fn encode_rgb_packed_wasm(
     r_data: Vec<u8>,
     g_data: Vec<u8>,
     b_data: Vec<u8>,
@@ -668,7 +619,7 @@ pub fn encode_rgb_packed(
 }
 
 #[wasm_bindgen]
-pub fn encode_rgb_row_aligned(
+pub fn encode_rgb_row_aligned_wasm(
     r_data: Vec<u8>,
     g_data: Vec<u8>,
     b_data: Vec<u8>,
@@ -682,7 +633,7 @@ pub fn encode_rgb_row_aligned(
 }
 
 #[wasm_bindgen]
-pub fn encode_gray_packed(
+pub fn encode_gray_packed_wasm(
     gray_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -692,7 +643,7 @@ pub fn encode_gray_packed(
 }
 
 #[wasm_bindgen]
-pub fn encode_gray_row_aligned(
+pub fn encode_gray_row_aligned_wasm(
     gray_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -702,7 +653,7 @@ pub fn encode_gray_row_aligned(
 }
 
 #[wasm_bindgen]
-pub fn encode_channel_packed(
+pub fn encode_channel_packed_wasm(
     channel_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -712,7 +663,7 @@ pub fn encode_channel_packed(
 }
 
 #[wasm_bindgen]
-pub fn encode_channel_row_aligned(
+pub fn encode_channel_row_aligned_wasm(
     channel_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -722,12 +673,12 @@ pub fn encode_channel_row_aligned(
 }
 
 #[wasm_bindgen]
-pub fn is_valid_stride(stride: usize) -> bool {
+pub fn is_valid_stride_wasm(stride: usize) -> bool {
     binary_format::is_valid_stride(stride)
 }
 
 #[wasm_bindgen]
-pub fn encode_rgb_row_aligned_stride(
+pub fn encode_rgb_row_aligned_stride_wasm(
     r_data: Vec<u8>,
     g_data: Vec<u8>,
     b_data: Vec<u8>,
@@ -746,7 +697,7 @@ pub fn encode_rgb_row_aligned_stride(
 }
 
 #[wasm_bindgen]
-pub fn encode_gray_row_aligned_stride(
+pub fn encode_gray_row_aligned_stride_wasm(
     gray_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -760,7 +711,7 @@ pub fn encode_gray_row_aligned_stride(
 }
 
 #[wasm_bindgen]
-pub fn encode_channel_row_aligned_stride(
+pub fn encode_channel_row_aligned_stride_wasm(
     channel_data: Vec<u8>,
     width: usize,
     height: usize,
@@ -781,21 +732,21 @@ pub fn encode_channel_row_aligned_stride(
 mod tests {
     use super::*;
 
-    fn create_test_buffer(data: &[u8], w: u32, h: u32) -> ImageBuffer {
+    fn create_test_buffer(data: &[u8]) -> BufferF32x4 {
         let pixels: Vec<Pixel4> = data.chunks(3)
             .map(|c| Pixel4::new(c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 0.0))
             .collect();
-        ImageBuffer::from_pixel4(pixels, w, h)
+        BufferF32x4::new(pixels)
     }
 
     #[test]
     fn test_color_space_roundtrip() {
-        let mut buf = create_test_buffer(&[128, 64, 32, 200, 100, 50], 2, 1);
+        let mut buf = create_test_buffer(&[128, 64, 32, 200, 100, 50]);
 
-        srgb_to_linear(&mut buf).unwrap();
-        linear_to_srgb(&mut buf).unwrap();
+        srgb_to_linear_wasm(&mut buf);
+        linear_to_srgb_wasm(&mut buf);
 
-        let pixels = buf.as_pixel4().unwrap();
+        let pixels = buf.as_slice();
         // Values should be approximately the same after roundtrip
         assert!((pixels[0][0] - 128.0/255.0).abs() < 0.01);
     }
@@ -803,14 +754,14 @@ mod tests {
     #[test]
     fn test_normalize_denormalize() {
         let pixels = vec![Pixel4::new(128.0, 64.0, 32.0, 0.0)];
-        let mut buf = ImageBuffer::from_pixel4(pixels, 1, 1);
+        let mut buf = BufferF32x4::new(pixels);
 
-        normalize(&mut buf).unwrap();
-        let p = buf.as_pixel4().unwrap();
+        normalize_wasm(&mut buf);
+        let p = buf.as_slice();
         assert!((p[0][0] - 128.0/255.0).abs() < 0.001);
 
-        denormalize(&mut buf).unwrap();
-        let p = buf.as_pixel4().unwrap();
+        denormalize_wasm(&mut buf);
+        let p = buf.as_slice();
         assert!((p[0][0] - 128.0).abs() < 0.01);
     }
 
@@ -822,26 +773,22 @@ mod tests {
             Pixel4::new(0.0, 0.0, 0.0, 0.0),
             Pixel4::new(1.0, 1.0, 1.0, 0.0),
         ];
-        let buf = ImageBuffer::from_pixel4(pixels, 2, 2);
+        let buf = BufferF32x4::new(pixels);
 
-        let result = rescale_rgb(&buf, 4, 4, 0, 0).unwrap();
-        assert_eq!(result.width(), 4);
-        assert_eq!(result.height(), 4);
+        let result = rescale_rgb_wasm(&buf, 2, 2, 4, 4, 0, 0);
+        assert_eq!(result.len(), 16);
     }
 
     #[test]
     fn test_color_correct_smoke() {
-        let input = create_test_buffer(&[128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150], 2, 2);
-        let reference = create_test_buffer(&[255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0], 2, 2);
+        let mut input = create_test_buffer(&[128, 64, 32, 200, 100, 50, 100, 150, 200, 50, 100, 150]);
+        let mut reference = create_test_buffer(&[255, 200, 150, 200, 150, 100, 150, 100, 50, 100, 50, 0]);
 
         // Convert to linear
-        let mut input_linear = input.clone_buffer();
-        srgb_to_linear(&mut input_linear).unwrap();
-        let mut ref_linear = reference.clone_buffer();
-        srgb_to_linear(&mut ref_linear).unwrap();
+        srgb_to_linear_wasm(&mut input);
+        srgb_to_linear_wasm(&mut reference);
 
-        let result = color_correct(&input_linear, &ref_linear, 0, false, 0, 4, false, 0).unwrap();
-        assert_eq!(result.width(), 2);
-        assert_eq!(result.height(), 2);
+        let result = color_correct_wasm(&input, &reference, 2, 2, 2, 2, 0, false, 0, 4, false, 0);
+        assert_eq!(result.len(), 4);
     }
 }

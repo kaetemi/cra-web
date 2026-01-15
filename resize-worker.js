@@ -36,17 +36,17 @@ async function initialize() {
     }
 }
 
-// Decode image from raw file bytes using WASM - returns ImageBuffer and metadata
+// Decode image from raw file bytes using WASM - returns BufferF32x4 and metadata
 function decodeImagePrecise(fileBytes) {
     // Get metadata
-    const metadata = craWasm.decode_metadata(new Uint8Array(fileBytes));
+    const metadata = craWasm.decode_metadata_wasm(new Uint8Array(fileBytes));
     const width = metadata[0];
     const height = metadata[1];
     const hasIcc = metadata[2] > 0.5;
     const is16bit = metadata[3] > 0.5;
 
-    // Decode to ImageBuffer (Pixel4 format, normalized 0-1)
-    const buffer = craWasm.decode_image(new Uint8Array(fileBytes));
+    // Decode to BufferF32x4 (Pixel4 format, normalized 0-1)
+    const buffer = craWasm.decode_image_wasm(new Uint8Array(fileBytes));
 
     return { width, height, hasIcc, is16bit, buffer };
 }
@@ -54,9 +54,9 @@ function decodeImagePrecise(fileBytes) {
 // Check if image has non-sRGB ICC profile
 function hasNonSrgbIcc(fileBytes, decoded) {
     if (!decoded.hasIcc) return false;
-    const iccProfile = craWasm.extract_icc_profile(new Uint8Array(fileBytes));
+    const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
     if (iccProfile.length === 0) return false;
-    return !craWasm.is_icc_profile_srgb(iccProfile);
+    return !craWasm.is_icc_profile_srgb_wasm(iccProfile);
 }
 
 // Process resize request (with precise WASM decoding)
@@ -87,16 +87,17 @@ function processResize(params) {
         // Convert to linear (either via ICC or sRGB gamma)
         if (hasNonSrgbIcc(fileBytes, decoded)) {
             // ICC profile → linear sRGB
-            const iccProfile = craWasm.extract_icc_profile(new Uint8Array(fileBytes));
-            craWasm.transform_icc_to_linear_srgb(buffer, iccProfile);
+            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
         } else {
             // sRGB → linear
-            craWasm.srgb_to_linear(buffer);
+            craWasm.srgb_to_linear_wasm(buffer);
         }
 
         // Step 4: Rescale in linear space with progress
-        const resizedBuffer = craWasm.rescale_rgb_with_progress(
+        const resizedBuffer = craWasm.rescale_rgb_with_progress_wasm(
             buffer,
+            srcWidth, srcHeight,
             dstWidth, dstHeight,
             interpolation,
             scaleMode,
@@ -106,16 +107,17 @@ function processResize(params) {
         sendProgress(85);
 
         // Step 5: Convert linear back to sRGB (0-1) in-place
-        craWasm.linear_to_srgb(resizedBuffer);
+        craWasm.linear_to_srgb_wasm(resizedBuffer);
 
         // Step 6: Denormalize to 0-255 in-place
-        craWasm.denormalize(resizedBuffer);
+        craWasm.denormalize_wasm(resizedBuffer);
 
         sendProgress(90);
 
         // Step 7: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb(
+        const ditheredBuffer = craWasm.dither_rgb_wasm(
             resizedBuffer,
+            dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,
             ditherMode,
@@ -124,7 +126,7 @@ function processResize(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb(ditheredBuffer);
+        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
 
         sendProgress(100);
 
@@ -174,15 +176,16 @@ function processSrgbResize(params) {
 
         // If non-sRGB ICC, convert to sRGB first (so comparison is fair)
         if (hasNonSrgbIcc(fileBytes, decoded)) {
-            const iccProfile = craWasm.extract_icc_profile(new Uint8Array(fileBytes));
-            craWasm.transform_icc_to_linear_srgb(buffer, iccProfile);
-            craWasm.linear_to_srgb(buffer);
+            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
+            craWasm.linear_to_srgb_wasm(buffer);
         }
 
         // WRONG - rescale directly in sRGB space (no linear conversion)
         // This demonstrates the incorrect result for comparison
-        const resizedBuffer = craWasm.rescale_rgb_with_progress(
+        const resizedBuffer = craWasm.rescale_rgb_with_progress_wasm(
             buffer,
+            srcWidth, srcHeight,
             dstWidth, dstHeight,
             interpolation,
             scaleMode,
@@ -190,13 +193,14 @@ function processSrgbResize(params) {
         );
 
         // Step 4: Denormalize to 0-255 in-place
-        craWasm.denormalize(resizedBuffer);
+        craWasm.denormalize_wasm(resizedBuffer);
 
         sendProgress(90);
 
         // Step 5: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb(
+        const ditheredBuffer = craWasm.dither_rgb_wasm(
             resizedBuffer,
+            dstWidth, dstHeight,
             8, 8, 8,
             ditherTechnique,
             ditherMode,
@@ -205,7 +209,7 @@ function processSrgbResize(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb(ditheredBuffer);
+        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
 
         sendProgress(100);
 
@@ -247,17 +251,18 @@ function processResizePixels(params) {
             rgbaData[i * 4 + 3] = 0.0;  // alpha unused
         }
 
-        // Create ImageBuffer from RGBA f32 data
-        let buffer = craWasm.create_buffer_from_rgba(Array.from(rgbaData), srcWidth, srcHeight);
+        // Create BufferF32x4 from RGBA f32 data
+        let buffer = craWasm.create_buffer_from_rgba_wasm(Array.from(rgbaData), pixelCount);
 
         // Convert sRGB to linear
-        craWasm.srgb_to_linear(buffer);
+        craWasm.srgb_to_linear_wasm(buffer);
 
         sendProgress(20);
 
         // Rescale in linear space with progress
-        const resizedBuffer = craWasm.rescale_rgb_with_progress(
+        const resizedBuffer = craWasm.rescale_rgb_with_progress_wasm(
             buffer,
+            srcWidth, srcHeight,
             dstWidth, dstHeight,
             interpolation,
             scaleMode,
@@ -267,16 +272,17 @@ function processResizePixels(params) {
         sendProgress(85);
 
         // Convert linear back to sRGB in-place
-        craWasm.linear_to_srgb(resizedBuffer);
+        craWasm.linear_to_srgb_wasm(resizedBuffer);
 
         // Denormalize to 0-255 in-place
-        craWasm.denormalize(resizedBuffer);
+        craWasm.denormalize_wasm(resizedBuffer);
 
         sendProgress(90);
 
         // Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb(
+        const ditheredBuffer = craWasm.dither_rgb_wasm(
             resizedBuffer,
+            dstWidth, dstHeight,
             8, 8, 8,
             2,  // ColorAware
             4,  // Mixed
@@ -285,7 +291,7 @@ function processResizePixels(params) {
         );
 
         // Extract final RGB u8 data
-        const dithered = craWasm.to_u8_rgb(ditheredBuffer);
+        const dithered = craWasm.to_u8_rgb_wasm(ditheredBuffer);
 
         sendProgress(100);
 
