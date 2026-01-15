@@ -1,5 +1,5 @@
 FLOYD-STEINBERG DITHERING (PERCEPTUAL DISTANCE, LINEAR ERROR)
-  Distance metric: CIELAB or OKLab
+  Distance metric: OKLab (default), CIELAB (CIE76/CIE94/CIEDE2000)
   Error accumulation: Linear RGB
   Quantization: sRGB uint8
 
@@ -7,8 +7,8 @@ FLOYD-STEINBERG DITHERING (PERCEPTUAL DISTANCE, LINEAR ERROR)
 
 DATA STRUCTURES:
 
-QuantParams:
-  bits: u8                          // e.g., 5
+QuantParams (one per channel, supports different bit depths):
+  bits: u8                          // e.g., 5 for R, 6 for G, 5 for B (RGB565)
   num_levels: usize                 // 2^bits, e.g., 32
   level_values: [u8; num_levels]    // level index → extended sRGB value
                                     // e.g., for 2-bit: [0, 85, 170, 255]
@@ -17,37 +17,50 @@ QuantParams:
 
 linear_lut: [f32; 256]              // sRGB component → Linear RGB component
 
-lab_lut: [[[Lab; num_levels]; num_levels]; num_levels]
-                                    // level indices (r, g, b) → Lab
-                                    // indexed by LEVEL not extended value
+lab_lut: Vec<Lab>                   // Flat array: r_level * n² + g_level * n + b_level → Lab
+                                    // Only built when all channels have same bit depth
+                                    // Otherwise compute on-the-fly during dithering
 
 ================================================================================
 
 PRECOMPUTATION:
 
-// QuantParams (extend existing implementation)
+// QuantParams (one per channel)
 for level in 0..num_levels:
   level_values[level] = bit_replicate(level, bits)
 
 for v in 0..256:
-  // existing floor/ceil logic, but store level index instead of extended value
-  lut_floor_level[v] = floor_level_index
-  lut_ceil_level[v] = ceil_level_index
+  // Bit truncation to find nearby level
+  trunc_idx = v >> (8 - bits)
+  trunc_val = level_values[trunc_idx]
+
+  if trunc_val == v:
+    floor_idx = ceil_idx = trunc_idx
+  elif trunc_val < v:
+    floor_idx = trunc_idx
+    ceil_idx = min(trunc_idx + 1, num_levels - 1)
+  else:
+    floor_idx = max(trunc_idx - 1, 0)
+    ceil_idx = trunc_idx
+
+  lut_floor_level[v] = floor_idx
+  lut_ceil_level[v] = ceil_idx
 
 // Linear LUT
 for v in 0..256:
-  linear_lut[v] = srgb_component_to_linear(v)
+  linear_lut[v] = srgb_component_to_linear(v / 255.0)
 
-// Lab LUT - indexed by level indices
-for r_level in 0..num_levels:
-  for g_level in 0..num_levels:
-    for b_level in 0..num_levels:
-      r_ext = level_values[r_level]
-      g_ext = level_values[g_level]
-      b_ext = level_values[b_level]
-      
-      linear = (linear_lut[r_ext], linear_lut[g_ext], linear_lut[b_ext])
-      lab_lut[r_level][g_level][b_level] = linear_rgb_to_lab(linear)
+// Lab LUT - only if all channels have same bit depth
+if bits_r == bits_g == bits_b:
+  for r_level in 0..num_levels:
+    for g_level in 0..num_levels:
+      for b_level in 0..num_levels:
+        r_ext = level_values[r_level]
+        g_ext = level_values[g_level]
+        b_ext = level_values[b_level]
+
+        linear = (linear_lut[r_ext], linear_lut[g_ext], linear_lut[b_ext])
+        lab_lut[r_level * n² + g_level * n + b_level] = linear_rgb_to_lab(linear)
 
 ================================================================================
 
@@ -90,14 +103,13 @@ for y in 0..height:
     best_g_level = 0
     best_b_level = 0
     best_dist = infinity
-    
+
     for r_level in r_min..=r_max:
       for g_level in g_min..=g_max:
         for b_level in b_min..=b_max:
-          lab_candidate = lab_lut[r_level][g_level][b_level]
-          dist = (lab_target.L - lab_candidate.L)² +
-                 (lab_target.a - lab_candidate.a)² +
-                 (lab_target.b - lab_candidate.b)²
+          // Use LUT if available, otherwise compute on-the-fly
+          lab_candidate = lookup_or_compute(r_level, g_level, b_level)
+          dist = perceptual_distance_sq(lab_target, lab_candidate, space)
           if dist < best_dist:
             best_dist = dist
             best_r_level = r_level
@@ -134,44 +146,52 @@ IMPLEMENTATION NOTES:
    - level_values[] maps level index → extended value
    - lab_lut is indexed by level indices, NOT extended values
 
-2. LUT sizing:
+2. LUT sizing (when same bit depth for all channels):
    - lab_lut memory: num_levels³ × 12 bytes (3 × f32)
      - 5-bit: 32³ × 12 = 393 KB
      - 6-bit: 64³ × 12 = 3.1 MB
-     - 8-bit: 256³ × 12 = 201 MB (impractical, use different approach)
+     - 8-bit: 256³ × 12 = 201 MB (falls back to on-the-fly computation)
 
-3. Candidate count:
+3. Different bit depths per channel:
+   - Supports asymmetric formats like RGB565 (5-bit R, 6-bit G, 5-bit B)
+   - LUT cannot be pre-built; candidate colors computed on-the-fly
+   - Each channel has its own QuantParams
+
+4. Candidate count:
    - Each range r_min..=r_max typically spans 1-2 levels
    - Total candidates: typically 1-8, worst case ~27 (3×3×3)
    - No heap allocation needed, just nested loops
 
-4. Gamut handling:
+5. Gamut handling:
    - Clamp before sRGB conversion (step 3) to get valid LUT indices
    - Use unclamped linear_adjusted for Lab conversion (step 5)
      to compute true perceptual distance even to out-of-gamut targets
    - Error can be negative or push values out of gamut; this is correct
      and will be compensated in subsequent pixels
 
-5. Color space conversions needed:
-   - srgb_to_linear: sRGB 0-255 → Linear RGB 0-1 (decode transfer function)
-   - linear_to_srgb: Linear RGB 0-1 → sRGB 0-255 (encode transfer function)
-   - linear_rgb_to_lab: Linear RGB → XYZ → Lab (or Linear RGB → OKLab direct)
+6. Color space conversions:
+   - srgb_to_linear: sRGB 0-1 → Linear RGB 0-1 (decode transfer function)
+   - linear_to_srgb: Linear RGB 0-1 → sRGB 0-1 (encode transfer function)
+   - linear_rgb_to_oklab: Linear RGB → OKLab (direct matrix + cube root)
+   - linear_rgb_to_lab: Linear RGB → XYZ → CIELAB (D65 reference white)
 
-6. OKLab vs CIELAB:
-   - OKLab: faster (skips XYZ), often better perceptual uniformity
-   - CIELAB: more established, requires reference white (use D65)
-   - Same algorithm, just swap lab_lut contents and linear_rgb_to_lab
+7. Perceptual distance functions:
+   - OKLab: Euclidean distance (L² + a² + b²) - default, recommended
+   - CIE76: Simple Euclidean in CIELAB (fast but over-weights chromaticity)
+   - CIE94: Weighted distance with chroma-dependent weights
+   - CIEDE2000: Most accurate, with hue rotation and lightness correction
 
-7. Precision:
+8. Precision:
    - error_buf should be f32, can accumulate values outside 0-1
    - lab_lut can be f32, precision is sufficient for perceptual comparison
    - floor/ceil on sRGB need to handle edge cases (0.0, 255.0)
 
-8. Edge handling:
+9. Edge handling:
    - error_buf needs padding or bounds checks for diffusion
    - Same padding strategy as existing implementation
 
-9. API change from existing code:
-   - Old: dither(channel) per channel independently
-   - New: dither(r, g, b) jointly - channels cannot be processed separately
-     when using perceptual distance metric
+10. API change from existing code:
+    - Old: dither(channel) per channel independently
+    - New: dither(r, g, b) jointly - channels cannot be processed separately
+      when using perceptual distance metric
+    - Both modes still available via OutputTechnique enum
