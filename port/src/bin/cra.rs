@@ -233,7 +233,7 @@ struct Args {
     input: PathBuf,
 
     /// Input color profile handling
-    #[arg(long, value_enum, default_value_t = InputColorProfile::Srgb)]
+    #[arg(long, value_enum, default_value_t = InputColorProfile::Auto)]
     input_profile: InputColorProfile,
 
     /// Reference image path (optional - required for histogram matching methods)

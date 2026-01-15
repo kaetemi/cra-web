@@ -851,6 +851,10 @@
             // Precise image decoding (preserves 16-bit, extracts ICC)
             decode_image_wasm,           // Returns f32 0-1 (for linear processing path)
             decode_image_srgb_255_wasm,  // Returns f32 0-255 (for sRGB-direct path)
+            // ICC profile handling
+            extract_icc_profile_wasm,
+            is_icc_profile_srgb_wasm,
+            transform_icc_to_linear_srgb_wasm,
             // Atomic color space conversion functions
             denormalize_f32_wasm,
             srgb_to_linear_f32_wasm,
@@ -877,27 +881,42 @@
         // Decode image to f32 0-1 (for linear processing path)
         function decodeToNormalized(fileBytes) {
             const result = decode_image_wasm(new Uint8Array(fileBytes));
-            const width = result[0];
-            const height = result[1];
-            const hasIcc = result[2] > 0.5;
-            const is16bit = result[3] > 0.5;
-            const pixels = result.slice(4); // Interleaved RGB f32 (0-1)
-            return { width, height, hasIcc, is16bit, pixels };
+            return {
+                width: result[0],
+                height: result[1],
+                hasIcc: result[2] > 0.5,
+                is16bit: result[3] > 0.5,
+                pixels: result.slice(4)
+            };
         }
 
         // Decode image directly to f32 0-255 (for sRGB-direct path, no intermediate)
         function decodeToSrgb255(fileBytes) {
             const result = decode_image_srgb_255_wasm(new Uint8Array(fileBytes));
-            const width = result[0];
-            const height = result[1];
-            const hasIcc = result[2] > 0.5;
-            const is16bit = result[3] > 0.5;
-            const pixels = result.slice(4); // Interleaved RGB f32 (0-255)
-            return { width, height, hasIcc, is16bit, pixels };
+            return {
+                width: result[0],
+                height: result[1],
+                hasIcc: result[2] > 0.5,
+                is16bit: result[3] > 0.5,
+                pixels: result.slice(4)
+            };
+        }
+
+        // Check if image has non-sRGB ICC profile (for auto color management)
+        function checkNonSrgbIcc(fileBytes, hasIcc) {
+            if (!hasIcc) return false;
+            const iccProfile = extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            return iccProfile.length > 0 && !is_icc_profile_srgb_wasm(iccProfile);
+        }
+
+        // Get ICC profile for transform (call only if checkNonSrgbIcc returned true)
+        function getIccProfile(fileBytes) {
+            return extract_icc_profile_wasm(new Uint8Array(fileBytes));
         }
 
         let wasmReady = false;
         let inputFileBytes = null;      // Raw file bytes (decoded on demand based on processing mode)
+        let inputHasNonSrgbIcc = false; // True if image has ICC profile that differs from sRGB
         let inputWidth = 0;
         let inputHeight = 0;
         let originalWidth = 0;
@@ -1050,7 +1069,8 @@
                 // Determine if linear processing is needed
                 // Grayscale requires linear for correct luminance computation
                 // Rescale requires linear for correct interpolation
-                const needsLinear = isGrayscale || doDownscale;
+                // Non-sRGB ICC profile requires linear (ICC transform outputs linear)
+                const needsLinear = isGrayscale || doDownscale || inputHasNonSrgbIcc;
 
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
@@ -1062,9 +1082,18 @@
                     // Decode to f32 0-1 for linear processing
                     const decoded = decodeToNormalized(inputFileBytes);
                     let srgbNorm = decoded.pixels;
+                    let linearRgb;
 
-                    // Step 1: Convert to linear
-                    let linearRgb = srgb_to_linear_f32_wasm(srgbNorm, currentWidth, currentHeight);
+                    // Step 1: Convert to linear (either via ICC or sRGB gamma)
+                    if (inputHasNonSrgbIcc) {
+                        // ICC profile → linear sRGB
+                        linearRgb = transform_icc_to_linear_srgb_wasm(
+                            srgbNorm, currentWidth, currentHeight, getIccProfile(inputFileBytes)
+                        );
+                    } else {
+                        // sRGB → linear
+                        linearRgb = srgb_to_linear_f32_wasm(srgbNorm, currentWidth, currentHeight);
+                    }
 
                     // Step 2: Rescale in linear space (if needed)
                     if (doDownscale) {
@@ -1437,8 +1466,14 @@
                 // Load file bytes (decoded on demand in processImage based on mode)
                 const fileBytes = await loadImageBytes(file);
 
-                // Quick decode just to get dimensions (using 0-255 path, no processing)
+                // Quick decode just to get dimensions and ICC info
                 const decoded = decodeToSrgb255(fileBytes);
+
+                // Check for non-sRGB ICC profile (auto detection)
+                inputHasNonSrgbIcc = checkNonSrgbIcc(fileBytes, decoded.hasIcc);
+                if (inputHasNonSrgbIcc) {
+                    console.log('Detected non-sRGB ICC profile - will use color management');
+                }
 
                 // Store raw bytes for processing
                 inputFileBytes = fileBytes;

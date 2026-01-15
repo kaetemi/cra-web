@@ -44,6 +44,14 @@ function decodeImagePrecise(fileBytes) {
     return { width, height, hasIcc, is16bit, pixels };
 }
 
+// Check if image has non-sRGB ICC profile
+function hasNonSrgbIcc(fileBytes, decoded) {
+    if (!decoded.hasIcc) return false;
+    const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+    if (iccProfile.length === 0) return false;
+    return !craWasm.is_icc_profile_srgb_wasm(iccProfile);
+}
+
 // Process resize request (with precise WASM decoding)
 function processResize(params) {
     if (!wasmReady) {
@@ -67,10 +75,18 @@ function processResize(params) {
         const decoded = decodeImagePrecise(fileBytes);
         const srcWidth = decoded.width;
         const srcHeight = decoded.height;
-        const srgbNorm = decoded.pixels; // f32 0-1 sRGB
+        const srgbNorm = decoded.pixels; // f32 0-1
 
-        // Convert sRGB (0-1) to linear
-        const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbNorm, srcWidth, srcHeight);
+        // Convert to linear (either via ICC or sRGB gamma)
+        let linearRgb;
+        if (hasNonSrgbIcc(fileBytes, decoded)) {
+            // ICC profile → linear sRGB
+            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            linearRgb = craWasm.transform_icc_to_linear_srgb_wasm(srgbNorm, srcWidth, srcHeight, iccProfile);
+        } else {
+            // sRGB → linear
+            linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbNorm, srcWidth, srcHeight);
+        }
 
         // Step 4: Rescale in linear space with progress
         const linearResized = craWasm.rescale_linear_rgb_with_progress_wasm(
@@ -123,6 +139,8 @@ function processResize(params) {
 }
 
 // Process sRGB (bad) resize request - for comparison purposes
+// Note: Even for the "bad" comparison, we still handle ICC correctly to show
+// only the difference between linear vs sRGB interpolation, not ICC handling
 function processSrgbResize(params) {
     if (!wasmReady) {
         sendError(new Error('WASM not ready'));
@@ -145,7 +163,14 @@ function processSrgbResize(params) {
         const decoded = decodeImagePrecise(fileBytes);
         const srcWidth = decoded.width;
         const srcHeight = decoded.height;
-        const srgbNorm = decoded.pixels; // f32 0-1 sRGB
+        let srgbNorm = decoded.pixels; // f32 0-1
+
+        // If non-sRGB ICC, convert to sRGB first (so comparison is fair)
+        if (hasNonSrgbIcc(fileBytes, decoded)) {
+            const iccProfile = craWasm.extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            const linearRgb = craWasm.transform_icc_to_linear_srgb_wasm(srgbNorm, srcWidth, srcHeight, iccProfile);
+            srgbNorm = craWasm.linear_to_srgb_f32_wasm(linearRgb, srcWidth, srcHeight);
+        }
 
         // WRONG - rescale directly in sRGB space (no linear conversion)
         // This demonstrates the incorrect result for comparison
