@@ -839,35 +839,41 @@
     <script type="module">
         import './linear-img.js';
         import init, {
-            dither_output_wasm,
-            dither_with_mode_wasm,
-            colorspace_aware_dither_gray_with_mode_wasm,
-            // Binary encoding functions
-            format_supports_binary_wasm,
-            format_total_bits_wasm,
-            encode_rgb_packed_wasm,
-            encode_rgb_row_aligned_stride_wasm,
-            encode_gray_packed_wasm,
-            encode_gray_row_aligned_stride_wasm,
-            encode_channel_row_aligned_stride_wasm,
-            // Precise image decoding (preserves 16-bit, extracts ICC)
-            decode_image_wasm,           // Returns f32 0-1 (for linear processing path)
-            decode_image_srgb_255_wasm,  // Returns f32 0-255 (for sRGB-direct path)
+            // ImageBuffer-based processing functions
+            decode_image,                // Returns ImageBuffer (Pixel4 0-1)
+            decode_image_srgb_255,       // Returns ImageBuffer (Pixel4 0-255)
+            decode_metadata,             // Returns [w, h, has_icc, is_16bit]
             // ICC profile handling
-            extract_icc_profile_wasm,
-            is_icc_profile_srgb_wasm,
-            transform_icc_to_linear_srgb_wasm,
-            // Atomic color space conversion functions
-            denormalize_f32_wasm,
-            srgb_to_linear_f32_wasm,
-            linear_to_srgb_f32_wasm,
-            linear_rgb_to_grayscale_wasm,
-            linear_gray_to_srgb_f32_wasm,
-            denormalize_gray_f32_wasm,
-            // Atomic rescaling functions (linear space)
-            rescale_linear_rgb_wasm,
-            rescale_linear_gray_wasm,
-            calculate_dimensions_wasm
+            extract_icc_profile,
+            is_icc_profile_srgb,
+            transform_icc_to_linear_srgb,
+            // Color space conversions (in-place on ImageBuffer)
+            srgb_to_linear,
+            linear_to_srgb,
+            normalize,
+            denormalize,
+            // Grayscale conversions
+            rgb_to_grayscale,
+            gray_linear_to_srgb,
+            gray_denormalize,
+            // Rescaling
+            rescale_rgb,
+            rescale_gray,
+            calculate_dimensions,
+            // Dithering
+            dither_rgb,
+            dither_gray,
+            // Output extraction
+            to_u8_rgb,
+            gray_to_u8,
+            // Binary encoding functions
+            format_supports_binary,
+            format_total_bits,
+            encode_rgb_packed,
+            encode_rgb_row_aligned_stride,
+            encode_gray_packed,
+            encode_gray_row_aligned_stride,
+            encode_channel_row_aligned_stride
         } from './wasm_cra/cra_wasm.js';
 
         // Get seeds from base seed (different for each channel)
@@ -880,40 +886,42 @@
             };
         }
 
-        // Decode image to f32 0-1 (for linear processing path)
+        // Decode image to ImageBuffer (Pixel4 0-1) for linear processing path
         function decodeToNormalized(fileBytes) {
-            const result = decode_image_wasm(new Uint8Array(fileBytes));
+            const metadata = decode_metadata(new Uint8Array(fileBytes));
+            const buffer = decode_image(new Uint8Array(fileBytes));
             return {
-                width: result[0],
-                height: result[1],
-                hasIcc: result[2] > 0.5,
-                is16bit: result[3] > 0.5,
-                pixels: result.slice(4)
+                width: metadata[0],
+                height: metadata[1],
+                hasIcc: metadata[2] > 0.5,
+                is16bit: metadata[3] > 0.5,
+                buffer: buffer
             };
         }
 
-        // Decode image directly to f32 0-255 (for sRGB-direct path, no intermediate)
+        // Decode image to ImageBuffer (Pixel4 0-255) for sRGB-direct path
         function decodeToSrgb255(fileBytes) {
-            const result = decode_image_srgb_255_wasm(new Uint8Array(fileBytes));
+            const metadata = decode_metadata(new Uint8Array(fileBytes));
+            const buffer = decode_image_srgb_255(new Uint8Array(fileBytes));
             return {
-                width: result[0],
-                height: result[1],
-                hasIcc: result[2] > 0.5,
-                is16bit: result[3] > 0.5,
-                pixels: result.slice(4)
+                width: metadata[0],
+                height: metadata[1],
+                hasIcc: metadata[2] > 0.5,
+                is16bit: metadata[3] > 0.5,
+                buffer: buffer
             };
         }
 
         // Check if image has non-sRGB ICC profile (for auto color management)
         function checkNonSrgbIcc(fileBytes, hasIcc) {
             if (!hasIcc) return false;
-            const iccProfile = extract_icc_profile_wasm(new Uint8Array(fileBytes));
-            return iccProfile.length > 0 && !is_icc_profile_srgb_wasm(iccProfile);
+            const iccProfile = extract_icc_profile(new Uint8Array(fileBytes));
+            return iccProfile.length > 0 && !is_icc_profile_srgb(iccProfile);
         }
 
         // Get ICC profile for transform (call only if checkNonSrgbIcc returned true)
         function getIccProfile(fileBytes) {
-            return extract_icc_profile_wasm(new Uint8Array(fileBytes));
+            return extract_icc_profile(new Uint8Array(fileBytes));
         }
 
         let wasmReady = false;
@@ -1023,23 +1031,11 @@
             updatingSize = false;
         }
 
-        // Dither a single channel
-        function ditherChannel(channelData, width, height, mode, seed, bits) {
-            // Convert to Float32Array (expected by WASM)
-            const floatData = new Float32Array(channelData.length);
-            for (let i = 0; i < channelData.length; i++) {
-                floatData[i] = channelData[i];
-            }
-
-            // Call WASM dither function
-            return dither_with_mode_wasm(floatData, width, height, mode, seed, bits);
-        }
-
-        // Process the image using atomic pipeline
+        // Process the image using atomic pipeline with ImageBuffer
         // Pipeline decisions:
-        // - RGB without rescale: decode to f32 0-255 → dither directly (no intermediate)
-        // - RGB with rescale: decode to f32 0-1 → linear → rescale → sRGB → denormalize → dither
-        // - Grayscale: decode to f32 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
+        // - RGB without rescale: decode to 0-255 → dither directly (no intermediate)
+        // - RGB with rescale: decode to 0-1 → linear → rescale → sRGB → denormalize → dither
+        // - Grayscale: decode to 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
         async function processImage() {
             if (!inputFileBytes) return;
 
@@ -1077,24 +1073,19 @@
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-                let currentWidth = originalWidth;
-                let currentHeight = originalHeight;
-
                 if (needsLinear) {
-                    // Decode to f32 0-1 for linear processing
+                    // Decode to ImageBuffer (Pixel4 0-1) for linear processing
                     const decoded = decodeToNormalized(inputFileBytes);
-                    let srgbNorm = decoded.pixels;
-                    let linearRgb;
+                    let buffer = decoded.buffer;
 
                     // Step 1: Convert to linear (either via ICC or sRGB gamma)
                     if (inputHasNonSrgbIcc) {
-                        // ICC profile → linear sRGB
-                        linearRgb = transform_icc_to_linear_srgb_wasm(
-                            srgbNorm, currentWidth, currentHeight, getIccProfile(inputFileBytes)
-                        );
+                        // ICC profile → linear sRGB (in-place)
+                        const iccProfile = getIccProfile(inputFileBytes);
+                        transform_icc_to_linear_srgb(buffer, iccProfile);
                     } else {
-                        // sRGB → linear
-                        linearRgb = srgb_to_linear_f32_wasm(srgbNorm, currentWidth, currentHeight);
+                        // sRGB → linear (in-place)
+                        srgb_to_linear(buffer);
                     }
 
                     // Step 2: Rescale in linear space (if needed)
@@ -1103,45 +1094,27 @@
                         const scaleMode = primaryDimension === 'width'
                             ? SCALE_MODE_UNIFORM_WIDTH
                             : SCALE_MODE_UNIFORM_HEIGHT;
-                        linearRgb = rescale_linear_rgb_wasm(
-                            linearRgb,
-                            currentWidth, currentHeight,
-                            processWidth, processHeight,
-                            scaleMethod,
-                            scaleMode
-                        );
-                        currentWidth = processWidth;
-                        currentHeight = processHeight;
+                        buffer = rescale_rgb(buffer, processWidth, processHeight, scaleMethod, scaleMode);
                     }
 
                     if (isGrayscale) {
                         // Step 3a: Convert to grayscale in linear space
-                        const linearGray = linear_rgb_to_grayscale_wasm(linearRgb, currentWidth, currentHeight);
+                        let grayBuffer = rgb_to_grayscale(buffer);
 
-                        // Step 4a: Convert linear to sRGB (0-1 -> 0-1)
-                        const srgbGrayNorm = linear_gray_to_srgb_f32_wasm(linearGray);
+                        // Step 4a: Convert linear to sRGB (in-place)
+                        gray_linear_to_srgb(grayBuffer);
 
-                        // Step 5a: Denormalize to 0-255
-                        const srgbGray = denormalize_gray_f32_wasm(srgbGrayNorm);
+                        // Step 5a: Denormalize to 0-255 (in-place)
+                        gray_denormalize(grayBuffer);
 
                         // Step 6a: Dither grayscale
                         const bitsGray = parseInt(document.getElementById('bits-gray').value);
                         const isPerceptual = document.getElementById('perceptual-toggle').checked;
+                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+                        const technique = isPerceptual ? 2 : 1;
 
-                        let grayDithered;
-                        if (isPerceptual) {
-                            const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                            grayDithered = colorspace_aware_dither_gray_with_mode_wasm(
-                                srgbGray,
-                                currentWidth, currentHeight,
-                                bitsGray,
-                                perceptualSpace,
-                                mode,
-                                seeds.r
-                            );
-                        } else {
-                            grayDithered = ditherChannel(srgbGray, currentWidth, currentHeight, mode, seeds.r, bitsGray);
-                        }
+                        const ditheredBuffer = dither_gray(grayBuffer, bitsGray, technique, mode, perceptualSpace, seeds.r);
+                        const grayDithered = gray_to_u8(ditheredBuffer);
 
                         // Output as grayscale (R=G=B)
                         for (let i = 0; i < pixelCount; i++) {
@@ -1152,11 +1125,11 @@
                             outputData[i * 4 + 3] = 255;
                         }
                     } else {
-                        // Step 3b: Convert back to sRGB (0-1)
-                        const srgbResizedNorm = linear_to_srgb_f32_wasm(linearRgb, currentWidth, currentHeight);
+                        // Step 3b: Convert back to sRGB (in-place)
+                        linear_to_srgb(buffer);
 
-                        // Step 4b: Denormalize to 0-255 for dithering
-                        const srgbF32_255 = denormalize_f32_wasm(srgbResizedNorm, currentWidth, currentHeight);
+                        // Step 4b: Denormalize to 0-255 (in-place)
+                        denormalize(buffer);
 
                         // Step 5b: Dither RGB
                         const bitsR = parseInt(document.getElementById('bits-r').value);
@@ -1166,15 +1139,8 @@
                         const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                         const technique = isPerceptual ? 2 : 1;
 
-                        const rgbDithered = dither_output_wasm(
-                            srgbF32_255,
-                            currentWidth, currentHeight,
-                            bitsR, bitsG, bitsB,
-                            technique,
-                            mode,
-                            perceptualSpace,
-                            seeds.r
-                        );
+                        const ditheredBuffer = dither_rgb(buffer, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seeds.r);
+                        const rgbDithered = to_u8_rgb(ditheredBuffer);
 
                         for (let i = 0; i < pixelCount; i++) {
                             outputData[i * 4] = rgbDithered[i * 3];
@@ -1184,11 +1150,9 @@
                         }
                     }
                 } else {
-                    // sRGB-direct path: decode directly to f32 0-255, no intermediate
-                    // 8-bit: u8 as f32 (no arithmetic)
-                    // 16-bit: u16 * 255.0 / 65535.0 (single operation)
+                    // sRGB-direct path: decode directly to 0-255, no intermediate
                     const decoded = decodeToSrgb255(inputFileBytes);
-                    const srgbF32_255 = decoded.pixels;
+                    let buffer = decoded.buffer;
 
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
@@ -1197,15 +1161,8 @@
                     const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                     const technique = isPerceptual ? 2 : 1;
 
-                    const rgbDithered = dither_output_wasm(
-                        srgbF32_255,
-                        currentWidth, currentHeight,
-                        bitsR, bitsG, bitsB,
-                        technique,
-                        mode,
-                        perceptualSpace,
-                        seeds.r
-                    );
+                    const ditheredBuffer = dither_rgb(buffer, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seeds.r);
+                    const rgbDithered = to_u8_rgb(ditheredBuffer);
 
                     for (let i = 0; i < pixelCount; i++) {
                         outputData[i * 4] = rgbDithered[i * 3];
@@ -1316,8 +1273,8 @@
             if (!lastDitherResult) return;
 
             const format = getFormatString();
-            const totalBits = format_total_bits_wasm(format);
-            const supportsBinary = format_supports_binary_wasm(format);
+            const totalBits = format_total_bits(format);
+            const supportsBinary = format_supports_binary(format);
 
             // Update format info
             const formatInfo = document.getElementById('format-info');
@@ -1466,7 +1423,7 @@
                 width: lastDitherResult.width,
                 height: lastDitherResult.height,
                 is_grayscale: lastDitherResult.isGrayscale,
-                bits_per_pixel: format_total_bits_wasm(format),
+                bits_per_pixel: format_total_bits(format),
                 bits_r: lastDitherResult.bitsR,
                 bits_g: lastDitherResult.bitsG,
                 bits_b: lastDitherResult.bitsB,
@@ -1646,14 +1603,14 @@
             if (stride === 1) {
                 // Packed output
                 if (lastDitherResult.isGrayscale) {
-                    rawData = encode_gray_packed_wasm(
+                    rawData = encode_gray_packed(
                         lastDitherResult.grayChannel,
                         lastDitherResult.width,
                         lastDitherResult.height,
                         lastDitherResult.bitsR
                     );
                 } else {
-                    rawData = encode_rgb_packed_wasm(
+                    rawData = encode_rgb_packed(
                         lastDitherResult.rChannel,
                         lastDitherResult.gChannel,
                         lastDitherResult.bChannel,
@@ -1668,7 +1625,7 @@
             } else {
                 // Row-aligned output
                 if (lastDitherResult.isGrayscale) {
-                    rawData = encode_gray_row_aligned_stride_wasm(
+                    rawData = encode_gray_row_aligned_stride(
                         lastDitherResult.grayChannel,
                         lastDitherResult.width,
                         lastDitherResult.height,
@@ -1677,7 +1634,7 @@
                         fill
                     );
                 } else {
-                    rawData = encode_rgb_row_aligned_stride_wasm(
+                    rawData = encode_rgb_row_aligned_stride(
                         lastDitherResult.rChannel,
                         lastDitherResult.gChannel,
                         lastDitherResult.bChannel,
@@ -1713,7 +1670,7 @@
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
 
-            const rawData = encode_channel_row_aligned_stride_wasm(
+            const rawData = encode_channel_row_aligned_stride(
                 channelData,
                 lastDitherResult.width,
                 lastDitherResult.height,
