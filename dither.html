@@ -1398,7 +1398,9 @@
                 const bitsG = parseInt(document.getElementById('bits-g').value);
                 const bitsB = parseInt(document.getElementById('bits-b').value);
                 if (bitsR !== 8 || bitsG !== 8 || bitsB !== 8) {
-                    cmd += ` --format RGB${bitsR}${bitsG}${bitsB}`;
+                    // Use shorthand (RGB5) when all channels are equal, otherwise full form (RGB565)
+                    const formatSuffix = (bitsR === bitsG && bitsG === bitsB) ? bitsR : `${bitsR}${bitsG}${bitsB}`;
+                    cmd += ` --format RGB${formatSuffix}`;
                 }
             }
 
