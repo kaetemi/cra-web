@@ -9,16 +9,18 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-cli = ["dep:clap", "dep:image", "dep:moxcms"]
+cli = ["dep:clap"]
 
 [dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
 
-# CLI-only dependencies (not compiled into WASM)
+# Image decoding and ICC support (used by both WASM and CLI)
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+moxcms = "0.7"
+
+# CLI-only dependencies
 clap = { version = "4", features = ["derive"], optional = true }
-image = { version = "0.25", optional = true }
-moxcms = { version = "0.5", optional = true }
 
 [[bin]]
 name = "cra"

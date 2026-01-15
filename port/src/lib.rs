@@ -963,6 +963,53 @@ pub fn rescale_linear_rgb_with_progress_wasm(
     )
 }
 
+// ============================================================================
+// Image Decoding WASM Exports (Precise 16-bit and ICC support)
+// ============================================================================
+//
+// These functions allow decoding images directly in WASM, bypassing the
+// browser's Canvas API which loses precision (converts to 8-bit) and ICC info.
+
+pub mod decode;
+
+/// Decode image from raw file bytes
+/// Returns: [width, height, has_icc (0/1), is_16bit (0/1), ...pixel_data]
+/// Pixel data is interleaved RGB f32 in 0-1 range (normalized, NOT linearized)
+/// The caller should apply srgb_to_linear if needed.
+#[wasm_bindgen]
+pub fn decode_image_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
+    decode::decode_image_to_f32(&file_bytes)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Get ICC profile from raw file bytes (if present)
+/// Returns empty Vec if no profile found
+#[wasm_bindgen]
+pub fn extract_icc_profile_wasm(file_bytes: Vec<u8>) -> Vec<u8> {
+    decode::extract_icc_profile(&file_bytes).unwrap_or_default()
+}
+
+/// Check if ICC profile is effectively sRGB
+/// Returns true if profile is sRGB or sRGB-compatible
+#[wasm_bindgen]
+pub fn is_icc_profile_srgb_wasm(icc_bytes: Vec<u8>) -> bool {
+    decode::is_profile_srgb(&icc_bytes)
+}
+
+/// Transform image from ICC profile to linear sRGB
+/// Input: interleaved RGB f32 (0-1 range, in source color space)
+/// Output: interleaved RGB f32 (0-1 range, linear sRGB)
+#[wasm_bindgen]
+pub fn transform_icc_to_linear_srgb_wasm(
+    pixels: Vec<f32>,
+    width: usize,
+    height: usize,
+    icc_bytes: Vec<u8>,
+) -> Result<Vec<f32>, JsValue> {
+    decode::transform_icc_to_linear_srgb(&pixels, width, height, &icc_bytes)
+        .map_err(|e| JsValue::from_str(&e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

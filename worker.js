@@ -93,8 +93,25 @@ async function loadScript(scriptName) {
     currentScript = scriptName;
 }
 
-// Decode PNG image data to raw RGBA pixels
-async function decodeImage(data) {
+// Decode image using WASM (preserves 16-bit precision and ICC profiles)
+// Returns: { width, height, hasIcc, is16bit, pixels (f32 0-1), iccProfile (Uint8Array or null) }
+function decodeImagePrecise(data) {
+    // Decode image to f32 (0-1 normalized, NOT linearized yet)
+    const result = craWasm.decode_image_wasm(new Uint8Array(data));
+    const width = result[0];
+    const height = result[1];
+    const hasIcc = result[2] > 0.5;
+    const is16bit = result[3] > 0.5;
+    const pixels = result.slice(4); // Interleaved RGB f32 (0-1)
+
+    // Extract ICC profile if present
+    const iccProfile = hasIcc ? craWasm.extract_icc_profile_wasm(new Uint8Array(data)) : null;
+
+    return { width, height, hasIcc, is16bit, pixels, iccProfile };
+}
+
+// Legacy decode using Canvas API (fallback, loses precision)
+async function decodeImageCanvas(data) {
     const blob = new Blob([data], { type: 'image/png' });
     const bitmap = await createImageBitmap(blob);
     const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
@@ -140,20 +157,23 @@ async function encodePng(rgbData, width, height) {
     return new Uint8Array(await blob.arrayBuffer());
 }
 
-// Process images using WASM
-// Pipeline: sRGB u8 → f32 0-255 → f32 0-1 → linear RGB → color_correct → sRGB → f32 0-255 → dither to u8
+// Process images using WASM with precise 16-bit and ICC support
+// Pipeline: file bytes → decode (16-bit preserved) → ICC transform if needed → linear RGB → color_correct → sRGB → dither
 async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
-    sendProgress('process', 'Decoding images...', 5);
-    const inputImg = await decodeImage(inputData);
-    const refImg = await decodeImage(refData);
+    sendProgress('process', 'Decoding images (precise)...', 5);
 
-    sendProgress('process', 'Converting to RGB...', 10);
-    const inputRgb = rgbaToRgb(inputImg.data);
-    const refRgb = rgbaToRgb(refImg.data);
+    // Decode with full precision (16-bit + ICC extraction)
+    const inputImg = decodeImagePrecise(inputData);
+    const refImg = decodeImagePrecise(refData);
 
     // Log processing info
     sendConsole(`Processing ${inputImg.width}x${inputImg.height} image with WASM...`);
+    if (inputImg.is16bit) sendConsole('  Input: 16-bit precision preserved');
+    if (inputImg.hasIcc) sendConsole('  Input: ICC profile detected');
+    if (refImg.is16bit) sendConsole('  Reference: 16-bit precision preserved');
+    if (refImg.hasIcc) sendConsole('  Reference: ICC profile detected');
     sendConsole(`Method: ${method}`);
+
     const histogramModeNames = {
         0: 'Binned (256 bins)',
         1: 'F32 Endpoint-aligned',
@@ -206,8 +226,6 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     }
 
     // Method mapping: method name -> [methodCode, luminosityFlag, description]
-    // Method codes: 0=BasicLab, 1=BasicRgb, 2=BasicOklab, 3=CraLab, 4=CraRgb, 5=CraOklab, 6=TiledLab, 7=TiledOklab
-    // luminosityFlag: keep_luminosity for Lab/Oklab, use_perceptual for CraRgb, tiled_luminosity for Tiled
     const methodMap = {
         'lab':              [0, false, 'basic LAB histogram matching'],
         'rgb':              [1, false, 'basic RGB histogram matching'],
@@ -233,25 +251,49 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     const startTime = performance.now();
 
     // ========================================================================
-    // Standard pipeline: sRGB u8 → f32 0-255 → f32 0-1 → linear → process → sRGB → f32 0-255 → dither
+    // Precise pipeline: decode → ICC transform (if non-sRGB) → linear → process → sRGB → dither
     // ========================================================================
 
-    // Step 1: Unpack u8 to f32 (0-255)
-    sendProgress('process', 'Converting input to float...', 15);
-    const inputF32_255 = craWasm.unpack_u8_to_f32_wasm(inputRgb, inputImg.width, inputImg.height);
-    const refF32_255 = craWasm.unpack_u8_to_f32_wasm(refRgb, refImg.width, refImg.height);
+    sendProgress('process', 'Processing color profiles...', 15);
 
-    // Step 2: Normalize to 0-1
-    sendProgress('process', 'Normalizing...', 20);
-    const inputF32_01 = craWasm.normalize_f32_wasm(inputF32_255, inputImg.width, inputImg.height);
-    const refF32_01 = craWasm.normalize_f32_wasm(refF32_255, refImg.width, refImg.height);
+    // Check if ICC transform is needed for input
+    let inputNormalized = inputImg.pixels; // Already f32 0-1 from decode
+    if (inputImg.iccProfile && inputImg.iccProfile.length > 0) {
+        const isInputSrgb = craWasm.is_icc_profile_srgb_wasm(inputImg.iccProfile);
+        if (!isInputSrgb) {
+            sendConsole('  Applying ICC transform to input...');
+            // Transform directly to linear sRGB
+            inputNormalized = craWasm.transform_icc_to_linear_srgb_wasm(
+                inputImg.pixels, inputImg.width, inputImg.height, inputImg.iccProfile
+            );
+            // Skip sRGB->linear below since ICC transform already outputs linear
+            var inputAlreadyLinear = true;
+        }
+    }
 
-    // Step 3: Convert sRGB to linear
+    // Check if ICC transform is needed for reference
+    let refNormalized = refImg.pixels;
+    if (refImg.iccProfile && refImg.iccProfile.length > 0) {
+        const isRefSrgb = craWasm.is_icc_profile_srgb_wasm(refImg.iccProfile);
+        if (!isRefSrgb) {
+            sendConsole('  Applying ICC transform to reference...');
+            refNormalized = craWasm.transform_icc_to_linear_srgb_wasm(
+                refImg.pixels, refImg.width, refImg.height, refImg.iccProfile
+            );
+            var refAlreadyLinear = true;
+        }
+    }
+
+    // Convert to linear if not already done by ICC transform
     sendProgress('process', 'Converting to linear RGB...', 25);
-    const inputLinear = craWasm.srgb_to_linear_f32_wasm(inputF32_01, inputImg.width, inputImg.height);
-    const refLinear = craWasm.srgb_to_linear_f32_wasm(refF32_01, refImg.width, refImg.height);
+    const inputLinear = inputAlreadyLinear
+        ? inputNormalized
+        : craWasm.srgb_to_linear_f32_wasm(inputNormalized, inputImg.width, inputImg.height);
+    const refLinear = refAlreadyLinear
+        ? refNormalized
+        : craWasm.srgb_to_linear_f32_wasm(refNormalized, refImg.width, refImg.height);
 
-    // Step 4: Color correction (in linear RGB space)
+    // Color correction (in linear RGB space)
     sendProgress('process', 'Running color correction...', 30);
     const resultLinear = craWasm.color_correct_wasm(
         inputLinear, inputImg.width, inputImg.height,
@@ -264,17 +306,16 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         histogramDistanceSpace
     );
 
-    // Step 5: Convert linear back to sRGB (0-1)
+    // Convert linear back to sRGB (0-1)
     sendProgress('process', 'Converting to sRGB...', 60);
     const resultSrgb_01 = craWasm.linear_to_srgb_f32_wasm(resultLinear, inputImg.width, inputImg.height);
 
-    // Step 6: Denormalize to 0-255
+    // Denormalize to 0-255
     sendProgress('process', 'Denormalizing...', 65);
     const resultSrgb_255 = craWasm.denormalize_f32_wasm(resultSrgb_01, inputImg.width, inputImg.height);
 
-    // Step 7: Dither to RGB888
+    // Dither to RGB888
     sendProgress('process', 'Dithering output...', 70);
-    // Dither technique: 1 = PerChannel, 2 = ColorAware
     const ditherTechnique = colorAwareOutput ? 2 : 1;
     const resultRgb = craWasm.dither_output_wasm(
         resultSrgb_255,
