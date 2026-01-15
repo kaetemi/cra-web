@@ -838,35 +838,11 @@
 
     <script type="module">
         import './linear-img.js';
+        // Only import binary encoding functions - processing is done in worker
         import init, {
-            // Buffer-based processing functions (all with _wasm suffix)
-            decode_image_wasm,           // Returns BufferF32x4 (Pixel4 0-1)
-            decode_image_srgb_255_wasm,  // Returns BufferF32x4 (Pixel4 0-255)
-            decode_metadata_wasm,        // Returns [w, h, has_icc, is_16bit]
-            // ICC profile handling
+            decode_metadata_wasm,
             extract_icc_profile_wasm,
             is_icc_profile_srgb_wasm,
-            transform_icc_to_linear_srgb_wasm,
-            // Color space conversions (in-place on BufferF32x4)
-            srgb_to_linear_wasm,
-            linear_to_srgb_wasm,
-            normalize_wasm,
-            denormalize_wasm,
-            // Grayscale conversions
-            rgb_to_grayscale_wasm,
-            gray_linear_to_srgb_wasm,
-            gray_denormalize_wasm,
-            // Rescaling
-            rescale_rgb_wasm,
-            rescale_gray_wasm,
-            calculate_dimensions_wasm,
-            // Dithering
-            dither_rgb_wasm,
-            dither_gray_wasm,
-            // Output extraction
-            to_u8_rgb_wasm,
-            gray_to_u8_wasm,
-            // Binary encoding functions
             format_supports_binary_wasm,
             format_total_bits_wasm,
             encode_rgb_packed_wasm,
@@ -876,40 +852,46 @@
             encode_channel_row_aligned_stride_wasm
         } from './wasm_cra/cra_wasm.js';
 
-        // Get seeds from base seed (different for each channel)
-        function getSeeds() {
-            const baseSeed = parseInt(document.getElementById('seed-input').value) || 0;
-            return {
-                r: baseSeed,
-                g: baseSeed + 55555,
-                b: baseSeed + 11111
-            };
-        }
+        // Worker for background processing
+        let worker = null;
+        let workerReady = false;
 
-        // Decode image to BufferF32x4 (Pixel4 0-1) for linear processing path
-        function decodeToNormalized(fileBytes) {
-            const metadata = decode_metadata_wasm(new Uint8Array(fileBytes));
-            const buffer = decode_image_wasm(new Uint8Array(fileBytes));
-            return {
-                width: metadata[0],
-                height: metadata[1],
-                hasIcc: metadata[2] > 0.5,
-                is16bit: metadata[3] > 0.5,
-                buffer: buffer
-            };
-        }
+        function initWorker() {
+            worker = new Worker('./dither-worker.js', { type: 'module' });
 
-        // Decode image to BufferF32x4 (Pixel4 0-255) for sRGB-direct path
-        function decodeToSrgb255(fileBytes) {
-            const metadata = decode_metadata_wasm(new Uint8Array(fileBytes));
-            const buffer = decode_image_srgb_255_wasm(new Uint8Array(fileBytes));
-            return {
-                width: metadata[0],
-                height: metadata[1],
-                hasIcc: metadata[2] > 0.5,
-                is16bit: metadata[3] > 0.5,
-                buffer: buffer
+            worker.onmessage = function(e) {
+                const { type, ...data } = e.data;
+
+                switch (type) {
+                    case 'ready':
+                        workerReady = true;
+                        updateProcessButton();
+                        break;
+
+                    case 'progress':
+                        // Update progress display (update the <p> inside loading div)
+                        const loadingP = document.querySelector('#loading p');
+                        if (loadingP && data.message) {
+                            loadingP.textContent = `${data.message} (${data.percent}%)`;
+                        }
+                        break;
+
+                    case 'complete':
+                        handleDitherComplete(data.result);
+                        break;
+
+                    case 'error':
+                        handleDitherError(data.message);
+                        break;
+                }
             };
+
+            worker.onerror = function(e) {
+                console.error('Worker error:', e);
+                handleDitherError(e.message || 'Worker error');
+            };
+
+            worker.postMessage({ type: 'init' });
         }
 
         // Check if image has non-sRGB ICC profile (for auto color management)
@@ -919,9 +901,78 @@
             return iccProfile.length > 0 && !is_icc_profile_srgb_wasm(iccProfile);
         }
 
-        // Get ICC profile for transform (call only if checkNonSrgbIcc returned true)
-        function getIccProfile(fileBytes) {
-            return extract_icc_profile_wasm(new Uint8Array(fileBytes));
+        // Handle dither completion from worker
+        function handleDitherComplete(result) {
+            const loading = document.getElementById('loading');
+            const outputSection = document.getElementById('output-section');
+
+            // Create output ImageData from worker result
+            let outputData = result.outputData;
+            let processWidth = result.width;
+            let processHeight = result.height;
+            let outputImageData = new ImageData(new Uint8ClampedArray(outputData), processWidth, processHeight);
+
+            // Upscale for viewing if enabled
+            const doUpscale = document.getElementById('upscale-toggle').checked;
+            const upscaleFactor = parseInt(document.getElementById('upscale-factor').value) || 1;
+            let displayWidth = processWidth;
+            let displayHeight = processHeight;
+            if (doUpscale && upscaleFactor > 1) {
+                outputImageData = upscaleNearestNeighbor(outputImageData, processWidth, processHeight, upscaleFactor);
+                displayWidth = processWidth * upscaleFactor;
+                displayHeight = processHeight * upscaleFactor;
+            }
+
+            const canvas = document.createElement('canvas');
+            canvas.width = displayWidth;
+            canvas.height = displayHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.putImageData(outputImageData, 0, 0);
+
+            // Display results
+            const outputUrl = canvas.toDataURL('image/png');
+            document.getElementById('compare-input').src = document.getElementById('input-preview').src;
+            document.getElementById('compare-output').src = outputUrl;
+            document.getElementById('download-btn').href = outputUrl;
+
+            // Store dither result for binary downloads
+            lastDitherResult = {
+                width: processWidth,
+                height: processHeight,
+                isGrayscale: result.isGrayscale,
+                bitsR: result.bitsR,
+                bitsG: result.bitsG,
+                bitsB: result.bitsB,
+                mode: result.mode,
+                perceptualSpace: document.getElementById('perceptual-toggle').checked ?
+                    parseInt(document.getElementById('perceptual-space').value) : null,
+                seed: parseInt(document.getElementById('seed-input').value) || 0,
+                rChannel: result.rChannel,
+                gChannel: result.gChannel,
+                bChannel: result.bChannel,
+                grayChannel: result.grayChannel
+            };
+
+            // Update download buttons
+            updateDownloadButtons();
+
+            // Generate and display CLI command
+            const cliCommand = generateCliCommand();
+            document.getElementById('cli-command').textContent = cliCommand;
+
+            loading.classList.remove('active');
+            outputSection.style.display = 'block';
+        }
+
+        // Handle dither error from worker
+        function handleDitherError(message) {
+            const loading = document.getElementById('loading');
+            const errorMsg = document.getElementById('error-message');
+
+            console.error('Dither error:', message);
+            errorMsg.textContent = `Error: ${message}`;
+            errorMsg.classList.add('visible');
+            loading.classList.remove('active');
         }
 
         let wasmReady = false;
@@ -943,11 +994,13 @@
         // Store last dithered result for binary downloads
         let lastDitherResult = null;
 
-        // Initialize WASM
+        // Initialize WASM and worker
         async function initWasm() {
             try {
                 await init();
                 wasmReady = true;
+                // Start worker initialization (it will set workerReady when done)
+                initWorker();
                 document.getElementById('init-overlay').classList.add('hidden');
                 updateProcessButton();
             } catch (err) {
@@ -962,7 +1015,7 @@
         // Update process button state
         function updateProcessButton() {
             const btn = document.getElementById('process-btn');
-            btn.disabled = !wasmReady || !inputFileBytes;
+            btn.disabled = !wasmReady || !workerReady || !inputFileBytes;
         }
 
         // Load image file as ArrayBuffer (for precise WASM decoding)
@@ -1031,13 +1084,9 @@
             updatingSize = false;
         }
 
-        // Process the image using atomic pipeline with BufferF32x4
-        // Pipeline decisions:
-        // - RGB without rescale: decode to 0-255 → dither directly (no intermediate)
-        // - RGB with rescale: decode to 0-1 → linear → rescale → sRGB → denormalize → dither
-        // - Grayscale: decode to 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
+        // Process the image using background worker
         async function processImage() {
-            if (!inputFileBytes) return;
+            if (!inputFileBytes || !workerReady) return;
 
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
@@ -1047,217 +1096,50 @@
             errorMsg.classList.remove('visible');
             outputSection.style.display = 'none';
 
-            try {
-                const mode = parseInt(document.getElementById('dither-mode').value);
-                const isGrayscale = document.getElementById('grayscale-toggle').checked;
-                const doDownscale = document.getElementById('downscale-toggle').checked;
-                const doUpscale = document.getElementById('upscale-toggle').checked;
-                const upscaleFactor = parseInt(document.getElementById('upscale-factor').value) || 1;
-                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
-                const seeds = getSeeds();
+            const mode = parseInt(document.getElementById('dither-mode').value);
+            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            const doDownscale = document.getElementById('downscale-toggle').checked;
+            const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
+            const isPerceptual = document.getElementById('perceptual-toggle').checked;
+            const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const seed = parseInt(document.getElementById('seed-input').value) || 0;
 
-                // Determine target dimensions
-                let processWidth = originalWidth;
-                let processHeight = originalHeight;
-                if (doDownscale) {
-                    processWidth = parseInt(document.getElementById('scale-width').value) || originalWidth;
-                    processHeight = parseInt(document.getElementById('scale-height').value) || originalHeight;
-                }
-
-                // Determine if linear processing is needed
-                // Grayscale requires linear for correct luminance computation
-                // Rescale requires linear for correct interpolation
-                // Non-sRGB ICC profile requires linear (ICC transform outputs linear)
-                const needsLinear = isGrayscale || doDownscale || inputHasNonSrgbIcc;
-
-                const pixelCount = processWidth * processHeight;
-                const outputData = new Uint8ClampedArray(pixelCount * 4);
-
-                // Track current dimensions as we process
-                let currentWidth = originalWidth;
-                let currentHeight = originalHeight;
-
-                if (needsLinear) {
-                    // Decode to BufferF32x4 (Pixel4 0-1) for linear processing
-                    const decoded = decodeToNormalized(inputFileBytes);
-                    let buffer = decoded.buffer;
-
-                    // Step 1: Convert to linear (either via ICC or sRGB gamma)
-                    if (inputHasNonSrgbIcc) {
-                        // ICC profile → linear sRGB (in-place)
-                        const iccProfile = getIccProfile(inputFileBytes);
-                        transform_icc_to_linear_srgb_wasm(buffer, currentWidth, currentHeight, iccProfile);
-                    } else {
-                        // sRGB → linear (in-place)
-                        srgb_to_linear_wasm(buffer);
-                    }
-
-                    // Step 2: Rescale in linear space (if needed)
-                    if (doDownscale) {
-                        // Use uniform scaling based on primary dimension for exact AR preservation
-                        const scaleMode = primaryDimension === 'width'
-                            ? SCALE_MODE_UNIFORM_WIDTH
-                            : SCALE_MODE_UNIFORM_HEIGHT;
-                        buffer = rescale_rgb_wasm(buffer, currentWidth, currentHeight, processWidth, processHeight, scaleMethod, scaleMode);
-                        currentWidth = processWidth;
-                        currentHeight = processHeight;
-                    }
-
-                    if (isGrayscale) {
-                        // Step 3a: Convert to grayscale in linear space
-                        let grayBuffer = rgb_to_grayscale_wasm(buffer);
-
-                        // Step 4a: Convert linear to sRGB (in-place)
-                        gray_linear_to_srgb_wasm(grayBuffer);
-
-                        // Step 5a: Denormalize to 0-255 (in-place)
-                        gray_denormalize_wasm(grayBuffer);
-
-                        // Step 6a: Dither grayscale
-                        const bitsGray = parseInt(document.getElementById('bits-gray').value);
-                        const isPerceptual = document.getElementById('perceptual-toggle').checked;
-                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                        const technique = isPerceptual ? 2 : 1;
-
-                        const ditheredBuffer = dither_gray_wasm(grayBuffer, currentWidth, currentHeight, bitsGray, technique, mode, perceptualSpace, seeds.r);
-                        const grayDithered = ditheredBuffer.to_vec();
-
-                        // Output as grayscale (R=G=B)
-                        for (let i = 0; i < pixelCount; i++) {
-                            const v = grayDithered[i];
-                            outputData[i * 4] = v;
-                            outputData[i * 4 + 1] = v;
-                            outputData[i * 4 + 2] = v;
-                            outputData[i * 4 + 3] = 255;
-                        }
-                    } else {
-                        // Step 3b: Convert back to sRGB (in-place)
-                        linear_to_srgb_wasm(buffer);
-
-                        // Step 4b: Denormalize to 0-255 (in-place)
-                        denormalize_wasm(buffer);
-
-                        // Step 5b: Dither RGB
-                        const bitsR = parseInt(document.getElementById('bits-r').value);
-                        const bitsG = parseInt(document.getElementById('bits-g').value);
-                        const bitsB = parseInt(document.getElementById('bits-b').value);
-                        const isPerceptual = document.getElementById('perceptual-toggle').checked;
-                        const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                        const technique = isPerceptual ? 2 : 1;
-
-                        const ditheredBuffer = dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seeds.r);
-                        const rgbDithered = to_u8_rgb_wasm(ditheredBuffer);
-
-                        for (let i = 0; i < pixelCount; i++) {
-                            outputData[i * 4] = rgbDithered[i * 3];
-                            outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
-                            outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
-                            outputData[i * 4 + 3] = 255;
-                        }
-                    }
-                } else {
-                    // sRGB-direct path: decode directly to 0-255, no intermediate
-                    const decoded = decodeToSrgb255(inputFileBytes);
-                    let buffer = decoded.buffer;
-
-                    const bitsR = parseInt(document.getElementById('bits-r').value);
-                    const bitsG = parseInt(document.getElementById('bits-g').value);
-                    const bitsB = parseInt(document.getElementById('bits-b').value);
-                    const isPerceptual = document.getElementById('perceptual-toggle').checked;
-                    const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                    const technique = isPerceptual ? 2 : 1;
-
-                    const ditheredBuffer = dither_rgb_wasm(buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seeds.r);
-                    const rgbDithered = to_u8_rgb_wasm(ditheredBuffer);
-
-                    for (let i = 0; i < pixelCount; i++) {
-                        outputData[i * 4] = rgbDithered[i * 3];
-                        outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
-                        outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
-                        outputData[i * 4 + 3] = 255;
-                    }
-                }
-
-                // Create output image
-                let outputImageData = new ImageData(outputData, processWidth, processHeight);
-
-                // Upscale for viewing if enabled
-                let displayWidth = processWidth;
-                let displayHeight = processHeight;
-                if (doUpscale && upscaleFactor > 1) {
-                    outputImageData = upscaleNearestNeighbor(outputImageData, processWidth, processHeight, upscaleFactor);
-                    displayWidth = processWidth * upscaleFactor;
-                    displayHeight = processHeight * upscaleFactor;
-                }
-
-                const canvas = document.createElement('canvas');
-                canvas.width = displayWidth;
-                canvas.height = displayHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.putImageData(outputImageData, 0, 0);
-
-                // Display results
-                const outputUrl = canvas.toDataURL('image/png');
-                document.getElementById('compare-input').src = document.getElementById('input-preview').src;
-                document.getElementById('compare-output').src = outputUrl;
-                document.getElementById('download-btn').href = outputUrl;
-
-                // Store dither result for binary downloads
-                lastDitherResult = {
-                    width: processWidth,
-                    height: processHeight,
-                    isGrayscale,
-                    bitsR: isGrayscale ? parseInt(document.getElementById('bits-gray').value) : parseInt(document.getElementById('bits-r').value),
-                    bitsG: isGrayscale ? 0 : parseInt(document.getElementById('bits-g').value),
-                    bitsB: isGrayscale ? 0 : parseInt(document.getElementById('bits-b').value),
-                    mode: mode,
-                    perceptualSpace: document.getElementById('perceptual-toggle').checked ?
-                        parseInt(document.getElementById('perceptual-space').value) : null,
-                    seed: parseInt(document.getElementById('seed-input').value) || 0,
-                    // Store channel data
-                    rChannel: null,
-                    gChannel: null,
-                    bChannel: null,
-                    grayChannel: null
-                };
-
-                if (isGrayscale) {
-                    // Extract gray channel from output
-                    const grayData = new Uint8Array(pixelCount);
-                    for (let i = 0; i < pixelCount; i++) {
-                        grayData[i] = outputData[i * 4];
-                    }
-                    lastDitherResult.grayChannel = grayData;
-                } else {
-                    // Extract RGB channels from output
-                    const rData = new Uint8Array(pixelCount);
-                    const gData = new Uint8Array(pixelCount);
-                    const bData = new Uint8Array(pixelCount);
-                    for (let i = 0; i < pixelCount; i++) {
-                        rData[i] = outputData[i * 4];
-                        gData[i] = outputData[i * 4 + 1];
-                        bData[i] = outputData[i * 4 + 2];
-                    }
-                    lastDitherResult.rChannel = rData;
-                    lastDitherResult.gChannel = gData;
-                    lastDitherResult.bChannel = bData;
-                }
-
-                // Update download buttons
-                updateDownloadButtons();
-
-                // Generate and display CLI command
-                const cliCommand = generateCliCommand();
-                document.getElementById('cli-command').textContent = cliCommand;
-
-                outputSection.style.display = 'block';
-            } catch (err) {
-                console.error('Processing error:', err);
-                errorMsg.textContent = `Error: ${err.message}`;
-                errorMsg.classList.add('visible');
-            } finally {
-                loading.classList.remove('active');
+            // Determine target dimensions
+            let processWidth = originalWidth;
+            let processHeight = originalHeight;
+            if (doDownscale) {
+                processWidth = parseInt(document.getElementById('scale-width').value) || originalWidth;
+                processHeight = parseInt(document.getElementById('scale-height').value) || originalHeight;
             }
+
+            // Get bit depths
+            const bitsR = parseInt(document.getElementById('bits-r').value);
+            const bitsG = parseInt(document.getElementById('bits-g').value);
+            const bitsB = parseInt(document.getElementById('bits-b').value);
+            const bitsGray = parseInt(document.getElementById('bits-gray').value);
+
+            // Send to worker
+            worker.postMessage({
+                type: 'dither',
+                fileBytes: inputFileBytes,
+                originalWidth: originalWidth,
+                originalHeight: originalHeight,
+                inputHasNonSrgbIcc: inputHasNonSrgbIcc,
+                isGrayscale: isGrayscale,
+                doDownscale: doDownscale,
+                processWidth: processWidth,
+                processHeight: processHeight,
+                scaleMethod: scaleMethod,
+                primaryDimension: primaryDimension,
+                bitsR: bitsR,
+                bitsG: bitsG,
+                bitsB: bitsB,
+                bitsGray: bitsGray,
+                mode: mode,
+                isPerceptual: isPerceptual,
+                perceptualSpace: perceptualSpace,
+                seed: seed
+            });
         }
 
         // Get format string from current settings
@@ -1449,25 +1331,29 @@
             if (!file) return;
 
             try {
-                // Load file bytes (decoded on demand in processImage based on mode)
+                // Load file bytes (decoded on demand in worker based on mode)
                 const fileBytes = await loadImageBytes(file);
 
-                // Quick decode just to get dimensions and ICC info
-                const decoded = decodeToSrgb255(fileBytes);
+                // Quick metadata decode to get dimensions and ICC info
+                const metadata = decode_metadata_wasm(new Uint8Array(fileBytes));
+                const width = metadata[0];
+                const height = metadata[1];
+                const hasIcc = metadata[2] > 0.5;
+                const is16bit = metadata[3] > 0.5;
 
                 // Check for non-sRGB ICC profile (auto detection)
-                inputHasNonSrgbIcc = checkNonSrgbIcc(fileBytes, decoded.hasIcc);
+                inputHasNonSrgbIcc = checkNonSrgbIcc(fileBytes, hasIcc);
                 if (inputHasNonSrgbIcc) {
                     console.log('Detected non-sRGB ICC profile - will use color management');
                 }
 
                 // Store raw bytes for processing
                 inputFileBytes = fileBytes;
-                inputWidth = decoded.width;
-                inputHeight = decoded.height;
-                originalWidth = decoded.width;
-                originalHeight = decoded.height;
-                aspectRatio = decoded.width / decoded.height;
+                inputWidth = width;
+                inputHeight = height;
+                originalWidth = width;
+                originalHeight = height;
+                aspectRatio = width / height;
 
                 // Create preview image for display (using DataURL for compatibility)
                 const previewUrl = await createPreview(file);
@@ -1491,7 +1377,7 @@
 
                 updateProcessButton();
 
-                if (decoded.is16bit) {
+                if (is16bit) {
                     console.log('Loaded 16-bit image');
                 }
             } catch (err) {
