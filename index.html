@@ -480,22 +480,6 @@
             </p>
         </div>
 
-        <div class="implementation-section" id="output-dither-section">
-            <label for="output-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Output Dithering:</label>
-            <select id="output-dither-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0">Floyd-Steinberg (Standard)</option>
-                <option value="1">Floyd-Steinberg (Serpentine)</option>
-                <option value="2">Jarvis-Judice-Ninke (Standard)</option>
-                <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4" selected>* Mixed (Standard, Recommended)</option>
-                <option value="5">Mixed (Serpentine)</option>
-                <option value="6">Mixed (Random Direction)</option>
-            </select>
-            <p class="impl-description" id="output-dither-description">
-                Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
-            </p>
-        </div>
-
         <div class="implementation-section" id="histogram-dither-section">
             <label for="histogram-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Histogram Dithering:</label>
             <select id="histogram-dither-select" class="method-select" style="margin-bottom: 10px;">
@@ -535,6 +519,22 @@
                     <option value="5">Y'CbCr</option>
                 </select>
             </div>
+        </div>
+
+        <div class="implementation-section" id="output-dither-section">
+            <label for="output-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Output Dithering:</label>
+            <select id="output-dither-select" class="method-select" style="margin-bottom: 10px;">
+                <option value="0">Floyd-Steinberg (Standard)</option>
+                <option value="1">Floyd-Steinberg (Serpentine)</option>
+                <option value="2">Jarvis-Judice-Ninke (Standard)</option>
+                <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
+                <option value="4" selected>* Mixed (Standard, Recommended)</option>
+                <option value="5">Mixed (Serpentine)</option>
+                <option value="6">Mixed (Random Direction)</option>
+            </select>
+            <p class="impl-description" id="output-dither-description">
+                Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
+            </p>
         </div>
 
         <div class="implementation-section" id="color-aware-output-section" style="display: none;">
