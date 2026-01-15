@@ -213,10 +213,10 @@ Instead of dithering each channel independently in sRGB (the common approach), c
 The per-channel approach simply quantizes each channel to its nearest value and diffuses error in sRGB space. This is faster but can produce visible color shifts since sRGB is neither perceptually uniform nor physically linear—it doesn't model how the eye perceives color differences or how light actually mixes.
 
 **Perceptual spaces** (for distance measurement):
-- **OKLab** (default): Modern, perceptually uniform
+- **OKLab** (default, recommended): Modern, perceptually uniform—outperforms all CIELAB variants in practice
 - **CIELAB + CIE76**: Simple Euclidean in Lab
-- **CIELAB + CIE94**: Weighted distance, good balance
-- **CIELAB + CIEDE2000**: Most accurate perceptual metric
+- **CIELAB + CIE94**: Weighted distance
+- **CIELAB + CIEDE2000**: Complex weighted formula, but still underperforms OKLab
 - Linear RGB, Y'CbCr: Available but not recommended
 
 See [COLORSPACES.md](COLORSPACES.md) for color space definitions and distance formulas.
@@ -321,4 +321,3 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
 
 - **Reference image profile**: Currently assumes sRGB. Should use the same ICC detection as input images. (Bug to fix)
 - **Tiled CRA memory**: Large images with many tiles can be memory-intensive
-- **CIEDE2000 performance**: The most accurate color difference formula but computationally expensive; OKLab offers similar perceptual quality with better performance
