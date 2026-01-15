@@ -226,6 +226,31 @@ impl StrideFillArg {
 }
 
 // ============================================================================
+// Progress Bar
+// ============================================================================
+
+/// Print a progress bar to stderr (overwrites the current line)
+fn print_progress(label: &str, progress: f32) {
+    const BAR_WIDTH: usize = 30;
+    let filled = (progress * BAR_WIDTH as f32).round() as usize;
+    let empty = BAR_WIDTH.saturating_sub(filled);
+    eprint!(
+        "\r{}: [{}{}] {:3}%",
+        label,
+        "=".repeat(filled),
+        " ".repeat(empty),
+        (progress * 100.0).round() as u32
+    );
+    let _ = std::io::stderr().flush();
+}
+
+/// Clear the progress bar line
+fn clear_progress() {
+    eprint!("\r{}\r", " ".repeat(60));
+    let _ = std::io::stderr().flush();
+}
+
+// ============================================================================
 // Command Line Arguments
 // ============================================================================
 
@@ -345,6 +370,10 @@ struct Args {
     /// Enable verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Show progress bar during processing
+    #[arg(long)]
+    progress: bool,
 }
 
 // ============================================================================
@@ -529,8 +558,9 @@ fn resize_linear(
     target_height: Option<u32>,
     method: cra_wasm::rescale::RescaleMethod,
     verbose: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale, ScaleMode};
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale_with_progress, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -557,12 +587,13 @@ fn resize_linear(
     }
 
     // Rescale directly in linear space for correct color blending
-    let dst_pixels = rescale(
+    let dst_pixels = rescale_with_progress(
         pixels,
         src_width as usize, src_height as usize,
         dst_width, dst_height,
         method,
         ScaleMode::Independent,
+        progress,
     );
 
     Ok((dst_pixels, dst_width as u32, dst_height as u32))
@@ -593,8 +624,9 @@ fn dither_grayscale(
     space: PerceptualSpace,
     mode: CSDitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed, None)
+    colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed, progress)
 }
 
 /// Result of dithering operation
@@ -616,6 +648,7 @@ fn dither_pixels(
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     if format.is_grayscale {
         // Step 1: Convert linear RGB to linear grayscale (luminance only)
@@ -630,7 +663,7 @@ fn dither_pixels(
 
         // Step 4: Dither grayscale
         let interleaved = dither_grayscale(
-            &srgb_gray, width, height, format.bits_r, colorspace, dither_mode, seed,
+            &srgb_gray, width, height, format.bits_r, colorspace, dither_mode, seed, progress,
         );
         DitherResult { interleaved, is_grayscale: true }
     } else {
@@ -648,7 +681,7 @@ fn dither_pixels(
             format.bits_r, format.bits_g, format.bits_b,
             technique,
             seed,
-            None,
+            progress,
         );
         DitherResult { interleaved, is_grayscale: false }
     }
@@ -667,6 +700,7 @@ fn dither_pixels_srgb_rgb(
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::output::dither_output_rgb;
 
@@ -679,7 +713,7 @@ fn dither_pixels_srgb_rgb(
         format.bits_r, format.bits_g, format.bits_b,
         technique,
         seed,
-        None,
+        progress,
     );
 
     DitherResult { interleaved, is_grayscale: false }
@@ -958,13 +992,18 @@ fn main() -> Result<(), String> {
         let (input_pixels, src_width, src_height) = convert_to_linear(&input_img, &input_icc, args.input_profile, args.verbose)?;
 
         // Resize in linear RGB space
+        let mut resize_progress = |p: f32| print_progress("Resize", p);
         let (input_pixels, width, height) = resize_linear(
             &input_pixels,
             src_width, src_height,
             args.width, args.height,
             args.scale_method.to_rescale_method(),
             args.verbose,
+            if args.progress { Some(&mut resize_progress) } else { None },
         )?;
+        if args.progress {
+            clear_progress();
+        }
 
         let width_usize = width as usize;
         let height_usize = height as usize;
@@ -995,6 +1034,7 @@ fn main() -> Result<(), String> {
             input_pixels
         };
 
+        let mut dither_progress = |p: f32| print_progress("Dither", p);
         let result = dither_pixels(
             pixels_to_dither,
             width_usize,
@@ -1004,7 +1044,11 @@ fn main() -> Result<(), String> {
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
+            if args.progress { Some(&mut dither_progress) } else { None },
         );
+        if args.progress {
+            clear_progress();
+        }
 
         (result, width, height)
     } else {
@@ -1016,6 +1060,7 @@ fn main() -> Result<(), String> {
 
         let (input_pixels, width, height) = convert_to_srgb_255(&input_img, args.verbose);
 
+        let mut dither_progress = |p: f32| print_progress("Dither", p);
         let result = dither_pixels_srgb_rgb(
             input_pixels,
             width as usize,
@@ -1025,7 +1070,11 @@ fn main() -> Result<(), String> {
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
+            if args.progress { Some(&mut dither_progress) } else { None },
         );
+        if args.progress {
+            clear_progress();
+        }
 
         (result, width, height)
     };
