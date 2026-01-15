@@ -60,10 +60,12 @@ cp index.html dist/
 cp dither.html dist/
 cp resize.html dist/
 cp linear-img-demo.html dist/
+cp linear-img-gpu-demo.html dist/
 cp app.js dist/
 cp worker.js dist/
 cp resize-worker.js dist/
 cp linear-img.js dist/
+cp linear-img-gpu.js dist/
 cp sw.js dist/
 
 # Copy default images
@@ -99,4 +101,5 @@ echo "  Then open http://localhost:8000"
 echo "  Dither demo: http://localhost:8000/dither.html"
 echo "  Resize demo: http://localhost:8000/resize.html"
 echo "  Linear-img demo: http://localhost:8000/linear-img-demo.html"
+echo "  Linear-img GPU demo: http://localhost:8000/linear-img-gpu-demo.html"
 echo "=========================================="

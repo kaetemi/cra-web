@@ -4,6 +4,8 @@
  * Unlike browser-native image scaling (which operates in sRGB space and causes
  * darkening/color shifts), this element uses proper linear RGB interpolation.
  *
+ * Uses WebGPU acceleration when available (for Lanczos), falls back to WASM worker.
+ *
  * Usage:
  *   <linear-img src="photo.jpg" width="200" height="150"></linear-img>
  *   <linear-img src="photo.jpg" style="width: 200px;"></linear-img>
@@ -15,6 +17,47 @@
  *   method     - Interpolation: "lanczos" (default) or "bilinear"
  *   fit        - Object-fit style: "contain" (default), "cover", "fill"
  */
+
+// ============================================================================
+// WebGPU Support (imported from linear-img-gpu.js)
+// ============================================================================
+
+import { LanczosGPU, isWebGPUSupported } from './linear-img-gpu.js';
+
+// Shared GPU instance for all <linear-img> elements
+let sharedGPU = null;
+let gpuInitPromise = null;
+let gpuAvailable = null; // null = unknown, true/false after check
+
+async function getGPU() {
+    if (gpuAvailable === false) return null;
+
+    if (!gpuInitPromise) {
+        gpuInitPromise = (async () => {
+            if (!isWebGPUSupported()) {
+                gpuAvailable = false;
+                console.log('[linear-img] WebGPU not supported, using WASM fallback');
+                return null;
+            }
+            try {
+                sharedGPU = new LanczosGPU();
+                await sharedGPU.init();
+                gpuAvailable = true;
+                console.log('[linear-img] WebGPU initialized successfully');
+                return sharedGPU;
+            } catch (err) {
+                console.warn('[linear-img] WebGPU init failed, using WASM fallback:', err.message);
+                gpuAvailable = false;
+                return null;
+            }
+        })();
+    }
+    return gpuInitPromise;
+}
+
+// ============================================================================
+// WASM Worker Fallback
+// ============================================================================
 
 // Shared worker instance for all <linear-img> elements
 let sharedWorker = null;
@@ -140,6 +183,7 @@ class LinearImg extends HTMLElement {
         this._method = 'lanczos';
         this._fit = 'contain';
         this._pixelData = null;  // Raw RGBA pixels from canvas
+        this._sourceImageData = null;  // Full ImageData for GPU path
         this._processing = false;
         this._pendingResize = false;
         this._loading = false;  // Guard against concurrent loads
@@ -228,6 +272,7 @@ class LinearImg extends HTMLElement {
                 this._src = newValue;
                 this._loadedSrc = null;  // Clear to allow fresh load
                 this._pixelData = null;  // Clear old pixel data
+                this._sourceImageData = null;  // Clear old ImageData
                 this._loadImage();
                 break;
             case 'width':
@@ -301,6 +346,7 @@ class LinearImg extends HTMLElement {
             // Extract pixels via canvas
             const imageData = getImagePixels(this._preview);
             this._pixelData = imageData.data;
+            this._sourceImageData = imageData;  // Store full ImageData for GPU path
 
             // Trigger resize with current display dimensions
             const rect = this.getBoundingClientRect();
@@ -365,23 +411,37 @@ class LinearImg extends HTMLElement {
         }
 
         this._processing = true;
-        console.log('[linear-img] Resizing:', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
 
         try {
-            const result = await requestResizePixels(
-                this._pixelData,
-                this._naturalWidth,
-                this._naturalHeight,
-                outputWidth,
-                outputHeight,
-                this._method
-            );
+            let imageData;
 
-            const imageData = new ImageData(
-                new Uint8ClampedArray(result.outputData),
-                result.width,
-                result.height
-            );
+            // Try GPU path for Lanczos (GPU only supports Lanczos, not bilinear)
+            const gpu = this._method === 'lanczos' ? await getGPU() : null;
+
+            if (gpu && this._sourceImageData) {
+                // Use WebGPU acceleration
+                console.log('[linear-img] Resizing (GPU):', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
+
+                imageData = await gpu.resize(this._sourceImageData, outputWidth, outputHeight);
+            } else {
+                // Fall back to WASM worker
+                console.log('[linear-img] Resizing (WASM):', this._naturalWidth, 'x', this._naturalHeight, '→', outputWidth, 'x', outputHeight, '@' + dpr + 'x');
+
+                const result = await requestResizePixels(
+                    this._pixelData,
+                    this._naturalWidth,
+                    this._naturalHeight,
+                    outputWidth,
+                    outputHeight,
+                    this._method
+                );
+
+                imageData = new ImageData(
+                    new Uint8ClampedArray(result.outputData),
+                    result.width,
+                    result.height
+                );
+            }
 
             cacheResult(cacheKey, imageData);
 
@@ -393,7 +453,7 @@ class LinearImg extends HTMLElement {
             }
 
             this.dispatchEvent(new CustomEvent('load', {
-                detail: { width: outputWidth, height: outputHeight, dpr }
+                detail: { width: outputWidth, height: outputHeight, dpr, backend: gpu ? 'gpu' : 'wasm' }
             }));
 
         } catch (err) {

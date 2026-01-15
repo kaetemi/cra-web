@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>linear-img-gpu Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            margin: 0;
+            padding: 20px;
+        }
+        h1 {
+            margin-top: 0;
+        }
+        .status {
+            padding: 10px 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-weight: 500;
+        }
+        .status.supported {
+            background: #1a4a1a;
+            color: #8f8;
+        }
+        .status.unsupported {
+            background: #4a1a1a;
+            color: #f88;
+        }
+        .comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .panel {
+            background: #2a2a4e;
+            border-radius: 8px;
+            padding: 15px;
+        }
+        .panel h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .image-container {
+            background: #111;
+            border-radius: 4px;
+            overflow: hidden;
+            aspect-ratio: 16/9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .image-container img,
+        .image-container linear-img-gpu {
+            max-width: 100%;
+            max-height: 100%;
+        }
+        .controls {
+            background: #2a2a4e;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .controls label {
+            display: block;
+            margin-bottom: 10px;
+        }
+        .controls input[type="text"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 14px;
+        }
+        .controls select {
+            padding: 8px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #1a1a2e;
+            color: #fff;
+            font-size: 14px;
+        }
+        .size-controls {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        .size-controls button {
+            padding: 8px 16px;
+            border: 1px solid #444;
+            border-radius: 4px;
+            background: #3a3a5e;
+            color: #fff;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .size-controls button:hover {
+            background: #4a4a6e;
+        }
+        .size-controls button.active {
+            background: #5a5aff;
+            border-color: #7a7aff;
+        }
+        .timing {
+            font-size: 12px;
+            color: #888;
+            margin-top: 8px;
+        }
+        .note {
+            font-size: 13px;
+            color: #888;
+            margin-top: 20px;
+            padding: 15px;
+            background: #222;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+<body>
+    <h1>WebGPU Linear Image Scaling</h1>
+
+    <div id="webgpu-status" class="status">Checking WebGPU support...</div>
+
+    <div class="controls">
+        <label>
+            Image URL:
+            <input type="text" id="image-url" value="https://upload.wikimedia.org/wikipedia/commons/thumb/e/ea/Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg/1280px-Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg">
+        </label>
+        <div class="size-controls">
+            <span>Size:</span>
+            <button data-size="200" class="active">200px</button>
+            <button data-size="300">300px</button>
+            <button data-size="400">400px</button>
+            <button data-size="600">600px</button>
+        </div>
+    </div>
+
+    <div class="comparison">
+        <div class="panel">
+            <h3>Browser Native (sRGB interpolation)</h3>
+            <div class="image-container">
+                <img id="browser-img" style="width: 200px;">
+            </div>
+            <div class="timing" id="browser-timing"></div>
+        </div>
+
+        <div class="panel">
+            <h3>WebGPU Lanczos (Linear RGB)</h3>
+            <div class="image-container">
+                <linear-img-gpu id="gpu-img" width="200" fit="contain"></linear-img-gpu>
+            </div>
+            <div class="timing" id="gpu-timing"></div>
+        </div>
+    </div>
+
+    <div class="note">
+        <strong>What to look for:</strong>
+        <ul>
+            <li>Browser scaling (left) darkens midtones and can cause color shifts, especially visible in gradients and thin lines</li>
+            <li>Linear RGB scaling (right) preserves brightness and color accuracy</li>
+            <li>The difference is most visible when downscaling by 2x or more</li>
+            <li>Lanczos also produces sharper results than bilinear/bicubic</li>
+        </ul>
+    </div>
+
+    <script type="module">
+        import { LinearImgGPU, isWebGPUSupported } from './linear-img-gpu.js';
+
+        const statusEl = document.getElementById('webgpu-status');
+        const browserImg = document.getElementById('browser-img');
+        const gpuImg = document.getElementById('gpu-img');
+        const urlInput = document.getElementById('image-url');
+        const browserTiming = document.getElementById('browser-timing');
+        const gpuTiming = document.getElementById('gpu-timing');
+
+        // Check WebGPU support
+        if (isWebGPUSupported()) {
+            statusEl.textContent = 'WebGPU is supported';
+            statusEl.className = 'status supported';
+        } else {
+            statusEl.textContent = 'WebGPU is NOT supported in this browser. Try Chrome 113+ or Firefox 121+';
+            statusEl.className = 'status unsupported';
+        }
+
+        // Load image
+        function loadImage() {
+            const url = urlInput.value;
+            browserImg.src = url;
+            gpuImg.src = url;
+            browserTiming.textContent = '';
+            gpuTiming.textContent = '';
+        }
+
+        urlInput.addEventListener('change', loadImage);
+        urlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadImage();
+        });
+
+        // Track GPU timing
+        gpuImg.addEventListener('load', (e) => {
+            gpuTiming.textContent = `Output: ${e.detail.width}x${e.detail.height} @ ${e.detail.dpr}x DPR`;
+        });
+
+        // Size buttons
+        document.querySelectorAll('.size-controls button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.size-controls button').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+
+                const size = btn.dataset.size;
+                browserImg.style.width = size + 'px';
+                gpuImg.setAttribute('width', size);
+            });
+        });
+
+        // Initial load
+        loadImage();
+    </script>
+</body>
+</html>
