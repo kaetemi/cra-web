@@ -4,42 +4,84 @@
 //! - 16-bit images are decoded to f32 without 8-bit intermediate
 //! - ICC profiles are extracted and can be applied via moxcms
 //!
-//! This allows the WASM build to bypass browser Canvas API limitations.
+//! Used by both WASM and CLI for consistent behavior.
 
-use image::{DynamicImage, GenericImageView, ImageDecoder, ImageReader};
+use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageReader};
 use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
-use std::io::Cursor;
+use std::io::{BufRead, Cursor, Seek};
+use std::path::Path;
 
-/// Decode image from raw bytes to normalized f32 RGB (0-1 range)
-/// Returns: [width as f32, height as f32, has_icc (0.0/1.0), is_16bit (0.0/1.0), ...pixel_data]
-/// Pixel data is interleaved RGB f32 in 0-1 range
-pub fn decode_image_to_f32(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
-    let cursor = Cursor::new(file_bytes);
+// ============================================================================
+// Image Loading
+// ============================================================================
+
+/// Result of decoding an image
+pub struct DecodedImage {
+    pub image: DynamicImage,
+    pub icc_profile: Option<Vec<u8>>,
+    pub is_16bit: bool,
+}
+
+/// Load image from file path with ICC profile extraction
+pub fn load_image_from_path<P: AsRef<Path>>(path: P) -> Result<DecodedImage, String> {
+    let reader = ImageReader::open(path.as_ref())
+        .map_err(|e| format!("Failed to open {}: {}", path.as_ref().display(), e))?
+        .with_guessed_format()
+        .map_err(|e| format!("Failed to detect format: {}", e))?;
+
+    load_from_reader(reader)
+}
+
+/// Load image from byte slice with ICC profile extraction
+pub fn load_image_from_bytes(data: &[u8]) -> Result<DecodedImage, String> {
+    let cursor = Cursor::new(data);
     let reader = ImageReader::new(cursor)
         .with_guessed_format()
-        .map_err(|e| format!("Failed to detect image format: {}", e))?;
+        .map_err(|e| format!("Failed to detect format: {}", e))?;
 
+    load_from_reader(reader)
+}
+
+/// Internal: load from ImageReader
+fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<DecodedImage, String> {
     let mut decoder = reader
         .into_decoder()
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
 
-    // Extract ICC profile before decoding
-    let has_icc = decoder.icc_profile().ok().flatten().is_some();
+    // Extract ICC profile before decoding (supported for PNG, JPEG, AVIF)
+    let icc_profile = decoder.icc_profile().ok().flatten();
 
-    let img = DynamicImage::from_decoder(decoder)
+    let image = DynamicImage::from_decoder(decoder)
         .map_err(|e| format!("Failed to decode image: {}", e))?;
 
+    let is_16bit = matches!(
+        image.color(),
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+    );
+
+    Ok(DecodedImage {
+        image,
+        icc_profile,
+        is_16bit,
+    })
+}
+
+// ============================================================================
+// Pixel Conversion
+// ============================================================================
+
+/// Convert DynamicImage to normalized f32 RGB (0-1 range)
+/// Handles both 8-bit and 16-bit sources with appropriate precision
+pub fn image_to_f32_normalized(img: &DynamicImage) -> Vec<[f32; 3]> {
     let (width, height) = img.dimensions();
     let pixel_count = (width * height) as usize;
 
-    // Check if 16-bit source
     let is_16bit = matches!(
         img.color(),
-        image::ColorType::Rgb16 | image::ColorType::Rgba16 | image::ColorType::L16 | image::ColorType::La16
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
     );
 
-    // Convert to normalized f32 (0-1 range)
-    let pixels: Vec<[f32; 3]> = if is_16bit {
+    if is_16bit {
         let rgb16 = img.to_rgb16();
         let data = rgb16.as_raw();
         (0..pixel_count)
@@ -59,37 +101,42 @@ pub fn decode_image_to_f32(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
                 data[i * 3 + 2] as f32 / 255.0,
             ])
             .collect()
-    };
-
-    // Build result: [width, height, has_icc, is_16bit, ...pixels]
-    let mut result = Vec::with_capacity(4 + pixel_count * 3);
-    result.push(width as f32);
-    result.push(height as f32);
-    result.push(if has_icc { 1.0 } else { 0.0 });
-    result.push(if is_16bit { 1.0 } else { 0.0 });
-
-    for pixel in pixels {
-        result.push(pixel[0]);
-        result.push(pixel[1]);
-        result.push(pixel[2]);
     }
-
-    Ok(result)
 }
 
-/// Extract ICC profile from image file bytes
-pub fn extract_icc_profile(file_bytes: &[u8]) -> Option<Vec<u8>> {
-    let cursor = Cursor::new(file_bytes);
-    let reader = ImageReader::new(cursor)
-        .with_guessed_format()
-        .ok()?;
-
-    let mut decoder = reader.into_decoder().ok()?;
-    decoder.icc_profile().ok().flatten()
+/// Convert DynamicImage to interleaved f32 RGB (0-1 range)
+pub fn image_to_f32_interleaved(img: &DynamicImage) -> Vec<f32> {
+    image_to_f32_normalized(img)
+        .into_iter()
+        .flat_map(|[r, g, b]| [r, g, b])
+        .collect()
 }
 
-/// Check if ICC profile is effectively sRGB
+// ============================================================================
+// ICC Profile Handling
+// ============================================================================
+
+/// Create a linear sRGB profile (sRGB primaries with gamma 1.0)
+pub fn make_linear_srgb_profile() -> ColorProfile {
+    let mut profile = ColorProfile::new_srgb();
+    let linear_curve = ToneReprCurve::Parametric(vec![1.0]);
+    profile.red_trc = Some(linear_curve.clone());
+    profile.green_trc = Some(linear_curve.clone());
+    profile.blue_trc = Some(linear_curve);
+    profile
+}
+
+/// Check if ICC profile is effectively sRGB by comparing test colors
 pub fn is_profile_srgb(icc_bytes: &[u8]) -> bool {
+    is_profile_srgb_impl(icc_bytes, false)
+}
+
+/// Check if ICC profile is effectively sRGB (with optional verbose output)
+pub fn is_profile_srgb_verbose(icc_bytes: &[u8], verbose: bool) -> bool {
+    is_profile_srgb_impl(icc_bytes, verbose)
+}
+
+fn is_profile_srgb_impl(icc_bytes: &[u8], verbose: bool) -> bool {
     let src_profile = match ColorProfile::new_from_slice(icc_bytes) {
         Ok(p) => p,
         Err(_) => return false,
@@ -116,6 +163,7 @@ pub fn is_profile_srgb(icc_bytes: &[u8]) -> bool {
         [0, 255, 0],
         [0, 0, 255],
         [128, 128, 128],
+        [192, 64, 32],
     ];
 
     for color in test_colors {
@@ -134,6 +182,12 @@ pub fn is_profile_srgb(icc_bytes: &[u8]) -> bool {
             .unwrap_or(0);
 
         if max_diff > 1 {
+            if verbose {
+                eprintln!(
+                    "  Profile differs from sRGB: {:?} -> {:?} (diff={})",
+                    color, output, max_diff
+                );
+            }
             return false;
         }
     }
@@ -141,17 +195,7 @@ pub fn is_profile_srgb(icc_bytes: &[u8]) -> bool {
     true
 }
 
-/// Create linear sRGB profile (sRGB primaries with gamma 1.0)
-fn make_linear_srgb_profile() -> ColorProfile {
-    let mut profile = ColorProfile::new_srgb();
-    let linear_curve = ToneReprCurve::Parametric(vec![1.0]);
-    profile.red_trc = Some(linear_curve.clone());
-    profile.green_trc = Some(linear_curve.clone());
-    profile.blue_trc = Some(linear_curve);
-    profile
-}
-
-/// Transform image from ICC profile to linear sRGB
+/// Transform image from ICC profile to linear sRGB (interleaved f32)
 /// Input: interleaved RGB f32 (0-1 range)
 /// Output: interleaved RGB f32 (0-1 range, linear sRGB)
 pub fn transform_icc_to_linear_srgb(
@@ -189,4 +233,55 @@ pub fn transform_icc_to_linear_srgb(
     }
 
     Ok(output)
+}
+
+/// Transform image from ICC profile to linear sRGB (array of [f32; 3])
+/// Input: array of [r, g, b] f32 (0-1 range)
+/// Output: array of [r, g, b] f32 (0-1 range, linear sRGB)
+pub fn transform_icc_to_linear_srgb_pixels(
+    pixels: &[[f32; 3]],
+    width: usize,
+    height: usize,
+    icc_bytes: &[u8],
+) -> Result<Vec<[f32; 3]>, String> {
+    // Flatten to interleaved
+    let interleaved: Vec<f32> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+
+    let result = transform_icc_to_linear_srgb(&interleaved, width, height, icc_bytes)?;
+
+    // Convert back to array format
+    Ok(result
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect())
+}
+
+// ============================================================================
+// WASM-specific functions
+// ============================================================================
+
+/// Decode image from raw bytes for WASM
+/// Returns: [width as f32, height as f32, has_icc (0.0/1.0), is_16bit (0.0/1.0), ...pixel_data]
+/// Pixel data is interleaved RGB f32 in 0-1 range
+pub fn decode_image_to_f32(file_bytes: &[u8]) -> Result<Vec<f32>, String> {
+    let decoded = load_image_from_bytes(file_bytes)?;
+    let (width, height) = decoded.image.dimensions();
+
+    let pixels = image_to_f32_interleaved(&decoded.image);
+
+    // Build result: [width, height, has_icc, is_16bit, ...pixels]
+    let pixel_count = (width * height) as usize;
+    let mut result = Vec::with_capacity(4 + pixel_count * 3);
+    result.push(width as f32);
+    result.push(height as f32);
+    result.push(if decoded.icc_profile.is_some() { 1.0 } else { 0.0 });
+    result.push(if decoded.is_16bit { 1.0 } else { 0.0 });
+    result.extend(pixels);
+
+    Ok(result)
+}
+
+/// Extract ICC profile from image file bytes
+pub fn extract_icc_profile(file_bytes: &[u8]) -> Option<Vec<u8>> {
+    load_image_from_bytes(file_bytes).ok()?.icc_profile
 }
