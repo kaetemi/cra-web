@@ -46,10 +46,10 @@ pub enum OutputTechnique {
     PerChannel {
         mode: DitherMode,
     },
-    /// Color-aware joint RGB dithering (default)
+    /// Colorspace-aware joint RGB dithering (default)
     /// Processes RGB channels together, selecting the quantized color that
     /// minimizes perceptual distance. Higher quality but slower.
-    ColorAware {
+    ColorspaceAware {
         mode: DitherMode,
         space: PerceptualSpace,
     },
@@ -57,7 +57,7 @@ pub enum OutputTechnique {
 
 impl Default for OutputTechnique {
     fn default() -> Self {
-        OutputTechnique::ColorAware {
+        OutputTechnique::ColorspaceAware {
             mode: DitherMode::default(),
             space: PerceptualSpace::default(),
         }

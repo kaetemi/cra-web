@@ -192,7 +192,7 @@ pub fn dither_output(
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b);
             (r_u8, g_u8, b_u8)
         }
-        OutputTechnique::ColorAware { mode, space } => {
+        OutputTechnique::ColorspaceAware { mode, space } => {
             // Joint RGB color-aware dithering
             colorspace_aware_dither_rgb_channels(
                 srgb_pixels,

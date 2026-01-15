@@ -23,10 +23,10 @@ pub struct HistogramOptions {
     pub mode: HistogramMode,
     /// Dithering mode for histogram quantization
     pub dither_mode: DitherMode,
-    /// Enable color-aware histogram dithering (CRA/Tiled methods only)
-    pub color_aware: bool,
-    /// Perceptual space for color-aware histogram dithering
-    pub color_aware_space: PerceptualSpace,
+    /// Enable colorspace-aware histogram dithering (CRA/Tiled methods only)
+    pub colorspace_aware: bool,
+    /// Perceptual space for colorspace-aware histogram dithering
+    pub colorspace_aware_space: PerceptualSpace,
 }
 
 impl Default for HistogramOptions {
@@ -34,8 +34,8 @@ impl Default for HistogramOptions {
         Self {
             mode: HistogramMode::default(),
             dither_mode: DitherMode::MixedStandard, // Default for histogram processing
-            color_aware: false,
-            color_aware_space: PerceptualSpace::default(),
+            colorspace_aware: false,
+            colorspace_aware_space: PerceptualSpace::default(),
         }
     }
 }
@@ -79,8 +79,8 @@ pub fn color_correct(
 ) -> Vec<Pixel4> {
     let hist_mode = histogram_options.mode_as_u8();
     let hist_dither = histogram_options.dither_mode;
-    let color_aware = histogram_options.color_aware;
-    let color_aware_space = histogram_options.color_aware_space;
+    let colorspace_aware = histogram_options.colorspace_aware;
+    let colorspace_aware_space = histogram_options.colorspace_aware_space;
 
     match method {
         ColorCorrectionMethod::BasicLab { keep_luminosity } => {
@@ -132,8 +132,8 @@ pub fn color_correct(
                 keep_luminosity,
                 hist_mode,
                 hist_dither,
-                color_aware,
-                color_aware_space,
+                colorspace_aware,
+                colorspace_aware_space,
             )
         }
         ColorCorrectionMethod::CraRgb { use_perceptual } => {
@@ -160,8 +160,8 @@ pub fn color_correct(
                 keep_luminosity,
                 hist_mode,
                 hist_dither,
-                color_aware,
-                color_aware_space,
+                colorspace_aware,
+                colorspace_aware_space,
             )
         }
         ColorCorrectionMethod::TiledLab { tiled_luminosity } => {
@@ -175,8 +175,8 @@ pub fn color_correct(
                 tiled_luminosity,
                 hist_mode,
                 hist_dither,
-                color_aware,
-                color_aware_space,
+                colorspace_aware,
+                colorspace_aware_space,
             )
         }
         ColorCorrectionMethod::TiledOklab { tiled_luminosity } => {
@@ -190,8 +190,8 @@ pub fn color_correct(
                 tiled_luminosity,
                 hist_mode,
                 hist_dither,
-                color_aware,
-                color_aware_space,
+                colorspace_aware,
+                colorspace_aware_space,
             )
         }
     }

@@ -122,9 +122,9 @@ pub fn dither_with_mode_wasm(img: Vec<f32>, w: usize, h: usize, mode: u8, seed: 
 ///     w: image width
 ///     h: image height
 ///     bits_r, bits_g, bits_b: output bit depth per channel (1-8)
-///     technique: 0 = None (no dithering), 1 = PerChannel, 2 = ColorAware
-///     mode: dither mode (0-6) - used for PerChannel and ColorAware
-///     space: perceptual space (0-5) - only used for ColorAware
+///     technique: 0 = None (no dithering), 1 = PerChannel, 2 = ColorspaceAware
+///     mode: dither mode (0-6) - used for PerChannel and ColorspaceAware
+///     space: perceptual space (0-5) - only used for ColorspaceAware
 ///     seed: random seed for mixed modes
 ///
 /// Returns:
@@ -150,7 +150,7 @@ pub fn dither_output_wasm(
     let output_technique = match technique {
         0 => OutputTechnique::None,
         1 => OutputTechnique::PerChannel { mode: dither_mode },
-        _ => OutputTechnique::ColorAware {
+        _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
         },
@@ -344,7 +344,7 @@ fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
 ///     luminosity_flag: Method-specific flag (keep_luminosity, use_perceptual, or tiled_luminosity)
 ///     histogram_mode: 0 = binned, 1 = endpoint-aligned, 2 = midpoint-aligned
 ///     histogram_dither_mode: Dither mode for histogram processing (0-6)
-///     color_aware_histogram: Enable color-aware histogram dithering (CRA/Tiled only)
+///     colorspace_aware_histogram: Enable colorspace-aware histogram dithering (CRA/Tiled only)
 ///     histogram_distance_space: Perceptual space for histogram dithering (0-5)
 ///
 /// Returns:
@@ -362,7 +362,7 @@ pub fn color_correct_wasm(
     luminosity_flag: bool,
     histogram_mode: u8,
     histogram_dither_mode: u8,
-    color_aware_histogram: bool,
+    colorspace_aware_histogram: bool,
     histogram_distance_space: u8,
 ) -> Vec<f32> {
     use correction::HistogramOptions;
@@ -386,8 +386,8 @@ pub fn color_correct_wasm(
     let histogram_options = HistogramOptions {
         mode: histogram_mode_from_u8(histogram_mode),
         dither_mode: dither_mode_from_u8(histogram_dither_mode),
-        color_aware: color_aware_histogram,
-        color_aware_space: perceptual_space_from_u8(histogram_distance_space),
+        colorspace_aware: colorspace_aware_histogram,
+        colorspace_aware_space: perceptual_space_from_u8(histogram_distance_space),
     };
 
     // Perform color correction
@@ -1033,7 +1033,7 @@ mod tests {
     }
 
     // Helper to convert linear f32 to sRGB u8 with dithering
-    fn linear_f32_to_u8(data: &[f32], width: usize, height: usize, dither_mode: u8, color_aware: bool, space: u8) -> Vec<u8> {
+    fn linear_f32_to_u8(data: &[f32], width: usize, height: usize, dither_mode: u8, colorspace_aware: bool, space: u8) -> Vec<u8> {
         // Convert interleaved f32 to Pixel4
         let pixels: usize = width * height;
         let mut pixel4: Vec<pixel::Pixel4> = (0..pixels)
@@ -1045,7 +1045,7 @@ mod tests {
             width,
             height,
             Some(dither_mode_from_u8(dither_mode)),
-            color_aware,
+            colorspace_aware,
             perceptual_space_from_u8(space),
             0, // seed
         )

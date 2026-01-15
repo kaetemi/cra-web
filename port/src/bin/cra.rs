@@ -296,17 +296,17 @@ struct Args {
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     histogram_dither: DitherMethod,
 
-    /// Use color-aware dithering for histogram quantization (only with --histogram-mode=binned)
+    /// Use colorspace-aware dithering for histogram quantization (only with --histogram-mode=binned)
     #[arg(long)]
-    color_aware_histogram: bool,
+    colorspace_aware_histogram: bool,
 
-    /// Perceptual space for color-aware histogram dithering distance metric
+    /// Perceptual space for colorspace-aware histogram dithering distance metric
     #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
     histogram_distance_space: ColorSpace,
 
-    /// Disable color-aware dithering for final RGB output (use per-channel instead)
+    /// Disable colorspace-aware dithering for final RGB output (use per-channel instead)
     #[arg(long)]
-    no_color_aware_output: bool,
+    no_colorspace_aware_output: bool,
 
     /// Perceptual space for output dithering distance metric (default: oklab for RGB, lab-cie94 for grayscale)
     #[arg(long, value_enum)]
@@ -568,12 +568,12 @@ fn resize_linear(
 
 /// Build OutputTechnique from CLI options
 fn build_output_technique(
-    color_aware: bool,
+    colorspace_aware: bool,
     mode: CSDitherMode,
     space: PerceptualSpace,
 ) -> OutputTechnique {
-    if color_aware {
-        OutputTechnique::ColorAware { mode, space }
+    if colorspace_aware {
+        OutputTechnique::ColorspaceAware { mode, space }
     } else {
         OutputTechnique::PerChannel { mode }
     }
@@ -612,7 +612,7 @@ fn dither_pixels(
     width: usize,
     height: usize,
     format: &cra_wasm::binary_format::ColorFormat,
-    color_aware: bool,
+    colorspace_aware: bool,
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
@@ -643,7 +643,7 @@ fn dither_pixels(
         }
     } else {
         let mut linear_pixels = pixels;
-        let technique = build_output_technique(color_aware, dither_mode, colorspace);
+        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
         let (r_out, g_out, b_out) = finalize_output(
             &mut linear_pixels,
             width, height,
@@ -679,7 +679,7 @@ fn dither_pixels_srgb_rgb(
     width: usize,
     height: usize,
     format: &cra_wasm::binary_format::ColorFormat,
-    color_aware: bool,
+    colorspace_aware: bool,
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
@@ -689,7 +689,7 @@ fn dither_pixels_srgb_rgb(
     debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
 
     let pixel_count = width * height;
-    let technique = build_output_technique(color_aware, dither_mode, colorspace);
+    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
     let (r_out, g_out, b_out) = dither_output(
         &pixels,
         width, height,
@@ -875,8 +875,8 @@ fn main() -> Result<(), String> {
     let histogram_options = HistogramOptions {
         mode: args.histogram_mode.to_lib_mode(),
         dither_mode: args.histogram_dither.to_dither_mode(),
-        color_aware: args.color_aware_histogram,
-        color_aware_space: args.histogram_distance_space.to_perceptual_space(),
+        colorspace_aware: args.colorspace_aware_histogram,
+        colorspace_aware_space: args.histogram_distance_space.to_perceptual_space(),
     };
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
 
@@ -1034,7 +1034,7 @@ fn main() -> Result<(), String> {
             width_usize,
             height_usize,
             &format,
-            !args.no_color_aware_output,
+            !args.no_colorspace_aware_output,
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
@@ -1055,7 +1055,7 @@ fn main() -> Result<(), String> {
             width as usize,
             height as usize,
             &format,
-            !args.no_color_aware_output,
+            !args.no_colorspace_aware_output,
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
