@@ -12,8 +12,9 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
-    encode_channel_row_aligned_stride, encode_gray_packed, encode_gray_row_aligned_stride,
-    encode_rgb_packed, encode_rgb_row_aligned_stride, is_valid_stride, ColorFormat, StrideFill,
+    encode_channel_from_interleaved_row_aligned_stride, encode_gray_packed,
+    encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
+    is_valid_stride, ColorFormat, StrideFill,
 };
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
@@ -1130,25 +1131,17 @@ fn main() -> Result<(), String> {
         outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
     }
 
-    // Write separate channel outputs (R, G, B) - extract from interleaved
+    // Write separate channel outputs (R, G, B) - encode directly from interleaved data
     let fill = args.stride_fill.to_stride_fill();
     let row_aligned = args.stride > 1;
     let needs_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
     if needs_channel_output && !dither_result.is_grayscale {
-        let pixel_count = width_usize * height_usize;
-
-        // Extract channels from interleaved RGB
-        let extract_channel = |offset: usize| -> Vec<u8> {
-            (0..pixel_count).map(|i| dither_result.interleaved[i * 3 + offset]).collect()
-        };
-
         if let Some(ref path) = args.output_raw_r {
-            let r_data = extract_channel(0);
             if args.verbose {
                 eprintln!("Writing red channel binary: {}", path.display());
             }
-            let bin_data = encode_channel_row_aligned_stride(
-                &r_data, width_usize, height_usize, format.bits_r, args.stride, fill,
+            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                &dither_result.interleaved, width_usize, height_usize, 3, 0, format.bits_r, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
@@ -1159,12 +1152,11 @@ fn main() -> Result<(), String> {
         }
 
         if let Some(ref path) = args.output_raw_g {
-            let g_data = extract_channel(1);
             if args.verbose {
                 eprintln!("Writing green channel binary: {}", path.display());
             }
-            let bin_data = encode_channel_row_aligned_stride(
-                &g_data, width_usize, height_usize, format.bits_g, args.stride, fill,
+            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                &dither_result.interleaved, width_usize, height_usize, 3, 1, format.bits_g, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
@@ -1175,12 +1167,11 @@ fn main() -> Result<(), String> {
         }
 
         if let Some(ref path) = args.output_raw_b {
-            let b_data = extract_channel(2);
             if args.verbose {
                 eprintln!("Writing blue channel binary: {}", path.display());
             }
-            let bin_data = encode_channel_row_aligned_stride(
-                &b_data, width_usize, height_usize, format.bits_b, args.stride, fill,
+            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                &dither_result.interleaved, width_usize, height_usize, 3, 2, format.bits_b, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
