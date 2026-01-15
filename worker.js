@@ -287,7 +287,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
 
     // Color correction (in linear RGB space)
     sendProgress('process', 'Running color correction...', 30);
-    const resultBuffer = craWasm.color_correct_wasm(
+    const resultBuffer = craWasm.color_correct_with_progress_wasm(
         inputBuffer,
         refBuffer,
         inputImg.width,
@@ -299,7 +299,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         histogramMode,
         histogramDitherMode,
         colorAwareHistogram,
-        histogramDistanceSpace
+        histogramDistanceSpace,
+        (progress) => sendProgress('process', 'Running color correction...', 30 + Math.round(progress * 25))
     );
 
     // Convert linear back to sRGB (0-1) in-place

@@ -388,6 +388,56 @@ pub fn color_correct_wasm(
     BufferF32x4::new(result)
 }
 
+/// Apply color correction with progress callback
+/// Input/output are linear RGB (0-1) in Pixel4 format
+/// Progress callback is called with values 0.0 to 1.0
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn color_correct_with_progress_wasm(
+    input: &BufferF32x4,
+    reference: &BufferF32x4,
+    input_width: usize,
+    input_height: usize,
+    ref_width: usize,
+    ref_height: usize,
+    method: u8,
+    luminosity_flag: bool,
+    histogram_mode: u8,
+    histogram_dither_mode: u8,
+    colorspace_aware_histogram: bool,
+    histogram_distance_space: u8,
+    progress_callback: &js_sys::Function,
+) -> BufferF32x4 {
+    use correction::HistogramOptions;
+
+    let histogram_options = HistogramOptions {
+        mode: histogram_mode_from_u8(histogram_mode),
+        dither_mode: dither_mode_from_u8(histogram_dither_mode),
+        colorspace_aware: colorspace_aware_histogram,
+        colorspace_aware_space: perceptual_space_from_u8(histogram_distance_space),
+    };
+
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result = correction::color_correct(
+        input.as_slice(),
+        reference.as_slice(),
+        input_width,
+        input_height,
+        ref_width,
+        ref_height,
+        correction_method_from_u8(method, luminosity_flag),
+        histogram_options,
+        Some(&mut progress_fn),
+    );
+
+    BufferF32x4::new(result)
+}
+
 // ============================================================================
 // Rescaling
 // ============================================================================

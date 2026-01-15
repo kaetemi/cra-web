@@ -575,6 +575,10 @@
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <p class="status-message" id="processing-status">Processing images...</p>
+            <div style="width: 200px; height: 8px; background: #ddd; border-radius: 4px; margin: 10px auto;">
+                <div id="progress-bar" style="width: 0%; height: 100%; background: #3498db; border-radius: 4px; transition: width 0.1s;"></div>
+            </div>
+            <span id="progress-text" style="font-size: 14px; color: #666;">0%</span>
             <pre class="console-output" id="console-output"></pre>
         </div>
     </div>

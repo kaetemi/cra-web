@@ -76,8 +76,18 @@ function initWorker() {
 
         switch (type) {
             case 'progress':
-                statusEl.textContent = data.message;
-                progressBar.style.width = data.percent + '%';
+                if (data.stage === 'init') {
+                    statusEl.textContent = data.message;
+                    progressBar.style.width = data.percent + '%';
+                } else if (data.stage === 'process') {
+                    // Update processing progress UI
+                    const processingStatus = document.getElementById('processing-status');
+                    const processingProgressBar = document.getElementById('progress-bar');
+                    const processingProgressText = document.getElementById('progress-text');
+                    if (processingStatus) processingStatus.textContent = data.message;
+                    if (processingProgressBar) processingProgressBar.style.width = data.percent + '%';
+                    if (processingProgressText) processingProgressText.textContent = data.percent + '%';
+                }
                 break;
 
             case 'ready':
@@ -573,6 +583,12 @@ function processImages() {
     processBtn.disabled = true;
     outputSection.style.display = 'none';
     clearConsole();
+
+    // Reset progress bar
+    const progressBar = document.getElementById('progress-bar');
+    const progressText = document.getElementById('progress-text');
+    if (progressBar) progressBar.style.width = '0%';
+    if (progressText) progressText.textContent = '0%';
 
     const implName = useWasm ? 'WASM' : 'Python';
     statusMessage.textContent = `Running color correction (${implName})...`;
