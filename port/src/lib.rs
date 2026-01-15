@@ -330,13 +330,16 @@ fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
 
 /// Unified color correction (WASM export)
 ///
-/// Single entry point for all color correction methods. Takes sRGB uint8 input
-/// and returns sRGB uint8 output.
+/// Single entry point for all color correction methods. Takes linear RGB f32 (0-1)
+/// input and returns linear RGB f32 (0-1) output.
+///
+/// Pipeline: caller handles sRGB u8 → f32 0-255 → f32 0-1 → linear conversion
+/// before calling this, and linear → sRGB → f32 0-255 → dither after.
 ///
 /// Args:
-///     input_data: Input image pixels as sRGB uint8 (RGBRGB...)
+///     input_linear: Input image as interleaved linear RGB f32 (0-1 range, RGBRGB...)
 ///     input_width, input_height: Input image dimensions
-///     ref_data: Reference image pixels as sRGB uint8 (RGBRGB...)
+///     ref_linear: Reference image as interleaved linear RGB f32 (0-1 range, RGBRGB...)
 ///     ref_width, ref_height: Reference image dimensions
 ///     method: Color correction method (0-7, see correction_method_from_u8)
 ///     luminosity_flag: Method-specific flag (keep_luminosity, use_perceptual, or tiled_luminosity)
@@ -344,19 +347,16 @@ fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
 ///     histogram_dither_mode: Dither mode for histogram processing (0-6)
 ///     color_aware_histogram: Enable color-aware histogram dithering (CRA/Tiled only)
 ///     histogram_distance_space: Perceptual space for histogram dithering (0-5)
-///     output_dither_mode: Dither mode for final RGB output (0-6)
-///     color_aware_output: Enable color-aware output dithering
-///     output_distance_space: Perceptual space for output dithering (0-5)
 ///
 /// Returns:
-///     Output image as sRGB uint8 (RGBRGB...)
+///     Output image as interleaved linear RGB f32 (0-1 range, RGBRGB...)
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
 pub fn color_correct_wasm(
-    input_data: &[u8],
+    input_linear: Vec<f32>,
     input_width: usize,
     input_height: usize,
-    ref_data: &[u8],
+    ref_linear: Vec<f32>,
     ref_width: usize,
     ref_height: usize,
     method: u8,
@@ -365,23 +365,20 @@ pub fn color_correct_wasm(
     histogram_dither_mode: u8,
     color_aware_histogram: bool,
     histogram_distance_space: u8,
-    output_dither_mode: u8,
-    color_aware_output: bool,
-    output_distance_space: u8,
-) -> Vec<u8> {
+) -> Vec<f32> {
     use correction::HistogramOptions;
 
-    // Convert sRGB u8 to Pixel4 linear RGB
-    // Step 1: Unpack u8 to Pixel4 (0-255)
-    // Step 2: Normalize (0-255 -> 0-1)
-    // Step 3: sRGB to linear (gamma conversion)
-    let mut input_pixels = pixel::srgb_u8_to_pixels(input_data);
-    color::normalize_inplace(&mut input_pixels);
-    color::srgb_to_linear_inplace(&mut input_pixels);
+    // Convert interleaved f32 to Pixel4
+    let input_pixels = input_width * input_height;
+    let ref_pixels = ref_width * ref_height;
 
-    let mut ref_pixels = pixel::srgb_u8_to_pixels(ref_data);
-    color::normalize_inplace(&mut ref_pixels);
-    color::srgb_to_linear_inplace(&mut ref_pixels);
+    let input_pixel4: Vec<pixel::Pixel4> = (0..input_pixels)
+        .map(|i| [input_linear[i * 3], input_linear[i * 3 + 1], input_linear[i * 3 + 2], 0.0])
+        .collect();
+
+    let ref_pixel4: Vec<pixel::Pixel4> = (0..ref_pixels)
+        .map(|i| [ref_linear[i * 3], ref_linear[i * 3 + 1], ref_linear[i * 3 + 2], 0.0])
+        .collect();
 
     // Build method enum
     let correction_method = correction_method_from_u8(method, luminosity_flag);
@@ -395,9 +392,9 @@ pub fn color_correct_wasm(
     };
 
     // Perform color correction
-    let mut result = correction::color_correct(
-        &input_pixels,
-        &ref_pixels,
+    let result = correction::color_correct(
+        &input_pixel4,
+        &ref_pixel4,
         input_width,
         input_height,
         ref_width,
@@ -406,16 +403,15 @@ pub fn color_correct_wasm(
         histogram_options,
     );
 
-    // Finalize to sRGB u8 output
-    output::finalize_to_srgb_u8_with_options(
-        &mut result,
-        input_width,
-        input_height,
-        Some(dither_mode_from_u8(output_dither_mode)),
-        color_aware_output,
-        perceptual_space_from_u8(output_distance_space),
-        0, // seed
-    )
+    // Convert Pixel4 back to interleaved f32
+    let mut output = vec![0.0f32; input_pixels * 3];
+    for (i, pixel) in result.iter().enumerate() {
+        output[i * 3] = pixel[0];
+        output[i * 3 + 1] = pixel[1];
+        output[i * 3 + 2] = pixel[2];
+    }
+
+    output
 }
 
 // ============================================================================
@@ -971,7 +967,35 @@ pub fn rescale_linear_rgb_with_progress_wasm(
 mod tests {
     use super::*;
 
-    // Helper to call unified color_correct_wasm
+    // Helper to convert u8 to linear f32 for testing
+    fn u8_to_linear_f32(data: &[u8], width: usize, height: usize) -> Vec<f32> {
+        let mut pixels = pixel::srgb_u8_to_pixels(data);
+        color::normalize_inplace(&mut pixels);
+        color::srgb_to_linear_inplace(&mut pixels);
+        // Convert to interleaved f32
+        pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect()
+    }
+
+    // Helper to convert linear f32 to sRGB u8 with dithering
+    fn linear_f32_to_u8(data: &[f32], width: usize, height: usize, dither_mode: u8, color_aware: bool, space: u8) -> Vec<u8> {
+        // Convert interleaved f32 to Pixel4
+        let pixels: usize = width * height;
+        let mut pixel4: Vec<pixel::Pixel4> = (0..pixels)
+            .map(|i| [data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 0.0])
+            .collect();
+        // Finalize to sRGB u8 output
+        output::finalize_to_srgb_u8_with_options(
+            &mut pixel4,
+            width,
+            height,
+            Some(dither_mode_from_u8(dither_mode)),
+            color_aware,
+            perceptual_space_from_u8(space),
+            0, // seed
+        )
+    }
+
+    // Helper to call unified color_correct_wasm with full pipeline
     // method: 0=BasicLab, 1=BasicRgb, 2=BasicOklab, 3=CraLab, 4=CraRgb, 5=CraOklab, 6=TiledLab, 7=TiledOklab
     fn cc(
         input: &[u8], iw: usize, ih: usize,
@@ -981,11 +1005,20 @@ mod tests {
         ca_hist: bool, hist_space: u8,
         out_dither: u8, ca_out: bool, out_space: u8,
     ) -> Vec<u8> {
-        color_correct_wasm(
-            input, iw, ih, reference, rw, rh,
+        // Step 1: Convert inputs to linear f32
+        let input_linear = u8_to_linear_f32(input, iw, ih);
+        let ref_linear = u8_to_linear_f32(reference, rw, rh);
+
+        // Step 2: Call color_correct_wasm (now takes linear f32)
+        let result_linear = color_correct_wasm(
+            input_linear, iw, ih,
+            ref_linear, rw, rh,
             method, lum_flag, hist_mode, hist_dither,
-            ca_hist, hist_space, out_dither, ca_out, out_space,
-        )
+            ca_hist, hist_space,
+        );
+
+        // Step 3: Convert result back to sRGB u8 with dithering
+        linear_f32_to_u8(&result_linear, iw, ih, out_dither, ca_out, out_space)
     }
 
     #[test]

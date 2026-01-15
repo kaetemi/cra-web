@@ -141,16 +141,17 @@ async function encodePng(rgbData, width, height) {
 }
 
 // Process images using WASM
+// Pipeline: sRGB u8 → f32 0-255 → f32 0-1 → linear RGB → color_correct → sRGB → f32 0-255 → dither to u8
 async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
-    sendProgress('process', 'Decoding images...', 10);
+    sendProgress('process', 'Decoding images...', 5);
     const inputImg = await decodeImage(inputData);
     const refImg = await decodeImage(refData);
 
-    sendProgress('process', 'Converting to RGB...', 20);
+    sendProgress('process', 'Converting to RGB...', 10);
     const inputRgb = rgbaToRgb(inputImg.data);
     const refRgb = rgbaToRgb(refImg.data);
 
-    sendProgress('process', 'Processing with WASM...', 30);
+    // Log processing info
     sendConsole(`Processing ${inputImg.width}x${inputImg.height} image with WASM...`);
     sendConsole(`Method: ${method}`);
     const histogramModeNames = {
@@ -230,18 +231,59 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     sendConsole(`Running ${description}...`);
 
     const startTime = performance.now();
-    const resultRgb = craWasm.color_correct_wasm(
-        inputRgb, inputImg.width, inputImg.height,
-        refRgb, refImg.width, refImg.height,
+
+    // ========================================================================
+    // Standard pipeline: sRGB u8 → f32 0-255 → f32 0-1 → linear → process → sRGB → f32 0-255 → dither
+    // ========================================================================
+
+    // Step 1: Unpack u8 to f32 (0-255)
+    sendProgress('process', 'Converting input to float...', 15);
+    const inputF32_255 = craWasm.unpack_u8_to_f32_wasm(inputRgb, inputImg.width, inputImg.height);
+    const refF32_255 = craWasm.unpack_u8_to_f32_wasm(refRgb, refImg.width, refImg.height);
+
+    // Step 2: Normalize to 0-1
+    sendProgress('process', 'Normalizing...', 20);
+    const inputF32_01 = craWasm.normalize_f32_wasm(inputF32_255, inputImg.width, inputImg.height);
+    const refF32_01 = craWasm.normalize_f32_wasm(refF32_255, refImg.width, refImg.height);
+
+    // Step 3: Convert sRGB to linear
+    sendProgress('process', 'Converting to linear RGB...', 25);
+    const inputLinear = craWasm.srgb_to_linear_f32_wasm(inputF32_01, inputImg.width, inputImg.height);
+    const refLinear = craWasm.srgb_to_linear_f32_wasm(refF32_01, refImg.width, refImg.height);
+
+    // Step 4: Color correction (in linear RGB space)
+    sendProgress('process', 'Running color correction...', 30);
+    const resultLinear = craWasm.color_correct_wasm(
+        inputLinear, inputImg.width, inputImg.height,
+        refLinear, refImg.width, refImg.height,
         methodCode,
         luminosityFlag,
         histogramMode,
         histogramDitherMode,
         colorAwareHistogram,
-        histogramDistanceSpace,
+        histogramDistanceSpace
+    );
+
+    // Step 5: Convert linear back to sRGB (0-1)
+    sendProgress('process', 'Converting to sRGB...', 60);
+    const resultSrgb_01 = craWasm.linear_to_srgb_f32_wasm(resultLinear, inputImg.width, inputImg.height);
+
+    // Step 6: Denormalize to 0-255
+    sendProgress('process', 'Denormalizing...', 65);
+    const resultSrgb_255 = craWasm.denormalize_f32_wasm(resultSrgb_01, inputImg.width, inputImg.height);
+
+    // Step 7: Dither to RGB888
+    sendProgress('process', 'Dithering output...', 70);
+    // Dither technique: 1 = PerChannel, 2 = ColorAware
+    const ditherTechnique = colorAwareOutput ? 2 : 1;
+    const resultRgb = craWasm.dither_output_wasm(
+        resultSrgb_255,
+        inputImg.width, inputImg.height,
+        8, 8, 8,  // RGB888
+        ditherTechnique,
         outputDitherMode,
-        colorAwareOutput,
-        outputDistanceSpace
+        outputDistanceSpace,
+        0  // seed
     );
 
     const elapsed = performance.now() - startTime;
