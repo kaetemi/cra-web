@@ -112,12 +112,15 @@ function cacheResult(key, imageData) {
 
 // Extract pixels from an image using canvas
 function getImagePixels(img) {
+    console.log('[linear-img] Extracting pixels from image:', img.naturalWidth, 'x', img.naturalHeight);
     const canvas = document.createElement('canvas');
     canvas.width = img.naturalWidth;
     canvas.height = img.naturalHeight;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
-    return ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    console.log('[linear-img] Got pixel data, length:', imageData.data.length);
+    return imageData;
 }
 
 // Custom element definition
@@ -132,6 +135,7 @@ class LinearImg extends HTMLElement {
 
         // Internal state
         this._src = null;
+        this._loadedSrc = null;  // Track which src we've loaded to prevent duplicates
         this._naturalWidth = 0;
         this._naturalHeight = 0;
         this._displayWidth = 0;
@@ -141,6 +145,7 @@ class LinearImg extends HTMLElement {
         this._pixelData = null;  // Raw RGBA pixels from canvas
         this._processing = false;
         this._pendingResize = false;
+        this._loading = false;  // Guard against concurrent loads
 
         // Create container
         this._container = document.createElement('div');
@@ -198,6 +203,8 @@ class LinearImg extends HTMLElement {
         switch (name) {
             case 'src':
                 this._src = newValue;
+                this._loadedSrc = null;  // Clear to allow fresh load
+                this._pixelData = null;  // Clear old pixel data
                 this._loadImage();
                 break;
             case 'width':
@@ -219,6 +226,9 @@ class LinearImg extends HTMLElement {
     }
 
     _updateFromAttributes() {
+        // Note: attributeChangedCallback handles src changes and calls _loadImage
+        // This method just syncs internal state for attributes that may have been
+        // set before connectedCallback
         this._src = this.getAttribute('src');
         this._method = this.getAttribute('method') === 'bilinear' ? 'bilinear' : 'lanczos';
         this._fit = this.getAttribute('fit') || 'contain';
@@ -229,7 +239,9 @@ class LinearImg extends HTMLElement {
         this._container.style.width = width ? width + 'px' : '100%';
         this._container.style.height = height ? height + 'px' : '100%';
 
-        if (this._src) {
+        // If we have a src but haven't loaded it yet, load it
+        // This handles the case where attributeChangedCallback fired before connectedCallback
+        if (this._src && !this._loadedSrc && !this._loading) {
             this._loadImage();
         }
     }
@@ -237,24 +249,47 @@ class LinearImg extends HTMLElement {
     async _loadImage() {
         if (!this._src) return;
 
+        // Skip if already loaded this src or currently loading
+        if (this._src === this._loadedSrc) {
+            console.log('[linear-img] Already loaded this src, skipping');
+            return;
+        }
+        if (this._loading) {
+            console.log('[linear-img] Already loading, skipping');
+            return;
+        }
+
+        console.log('[linear-img] _loadImage called, src length:', this._src.length);
+        this._loading = true;
+
         // Show preview immediately using browser scaling
         this._preview.src = this._src;
         this._preview.style.display = 'block';
+        this._preview.style.visibility = 'visible';  // Reset visibility
         this._canvas.style.display = 'none';
 
         try {
             // Wait for image to load
             await new Promise((resolve, reject) => {
                 if (this._preview.complete && this._preview.naturalWidth > 0) {
+                    console.log('[linear-img] Image already complete');
                     resolve();
                 } else {
-                    this._preview.onload = resolve;
-                    this._preview.onerror = () => reject(new Error('Failed to load image'));
+                    this._preview.onload = () => {
+                        console.log('[linear-img] Image onload fired');
+                        resolve();
+                    };
+                    this._preview.onerror = (e) => {
+                        console.error('[linear-img] Image onerror fired', e);
+                        reject(new Error('Failed to load image'));
+                    };
                 }
             });
 
             this._naturalWidth = this._preview.naturalWidth;
             this._naturalHeight = this._preview.naturalHeight;
+            this._loadedSrc = this._src;  // Mark as loaded
+            console.log('[linear-img] Natural size:', this._naturalWidth, 'x', this._naturalHeight);
 
             // Extract pixels via canvas
             const imageData = getImagePixels(this._preview);
@@ -262,13 +297,19 @@ class LinearImg extends HTMLElement {
 
             // Trigger resize with current display dimensions
             const rect = this.getBoundingClientRect();
+            console.log('[linear-img] Bounding rect:', rect.width, 'x', rect.height);
             if (rect.width > 0 && rect.height > 0) {
-                this._handleResize(Math.round(rect.width), Math.round(rect.height));
+                this._displayWidth = Math.round(rect.width);
+                this._displayHeight = Math.round(rect.height);
+                // Call _scheduleResize directly since we now have pixel data
+                this._scheduleResize();
             }
 
         } catch (err) {
-            console.error('LinearImg: Failed to load image:', err);
+            console.error('[linear-img] Failed to load image:', err);
             this.dispatchEvent(new CustomEvent('error', { detail: err }));
+        } finally {
+            this._loading = false;
         }
     }
 
@@ -296,15 +337,20 @@ class LinearImg extends HTMLElement {
     }
 
     async _doResize() {
+        console.log('[linear-img] _doResize called');
         if (!this._pixelData || this._displayWidth <= 0 || this._displayHeight <= 0) {
+            console.log('[linear-img] _doResize early return - no pixel data or zero dimensions');
             return;
         }
 
         const { outputWidth, outputHeight } = this._calculateOutputDimensions();
+        console.log('[linear-img] Output dimensions:', outputWidth, 'x', outputHeight);
 
         // Skip if output would be same as natural size
         if (outputWidth === this._naturalWidth && outputHeight === this._naturalHeight) {
+            console.log('[linear-img] Same as natural size, showing preview');
             this._preview.style.display = 'block';
+            this._preview.style.visibility = 'visible';
             this._canvas.style.display = 'none';
             return;
         }
@@ -313,11 +359,13 @@ class LinearImg extends HTMLElement {
         const cacheKey = getCacheKey(this._src, outputWidth, outputHeight, this._method);
         const cached = resultCache.get(cacheKey);
         if (cached) {
+            console.log('[linear-img] Using cached result');
             this._displayResult(cached, outputWidth, outputHeight);
             return;
         }
 
         this._processing = true;
+        console.log('[linear-img] Starting resize:', this._naturalWidth, 'x', this._naturalHeight, '->', outputWidth, 'x', outputHeight);
 
         try {
             const result = await requestResizePixels(
@@ -328,6 +376,8 @@ class LinearImg extends HTMLElement {
                 outputHeight,
                 this._method
             );
+
+            console.log('[linear-img] Resize complete, result:', result.width, 'x', result.height, 'data length:', result.outputData.length);
 
             const imageData = new ImageData(
                 new Uint8ClampedArray(result.outputData),
@@ -340,7 +390,10 @@ class LinearImg extends HTMLElement {
             // Display if dimensions still match
             const { outputWidth: currentW, outputHeight: currentH } = this._calculateOutputDimensions();
             if (currentW === outputWidth && currentH === outputHeight) {
+                console.log('[linear-img] Displaying result');
                 this._displayResult(imageData, outputWidth, outputHeight);
+            } else {
+                console.log('[linear-img] Dimensions changed during processing, not displaying');
             }
 
             this.dispatchEvent(new CustomEvent('load', {
@@ -348,7 +401,7 @@ class LinearImg extends HTMLElement {
             }));
 
         } catch (err) {
-            console.error('LinearImg: Resize failed:', err);
+            console.error('[linear-img] Resize failed:', err);
             // Keep showing browser-scaled preview on error
         } finally {
             this._processing = false;
@@ -427,12 +480,28 @@ class LinearImg extends HTMLElement {
         this._canvas.style.width = width + 'px';
         this._canvas.style.height = height + 'px';
 
-        // Show canvas, hide preview
+        // Show canvas, keep preview invisible but in layout (prevents collapse)
         this._canvas.style.display = 'block';
-        this._preview.style.display = 'none';
+        this._preview.style.visibility = 'hidden';  // Hidden but still takes space
+        this._preview.style.display = 'block';
     }
 
-    // Public API
+    // Public API - property accessors that reflect to attributes
+    get src() { return this.getAttribute('src'); }
+    set src(value) {
+        if (value) {
+            this.setAttribute('src', value);
+        } else {
+            this.removeAttribute('src');
+        }
+    }
+
+    get width() { return this.getAttribute('width'); }
+    set width(value) { this.setAttribute('width', value); }
+
+    get height() { return this.getAttribute('height'); }
+    set height(value) { this.setAttribute('height', value); }
+
     get naturalWidth() { return this._naturalWidth; }
     get naturalHeight() { return this._naturalHeight; }
     get complete() { return !this._processing && this._canvas.style.display === 'block'; }
