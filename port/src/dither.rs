@@ -302,6 +302,7 @@ fn dither_standard<K: DitherKernel>(
     width: usize,
     height: usize,
     quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let mut buf = create_padded_buffer(
         img, width, height,
@@ -317,6 +318,9 @@ fn dither_standard<K: DitherKernel>(
             let err = old - new;
             K::apply_ltr(&mut buf, bx, y, err);
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 
     extract_result(&buf, width, height, K::PAD_LEFT)
@@ -329,6 +333,7 @@ fn dither_serpentine<K: DitherKernel>(
     width: usize,
     height: usize,
     quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let mut buf = create_padded_buffer(
         img, width, height,
@@ -356,6 +361,9 @@ fn dither_serpentine<K: DitherKernel>(
                 let err = old - new;
                 K::apply_ltr(&mut buf, bx, y, err);
             }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 
@@ -394,6 +402,7 @@ fn mixed_dither_standard(
     height: usize,
     seed: u32,
     quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
     // Use JJN padding (larger) to accommodate both kernels
@@ -410,6 +419,9 @@ fn mixed_dither_standard(
             let use_jjn = pixel_hash & 1 == 1;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 
     extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
@@ -423,6 +435,7 @@ fn mixed_dither_serpentine(
     height: usize,
     seed: u32,
     quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
     let mut buf = create_padded_buffer(
@@ -450,6 +463,9 @@ fn mixed_dither_serpentine(
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
     }
 
     extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
@@ -463,6 +479,7 @@ fn mixed_dither_random(
     height: usize,
     seed: u32,
     quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
     let mut buf = create_padded_buffer(
@@ -490,6 +507,9 @@ fn mixed_dither_random(
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
         }
     }
 
@@ -525,7 +545,7 @@ pub fn floyd_steinberg_dither(img: &[f32], width: usize, height: usize) -> Vec<u
 ///     flat array of u8 values, same length as input.
 ///     Lower bit depths are represented in uint8 by extending bits through repetition.
 pub fn floyd_steinberg_dither_bits(img: &[f32], width: usize, height: usize, bits: u8) -> Vec<u8> {
-    dither_with_mode_bits(img, width, height, DitherMode::Standard, 0, bits)
+    dither_with_mode_bits(img, width, height, DitherMode::Standard, 0, bits, None)
 }
 
 /// Dithering with selectable algorithm and scanning mode (standard 8-bit depth).
@@ -549,7 +569,7 @@ pub fn dither_with_mode(
     mode: DitherMode,
     seed: u32,
 ) -> Vec<u8> {
-    dither_with_mode_bits(img, width, height, mode, seed, 8)
+    dither_with_mode_bits(img, width, height, mode, seed, 8, None)
 }
 
 /// Dithering with selectable algorithm, scanning mode, and bit depth.
@@ -561,6 +581,7 @@ pub fn dither_with_mode(
 ///     mode: DitherMode variant selecting algorithm and scan pattern
 ///     seed: random seed for mixed modes (ignored for non-mixed modes)
 ///     bits: output bit depth (1-8), controls number of quantization levels
+///     progress: optional callback called after each row with progress (0.0 to 1.0)
 ///
 /// Returns:
 ///     flat array of u8 values, same length as input.
@@ -572,6 +593,7 @@ pub fn dither_with_mode_bits(
     mode: DitherMode,
     seed: u32,
     bits: u8,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let quant = if bits == 8 {
         QuantParams::default_8bit()
@@ -580,14 +602,14 @@ pub fn dither_with_mode_bits(
     };
 
     match mode {
-        DitherMode::None => dither_standard::<NoneKernel>(img, width, height, quant),
-        DitherMode::Standard => dither_standard::<FloydSteinberg>(img, width, height, quant),
-        DitherMode::Serpentine => dither_serpentine::<FloydSteinberg>(img, width, height, quant),
-        DitherMode::JarvisStandard => dither_standard::<JarvisJudiceNinke>(img, width, height, quant),
-        DitherMode::JarvisSerpentine => dither_serpentine::<JarvisJudiceNinke>(img, width, height, quant),
-        DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed, quant),
-        DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed, quant),
-        DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant),
+        DitherMode::None => dither_standard::<NoneKernel>(img, width, height, quant, progress),
+        DitherMode::Standard => dither_standard::<FloydSteinberg>(img, width, height, quant, progress),
+        DitherMode::Serpentine => dither_serpentine::<FloydSteinberg>(img, width, height, quant, progress),
+        DitherMode::JarvisStandard => dither_standard::<JarvisJudiceNinke>(img, width, height, quant, progress),
+        DitherMode::JarvisSerpentine => dither_serpentine::<JarvisJudiceNinke>(img, width, height, quant, progress),
+        DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed, quant, progress),
+        DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant, progress),
     }
 }
 
@@ -690,9 +712,9 @@ pub fn dither_rgb_channels_with_mode(
     seed: u32,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let (r, g, b) = pixels_to_channels(pixels);
-    let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r);
-    let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g);
-    let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b);
+    let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
+    let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
+    let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
     (r_u8, g_u8, b_u8)
 }
 
@@ -1050,8 +1072,8 @@ mod tests {
     fn test_dither_with_mode_bits_parameter() {
         // Test that dither_with_mode_bits correctly uses the bits parameter
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result_8bit = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 8);
-        let result_2bit = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 2);
+        let result_8bit = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 8, None);
+        let result_2bit = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 2, None);
         assert_ne!(result_8bit, result_2bit);
         // 2-bit should only contain valid levels
         let valid_levels = [0u8, 85, 170, 255];
@@ -1075,7 +1097,7 @@ mod tests {
         ];
         let valid_levels = [0u8, 85, 170, 255]; // 2-bit levels
         for mode in modes {
-            let result = dither_with_mode_bits(&img, 10, 10, mode, 42, 2);
+            let result = dither_with_mode_bits(&img, 10, 10, mode, 42, 2, None);
             assert_eq!(result.len(), 100);
             for &v in &result {
                 assert!(valid_levels.contains(&v), "Mode {:?} produced invalid 2-bit value: {}", mode, v);

@@ -182,11 +182,12 @@ pub fn dither_output(
             (r_u8, g_u8, b_u8)
         }
         OutputTechnique::PerChannel { mode } => {
-            // Per-channel error diffusion - progress not supported yet
+            // Per-channel error diffusion in sRGB space
+            // Note: progress callback is ignored for per-channel (not practical to report)
             let (r, g, b) = pixels_to_channels(srgb_pixels);
-            let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r);
-            let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g);
-            let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b);
+            let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
+            let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
+            let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
             (r_u8, g_u8, b_u8)
         }
         OutputTechnique::ColorspaceAware { mode, space } => {
@@ -344,8 +345,9 @@ pub fn dither_output_gray(
             gray_channel.iter().map(|v| quantize_no_dither(*v, bits)).collect()
         }
         OutputTechnique::PerChannel { mode } => {
-            // Per-channel error diffusion (same as color-aware for grayscale)
-            crate::dither::dither_with_mode_bits(gray_channel, width, height, mode, seed, bits)
+            // Per-channel error diffusion in sRGB space (no linear/perceptual conversion)
+            // Note: progress callback is ignored for per-channel
+            crate::dither::dither_with_mode_bits(gray_channel, width, height, mode, seed, bits, None)
         }
         OutputTechnique::ColorspaceAware { mode, space } => {
             // Color-aware dithering for grayscale

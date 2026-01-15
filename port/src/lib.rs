@@ -564,7 +564,7 @@ pub fn dither_gray_wasm(
         )
     } else if technique == 1 {
         // Per-channel dithering
-        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits)
+        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits, None)
     } else {
         // No dithering - just quantize (round to nearest level)
         let levels = 1u32 << bits;
@@ -670,8 +670,8 @@ pub fn dither_gray_with_progress_wasm(
             Some(&mut progress_fn),
         )
     } else if technique == 1 {
-        // Per-channel dithering - no progress support yet
-        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits)
+        // Per-channel dithering - no progress support
+        dither::dither_with_mode_bits(buf.as_slice(), width, height, dither_mode, seed, bits, None)
     } else {
         // No dithering - just quantize (round to nearest level)
         let levels = 1u32 << bits;
