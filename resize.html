@@ -375,7 +375,7 @@
     <script>
         let worker = null;
         let workerReady = false;
-        let inputImageData = null;
+        let inputFileBytes = null;      // Raw file bytes for precise WASM decoding
         let originalWidth = 0;
         let originalHeight = 0;
         let aspectRatio = 1;
@@ -402,7 +402,7 @@
                 switch (type) {
                     case 'ready':
                         workerReady = true;
-                        document.getElementById('process-btn').disabled = !inputImageData;
+                        document.getElementById('process-btn').disabled = !inputFileBytes;
                         break;
 
                     case 'progress':
@@ -458,9 +458,6 @@
                     // Start sRGB (bad) resize - use simple Floyd-Steinberg without color-awareness
                     worker.postMessage({
                         type: 'resize-srgb',
-                        imageData: inputImageData.data,
-                        srcWidth: originalWidth,
-                        srcHeight: originalHeight,
                         ...pendingComparison.params,
                         ditherMode: 0,        // Floyd-Steinberg standard (not mixed)
                         ditherTechnique: 1    // PerChannel (not ColorAware)
@@ -596,19 +593,25 @@
             return cmd;
         }
 
-        function loadImage(file) {
+        // Load image file as ArrayBuffer (for precise WASM decoding in worker)
+        function loadImageBytes(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        // Load image for preview and dimensions (uses Canvas for UI only)
+        function loadImagePreview(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     const img = new Image();
                     img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        canvas.width = img.width;
-                        canvas.height = img.height;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0);
                         resolve({
-                            imageData: ctx.getImageData(0, 0, img.width, img.height),
+                            dataUrl: e.target.result,
                             width: img.width,
                             height: img.height
                         });
@@ -649,7 +652,7 @@
         }
 
         function processImage() {
-            if (!inputImageData || !workerReady) return;
+            if (!inputFileBytes || !workerReady) return;
 
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
@@ -681,6 +684,7 @@
                 : SCALE_MODE_UNIFORM_HEIGHT;
 
             const params = {
+                fileBytes: inputFileBytes,  // Send raw file bytes for precise WASM decoding
                 dstWidth: dstW,
                 dstHeight: dstH,
                 interpolation,
@@ -704,9 +708,6 @@
             // Start linear resize (correct way)
             worker.postMessage({
                 type: 'resize',
-                imageData: inputImageData.data,
-                srcWidth: originalWidth,
-                srcHeight: originalHeight,
                 ...params
             });
         }
@@ -739,8 +740,12 @@
             if (!file) return;
 
             try {
-                const { imageData, width, height } = await loadImage(file);
-                inputImageData = imageData;
+                // Load file bytes for precise WASM decoding in worker
+                const fileBytes = await loadImageBytes(file);
+                inputFileBytes = fileBytes;
+
+                // Load preview image for UI (dimensions and display)
+                const { dataUrl, width, height } = await loadImagePreview(file);
                 originalWidth = width;
                 originalHeight = height;
                 aspectRatio = width / height;
@@ -758,14 +763,8 @@
                 const box = document.getElementById('upload-box');
                 box.classList.add('has-image');
 
-                // Create preview canvas to show the loaded image
-                const previewCanvas = document.createElement('canvas');
-                previewCanvas.width = width;
-                previewCanvas.height = height;
-                previewCanvas.getContext('2d').putImageData(imageData, 0, 0);
-
                 box.innerHTML = `
-                    <img id="input-preview" src="${previewCanvas.toDataURL()}" alt="Preview">
+                    <img id="input-preview" src="${dataUrl}" alt="Preview">
                     <label>Image loaded: ${width}x${height}</label>
                     <p class="hint">Click to change image</p>
                     <input type="file" id="file-input" accept="image/*">

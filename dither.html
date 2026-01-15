@@ -848,9 +848,9 @@
             encode_gray_row_aligned_stride_wasm,
             encode_channel_packed_wasm,
             encode_channel_row_aligned_stride_wasm,
+            // Precise image decoding (preserves 16-bit, extracts ICC)
+            decode_image_wasm,
             // Atomic color space conversion functions
-            unpack_u8_to_f32_wasm,
-            normalize_f32_wasm,
             denormalize_f32_wasm,
             srgb_to_linear_f32_wasm,
             linear_to_srgb_f32_wasm,
@@ -873,29 +873,21 @@
             };
         }
 
-        // Extract RGB from ImageData as interleaved Uint8Array (for WASM input)
-        function imageDataToU8Interleaved(imageData) {
-            const pixels = imageData.width * imageData.height;
-            const data = imageData.data;
-            const rgb = new Uint8Array(pixels * 3);
-
-            for (let i = 0; i < pixels; i++) {
-                rgb[i * 3] = data[i * 4];
-                rgb[i * 3 + 1] = data[i * 4 + 1];
-                rgb[i * 3 + 2] = data[i * 4 + 2];
-            }
-
-            return rgb;
-        }
-
-        // Unpack ImageData to sRGB f32 (0-255 scale) - for direct dithering when no processing needed
-        function imageDataToSrgbF32(imageData) {
-            const rgb = imageDataToU8Interleaved(imageData);
-            return unpack_u8_to_f32_wasm(rgb, imageData.width, imageData.height);
+        // Decode image using WASM (preserves 16-bit precision)
+        // Returns: { width, height, pixels (f32 0-1 interleaved RGB), is16bit }
+        function decodeImagePrecise(fileBytes) {
+            const result = decode_image_wasm(new Uint8Array(fileBytes));
+            const width = result[0];
+            const height = result[1];
+            const hasIcc = result[2] > 0.5;
+            const is16bit = result[3] > 0.5;
+            const pixels = result.slice(4); // Interleaved RGB f32 (0-1)
+            return { width, height, hasIcc, is16bit, pixels };
         }
 
         let wasmReady = false;
-        let inputImageData = null;
+        let inputFileBytes = null;      // Raw file bytes for precise decoding
+        let inputPixelsF32 = null;      // Decoded f32 0-1 pixels (cached)
         let inputWidth = 0;
         let inputHeight = 0;
         let originalWidth = 0;
@@ -931,32 +923,27 @@
         // Update process button state
         function updateProcessButton() {
             const btn = document.getElementById('process-btn');
-            btn.disabled = !wasmReady || !inputImageData;
+            btn.disabled = !wasmReady || !inputFileBytes;
         }
 
-        // Load image from file
-        function loadImage(file) {
+        // Load image file as ArrayBuffer (for precise WASM decoding)
+        function loadImageBytes(file) {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => resolve(img);
-                    img.onerror = reject;
-                    img.src = e.target.result;
-                };
+                reader.onload = (e) => resolve(e.target.result);
                 reader.onerror = reject;
-                reader.readAsDataURL(file);
+                reader.readAsArrayBuffer(file);
             });
         }
 
-        // Get image data from image element
-        function getImageData(img) {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            return ctx.getImageData(0, 0, img.width, img.height);
+        // Create preview image from file (for display only)
+        function createPreview(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => resolve(e.target.result);
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
 
         // Note: rescaleImageData removed - now using atomic pipeline in processImage
@@ -1019,11 +1006,11 @@
 
         // Process the image using atomic pipeline
         // Pipeline decisions:
-        // - RGB without rescale: u8 → unpack → sRGB f32 → dither (skip linear)
-        // - RGB with rescale: u8 → unpack → sRGB f32 → linear → rescale → sRGB f32 → dither
-        // - Grayscale: u8 → unpack → sRGB f32 → linear → [rescale] → grayscale → sRGB f32 → dither
+        // - RGB without rescale: f32 0-1 → denormalize to 0-255 → dither (skip linear)
+        // - RGB with rescale: f32 0-1 → linear → rescale → sRGB → denormalize → dither
+        // - Grayscale: f32 0-1 → linear → [rescale] → grayscale → sRGB → denormalize → dither
         async function processImage() {
-            if (!inputImageData) return;
+            if (!inputFileBytes) return;
 
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
@@ -1058,19 +1045,17 @@
                 const pixelCount = processWidth * processHeight;
                 const outputData = new Uint8ClampedArray(pixelCount * 4);
 
-                // Step 1: Unpack u8 to sRGB f32
-                let srgbF32 = imageDataToSrgbF32(inputImageData);
+                // Use cached decoded pixels (f32 0-1 sRGB)
+                let srgbNorm = inputPixelsF32;
                 let currentWidth = originalWidth;
                 let currentHeight = originalHeight;
 
                 if (needsLinear) {
-                    // Step 2: Normalize to 0-1 range
-                    let srgbNorm = normalize_f32_wasm(srgbF32, currentWidth, currentHeight);
-
-                    // Step 3: Convert to linear
+                    // Input srgbNorm is already f32 0-1 from precise decode
+                    // Step 1: Convert to linear
                     let linearRgb = srgb_to_linear_f32_wasm(srgbNorm, currentWidth, currentHeight);
 
-                    // Step 3: Rescale in linear space (if needed)
+                    // Step 2: Rescale in linear space (if needed)
                     if (doDownscale) {
                         // Use uniform scaling based on primary dimension for exact AR preservation
                         const scaleMode = primaryDimension === 'width'
@@ -1088,16 +1073,16 @@
                     }
 
                     if (isGrayscale) {
-                        // Step 4a: Convert to grayscale in linear space
+                        // Step 3a: Convert to grayscale in linear space
                         const linearGray = linear_rgb_to_grayscale_wasm(linearRgb, currentWidth, currentHeight);
 
-                        // Step 5a: Convert linear to sRGB (0-1 -> 0-1)
+                        // Step 4a: Convert linear to sRGB (0-1 -> 0-1)
                         const srgbGrayNorm = linear_gray_to_srgb_f32_wasm(linearGray);
 
-                        // Step 6a: Denormalize to 0-255
+                        // Step 5a: Denormalize to 0-255
                         const srgbGray = denormalize_gray_f32_wasm(srgbGrayNorm);
 
-                        // Step 7a: Dither grayscale
+                        // Step 6a: Dither grayscale
                         const bitsGray = parseInt(document.getElementById('bits-gray').value);
                         const isPerceptual = document.getElementById('perceptual-toggle').checked;
 
@@ -1125,13 +1110,13 @@
                             outputData[i * 4 + 3] = 255;
                         }
                     } else {
-                        // Step 4b: Convert back to sRGB (0-1)
-                        let srgbNorm = linear_to_srgb_f32_wasm(linearRgb, currentWidth, currentHeight);
+                        // Step 3b: Convert back to sRGB (0-1)
+                        const srgbResizedNorm = linear_to_srgb_f32_wasm(linearRgb, currentWidth, currentHeight);
 
-                        // Step 5b: Denormalize to 0-255 for dithering
-                        srgbF32 = denormalize_f32_wasm(srgbNorm, currentWidth, currentHeight);
+                        // Step 4b: Denormalize to 0-255 for dithering
+                        const srgbF32_255 = denormalize_f32_wasm(srgbResizedNorm, currentWidth, currentHeight);
 
-                        // Step 6b: Dither RGB
+                        // Step 5b: Dither RGB
                         const bitsR = parseInt(document.getElementById('bits-r').value);
                         const bitsG = parseInt(document.getElementById('bits-g').value);
                         const bitsB = parseInt(document.getElementById('bits-b').value);
@@ -1140,7 +1125,7 @@
                         const technique = isPerceptual ? 2 : 1;
 
                         const rgbDithered = dither_output_wasm(
-                            srgbF32,
+                            srgbF32_255,
                             currentWidth, currentHeight,
                             bitsR, bitsG, bitsB,
                             technique,
@@ -1157,7 +1142,10 @@
                         }
                     }
                 } else {
-                    // No linear processing needed - direct RGB dithering
+                    // No linear processing needed - direct sRGB dithering (preserves 16-bit precision)
+                    // srgbNorm is f32 0-1, denormalize to 0-255 for dithering
+                    const srgbF32_255 = denormalize_f32_wasm(srgbNorm, currentWidth, currentHeight);
+
                     const bitsR = parseInt(document.getElementById('bits-r').value);
                     const bitsG = parseInt(document.getElementById('bits-g').value);
                     const bitsB = parseInt(document.getElementById('bits-b').value);
@@ -1166,7 +1154,7 @@
                     const technique = isPerceptual ? 2 : 1;
 
                     const rgbDithered = dither_output_wasm(
-                        srgbF32,
+                        srgbF32_255,
                         currentWidth, currentHeight,
                         bitsR, bitsG, bitsB,
                         technique,
@@ -1433,21 +1421,30 @@
             if (!file) return;
 
             try {
-                const img = await loadImage(file);
+                // Load file bytes for precise WASM decoding
+                const fileBytes = await loadImageBytes(file);
+
+                // Decode with WASM (preserves 16-bit precision)
+                const decoded = decodeImagePrecise(fileBytes);
+
+                // Store for processing
+                inputFileBytes = fileBytes;
+                inputPixelsF32 = decoded.pixels;
+                inputWidth = decoded.width;
+                inputHeight = decoded.height;
+                originalWidth = decoded.width;
+                originalHeight = decoded.height;
+                aspectRatio = decoded.width / decoded.height;
+
+                // Create preview image for display (using DataURL for compatibility)
+                const previewUrl = await createPreview(file);
                 const preview = document.getElementById('input-preview');
-                preview.src = img.src;
+                preview.src = previewUrl;
                 preview.style.display = 'block';
 
                 const uploadBox = document.getElementById('input-upload');
                 uploadBox.classList.add('has-image');
                 uploadBox.querySelectorAll('.hint, label').forEach(el => el.style.display = 'none');
-
-                inputImageData = getImageData(img);
-                inputWidth = img.width;
-                inputHeight = img.height;
-                originalWidth = img.width;
-                originalHeight = img.height;
-                aspectRatio = img.width / img.height;
 
                 // Set initial scale values (default to 128 on longest edge)
                 const maxDim = 128;
@@ -1460,6 +1457,10 @@
                 }
 
                 updateProcessButton();
+
+                if (decoded.is16bit) {
+                    console.log('Loaded 16-bit image with precise decoding');
+                }
             } catch (err) {
                 console.error('Failed to load image:', err);
             }

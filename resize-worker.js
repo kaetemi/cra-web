@@ -1,5 +1,6 @@
 // Web Worker for resize processing
 // Runs WASM rescaling in a separate thread to keep UI responsive
+// Uses precise WASM decoding to preserve 16-bit precision
 
 let wasmReady = false;
 let craWasm = null;
@@ -32,7 +33,18 @@ async function initialize() {
     }
 }
 
-// Process resize request
+// Decode image from raw file bytes using WASM (preserves 16-bit precision)
+function decodeImagePrecise(fileBytes) {
+    const result = craWasm.decode_image_wasm(new Uint8Array(fileBytes));
+    const width = result[0];
+    const height = result[1];
+    const hasIcc = result[2] > 0.5;
+    const is16bit = result[3] > 0.5;
+    const pixels = result.slice(4); // Interleaved RGB f32 (0-1)
+    return { width, height, hasIcc, is16bit, pixels };
+}
+
+// Process resize request (with precise WASM decoding)
 function processResize(params) {
     if (!wasmReady) {
         sendError(new Error('WASM not ready'));
@@ -41,9 +53,7 @@ function processResize(params) {
 
     try {
         const {
-            imageData,  // Uint8ClampedArray RGBA
-            srcWidth,
-            srcHeight,
+            fileBytes,  // Raw file bytes for precise decoding
             dstWidth,
             dstHeight,
             interpolation,
@@ -53,23 +63,14 @@ function processResize(params) {
             perceptualSpace
         } = params;
 
-        // Convert RGBA to RGB interleaved Uint8Array
-        const pixels = srcWidth * srcHeight;
-        const rgbData = new Uint8Array(pixels * 3);
-        for (let i = 0; i < pixels; i++) {
-            rgbData[i * 3] = imageData[i * 4];
-            rgbData[i * 3 + 1] = imageData[i * 4 + 1];
-            rgbData[i * 3 + 2] = imageData[i * 4 + 2];
-        }
+        // Decode image with WASM (preserves 16-bit precision)
+        const decoded = decodeImagePrecise(fileBytes);
+        const srcWidth = decoded.width;
+        const srcHeight = decoded.height;
+        const srgbNorm = decoded.pixels; // f32 0-1 sRGB
 
-        // Step 1: Unpack u8 to f32 (0-255)
-        const srgbF32_255 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
-
-        // Step 2: Normalize to 0-1
-        const srgbF32 = craWasm.normalize_f32_wasm(srgbF32_255, srcWidth, srcHeight);
-
-        // Step 3: Convert sRGB to linear
-        const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbF32, srcWidth, srcHeight);
+        // Convert sRGB (0-1) to linear
+        const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbNorm, srcWidth, srcHeight);
 
         // Step 4: Rescale in linear space with progress
         const linearResized = craWasm.rescale_linear_rgb_with_progress_wasm(
@@ -121,7 +122,7 @@ function processResize(params) {
     }
 }
 
-// Process sRGB (bad) resize request
+// Process sRGB (bad) resize request - for comparison purposes
 function processSrgbResize(params) {
     if (!wasmReady) {
         sendError(new Error('WASM not ready'));
@@ -130,9 +131,7 @@ function processSrgbResize(params) {
 
     try {
         const {
-            imageData,
-            srcWidth,
-            srcHeight,
+            fileBytes,
             dstWidth,
             dstHeight,
             interpolation,
@@ -142,24 +141,16 @@ function processSrgbResize(params) {
             perceptualSpace
         } = params;
 
-        // Convert RGBA to RGB interleaved Uint8Array
-        const pixels = srcWidth * srcHeight;
-        const rgbData = new Uint8Array(pixels * 3);
-        for (let i = 0; i < pixels; i++) {
-            rgbData[i * 3] = imageData[i * 4];
-            rgbData[i * 3 + 1] = imageData[i * 4 + 1];
-            rgbData[i * 3 + 2] = imageData[i * 4 + 2];
-        }
+        // Decode image with WASM (preserves 16-bit precision)
+        const decoded = decodeImagePrecise(fileBytes);
+        const srcWidth = decoded.width;
+        const srcHeight = decoded.height;
+        const srgbNorm = decoded.pixels; // f32 0-1 sRGB
 
-        // Step 1: Unpack u8 to f32 (0-255)
-        const srgbF32_255 = craWasm.unpack_u8_to_f32_wasm(rgbData, srcWidth, srcHeight);
-
-        // Step 2: Normalize to 0-1 (still sRGB)
-        const srgbF32 = craWasm.normalize_f32_wasm(srgbF32_255, srcWidth, srcHeight);
-
-        // Step 3: WRONG - rescale directly in sRGB space (no linear conversion)
+        // WRONG - rescale directly in sRGB space (no linear conversion)
+        // This demonstrates the incorrect result for comparison
         const srgbResized = craWasm.rescale_linear_rgb_with_progress_wasm(
-            srgbF32,
+            srgbNorm,
             srcWidth, srcHeight,
             dstWidth, dstHeight,
             interpolation,
