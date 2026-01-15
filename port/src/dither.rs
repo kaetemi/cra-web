@@ -2,7 +2,7 @@
 /// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
 
 // Re-export color space aware dithering from dedicated module
-pub use crate::dither_colorspace_aware::{
+pub use crate::dither_rgb::{
     colorspace_aware_dither_rgb,
     colorspace_aware_dither_rgb_with_mode,
 };
@@ -84,7 +84,7 @@ impl QuantParams {
 
     /// Extend n-bit value to 8 bits by repeating the bit pattern.
     /// e.g., 3-bit value ABC becomes ABCABCAB
-    /// Delegates to the shared bit_replicate function from dither_colorspace_aware.
+    /// Delegates to the shared bit_replicate function from dither_common.
     #[inline]
     fn bit_replicate_local(value: u8, bits: u8) -> u8 {
         bit_replicate(value, bits)
@@ -128,7 +128,7 @@ impl QuantParams {
     }
 }
 
-// wang_hash is imported from dither_colorspace_aware
+// wang_hash is imported from dither_common
 
 // ============================================================================
 // Trait-based kernel abstraction

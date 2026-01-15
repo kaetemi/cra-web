@@ -20,9 +20,9 @@ pub mod correction;
 pub mod cra_lab;
 pub mod cra_rgb;
 pub mod dither;
-pub mod dither_colorspace_aware;
-pub mod dither_colorspace_lab;
-pub mod dither_colorspace_luminosity;
+pub mod dither_rgb;
+pub mod dither_lab;
+pub mod dither_luminosity;
 pub mod dither_common;
 mod histogram;
 pub mod output;
@@ -519,7 +519,7 @@ pub fn dither_rgb_wasm(
         },
     };
 
-    let result_u8 = output::dither_output_interleaved(
+    let result_u8 = output::dither_output_rgb(
         buf.as_slice(),
         width,
         height,
@@ -552,7 +552,7 @@ pub fn dither_gray_wasm(
 
     let result = if technique >= 2 {
         // Colorspace-aware dithering
-        dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode(
+        dither_luminosity::colorspace_aware_dither_gray_with_mode(
             buf.as_slice(),
             width,
             height,
@@ -618,7 +618,7 @@ pub fn dither_rgb_with_progress_wasm(
         let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
     };
 
-    let result_u8 = output::dither_output_interleaved(
+    let result_u8 = output::dither_output_rgb(
         buf.as_slice(),
         width,
         height,
@@ -659,7 +659,7 @@ pub fn dither_gray_with_progress_wasm(
 
     let result = if technique >= 2 {
         // Colorspace-aware dithering with progress
-        dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode(
+        dither_luminosity::colorspace_aware_dither_gray_with_mode(
             buf.as_slice(),
             width,
             height,

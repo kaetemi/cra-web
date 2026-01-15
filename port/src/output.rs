@@ -3,13 +3,13 @@
 /// Provides dithering functions that take sRGB 0-255 input and produce
 /// quantized output at the specified bit depth.
 ///
-/// The primary API is `dither_output_interleaved` for RGB and `dither_output_gray`
+/// The primary API is `dither_output_rgb` for RGB and `dither_output_luminosity`
 /// for grayscale.
 
 use crate::color::interleave_rgb_u8;
 use crate::dither::dither_with_mode_bits;
-use crate::dither_colorspace_aware::colorspace_aware_dither_rgb_channels;
-use crate::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
+use crate::dither_rgb::colorspace_aware_dither_rgb_channels;
+use crate::dither_luminosity::colorspace_aware_dither_gray_with_mode;
 use crate::dither_common::OutputTechnique;
 use crate::pixel::{pixels_to_channels, Pixel4};
 
@@ -33,7 +33,7 @@ use crate::pixel::{pixels_to_channels, Pixel4};
 ///
 /// Returns:
 ///     Interleaved RGB u8 data (RGBRGB...)
-pub fn dither_output_interleaved(
+pub fn dither_output_rgb(
     srgb_pixels: &[Pixel4],
     width: usize,
     height: usize,
@@ -109,7 +109,7 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
 ///
 /// Returns:
 ///     Grayscale output as u8
-pub fn dither_output_gray(
+pub fn dither_output_luminosity(
     gray_channel: &[f32],
     width: usize,
     height: usize,

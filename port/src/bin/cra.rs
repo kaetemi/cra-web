@@ -21,14 +21,14 @@ use cra_wasm::decode::{
     image_to_f32_normalized, image_to_f32_srgb_255_pixels, is_profile_srgb_verbose,
     load_image_from_path, transform_icc_to_linear_srgb_pixels,
 };
-use cra_wasm::dither_colorspace_aware::DitherMode as CSDitherMode;
-use cra_wasm::dither_colorspace_luminosity::colorspace_aware_dither_gray_with_mode;
+use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
+use cra_wasm::dither_luminosity::colorspace_aware_dither_gray_with_mode;
 use cra_wasm::dither_common::{
     ColorCorrectionMethod, DitherMode, HistogramMode as LibHistogramMode, OutputTechnique,
     PerceptualSpace,
 };
 use cra_wasm::color::{denormalize_inplace, linear_to_srgb_inplace};
-use cra_wasm::output::dither_output_interleaved;
+use cra_wasm::output::dither_output_rgb;
 use cra_wasm::pixel::Pixel4;
 
 // ============================================================================
@@ -642,7 +642,7 @@ fn dither_pixels(
 
         // Dither
         let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
-        let interleaved = dither_output_interleaved(
+        let interleaved = dither_output_rgb(
             &linear_pixels,
             width, height,
             format.bits_r, format.bits_g, format.bits_b,
@@ -668,12 +668,12 @@ fn dither_pixels_srgb_rgb(
     colorspace: PerceptualSpace,
     seed: u32,
 ) -> DitherResult {
-    use cra_wasm::output::dither_output_interleaved;
+    use cra_wasm::output::dither_output_rgb;
 
     debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
 
     let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
-    let interleaved = dither_output_interleaved(
+    let interleaved = dither_output_rgb(
         &pixels,
         width, height,
         format.bits_r, format.bits_g, format.bits_b,

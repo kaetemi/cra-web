@@ -7,7 +7,7 @@ use crate::color::{
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::pixel::Pixel4;
-use crate::dither_colorspace_lab::{
+use crate::dither_lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
 use crate::dither_common::PerceptualSpace;
