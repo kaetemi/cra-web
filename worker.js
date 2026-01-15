@@ -397,7 +397,7 @@ self.onmessage = async function(e) {
             await initialize();
             break;
         case 'process':
-            // Default: histogramMode=0 (binned), histogramDitherMode=4 (Mixed), outputDitherMode=2 (Jarvis)
+            // Defaults match CLI: histogramMode=0 (binned), histogramDitherMode=4 (Mixed), outputDitherMode=4 (Mixed)
             await processImages(
                 data.inputData,
                 data.refData,
@@ -406,10 +406,10 @@ self.onmessage = async function(e) {
                 data.useWasm,
                 data.histogramMode !== undefined ? data.histogramMode : 0,
                 data.histogramDitherMode !== undefined ? data.histogramDitherMode : 4,
-                data.outputDitherMode !== undefined ? data.outputDitherMode : 2,
+                data.outputDitherMode !== undefined ? data.outputDitherMode : 4,
                 data.colorAwareHistogram !== undefined ? data.colorAwareHistogram : true,
                 data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
-                data.colorAwareOutput !== undefined ? data.colorAwareOutput : false,
+                data.colorAwareOutput !== undefined ? data.colorAwareOutput : true,
                 data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1
             );
             break;

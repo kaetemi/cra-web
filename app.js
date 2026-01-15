@@ -215,7 +215,8 @@ function generateCliCommand() {
         if (!colorAwareOutput) {
             // Disable (differs from CLI default)
             cmd += ' --no-colorspace-aware-output';
-        } else if (outputDistanceSpace !== 1) {
+        }
+        if (colorAwareOutput && outputDistanceSpace !== 1) {
             // Add distance space only if non-default (1 = Oklab)
             cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
         }

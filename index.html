@@ -439,13 +439,13 @@
             <select id="method-select" class="method-select">
                 <option value="lab">* Lab (Basic LAB histogram matching)</option>
                 <option value="rgb">RGB (Basic RGB histogram matching)</option>
-                <option value="cra_lab" selected>* CRA Lab (Recommended - Chroma Rotation in LAB)</option>
+                <option value="cra_lab">CRA Lab (Chroma Rotation in LAB)</option>
                 <option value="cra_lab_tiled">CRA Lab Tiled (For spatially varying colors)</option>
                 <option value="cra_lab_tiled_ab">* CRA Lab Tiled AB (Tiled AB + global luminosity)</option>
                 <option value="cra_rgb">CRA RGB (Chroma Rotation in RGB)</option>
                 <option value="cra_rgb_perceptual">CRA RGB Perceptual (RGB with perceptual weighting)</option>
                 <option value="oklab">* Oklab (Modern perceptually uniform)</option>
-                <option value="cra_oklab">* CRA Oklab (CRA in Oklab space)</option>
+                <option value="cra_oklab" selected>* CRA Oklab (Recommended - CRA in Oklab space)</option>
                 <option value="cra_oklab_tiled">CRA Oklab Tiled (For spatially varying colors)</option>
                 <option value="cra_oklab_tiled_ab">* CRA Oklab Tiled AB (Tiled AB + global luminosity)</option>
             </select>
@@ -483,16 +483,16 @@
         <div class="implementation-section" id="output-dither-section">
             <label for="output-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Output Dithering:</label>
             <select id="output-dither-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0" selected>* Floyd-Steinberg (Standard)</option>
+                <option value="0">Floyd-Steinberg (Standard)</option>
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
-                <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
+                <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4">* Mixed (Standard)</option>
+                <option value="4" selected>* Mixed (Standard, Recommended)</option>
                 <option value="5">Mixed (Serpentine)</option>
                 <option value="6">Mixed (Random Direction)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
-                Floyd-Steinberg with standard left-to-right scanning. Fast and widely used error diffusion algorithm. Used for final output quantization.
+                Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
             </p>
         </div>
 
@@ -541,15 +541,15 @@
             <label class="toggle-container">
                 <span class="toggle-label">Colorspace-Aware Output:</span>
                 <div class="toggle-switch">
-                    <input type="checkbox" id="color-aware-output">
+                    <input type="checkbox" id="color-aware-output" checked>
                     <span class="toggle-slider"></span>
                 </div>
-                <span class="toggle-text" id="color-aware-output-label">Off</span>
+                <span class="toggle-text" id="color-aware-output-label">On</span>
             </label>
             <p class="impl-description">
                 When enabled, uses joint RGB colorspace-aware dithering for final output. Processes all three RGB channels together using perceptual color distance.
             </p>
-            <div id="output-distance-space-container" style="margin-top: 10px; display: none;">
+            <div id="output-distance-space-container" style="margin-top: 10px;">
                 <label for="output-distance-space" style="font-size: 13px; color: #555;">Distance Space:</label>
                 <select id="output-distance-space" class="method-select" style="margin-top: 5px;">
                     <option value="0">CIELAB (CIE76)</option>
