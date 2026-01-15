@@ -153,14 +153,14 @@ impl ColorSpace {
 
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq)]
 enum InputColorProfile {
-    /// Assume standard sRGB input, use builtin gamma functions (default)
-    #[default]
+    /// Assume standard sRGB input, use builtin gamma functions
     Srgb,
     /// Assume linear RGB input (for normal maps, height maps, data textures)
     Linear,
-    /// Auto-detect: check ICC profile, use lcms2 if non-sRGB
+    /// Auto-detect: check ICC profile, use moxcms if non-sRGB (default)
+    #[default]
     Auto,
-    /// Always use embedded ICC profile via lcms2 (even if sRGB)
+    /// Always use embedded ICC profile via moxcms (even if sRGB)
     Icc,
 }
 
