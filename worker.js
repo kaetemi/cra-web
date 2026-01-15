@@ -313,7 +313,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     // Dither to RGB888
     sendProgress('process', 'Dithering output...', 70);
     const ditherTechnique = colorAwareOutput ? 2 : 1;
-    const ditheredBuffer = craWasm.dither_rgb_wasm(
+    const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
         resultBuffer,
         inputImg.width,
         inputImg.height,
@@ -321,10 +321,11 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         ditherTechnique,
         outputDitherMode,
         outputDistanceSpace,
-        0  // seed
+        0,  // seed
+        (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
     );
 
-    // Extract final u8 RGB data (dither_rgb_wasm returns BufferU8 directly)
+    // Extract final u8 RGB data (dither_rgb_with_progress_wasm returns BufferU8 directly)
     const resultRgb = ditheredBuffer.to_vec();
 
     const elapsed = performance.now() - startTime;
