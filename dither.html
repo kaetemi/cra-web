@@ -471,10 +471,14 @@
             text-align: center;
         }
 
-        .compare-box img {
+        .compare-box img,
+        .compare-box linear-img {
             width: 100%;
             border-radius: 8px;
             box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .compare-box img {
             image-rendering: pixelated;
         }
 
@@ -801,7 +805,7 @@
                 <p>Original</p>
             </div>
             <div class="compare-box">
-                <img id="compare-output">
+                <linear-img id="compare-output" method="lanczos"></linear-img>
                 <p>Dithered</p>
             </div>
         </div>
@@ -833,6 +837,7 @@
     </div>
 
     <script type="module">
+        import './linear-img.js';
         import init, {
             dither_output_wasm,
             dither_with_mode_wasm,
