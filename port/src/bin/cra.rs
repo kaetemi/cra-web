@@ -296,9 +296,9 @@ struct Args {
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     histogram_dither: DitherMethod,
 
-    /// Use colorspace-aware dithering for histogram quantization (only with --histogram-mode=binned)
+    /// Disable colorspace-aware dithering for histogram quantization (use per-channel instead)
     #[arg(long)]
-    colorspace_aware_histogram: bool,
+    no_colorspace_aware_histogram: bool,
 
     /// Perceptual space for colorspace-aware histogram dithering distance metric
     #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
@@ -875,7 +875,7 @@ fn main() -> Result<(), String> {
     let histogram_options = HistogramOptions {
         mode: args.histogram_mode.to_lib_mode(),
         dither_mode: args.histogram_dither.to_dither_mode(),
-        colorspace_aware: args.colorspace_aware_histogram,
+        colorspace_aware: !args.no_colorspace_aware_histogram,
         colorspace_aware_space: args.histogram_distance_space.to_perceptual_space(),
     };
     let output_dither_mode = args.output_dither.to_cs_dither_mode();

@@ -514,17 +514,17 @@
 
         <div class="implementation-section" id="color-aware-histogram-section" style="display: none;">
             <label class="toggle-container">
-                <span class="toggle-label">Color-Aware Histogram:</span>
+                <span class="toggle-label">Colorspace-Aware Histogram:</span>
                 <div class="toggle-switch">
-                    <input type="checkbox" id="color-aware-histogram">
+                    <input type="checkbox" id="color-aware-histogram" checked>
                     <span class="toggle-slider"></span>
                 </div>
-                <span class="toggle-text" id="color-aware-histogram-label">Off</span>
+                <span class="toggle-text" id="color-aware-histogram-label">On</span>
             </label>
             <p class="impl-description">
-                When enabled, uses joint color-aware dithering for histogram quantization. Considers perceptual color distance when quantizing Lab values.
+                When enabled, uses joint colorspace-aware dithering for histogram quantization. Considers perceptual color distance when quantizing Lab values.
             </p>
-            <div id="histogram-distance-space-container" style="margin-top: 10px; display: none;">
+            <div id="histogram-distance-space-container" style="margin-top: 10px;">
                 <label for="histogram-distance-space" style="font-size: 13px; color: #555;">Distance Space:</label>
                 <select id="histogram-distance-space" class="method-select" style="margin-top: 5px;">
                     <option value="0">CIELAB (CIE76)</option>
@@ -539,7 +539,7 @@
 
         <div class="implementation-section" id="color-aware-output-section" style="display: none;">
             <label class="toggle-container">
-                <span class="toggle-label">Color-Aware Output:</span>
+                <span class="toggle-label">Colorspace-Aware Output:</span>
                 <div class="toggle-switch">
                     <input type="checkbox" id="color-aware-output">
                     <span class="toggle-slider"></span>
@@ -547,7 +547,7 @@
                 <span class="toggle-text" id="color-aware-output-label">Off</span>
             </label>
             <p class="impl-description">
-                When enabled, uses joint RGB color-aware dithering for final output. Processes all three RGB channels together using perceptual color distance.
+                When enabled, uses joint RGB colorspace-aware dithering for final output. Processes all three RGB channels together using perceptual color distance.
             </p>
             <div id="output-distance-space-container" style="margin-top: 10px; display: none;">
                 <label for="output-distance-space" style="font-size: 13px; color: #555;">Distance Space:</label>

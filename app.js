@@ -201,17 +201,24 @@ function generateCliCommand() {
     if (histogramMode === 0) {
         cmd += ` --histogram-dither ${ditherMap[histogramDitherMode]}`;
 
-        // Add color-aware histogram options
-        if (colorAwareHistogram && methodSupportsColorAware(method)) {
-            cmd += ' --color-aware-histogram';
+        // Colorspace-aware histogram is default, add flag only if disabled
+        if (!colorAwareHistogram && methodSupportsColorAware(method)) {
+            cmd += ' --no-colorspace-aware-histogram';
+        } else if (colorAwareHistogram && methodSupportsColorAware(method) && histogramDistanceSpace !== 1) {
+            // Add distance space only if non-default (1 = Oklab)
             cmd += ` --histogram-distance-space ${spaceMap[histogramDistanceSpace]}`;
         }
     }
 
-    // Add color-aware output options
-    if (colorAwareOutput && methodSupportsColorAware(method)) {
-        cmd += ' --color-aware-output';
-        cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
+    // Colorspace-aware output is ON by default in CLI
+    if (methodSupportsColorAware(method)) {
+        if (!colorAwareOutput) {
+            // Disable (differs from CLI default)
+            cmd += ' --no-colorspace-aware-output';
+        } else if (outputDistanceSpace !== 1) {
+            // Add distance space only if non-default (1 = Oklab)
+            cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
+        }
     }
 
     return cmd;

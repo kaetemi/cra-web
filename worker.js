@@ -407,7 +407,7 @@ self.onmessage = async function(e) {
                 data.histogramMode !== undefined ? data.histogramMode : 0,
                 data.histogramDitherMode !== undefined ? data.histogramDitherMode : 4,
                 data.outputDitherMode !== undefined ? data.outputDitherMode : 2,
-                data.colorAwareHistogram !== undefined ? data.colorAwareHistogram : false,
+                data.colorAwareHistogram !== undefined ? data.colorAwareHistogram : true,
                 data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
                 data.colorAwareOutput !== undefined ? data.colorAwareOutput : false,
                 data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1

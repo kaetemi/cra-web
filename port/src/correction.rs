@@ -34,7 +34,7 @@ impl Default for HistogramOptions {
         Self {
             mode: HistogramMode::default(),
             dither_mode: DitherMode::MixedStandard, // Default for histogram processing
-            colorspace_aware: false,
+            colorspace_aware: true,
             colorspace_aware_space: PerceptualSpace::default(),
         }
     }
