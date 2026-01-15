@@ -585,9 +585,9 @@
                 cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
             }
 
-            // Add --no-color-aware-output if not using perceptual
+            // Add --no-colorspace-aware-output if not using perceptual
             if (!isPerceptual) {
-                cmd += ' --no-color-aware-output';
+                cmd += ' --no-colorspace-aware-output';
             }
 
             return cmd;
