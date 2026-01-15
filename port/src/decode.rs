@@ -142,7 +142,7 @@ pub fn image_to_f32_srgb_255_pixels(img: &DynamicImage) -> Vec<[f32; 3]> {
     let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
 
     if is_f32 {
-        // f32: scale from 0-1 to 0-255, clamp for HDR values
+        // f32: scale from 0-1 to 0-255, clamp for HDR (this path is for direct output)
         let rgb32f = img.to_rgb32f();
         let data = rgb32f.as_raw();
         (0..pixel_count)
