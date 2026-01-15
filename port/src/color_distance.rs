@@ -132,8 +132,9 @@ pub fn lab_distance_ciede2000_sq(l1: f32, a1: f32, b1: f32, l2: f32, a2: f32, b2
         - 0.20 * (4.0 * h_bar_prime - cs::CIEDE2000_T_63_RAD).cos();
 
     // SL, SC, SH (using same K1/K2 as CIE94 for SC/SH base)
-    let l_bar_minus_50_sq = (l_bar_prime - 50.0) * (l_bar_prime - 50.0);
-    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
+    let l_bar_minus_mid = l_bar_prime - cs::CIEDE2000_SL_L_MIDPOINT;
+    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
+    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_mid_sq) / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
     let sc = 1.0 + cs::CIE94_K1 * c_bar_prime;
     let sh = 1.0 + cs::CIE94_K2 * c_bar_prime * t;
 

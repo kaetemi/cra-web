@@ -34,6 +34,7 @@ use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
+use crate::colorspace_derived::f32 as cs;
 use crate::dither_common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
@@ -67,14 +68,16 @@ fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
 /// This compensates for reduced human sensitivity in dark/light regions.
 ///
 /// Formula: ΔE² = (ΔL / SL)²
-/// Where: SL = 1 + (0.015 × (L̄ - 50)²) / √(20 + (L̄ - 50)²)
+/// Where: SL = 1 + (K2 × (L̄ - 50)²) / √(20 + (L̄ - 50)²)
 ///        L̄ = (L1 + L2) / 2
+///        K2 = 0.015 (from CIE94, shared with CIEDE2000)
 #[inline]
 fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
     let dl = l1 - l2;
     let l_bar = (l1 + l2) / 2.0;
-    let l_bar_minus_50_sq = (l_bar - 50.0) * (l_bar - 50.0);
-    let sl = 1.0 + (0.015 * l_bar_minus_50_sq) / (20.0 + l_bar_minus_50_sq).sqrt();
+    let l_bar_minus_mid = l_bar - cs::CIEDE2000_SL_L_MIDPOINT;
+    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
+    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_mid_sq) / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
     let dl_term = dl / sl;
     dl_term * dl_term
 }

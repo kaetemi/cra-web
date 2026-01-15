@@ -130,6 +130,9 @@ mod primary {
         pub const RT_ANGLE_275_DEG: f64 = 275.0;
         pub const RT_ANGLE_25_DEG: f64 = 25.0;
         pub const RT_ANGLE_30_DEG: f64 = 30.0;
+        // SL weighting function constants
+        pub const SL_L_MIDPOINT: f64 = 50.0;
+        pub const SL_DENOM_OFFSET: f64 = 20.0;
     }
 
     pub mod ycbcr_bt709 {
@@ -1030,6 +1033,10 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const CIEDE2000_RT_25_RAD: f32 = {} as f32;", fmt_f64(rt_angle_25_rad))?;
     writeln!(out, "    /// RT term: 30° for Δθ in radians (derived: π/6)")?;
     writeln!(out, "    pub const CIEDE2000_RT_30_RAD: f32 = {} as f32;", fmt_f64(rt_angle_30_rad))?;
+    writeln!(out, "    /// SL weighting function: L* midpoint (primary)")?;
+    writeln!(out, "    pub const CIEDE2000_SL_L_MIDPOINT: f32 = {} as f32;", fmt_f64(primary::ciede2000::SL_L_MIDPOINT))?;
+    writeln!(out, "    /// SL weighting function: denominator offset (primary)")?;
+    writeln!(out, "    pub const CIEDE2000_SL_DENOM_OFFSET: f32 = {} as f32;", fmt_f64(primary::ciede2000::SL_DENOM_OFFSET))?;
     writeln!(out)?;
 
     // OKLab matrices (from primary constants)

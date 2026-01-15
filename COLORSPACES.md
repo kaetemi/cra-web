@@ -501,6 +501,15 @@ SC = 1 + 0.045 × C̄'
 SH = 1 + 0.015 × C̄' × T
 ```
 
+**Primary constants in weighting functions:**
+
+| Constant | Value | Appears in | Notes |
+|----------|-------|------------|-------|
+| K₁ | 0.045 | SC | Shared with CIE94 |
+| K₂ | 0.015 | SL, SH | Shared with CIE94 |
+| L* midpoint | 50 | SL | Perceptual midpoint |
+| SL denom offset | 20 | SL | Empirical constant |
+
 **Step 9 — RT rotation term (blue region correction):**
 
 ```
@@ -632,7 +641,7 @@ CIE XYZ (empirical root)
 | CIELAB | XYZ | Transform equations, reference white | — |
 | CIE76 | CIELAB | Euclidean distance | — |
 | CIE94 | CIELAB | kL, kC, kH, K₁=0.045, K₂=0.015 | SC, SH |
-| CIEDE2000 | CIELAB | kL, kC, kH, 25⁷ | G, T, SL, SC, SH, RT |
+| CIEDE2000 | CIELAB | kL, kC, kH, 25⁷, K₁, K₂, SL midpoint=50, SL offset=20 | G, T, SL, SC, SH, RT |
 | OKLab | Linear RGB | All matrices, cube root | — |
 
 ---

@@ -650,6 +650,10 @@ pub mod f32 {
     pub const CIEDE2000_RT_25_RAD: f32 = 0.43633231299858238 as f32;
     /// RT term: 30° for Δθ in radians (derived: π/6)
     pub const CIEDE2000_RT_30_RAD: f32 = 0.52359877559829882 as f32;
+    /// SL weighting function: L* midpoint (primary)
+    pub const CIEDE2000_SL_L_MIDPOINT: f32 = 50.0 as f32;
+    /// SL weighting function: denominator offset (primary)
+    pub const CIEDE2000_SL_DENOM_OFFSET: f32 = 20.0 as f32;
 
     // -------------------------------------------------------------------------
     // OKLAB MATRICES (from primary constants)

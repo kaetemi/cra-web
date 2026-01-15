@@ -265,6 +265,12 @@ pub mod ciede2000 {
     pub const RT_ANGLE_275_DEG: f64 = 275.0;
     pub const RT_ANGLE_25_DEG: f64 = 25.0;
     pub const RT_ANGLE_30_DEG: f64 = 30.0;
+
+    /// SL weighting function constants.
+    /// SL = 1 + (K2 × (L̄' - SL_L_MIDPOINT)²) / √(SL_DENOM_OFFSET + (L̄' - SL_L_MIDPOINT)²)
+    /// Note: K2 (0.015) is shared with CIE94 and defined in cie94 module.
+    pub const SL_L_MIDPOINT: f64 = 50.0;
+    pub const SL_DENOM_OFFSET: f64 = 20.0;
 }
 
 // =============================================================================
