@@ -118,6 +118,7 @@ pub struct LoadedImage {
     width: u32,
     height: u32,
     is_16bit: bool,
+    is_f32: bool,
     has_non_srgb_icc: bool,
 }
 
@@ -136,6 +137,11 @@ impl LoadedImage {
     #[wasm_bindgen(getter)]
     pub fn is_16bit(&self) -> bool {
         self.is_16bit
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn is_f32(&self) -> bool {
+        self.is_f32
     }
 
     #[wasm_bindgen(getter)]
@@ -189,12 +195,13 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         width,
         height,
         is_16bit: decoded.is_16bit,
+        is_f32: decoded.is_f32,
         has_non_srgb_icc,
     })
 }
 
 /// Get decode metadata without the pixel data (fast - no pixel decoding)
-/// Returns: [width, height, has_icc (0/1), is_16bit (0/1)]
+/// Returns: [width, height, has_icc (0/1), is_16bit (0/1), is_f32 (0/1)]
 #[wasm_bindgen]
 pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
     let (metadata, _) = decode::get_metadata_and_icc(&file_bytes)
@@ -205,11 +212,12 @@ pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
         metadata.height as f32,
         if metadata.has_icc { 1.0 } else { 0.0 },
         if metadata.is_16bit { 1.0 } else { 0.0 },
+        if metadata.is_f32 { 1.0 } else { 0.0 },
     ])
 }
 
 /// Get metadata and check if ICC profile is non-sRGB (single parse)
-/// Returns: [width, height, has_non_srgb_icc (0/1), is_16bit (0/1)]
+/// Returns: [width, height, has_non_srgb_icc (0/1), is_16bit (0/1), is_f32 (0/1)]
 /// This combines decode_metadata + extract_icc + is_icc_srgb check in one call
 #[wasm_bindgen]
 pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
@@ -226,6 +234,7 @@ pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f3
         metadata.height as f32,
         if has_non_srgb_icc { 1.0 } else { 0.0 },
         if metadata.is_16bit { 1.0 } else { 0.0 },
+        if metadata.is_f32 { 1.0 } else { 0.0 },
     ])
 }
 

@@ -482,7 +482,10 @@ fn convert_to_linear(
             img.color(),
             ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
         );
-        if is_16bit {
+        let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+        if is_f32 {
+            eprintln!("  Using f32 precision path (values already float)");
+        } else if is_16bit {
             eprintln!("  Converting 16-bit to float (dividing by 65535)");
         } else {
             eprintln!("  Converting 8-bit to float (dividing by 255)");
@@ -538,7 +541,10 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
             img.color(),
             ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
         );
-        if is_16bit {
+        let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+        if is_f32 {
+            eprintln!("  Using f32 precision path (scaling to 0-255, clamping HDR)");
+        } else if is_16bit {
             eprintln!("  Using 16-bit precision path (scaling to 0-255)");
         } else {
             eprintln!("  Using 8-bit path");

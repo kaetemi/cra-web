@@ -20,6 +20,7 @@ pub struct DecodedImage {
     pub image: DynamicImage,
     pub icc_profile: Option<Vec<u8>>,
     pub is_16bit: bool,
+    pub is_f32: bool,
 }
 
 /// Load image from file path with ICC profile extraction
@@ -59,10 +60,13 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
         ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
     );
 
+    let is_f32 = matches!(image.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+
     Ok(DecodedImage {
         image,
         icc_profile,
         is_16bit,
+        is_f32,
     })
 }
 
@@ -71,7 +75,7 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
 // ============================================================================
 
 /// Convert DynamicImage to normalized f32 RGB (0-1 range)
-/// Handles both 8-bit and 16-bit sources with appropriate precision
+/// Handles 8-bit, 16-bit, and f32 sources with appropriate precision
 pub fn image_to_f32_normalized(img: &DynamicImage) -> Vec<[f32; 3]> {
     let (width, height) = img.dimensions();
     let pixel_count = (width * height) as usize;
@@ -81,7 +85,16 @@ pub fn image_to_f32_normalized(img: &DynamicImage) -> Vec<[f32; 3]> {
         ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
     );
 
-    if is_16bit {
+    let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+
+    if is_f32 {
+        // f32 images: already in float format, typically 0-1 range (may be HDR with values > 1.0)
+        let rgb32f = img.to_rgb32f();
+        let data = rgb32f.as_raw();
+        (0..pixel_count)
+            .map(|i| [data[i * 3], data[i * 3 + 1], data[i * 3 + 2]])
+            .collect()
+    } else if is_16bit {
         let rgb16 = img.to_rgb16();
         let data = rgb16.as_raw();
         (0..pixel_count)
@@ -116,6 +129,7 @@ pub fn image_to_f32_interleaved(img: &DynamicImage) -> Vec<f32> {
 /// Returns array of [r, g, b] for CLI compatibility.
 /// - 8-bit: u8 as f32 (direct cast)
 /// - 16-bit: u16 * 255.0 / 65535.0 directly to 0-255
+/// - f32: assumed 0-1 range, scaled to 0-255 (clamped for HDR)
 pub fn image_to_f32_srgb_255_pixels(img: &DynamicImage) -> Vec<[f32; 3]> {
     let (width, height) = img.dimensions();
     let pixel_count = (width * height) as usize;
@@ -125,7 +139,20 @@ pub fn image_to_f32_srgb_255_pixels(img: &DynamicImage) -> Vec<[f32; 3]> {
         ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
     );
 
-    if is_16bit {
+    let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+
+    if is_f32 {
+        // f32: scale from 0-1 to 0-255, clamp for HDR values
+        let rgb32f = img.to_rgb32f();
+        let data = rgb32f.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                (data[i * 3] * 255.0).clamp(0.0, 255.0),
+                (data[i * 3 + 1] * 255.0).clamp(0.0, 255.0),
+                (data[i * 3 + 2] * 255.0).clamp(0.0, 255.0),
+            ])
+            .collect()
+    } else if is_16bit {
         // 16-bit: scale from 0-65535 to 0-255
         let rgb16 = img.to_rgb16();
         let data = rgb16.as_raw();
@@ -358,6 +385,7 @@ pub struct ImageMetadata {
     pub height: u32,
     pub has_icc: bool,
     pub is_16bit: bool,
+    pub is_f32: bool,
 }
 
 /// Get image metadata and ICC profile without decoding pixels
@@ -382,11 +410,14 @@ pub fn get_metadata_and_icc(file_bytes: &[u8]) -> Result<(ImageMetadata, Option<
         ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
     );
 
+    let is_f32 = matches!(color_type, ColorType::Rgb32F | ColorType::Rgba32F);
+
     let metadata = ImageMetadata {
         width,
         height,
         has_icc: icc_profile.is_some(),
         is_16bit,
+        is_f32,
     };
 
     Ok((metadata, icc_profile))
