@@ -9,14 +9,11 @@
  *   <linear-img src="photo.jpg" style="width: 200px;"></linear-img>
  *
  * Attributes:
- *   src        - Image source URL (required)
+ *   src        - Image source URL or data URL (required)
  *   width      - Display width in pixels
  *   height     - Display height in pixels
  *   method     - Interpolation: "lanczos" (default) or "bilinear"
  *   fit        - Object-fit style: "contain" (default), "cover", "fill"
- *
- * The element shows a browser-scaled preview immediately, then swaps in
- * the correctly resized version when processing completes.
  */
 
 // Shared worker instance for all <linear-img> elements
@@ -26,7 +23,7 @@ let workerReadyPromise = null;
 let pendingRequests = new Map();
 let requestId = 0;
 
-// Image cache: caches resized results by "url:width:height:method"
+// Image cache: caches resized results by "src:width:height:method"
 const resultCache = new Map();
 const MAX_CACHE_SIZE = 50;
 
@@ -49,7 +46,6 @@ function initSharedWorker() {
                     workerReady = true;
                     resolve();
                 } else if (type === 'complete' || type === 'error') {
-                    // Find the pending request and resolve/reject it
                     const reqId = data.requestId;
                     const pending = pendingRequests.get(reqId);
                     if (pending) {
@@ -59,12 +55,6 @@ function initSharedWorker() {
                         } else {
                             pending.reject(new Error(data.message));
                         }
-                    }
-                } else if (type === 'progress') {
-                    const reqId = data.requestId;
-                    const pending = pendingRequests.get(reqId);
-                    if (pending && pending.onProgress) {
-                        pending.onProgress(data.percent);
                     }
                 }
             };
@@ -82,38 +72,28 @@ function initSharedWorker() {
     return workerReadyPromise;
 }
 
-// Request a resize operation from the worker
-async function requestResize(fileBytes, srcWidth, srcHeight, dstWidth, dstHeight, method, onProgress) {
+// Request a resize operation from the worker using raw pixel data
+async function requestResizePixels(pixelData, srcWidth, srcHeight, dstWidth, dstHeight, method) {
     await initSharedWorker();
 
     const id = ++requestId;
     const methodCode = method === 'bilinear' ? 0 : 1; // 0=bilinear, 1=lanczos
 
     return new Promise((resolve, reject) => {
-        pendingRequests.set(id, { resolve, reject, onProgress });
+        pendingRequests.set(id, { resolve, reject });
 
         sharedWorker.postMessage({
-            type: 'resize',
+            type: 'resize-pixels',
             requestId: id,
-            fileBytes,
+            pixelData,
+            srcWidth,
+            srcHeight,
             dstWidth,
             dstHeight,
             interpolation: methodCode,
-            scaleMode: 0, // Independent - we calculate exact dimensions ourselves
-            ditherMode: 4, // Mixed
-            ditherTechnique: 2, // ColorAware
-            perceptualSpace: 1 // OKLab
+            scaleMode: 0 // Independent - we calculate exact dimensions ourselves
         });
     });
-}
-
-// Fetch image as ArrayBuffer
-async function fetchImageBytes(src) {
-    const response = await fetch(src);
-    if (!response.ok) {
-        throw new Error(`Failed to fetch image: ${response.status}`);
-    }
-    return await response.arrayBuffer();
 }
 
 // Get cache key
@@ -124,11 +104,20 @@ function getCacheKey(src, width, height, method) {
 // Add to cache with LRU eviction
 function cacheResult(key, imageData) {
     if (resultCache.size >= MAX_CACHE_SIZE) {
-        // Remove oldest entry
         const firstKey = resultCache.keys().next().value;
         resultCache.delete(firstKey);
     }
     resultCache.set(key, imageData);
+}
+
+// Extract pixels from an image using canvas
+function getImagePixels(img) {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return ctx.getImageData(0, 0, canvas.width, canvas.height);
 }
 
 // Custom element definition
@@ -139,8 +128,6 @@ class LinearImg extends HTMLElement {
 
     constructor() {
         super();
-
-        // Create shadow DOM
         this.attachShadow({ mode: 'open' });
 
         // Internal state
@@ -151,13 +138,13 @@ class LinearImg extends HTMLElement {
         this._displayHeight = 0;
         this._method = 'lanczos';
         this._fit = 'contain';
-        this._imageBytes = null;
+        this._pixelData = null;  // Raw RGBA pixels from canvas
         this._processing = false;
         this._pendingResize = false;
 
-        // Create internal elements
+        // Create container
         this._container = document.createElement('div');
-        this._container.style.cssText = 'position: relative; display: inline-block; overflow: hidden;';
+        this._container.style.cssText = 'position: relative; display: inline-block; overflow: hidden; width: 100%; height: 100%;';
 
         // Preview image (browser-scaled, shown while processing)
         this._preview = document.createElement('img');
@@ -170,7 +157,7 @@ class LinearImg extends HTMLElement {
         this._container.appendChild(this._preview);
         this._container.appendChild(this._canvas);
 
-        // Add styles
+        // Styles
         const style = document.createElement('style');
         style.textContent = `
             :host {
@@ -214,10 +201,10 @@ class LinearImg extends HTMLElement {
                 this._loadImage();
                 break;
             case 'width':
-                this._container.style.width = newValue ? newValue + 'px' : '';
+                this._container.style.width = newValue ? newValue + 'px' : '100%';
                 break;
             case 'height':
-                this._container.style.height = newValue ? newValue + 'px' : '';
+                this._container.style.height = newValue ? newValue + 'px' : '100%';
                 break;
             case 'method':
                 this._method = newValue === 'bilinear' ? 'bilinear' : 'lanczos';
@@ -239,8 +226,8 @@ class LinearImg extends HTMLElement {
 
         const width = this.getAttribute('width');
         const height = this.getAttribute('height');
-        if (width) this._container.style.width = width + 'px';
-        if (height) this._container.style.height = height + 'px';
+        this._container.style.width = width ? width + 'px' : '100%';
+        this._container.style.height = height ? height + 'px' : '100%';
 
         if (this._src) {
             this._loadImage();
@@ -256,7 +243,7 @@ class LinearImg extends HTMLElement {
         this._canvas.style.display = 'none';
 
         try {
-            // Wait for preview to load to get natural dimensions
+            // Wait for image to load
             await new Promise((resolve, reject) => {
                 if (this._preview.complete && this._preview.naturalWidth > 0) {
                     resolve();
@@ -269,8 +256,9 @@ class LinearImg extends HTMLElement {
             this._naturalWidth = this._preview.naturalWidth;
             this._naturalHeight = this._preview.naturalHeight;
 
-            // Fetch raw bytes for WASM processing
-            this._imageBytes = await fetchImageBytes(this._src);
+            // Extract pixels via canvas
+            const imageData = getImagePixels(this._preview);
+            this._pixelData = imageData.data;
 
             // Trigger resize with current display dimensions
             const rect = this.getBoundingClientRect();
@@ -295,7 +283,7 @@ class LinearImg extends HTMLElement {
     }
 
     _scheduleResize() {
-        if (!this._imageBytes || !this._displayWidth || !this._displayHeight) {
+        if (!this._pixelData || !this._displayWidth || !this._displayHeight) {
             return;
         }
 
@@ -308,16 +296,14 @@ class LinearImg extends HTMLElement {
     }
 
     async _doResize() {
-        if (!this._imageBytes || this._displayWidth <= 0 || this._displayHeight <= 0) {
+        if (!this._pixelData || this._displayWidth <= 0 || this._displayHeight <= 0) {
             return;
         }
 
-        // Calculate actual output dimensions based on fit mode
         const { outputWidth, outputHeight } = this._calculateOutputDimensions();
 
-        // Skip if output would be same as natural size (no resize needed)
+        // Skip if output would be same as natural size
         if (outputWidth === this._naturalWidth && outputHeight === this._naturalHeight) {
-            // Just show the preview at full res
             this._preview.style.display = 'block';
             this._canvas.style.display = 'none';
             return;
@@ -334,8 +320,8 @@ class LinearImg extends HTMLElement {
         this._processing = true;
 
         try {
-            const result = await requestResize(
-                this._imageBytes,
+            const result = await requestResizePixels(
+                this._pixelData,
                 this._naturalWidth,
                 this._naturalHeight,
                 outputWidth,
@@ -349,10 +335,9 @@ class LinearImg extends HTMLElement {
                 result.height
             );
 
-            // Cache the result
             cacheResult(cacheKey, imageData);
 
-            // Display if dimensions still match (user might have resized during processing)
+            // Display if dimensions still match
             const { outputWidth: currentW, outputHeight: currentH } = this._calculateOutputDimensions();
             if (currentW === outputWidth && currentH === outputHeight) {
                 this._displayResult(imageData, outputWidth, outputHeight);
@@ -368,7 +353,6 @@ class LinearImg extends HTMLElement {
         } finally {
             this._processing = false;
 
-            // Process any pending resize
             if (this._pendingResize) {
                 this._pendingResize = false;
                 this._scheduleResize();
@@ -393,13 +377,11 @@ class LinearImg extends HTMLElement {
 
         switch (this._fit) {
             case 'fill':
-                // Stretch to fill (ignores aspect ratio)
                 outputWidth = displayW;
                 outputHeight = displayH;
                 break;
 
             case 'cover':
-                // Scale to cover container (may crop)
                 if (displayAspect > naturalAspect) {
                     outputWidth = displayW;
                     outputHeight = Math.round(displayW / naturalAspect);
@@ -411,7 +393,6 @@ class LinearImg extends HTMLElement {
 
             case 'contain':
             default:
-                // Scale to fit within container (may letterbox)
                 if (displayAspect > naturalAspect) {
                     outputHeight = displayH;
                     outputWidth = Math.round(displayH * naturalAspect);
@@ -422,11 +403,10 @@ class LinearImg extends HTMLElement {
                 break;
         }
 
-        // Ensure minimum size of 1
-        outputWidth = Math.max(1, outputWidth);
-        outputHeight = Math.max(1, outputHeight);
-
-        return { outputWidth, outputHeight };
+        return {
+            outputWidth: Math.max(1, outputWidth),
+            outputHeight: Math.max(1, outputHeight)
+        };
     }
 
     _displayResult(imageData, width, height) {
@@ -436,27 +416,14 @@ class LinearImg extends HTMLElement {
         const ctx = this._canvas.getContext('2d');
         ctx.putImageData(imageData, 0, 0);
 
-        // Position canvas based on fit mode
+        // Position canvas
         const displayW = this._displayWidth;
         const displayH = this._displayHeight;
 
-        if (this._fit === 'cover') {
-            // Center the oversized canvas
-            const left = Math.round((displayW - width) / 2);
-            const top = Math.round((displayH - height) / 2);
-            this._canvas.style.left = left + 'px';
-            this._canvas.style.top = top + 'px';
-        } else if (this._fit === 'contain') {
-            // Center the undersized canvas
-            const left = Math.round((displayW - width) / 2);
-            const top = Math.round((displayH - height) / 2);
-            this._canvas.style.left = left + 'px';
-            this._canvas.style.top = top + 'px';
-        } else {
-            this._canvas.style.left = '0';
-            this._canvas.style.top = '0';
-        }
-
+        const left = Math.round((displayW - width) / 2);
+        const top = Math.round((displayH - height) / 2);
+        this._canvas.style.left = left + 'px';
+        this._canvas.style.top = top + 'px';
         this._canvas.style.width = width + 'px';
         this._canvas.style.height = height + 'px';
 
@@ -466,28 +433,15 @@ class LinearImg extends HTMLElement {
     }
 
     // Public API
+    get naturalWidth() { return this._naturalWidth; }
+    get naturalHeight() { return this._naturalHeight; }
+    get complete() { return !this._processing && this._canvas.style.display === 'block'; }
 
-    get naturalWidth() {
-        return this._naturalWidth;
-    }
-
-    get naturalHeight() {
-        return this._naturalHeight;
-    }
-
-    get complete() {
-        return !this._processing && this._canvas.style.display === 'block';
-    }
-
-    // Force re-render
     refresh() {
         this._pendingResize = false;
         this._scheduleResize();
     }
 }
 
-// Register the custom element
 customElements.define('linear-img', LinearImg);
-
-// Export for module usage
 export { LinearImg };

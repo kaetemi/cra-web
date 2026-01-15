@@ -221,6 +221,89 @@ function processSrgbResize(params) {
     }
 }
 
+// Process resize from raw RGBA pixels (from canvas, already u8 sRGB)
+// Simpler path that bypasses file decoding - for use with browser-loaded images
+function processResizePixels(params) {
+    if (!wasmReady) {
+        sendError(new Error('WASM not ready'));
+        return;
+    }
+
+    try {
+        const {
+            pixelData,   // Uint8ClampedArray RGBA from canvas
+            srcWidth,
+            srcHeight,
+            dstWidth,
+            dstHeight,
+            interpolation,
+            scaleMode
+        } = params;
+
+        // Convert RGBA u8 to RGB f32 normalized (0-1)
+        const pixelCount = srcWidth * srcHeight;
+        const srgbNorm = new Float32Array(pixelCount * 3);
+        for (let i = 0; i < pixelCount; i++) {
+            srgbNorm[i * 3] = pixelData[i * 4] / 255.0;
+            srgbNorm[i * 3 + 1] = pixelData[i * 4 + 1] / 255.0;
+            srgbNorm[i * 3 + 2] = pixelData[i * 4 + 2] / 255.0;
+        }
+
+        // Convert sRGB to linear
+        const linearRgb = craWasm.srgb_to_linear_f32_wasm(srgbNorm, srcWidth, srcHeight);
+
+        sendProgress(20);
+
+        // Rescale in linear space
+        const linearResized = craWasm.rescale_linear_rgb_with_progress_wasm(
+            linearRgb,
+            srcWidth, srcHeight,
+            dstWidth, dstHeight,
+            interpolation,
+            scaleMode,
+            (progress) => sendProgress(20 + Math.round(progress * 60))
+        );
+
+        sendProgress(85);
+
+        // Convert linear back to sRGB
+        const srgbResized = craWasm.linear_to_srgb_f32_wasm(linearResized, dstWidth, dstHeight);
+
+        // Denormalize to 0-255
+        const srgbResized_255 = craWasm.denormalize_f32_wasm(srgbResized, dstWidth, dstHeight);
+
+        sendProgress(90);
+
+        // Dither to RGB888 (using good defaults)
+        const dithered = craWasm.dither_output_wasm(
+            srgbResized_255,
+            dstWidth, dstHeight,
+            8, 8, 8,
+            2,  // ColorAware
+            4,  // Mixed
+            1,  // OKLab
+            0   // seed
+        );
+
+        sendProgress(100);
+
+        // Convert to RGBA for ImageData
+        const dstPixels = dstWidth * dstHeight;
+        const outputData = new Uint8ClampedArray(dstPixels * 4);
+        for (let i = 0; i < dstPixels; i++) {
+            outputData[i * 4] = dithered[i * 3];
+            outputData[i * 4 + 1] = dithered[i * 3 + 1];
+            outputData[i * 4 + 2] = dithered[i * 3 + 2];
+            outputData[i * 4 + 3] = 255;
+        }
+
+        sendComplete(outputData, dstWidth, dstHeight);
+
+    } catch (error) {
+        sendError(error);
+    }
+}
+
 // Handle messages from main thread
 self.onmessage = function(e) {
     const { type, requestId, ...data } = e.data;
@@ -237,6 +320,9 @@ self.onmessage = function(e) {
             break;
         case 'resize-srgb':
             processSrgbResize(data);
+            break;
+        case 'resize-pixels':
+            processResizePixels(data);
             break;
     }
 };
