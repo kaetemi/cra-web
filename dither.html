@@ -1430,13 +1430,17 @@
                 cmd += ` --seed ${seed}`;
             }
 
-            // Add resize if downscaling
+            // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
-                const width = parseInt(document.getElementById('scale-width').value);
-                const height = parseInt(document.getElementById('scale-height').value);
                 const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
                 const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos' };
-                cmd += ` --width ${width} --height ${height}`;
+                if (primaryDimension === 'height') {
+                    const height = parseInt(document.getElementById('scale-height').value);
+                    cmd += ` --height ${height}`;
+                } else {
+                    const width = parseInt(document.getElementById('scale-width').value);
+                    cmd += ` --width ${width}`;
+                }
                 // Only add scale method if not default lanczos
                 if (scaleMethod !== 1) {
                     cmd += ` --scale-method ${scaleMethodMap[scaleMethod]}`;
