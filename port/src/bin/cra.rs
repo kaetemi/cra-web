@@ -72,6 +72,8 @@ enum DitherMethod {
     MixedSerpentine,
     /// Mixed: randomly selects kernel AND scan direction per-row
     MixedRandom,
+    /// No error diffusion - each pixel quantized independently (produces banding)
+    None,
 }
 
 impl DitherMethod {
@@ -84,6 +86,7 @@ impl DitherMethod {
             DitherMethod::MixedStandard => DitherMode::MixedStandard,
             DitherMethod::MixedSerpentine => DitherMode::MixedSerpentine,
             DitherMethod::MixedRandom => DitherMode::MixedRandom,
+            DitherMethod::None => DitherMode::None,
         }
     }
 
@@ -96,6 +99,7 @@ impl DitherMethod {
             DitherMethod::MixedStandard => CSDitherMode::MixedStandard,
             DitherMethod::MixedSerpentine => CSDitherMode::MixedSerpentine,
             DitherMethod::MixedRandom => CSDitherMode::MixedRandom,
+            DitherMethod::None => CSDitherMode::None,
         }
     }
 }

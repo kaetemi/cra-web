@@ -42,6 +42,7 @@ use dither_common::PerceptualSpace;
 /// 4 = Mixed Standard (random kernel, standard scan) (default for histogram_dither_mode)
 /// 5 = Mixed Serpentine (random kernel, serpentine scan)
 /// 6 = Mixed Random (random kernel and random scan direction)
+/// 7 = None (no error diffusion, nearest-level quantization only)
 fn dither_mode_from_u8(mode: u8) -> DitherMode {
     match mode {
         1 => DitherMode::Serpentine,
@@ -50,6 +51,7 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
         4 => DitherMode::MixedStandard,
         5 => DitherMode::MixedSerpentine,
         6 => DitherMode::MixedRandom,
+        7 => DitherMode::None,
         _ => DitherMode::Standard,
     }
 }

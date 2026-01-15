@@ -676,6 +676,7 @@
                     <option value="4" selected>* Mixed (Standard)</option>
                     <option value="5">Mixed (Serpentine)</option>
                     <option value="6">Mixed (Random Direction)</option>
+                    <option value="7">None (Nearest Only)</option>
                 </select>
             </div>
 
@@ -1373,7 +1374,8 @@
                 3: 'jjn-serpentine',
                 4: 'mixed-standard',
                 5: 'mixed-serpentine',
-                6: 'mixed-random'
+                6: 'mixed-random',
+                7: 'none'
             };
 
             // Map perceptual space values to CLI names
@@ -1456,7 +1458,7 @@
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
             const fillNames = ['Black', 'Repeat'];
             const modeNames = ['fs-standard', 'fs-serpentine', 'jjn-standard', 'jjn-serpentine',
-                               'mixed-standard', 'mixed-serpentine', 'mixed-random'];
+                               'mixed-standard', 'mixed-serpentine', 'mixed-random', 'none'];
             const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
 
             return {
