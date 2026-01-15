@@ -32,6 +32,14 @@ impl ColorFormat {
     pub fn parse(format: &str) -> Result<Self, String> {
         let format_upper = format.to_uppercase();
 
+        // Alpha channel formats: ARGB - not yet supported
+        if format_upper.starts_with("ARGB") {
+            return Err(format!(
+                "Alpha channel format '{}' is not yet supported. Use RGB formats instead (e.g., RGB8, RGB565).",
+                format
+            ));
+        }
+
         // Grayscale formats: L1, L2, L4, L8
         if format_upper.starts_with('L') {
             let bits_str = &format_upper[1..];
@@ -847,6 +855,12 @@ mod tests {
         assert_eq!(rgb5.bits_g, 5);
         assert_eq!(rgb5.bits_b, 5);
         assert_eq!(rgb5.total_bits, 15);
+
+        // Alpha formats should error
+        assert!(ColorFormat::parse("ARGB8").is_err());
+        assert!(ColorFormat::parse("ARGB1555").is_err());
+        let err = ColorFormat::parse("ARGB1555").unwrap_err();
+        assert!(err.contains("not yet supported"));
     }
 
     #[test]
