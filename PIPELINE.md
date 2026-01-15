@@ -203,12 +203,14 @@ The **Mixed** mode breaks up periodic patterns that can appear with fixed kernel
 
 ### 5.2 Colorspace-Aware Dithering
 
-Instead of dithering each channel independently, colorspace-aware dithering:
+Instead of dithering each channel independently in sRGB (the common approach), colorspace-aware dithering:
 
 1. Generates candidate quantized values for the current pixel
-2. Measures perceptual distance to the original color
+2. Measures perceptual distance to the original color (in OKLab, CIELAB, etc.)
 3. Selects the candidate closest perceptually
-4. Diffuses error in linear RGB
+4. Diffuses error in linear RGB space (physically correct error propagation)
+
+The per-channel approach simply quantizes each channel to its nearest value and diffuses error in sRGB space. This is faster but can produce visible color shifts since sRGB is neither perceptually uniform nor physically linear—it doesn't model how the eye perceives color differences or how light actually mixes.
 
 **Perceptual spaces** (for distance measurement):
 - **OKLab** (default): Modern, perceptually uniform
@@ -293,19 +295,16 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                          Denormalize (×255)
                                    │
                                    ▼
+                      Error Diffusion Dithering
+                       (FS / JJN / Mixed kernel)
+                                   │
                       ┌────────────┴────────────┐
                       │                         │
-               [Colorspace-Aware]         [Per-Channel]
-                      │                         │
-                      ▼                         ▼
-               Perceptual distance      Independent channel
-               candidate selection        quantization
+               [Colorspace-Aware]          [Per-Channel]
+               Perceptual candidate       Nearest per channel
+               Error diffused in linear   Error diffused in sRGB
                       │                         │
                       └────────────┬────────────┘
-                                   │
-                                   ▼
-                         Error Diffusion
-                         (FS / JJN / Mixed)
                                    │
                                    ▼
                          Quantized Output
