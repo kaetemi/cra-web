@@ -493,10 +493,15 @@ fn process_pixel_rgba(
     let lin_g_orig = srgb_to_linear_single(srgb_g);
     let lin_b_orig = srgb_to_linear_single(srgb_b);
 
-    // 3. Add accumulated error
-    let lin_r_adj = lin_r_orig + err_r_in;
-    let lin_g_adj = lin_g_orig + err_g_in;
-    let lin_b_adj = lin_b_orig + err_b_in;
+    // 3. Add accumulated error (skip for fully transparent pixels)
+    // For α=0, we quantize the original value to produce cleaner RGB output
+    // (useful if alpha is later stripped). Error diffusion still works since
+    // the quantization error term is multiplied by α anyway.
+    let (lin_r_adj, lin_g_adj, lin_b_adj) = if alpha == 0.0 {
+        (lin_r_orig, lin_g_orig, lin_b_orig)
+    } else {
+        (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
+    };
 
     // 4. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
     let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
