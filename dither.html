@@ -124,8 +124,15 @@
             margin-top: 20px;
         }
 
+        .channel-options.has-alpha {
+            grid-template-columns: repeat(4, 1fr);
+        }
+
         @media (max-width: 768px) {
             .channel-options {
+                grid-template-columns: 1fr;
+            }
+            .channel-options.has-alpha {
                 grid-template-columns: 1fr;
             }
         }
@@ -139,6 +146,9 @@
         .channel-box.red { background: #ffebee; border: 2px solid #e57373; }
         .channel-box.green { background: #e8f5e9; border: 2px solid #81c784; }
         .channel-box.blue { background: #e3f2fd; border: 2px solid #64b5f6; }
+        .channel-box.alpha { background: #f3e5f5; border: 2px solid #ba68c8; }
+        .channel-box.alpha h4 { color: #7b1fa2; }
+        .channel-box.alpha .alpha-hint { font-size: 11px; color: #888; margin-top: 5px; }
 
         .channel-box h4 {
             margin: 0 0 10px 0;
@@ -777,6 +787,12 @@
                     <input type="range" id="bits-b" min="1" max="8" value="2">
                     <p class="bit-value" id="bits-b-label">2 bits (4 levels)</p>
                 </div>
+                <div class="channel-box alpha" id="alpha-channel-box" style="display: none;">
+                    <h4>Alpha Channel</h4>
+                    <input type="range" id="bits-a" min="0" max="8" value="8">
+                    <p class="bit-value" id="bits-a-label">8 bits (256 levels)</p>
+                    <p class="alpha-hint">Set to 0 to strip alpha</p>
+                </div>
             </div>
 
             <div class="grayscale-options" id="grayscale-options">
@@ -846,6 +862,8 @@
             format_total_bits_wasm,
             encode_rgb_packed_wasm,
             encode_rgb_row_aligned_stride_wasm,
+            encode_argb_packed_wasm,
+            encode_argb_row_aligned_stride_wasm,
             encode_gray_packed_wasm,
             encode_gray_row_aligned_stride_wasm,
             encode_channel_row_aligned_stride_wasm
@@ -972,6 +990,7 @@
         let wasmReady = false;
         let inputFileBytes = null;      // Raw file bytes (decoded on demand based on processing mode)
         let inputHasNonSrgbIcc = false; // True if image has ICC profile that differs from sRGB
+        let inputHasAlpha = false;      // True if input image has alpha channel
         let inputWidth = 0;
         let inputHeight = 0;
         let originalWidth = 0;
@@ -1110,6 +1129,7 @@
             const bitsR = parseInt(document.getElementById('bits-r').value);
             const bitsG = parseInt(document.getElementById('bits-g').value);
             const bitsB = parseInt(document.getElementById('bits-b').value);
+            const bitsA = parseInt(document.getElementById('bits-a').value);  // 0 = strip alpha
             const bitsGray = parseInt(document.getElementById('bits-gray').value);
 
             // Send to worker
@@ -1128,6 +1148,7 @@
                 bitsR: bitsR,
                 bitsG: bitsG,
                 bitsB: bitsB,
+                bitsA: bitsA,  // Alpha bit depth (0 = strip alpha)
                 bitsGray: bitsGray,
                 mode: mode,
                 isPerceptual: isPerceptual,
@@ -1146,7 +1167,14 @@
                 const bitsR = parseInt(document.getElementById('bits-r').value);
                 const bitsG = parseInt(document.getElementById('bits-g').value);
                 const bitsB = parseInt(document.getElementById('bits-b').value);
-                return `RGB${bitsR}${bitsG}${bitsB}`;
+                const bitsA = parseInt(document.getElementById('bits-a').value);
+
+                // Use ARGB format when alpha is preserved (bitsA > 0 and input has alpha)
+                if (inputHasAlpha && bitsA > 0) {
+                    return `ARGB${bitsA}${bitsR}${bitsG}${bitsB}`;
+                } else {
+                    return `RGB${bitsR}${bitsG}${bitsB}`;
+                }
             }
         }
 
@@ -1249,7 +1277,15 @@
                 const bitsR = parseInt(document.getElementById('bits-r').value);
                 const bitsG = parseInt(document.getElementById('bits-g').value);
                 const bitsB = parseInt(document.getElementById('bits-b').value);
-                if (bitsR !== 8 || bitsG !== 8 || bitsB !== 8) {
+                const bitsA = parseInt(document.getElementById('bits-a').value);
+
+                // Use ARGB format when alpha is preserved
+                if (inputHasAlpha && bitsA > 0) {
+                    // Use shorthand (ARGB8) when all channels are equal, otherwise full form (ARGB8888)
+                    const allEqual = (bitsA === bitsR && bitsR === bitsG && bitsG === bitsB);
+                    const formatSuffix = allEqual ? bitsA : `${bitsA}${bitsR}${bitsG}${bitsB}`;
+                    cmd += ` --format ARGB${formatSuffix}`;
+                } else if (bitsR !== 8 || bitsG !== 8 || bitsB !== 8) {
                     // Use shorthand (RGB5) when all channels are equal, otherwise full form (RGB565)
                     const formatSuffix = (bitsR === bitsG && bitsG === bitsB) ? bitsR : `${bitsR}${bitsG}${bitsB}`;
                     cmd += ` --format RGB${formatSuffix}`;
@@ -1311,11 +1347,12 @@
                                'mixed-standard', 'mixed-serpentine', 'mixed-random', 'none'];
             const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
 
-            return {
+            const metadata = {
                 format: format,
                 width: lastDitherResult.width,
                 height: lastDitherResult.height,
                 is_grayscale: lastDitherResult.isGrayscale,
+                has_alpha: lastDitherResult.hasAlpha,
                 bits_per_pixel: format_total_bits_wasm(format),
                 bits_r: lastDitherResult.bitsR,
                 bits_g: lastDitherResult.bitsG,
@@ -1328,6 +1365,13 @@
                 stride_fill: fillNames[fill] || 'Black',
                 generated_at: new Date().toISOString()
             };
+
+            // Add bits_a only when output has alpha
+            if (lastDitherResult.hasAlpha) {
+                metadata.bits_a = lastDitherResult.bitsA;
+            }
+
+            return metadata;
         }
 
         // Event handlers
@@ -1345,12 +1389,20 @@
                 const height = metadata[1];
                 const hasNonSrgbIcc = metadata[2] > 0.5;
                 const is16bit = metadata[3] > 0.5;
+                const hasAlpha = metadata[5] > 0.5;
 
-                // Store ICC info for worker
+                // Store ICC and alpha info for worker
                 inputHasNonSrgbIcc = hasNonSrgbIcc;
+                inputHasAlpha = hasAlpha;
                 if (inputHasNonSrgbIcc) {
                     console.log('Detected non-sRGB ICC profile - will use color management');
                 }
+                if (inputHasAlpha) {
+                    console.log('Detected alpha channel in input image');
+                }
+
+                // Show/hide alpha channel controls based on input
+                updateAlphaControlVisibility();
 
                 // Store raw bytes for processing
                 inputFileBytes = fileBytes;
@@ -1397,11 +1449,15 @@
             const slider = document.getElementById(`bits-${channel}`);
             const label = document.getElementById(`bits-${channel}-label`);
             const bits = parseInt(slider.value);
-            const levels = 1 << bits;
-            label.textContent = `${bits} bit${bits > 1 ? 's' : ''} (${levels} levels)`;
+            if (channel === 'a' && bits === 0) {
+                label.textContent = '0 bits (strip alpha)';
+            } else {
+                const levels = 1 << bits;
+                label.textContent = `${bits} bit${bits > 1 ? 's' : ''} (${levels} levels)`;
+            }
         }
 
-        ['r', 'g', 'b', 'gray'].forEach(channel => {
+        ['r', 'g', 'b', 'a', 'gray'].forEach(channel => {
             document.getElementById(`bits-${channel}`).addEventListener('input', () => updateBitLabel(channel));
         });
 
@@ -1411,9 +1467,22 @@
             document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
             document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
             // Grayscale now works with color space aware mode, no need to disable it
+            // Update alpha visibility (hidden in grayscale mode)
+            updateAlphaControlVisibility();
         }
 
         document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
+
+        // Alpha channel control visibility
+        function updateAlphaControlVisibility() {
+            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            const showAlpha = inputHasAlpha && !isGrayscale;
+            const alphaBox = document.getElementById('alpha-channel-box');
+            const rgbOptions = document.getElementById('rgb-options');
+
+            alphaBox.style.display = showAlpha ? 'block' : 'none';
+            rgbOptions.classList.toggle('has-alpha', showAlpha);
+        }
 
         // Color space aware toggle
         function updatePerceptualMode() {
@@ -1527,7 +1596,19 @@
                         lastDitherResult.height,
                         lastDitherResult.bitsR
                     );
+                } else if (lastDitherResult.hasAlpha) {
+                    // ARGB format - use RGBA interleaved data
+                    rawData = encode_argb_packed_wasm(
+                        lastDitherResult.rgbaInterleaved,
+                        lastDitherResult.width,
+                        lastDitherResult.height,
+                        lastDitherResult.bitsA,
+                        lastDitherResult.bitsR,
+                        lastDitherResult.bitsG,
+                        lastDitherResult.bitsB
+                    );
                 } else {
+                    // RGB format
                     const rgbData = getRgbInterleaved();
                     rawData = encode_rgb_packed_wasm(
                         rgbData,
@@ -1550,7 +1631,21 @@
                         stride,
                         fill
                     );
+                } else if (lastDitherResult.hasAlpha) {
+                    // ARGB format - use RGBA interleaved data
+                    rawData = encode_argb_row_aligned_stride_wasm(
+                        lastDitherResult.rgbaInterleaved,
+                        lastDitherResult.width,
+                        lastDitherResult.height,
+                        lastDitherResult.bitsA,
+                        lastDitherResult.bitsR,
+                        lastDitherResult.bitsG,
+                        lastDitherResult.bitsB,
+                        stride,
+                        fill
+                    );
                 } else {
+                    // RGB format
                     const rgbData = getRgbInterleaved();
                     rawData = encode_rgb_row_aligned_stride_wasm(
                         rgbData,
