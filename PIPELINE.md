@@ -29,18 +29,29 @@ These divisors are coherent: a uint8 value bit-replicated to uint16 produces the
 
 For non-divisor bit depths (3, 5, 6 bits used in formats like RGB332, RGB565), values are first bit-replicated to uint8, then divided by 255. See [BITDEPTH.md](BITDEPTH.md) for details.
 
-### ICC Profile Detection
+### Color Space Detection
 
-The pipeline examines embedded ICC profiles to determine color space handling:
+The pipeline examines CICP (Coding-Independent Code Points) metadata and ICC profiles to determine color space handling:
 
 | Profile Mode | Behavior |
 |--------------|----------|
 | `sRGB` | Use builtin sRGB gamma functions |
 | `Linear` | Skip gamma decode (for normal maps, data textures) |
-| `Auto` (default) | Check ICC profile; use moxcms if non-sRGB |
+| `Auto` (default) | Check CICP first, then ICC; use moxcms if non-sRGB |
 | `ICC` | Always use embedded ICC profile via moxcms |
+| `CICP` | Always use CICP metadata via moxcms (ignore ICC) |
 
-In `Auto` mode, the ICC profile is compared against sRGB characteristics. If it differs significantly, the image is transformed through XYZ to linear sRGB using moxcms.
+**Auto mode priority order:**
+
+1. **CICP sRGB check** — If CICP indicates sRGB (BT.709 primaries + sRGB transfer), use builtin gamma functions
+2. **CICP linear check** — If CICP indicates linear sRGB (BT.709 primaries + linear transfer), skip gamma decode
+3. **ICC profile fallback** — If CICP is unspecified or needs conversion:
+   - If ICC profile is present and sRGB-compatible, use builtin gamma
+   - If ICC profile is non-sRGB, transform via moxcms
+4. **CICP conversion** — If no ICC but CICP indicates a supported non-sRGB color space (Display P3, BT.2020, etc.), transform via moxcms
+5. **Default** — Assume sRGB
+
+CICP is checked first because it's authoritative (O(1) lookup) and increasingly common in modern formats (HEIF, AVIF, PNG cICP chunk). ICC profiles remain the fallback for formats without CICP or for specialized workflows.
 
 ### Premultiplied Alpha Detection
 
@@ -71,7 +82,7 @@ Used when any of these conditions apply:
 - Reference image provided (color correction needed)
 - Resize operation requested
 - Grayscale output selected
-- Non-sRGB ICC profile detected
+- Non-sRGB color space detected (via CICP or ICC profile)
 - Premultiplied alpha needs un-premultiplying (EXR by default)
 
 This path converts to linear RGB (0–1 float), performs all processing, then converts back to sRGB.
@@ -82,7 +93,7 @@ Used when all of these are true:
 - No color correction (no reference image)
 - No resize needed
 - RGB output (not grayscale)
-- Standard sRGB input (no special ICC profile)
+- Standard sRGB input (CICP indicates sRGB, or no CICP and no non-sRGB ICC profile)
 - No premultiplied alpha to un-premultiply
 
 This path converts directly to sRGB float (0–255 range) without gamma decode, avoiding unnecessary round-trips through linear space.
@@ -92,7 +103,7 @@ sRGB Direct Path:
   Input (u8/u16) → f32 [0-255] sRGB → Dither → Output
 
 Linear Path:
-  Input → ICC (if needed) → f32 [0-1] linear → Un-premultiply (if needed) → Process → sRGB encode → f32 [0-255] → Dither → Output
+  Input → CICP/ICC (if needed) → f32 [0-1] linear → Un-premultiply (if needed) → Process → sRGB encode → f32 [0-255] → Dither → Output
 ```
 
 The sRGB direct path preserves full precision for dither-only operations. Even though the range is 0–255, the f32 representation maintains sub-integer precision that participates in error diffusion.
@@ -104,7 +115,7 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Resize → Color Correct → Grayscale → sRGB Encode → Dither
+CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Resize → Color Correct → Grayscale → sRGB Encode → Dither
 ```
 
 ### 3.0 Un-premultiply Alpha
@@ -298,10 +309,10 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    │
                     ┌──────────────┴──────────────┐
                     │                             │
-              [Has ICC?]                    [sRGB assumed]
+        [CICP/ICC non-sRGB?]              [sRGB assumed]
                     │                             │
                     ▼                             ▼
-             ICC Transform                  sRGB Decode
+          CICP/ICC Transform              sRGB Decode
              (via moxcms)                   (gamma 2.4)
                     │                             │
                     └──────────────┬──────────────┘
