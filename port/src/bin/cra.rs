@@ -6,7 +6,7 @@
 //! All processing occurs in linear RGB space for correct color math.
 
 use clap::{Parser, ValueEnum};
-use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb};
+use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgba};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -19,7 +19,7 @@ use cra_wasm::binary_format::{
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
-    image_to_f32_normalized, image_to_f32_srgb_255_pixels, is_profile_srgb_verbose,
+    image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba, is_profile_srgb_verbose,
     load_image_from_path, transform_icc_to_linear_srgb_pixels,
 };
 use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
@@ -29,7 +29,7 @@ use cra_wasm::dither_common::{
     PerceptualSpace,
 };
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
-use cra_wasm::output::dither_output_rgb;
+use cra_wasm::output::{dither_output_rgb, dither_output_rgba};
 use cra_wasm::pixel::Pixel4;
 
 // ============================================================================
@@ -386,15 +386,19 @@ struct Args {
 // ============================================================================
 
 /// Convert ICC pixels to Pixel4 format using shared decode module
+/// Takes RGBA input, strips to RGB for ICC transform, merges alpha back
 fn convert_icc_to_linear_pixels(
-    input_pixels: &[[f32; 3]],
+    input_pixels: &[[f32; 4]],
     width: u32,
     height: u32,
     icc_profile: &[u8],
     verbose: bool,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
+    // ICC transform only handles RGB - strip alpha, transform, merge back
+    let rgb_only: Vec<[f32; 3]> = input_pixels.iter().map(|p| [p[0], p[1], p[2]]).collect();
+
     let result = transform_icc_to_linear_srgb_pixels(
-        input_pixels,
+        &rgb_only,
         width as usize,
         height as usize,
         icc_profile,
@@ -404,8 +408,12 @@ fn convert_icc_to_linear_pixels(
         eprintln!("  Converted via ICC profile to linear sRGB (float path)");
     }
 
-    // Convert to Pixel4 format
-    let pixels: Vec<Pixel4> = result.into_iter().map(|[r, g, b]| Pixel4([r, g, b, 0.0])).collect();
+    // Merge transformed RGB with original alpha
+    let pixels: Vec<Pixel4> = result
+        .into_iter()
+        .zip(input_pixels.iter())
+        .map(|([r, g, b], orig)| Pixel4([r, g, b, orig[3]]))
+        .collect();
 
     Ok((pixels, width, height))
 }
@@ -453,18 +461,25 @@ fn determine_effective_profile(
 }
 
 /// Convert pre-loaded image to linear RGB channels (f32, 0-1 range)
+/// Returns (pixels, width, height, has_alpha)
+/// Always uses RGBA path internally - Pixel4 is float4 so no overhead.
 fn convert_to_linear(
     img: &DynamicImage,
     icc_profile: &Option<Vec<u8>>,
     profile_mode: InputColorProfile,
     verbose: bool,
-) -> Result<(Vec<Pixel4>, u32, u32), String> {
+) -> Result<(Vec<Pixel4>, u32, u32, bool), String> {
     let (width, height) = img.dimensions();
+    let has_alpha = matches!(
+        img.color(),
+        ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
+    );
 
     if verbose {
         eprintln!("  Input profile mode: {:?}", profile_mode);
         eprintln!("  Dimensions: {}x{}", width, height);
         eprintln!("  Color type: {:?}", img.color());
+        eprintln!("  Has alpha: {}", has_alpha);
         if let Some(icc) = icc_profile {
             eprintln!("  ICC profile: {} bytes", icc.len());
         } else {
@@ -473,9 +488,6 @@ fn convert_to_linear(
     }
 
     let effective_mode = determine_effective_profile(profile_mode, icc_profile, verbose);
-
-    // Convert to normalized f32 (0-1) - single code path for all modes
-    let normalized = image_to_f32_normalized(img);
 
     if verbose {
         let is_16bit = matches!(
@@ -492,12 +504,17 @@ fn convert_to_linear(
         }
     }
 
+    // Always use RGBA path - Pixel4 is float4, no overhead
+    // Images without alpha get alpha=1.0 from image crate's to_rgba*
+    let normalized = image_to_f32_normalized_rgba(img);
+
     // Apply color space conversion based on effective mode
     match effective_mode {
         InputColorProfile::Icc => {
-            // ICC transform in float space
+            // ICC transform handles RGB extraction and alpha merge internally
             let icc = icc_profile.as_ref().expect("ICC mode requires profile");
-            convert_icc_to_linear_pixels(&normalized, width, height, icc, verbose)
+            let (pixels, w, h) = convert_icc_to_linear_pixels(&normalized, width, height, icc, verbose)?;
+            Ok((pixels, w, h, has_alpha))
         }
         InputColorProfile::Linear => {
             // Already linear, just convert to Pixel4
@@ -506,37 +523,44 @@ fn convert_to_linear(
             }
             let pixels: Vec<Pixel4> = normalized
                 .into_iter()
-                .map(|[r, g, b]| Pixel4([r, g, b, 0.0]))
+                .map(|[r, g, b, a]| Pixel4([r, g, b, a]))
                 .collect();
-            Ok((pixels, width, height))
+            Ok((pixels, width, height, has_alpha))
         }
         InputColorProfile::Srgb | InputColorProfile::Auto => {
-            // sRGB input - apply gamma decode
+            // sRGB input - apply gamma decode (alpha stays linear)
             if verbose {
                 eprintln!("  Applying sRGB gamma decode");
             }
             let pixels: Vec<Pixel4> = normalized
                 .into_iter()
-                .map(|[r, g, b]| Pixel4([
+                .map(|[r, g, b, a]| Pixel4([
                     srgb_to_linear_single(r),
                     srgb_to_linear_single(g),
                     srgb_to_linear_single(b),
-                    0.0,
+                    a, // Alpha is already linear
                 ]))
                 .collect();
-            Ok((pixels, width, height))
+            Ok((pixels, width, height, has_alpha))
         }
     }
 }
 
 /// Convert pre-loaded image to sRGB (f32, 0-255 range) - no color space conversion
 /// Use when only dithering is needed (no resize, no color correction)
-fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, u32) {
+/// Returns (pixels, width, height, has_alpha)
+/// Always uses RGBA path internally - Pixel4 is float4 so no overhead.
+fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, u32, bool) {
     let (width, height) = img.dimensions();
+    let has_alpha = matches!(
+        img.color(),
+        ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
+    );
 
     if verbose {
         eprintln!("  Dimensions: {}x{}", width, height);
         eprintln!("  Color type: {:?}", img.color());
+        eprintln!("  Has alpha: {}", has_alpha);
         let is_16bit = matches!(
             img.color(),
             ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
@@ -551,13 +575,13 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
         }
     }
 
-    // Use shared function: 8-bit → f32 direct, 16-bit → f32 * 255.0 / 65535.0
-    let pixels: Vec<Pixel4> = image_to_f32_srgb_255_pixels(img)
+    // Always use RGBA path - Pixel4 is float4, no overhead
+    // Images without alpha get alpha=255.0 from image crate's to_rgba*
+    let pixels: Vec<Pixel4> = image_to_f32_srgb_255_pixels_rgba(img)
         .into_iter()
-        .map(|[r, g, b]| Pixel4([r, g, b, 0.0]))
+        .map(|[r, g, b, a]| Pixel4([r, g, b, a]))
         .collect();
-
-    (pixels, width, height)
+    (pixels, width, height, has_alpha)
 }
 
 /// Resize linear RGB image in linear space for correct color blending
@@ -642,10 +666,12 @@ fn dither_grayscale(
 
 /// Result of dithering operation
 struct DitherResult {
-    /// Interleaved output (grayscale or RGB)
+    /// Interleaved output (grayscale, RGB, or RGBA)
     interleaved: Vec<u8>,
     /// True if this is grayscale data
     is_grayscale: bool,
+    /// True if this is RGBA data (4 channels)
+    has_alpha: bool,
 }
 
 /// Dither linear RGB pixels to the target format
@@ -659,6 +685,7 @@ fn dither_pixels(
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
+    has_alpha: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     if format.is_grayscale {
@@ -672,29 +699,41 @@ fn dither_pixels(
             .map(|&l| linear_to_srgb_single(l) * 255.0)
             .collect();
 
-        // Step 4: Dither grayscale
+        // Step 4: Dither grayscale (alpha not supported for grayscale output)
         let interleaved = dither_grayscale(
             &srgb_gray, width, height, format.bits_r, colorspace, dither_mode, seed, progress,
         );
-        DitherResult { interleaved, is_grayscale: true }
+        DitherResult { interleaved, is_grayscale: true, has_alpha: false }
     } else {
         let mut linear_pixels = pixels;
 
-        // Convert linear RGB to sRGB 0-255
+        // Convert linear RGB to sRGB 0-255 (alpha already in correct range)
         linear_to_srgb_inplace(&mut linear_pixels);
         denormalize_inplace_clamped(&mut linear_pixels);
 
         // Dither
         let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
-        let interleaved = dither_output_rgb(
-            &linear_pixels,
-            width, height,
-            format.bits_r, format.bits_g, format.bits_b,
-            technique,
-            seed,
-            progress,
-        );
-        DitherResult { interleaved, is_grayscale: false }
+        if has_alpha {
+            let interleaved = dither_output_rgba(
+                &linear_pixels,
+                width, height,
+                format.bits_r, format.bits_g, format.bits_b,
+                technique,
+                seed,
+                progress,
+            );
+            DitherResult { interleaved, is_grayscale: false, has_alpha: true }
+        } else {
+            let interleaved = dither_output_rgb(
+                &linear_pixels,
+                width, height,
+                format.bits_r, format.bits_g, format.bits_b,
+                technique,
+                seed,
+                progress,
+            );
+            DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+        }
     }
 }
 
@@ -711,23 +750,33 @@ fn dither_pixels_srgb_rgb(
     dither_mode: CSDitherMode,
     colorspace: PerceptualSpace,
     seed: u32,
+    has_alpha: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
-    use cra_wasm::output::dither_output_rgb;
-
     debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
 
     let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
-    let interleaved = dither_output_rgb(
-        &pixels,
-        width, height,
-        format.bits_r, format.bits_g, format.bits_b,
-        technique,
-        seed,
-        progress,
-    );
-
-    DitherResult { interleaved, is_grayscale: false }
+    if has_alpha {
+        let interleaved = dither_output_rgba(
+            &pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b,
+            technique,
+            seed,
+            progress,
+        );
+        DitherResult { interleaved, is_grayscale: false, has_alpha: true }
+    } else {
+        let interleaved = dither_output_rgb(
+            &pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b,
+            technique,
+            seed,
+            progress,
+        );
+        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+    }
 }
 
 /// Encode dithered pixels to binary format
@@ -778,6 +827,17 @@ fn save_png_rgb(path: &PathBuf, data: &[u8], width: u32, height: u32) -> Result<
     let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
         ImageBuffer::from_raw(width, height, data.to_vec())
             .ok_or_else(|| "Failed to create RGB image buffer".to_string())?;
+
+    img.save(path)
+        .map_err(|e| format!("Failed to save {}: {}", path.display(), e))?;
+
+    Ok(())
+}
+
+fn save_png_rgba(path: &PathBuf, data: &[u8], width: u32, height: u32) -> Result<(), String> {
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, data.to_vec())
+            .ok_or_else(|| "Failed to create RGBA image buffer".to_string())?;
 
     img.save(path)
         .map_err(|e| format!("Failed to save {}: {}", path.display(), e))?;
@@ -1000,7 +1060,7 @@ fn main() -> Result<(), String> {
             eprintln!("Processing in linear RGB space...");
         }
 
-        let (input_pixels, src_width, src_height) = convert_to_linear(&input_img, &input_icc, args.input_profile, args.verbose)?;
+        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, args.input_profile, args.verbose)?;
 
         // Resize in linear RGB space
         let mut resize_progress = |p: f32| print_progress("Resize", p);
@@ -1027,7 +1087,8 @@ fn main() -> Result<(), String> {
                 eprintln!("Loading: {}", ref_path.display());
             }
             let decoded_ref = load_image_from_path(ref_path)?;
-            let (ref_pixels, ref_width, ref_height) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, args.verbose)?;
+            // Reference doesn't need alpha - we only use it for color matching
+            let (ref_pixels, ref_width, ref_height, _) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, args.verbose)?;
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 
@@ -1061,6 +1122,7 @@ fn main() -> Result<(), String> {
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
+            input_has_alpha,
             if args.progress { Some(&mut dither_progress) } else { None },
         );
         if args.progress {
@@ -1075,7 +1137,7 @@ fn main() -> Result<(), String> {
             eprintln!("Dithering RGB channels (sRGB path)...");
         }
 
-        let (input_pixels, width, height) = convert_to_srgb_255(&input_img, args.verbose);
+        let (input_pixels, width, height, input_has_alpha) = convert_to_srgb_255(&input_img, args.verbose);
 
         let mut dither_progress = |p: f32| print_progress("Dither", p);
         let result = dither_pixels_srgb_rgb(
@@ -1087,6 +1149,7 @@ fn main() -> Result<(), String> {
             output_dither_mode,
             output_colorspace.to_perceptual_space(),
             args.seed,
+            input_has_alpha,
             if args.progress { Some(&mut dither_progress) } else { None },
         );
         if args.progress {
@@ -1110,6 +1173,8 @@ fn main() -> Result<(), String> {
 
         if format.is_grayscale {
             save_png_grayscale(png_path, &dither_result.interleaved, width, height)?;
+        } else if dither_result.has_alpha {
+            save_png_rgba(png_path, &dither_result.interleaved, width, height)?;
         } else {
             save_png_rgb(png_path, &dither_result.interleaved, width, height)?;
         }

@@ -79,6 +79,9 @@ function processDither(params) {
         // inputIsLinear counts as needing the linear path (already in linear, process there)
         const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || inputIsLinear;
 
+        // Check if input has alpha channel (for output format decision)
+        const hasAlpha = loadedImage.has_alpha;
+
         const pixelCount = processWidth * processHeight;
         const outputData = new Uint8ClampedArray(pixelCount * 4);
 
@@ -94,8 +97,10 @@ function processDither(params) {
 
         if (needsLinear) {
             // Linear path: convert to normalized (0-1)
+            // Always use RGBA buffer - Pixel4/BufferF32x4 is float4, no overhead
+            // Images without alpha get alpha=1.0 automatically
             sendProgress(10, 'Converting to normalized format...');
-            let buffer = loadedImage.to_normalized_buffer();
+            let buffer = loadedImage.to_normalized_buffer_rgba();
 
             sendProgress(20, 'Converting to linear color space...');
             // Step 1: Convert to linear (either via ICC, sRGB gamma, or already linear)
@@ -120,6 +125,9 @@ function processDither(params) {
             }
 
             if (isGrayscale) {
+                // Extract alpha before grayscale conversion (in 0-1 range, will be scaled to 0-255)
+                const bufferData = buffer.as_slice ? buffer.as_slice() : buffer;
+
                 sendProgress(50, 'Converting to grayscale...');
                 let grayBuffer = craWasm.rgb_to_grayscale_wasm(buffer);
 
@@ -137,13 +145,13 @@ function processDither(params) {
                 // Store for download
                 grayChannel = new Uint8Array(grayDithered);
 
-                // Output as grayscale (R=G=B)
+                // Output as grayscale (R=G=B) with alpha from buffer
                 for (let i = 0; i < pixelCount; i++) {
                     const v = grayDithered[i];
                     outputData[i * 4] = v;
                     outputData[i * 4 + 1] = v;
                     outputData[i * 4 + 2] = v;
-                    outputData[i * 4 + 3] = 255;
+                    outputData[i * 4 + 3] = Math.round(bufferData[i * 4 + 3] * 255);
                 }
             } else {
                 sendProgress(50, 'Converting to sRGB...');
@@ -151,6 +159,9 @@ function processDither(params) {
 
                 sendProgress(60, 'Denormalizing...');
                 craWasm.denormalize_clamped_wasm(buffer);
+
+                // Get alpha from buffer before dithering (now in 0-255 range after denormalize)
+                const bufferData = buffer.as_slice ? buffer.as_slice() : buffer;
 
                 sendProgress(70, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
@@ -162,19 +173,23 @@ function processDither(params) {
                 // Keep interleaved data for binary export
                 rgbInterleaved = new Uint8Array(rgbDithered);
 
-                // Convert to RGBA for display
+                // Convert to RGBA for display with alpha from buffer
                 for (let i = 0; i < pixelCount; i++) {
                     outputData[i * 4] = rgbDithered[i * 3];
                     outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
                     outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
-                    outputData[i * 4 + 3] = 255;
+                    outputData[i * 4 + 3] = Math.round(bufferData[i * 4 + 3]);
                 }
             }
         } else {
             // sRGB-direct path: bypass 0-1 range and linear conversion entirely
-            // Convert directly to sRGB 0-255 (no normalization, no linear conversion)
+            // Always use RGBA buffer - Pixel4/BufferF32x4 is float4, no overhead
+            // Images without alpha get alpha=255.0 automatically
             sendProgress(10, 'Converting to sRGB 0-255...');
-            let buffer = loadedImage.to_srgb_255_buffer();
+            let buffer = loadedImage.to_srgb_255_buffer_rgba();
+
+            // Get alpha from buffer (already in 0-255 range)
+            const bufferData = buffer.as_slice ? buffer.as_slice() : buffer;
 
             sendProgress(50, 'Dithering RGB...');
             const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
@@ -186,12 +201,12 @@ function processDither(params) {
             // Keep interleaved data for binary export
             rgbInterleaved = new Uint8Array(rgbDithered);
 
-            // Convert to RGBA for display
+            // Convert to RGBA for display with alpha from buffer
             for (let i = 0; i < pixelCount; i++) {
                 outputData[i * 4] = rgbDithered[i * 3];
                 outputData[i * 4 + 1] = rgbDithered[i * 3 + 1];
                 outputData[i * 4 + 2] = rgbDithered[i * 3 + 2];
-                outputData[i * 4 + 3] = 255;
+                outputData[i * 4 + 3] = Math.round(bufferData[i * 4 + 3]);
             }
         }
 
@@ -208,7 +223,8 @@ function processDither(params) {
             bitsB: isGrayscale ? bitsGray : bitsB,
             mode: mode,
             rgbInterleaved: rgbInterleaved,
-            grayChannel: grayChannel
+            grayChannel: grayChannel,
+            hasAlpha: hasAlpha
         });
 
     } catch (error) {
