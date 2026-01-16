@@ -1001,27 +1001,13 @@ pub fn colorspace_aware_dither_rgba_with_mode(
 
     let hashed_seed = wang_hash(seed);
 
-    // Create a progress wrapper that maps 0-1 to 0.1-1.0
-    let rgb_progress: Option<&mut dyn FnMut(f32)> = progress.as_mut().map(|cb| {
-        let wrapper: &mut dyn FnMut(f32) = &mut |p: f32| {
-            cb(0.1 + p * 0.9);
-        };
-        // This is a bit awkward but we need to convert the reference
-        wrapper
-    });
-
-    // We can't easily pass the wrapped progress, so we'll handle it inline
     match mode {
         DitherMode::None => {
             dither_standard_rgba::<NoneKernel>(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left,
-                progress.map(|cb| -> &mut dyn FnMut(f32) {
-                    // Can't easily wrap, just pass through
-                    cb
-                }),
+                width, height, pad_left, progress,
             );
         }
         DitherMode::Standard => {

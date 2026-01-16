@@ -9,6 +9,7 @@
 use crate::color::{interleave_rgb_u8, interleave_rgba_u8};
 use crate::dither::dither_with_mode_bits;
 use crate::dither_rgb::colorspace_aware_dither_rgb_channels;
+use crate::dither_rgba::colorspace_aware_dither_rgba_channels;
 use crate::dither_luminosity::colorspace_aware_dither_gray_with_mode;
 use crate::dither_common::OutputTechnique;
 use crate::pixel::{pixels_to_channels, pixels_to_channels_rgba, Pixel4};
@@ -96,8 +97,11 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
 
 /// Dither sRGB 0-255 Pixel4 data to interleaved u8 RGBA output.
 ///
-/// RGB channels are dithered normally, alpha channel is passed through
-/// without dithering. Alpha is already in 0-255 range (same scale as RGB).
+/// All channels (RGB + alpha) are dithered with alpha-aware error propagation:
+/// - Alpha is dithered first using standard single-channel dithering
+/// - RGB channels are dithered with error weighted by alpha visibility
+/// - Fully transparent pixels pass error to neighbors without absorbing it
+/// - Fully opaque pixels behave like standard RGB dithering
 ///
 /// Args:
 ///     srgb_pixels: sRGB Pixel4 array (all channels in 0-255 range)
@@ -120,44 +124,45 @@ pub fn dither_output_rgba(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    // Extract alpha channel - already in 0-255 range (same scale as RGB)
-    let alpha_u8: Vec<u8> = srgb_pixels
-        .iter()
-        .map(|p| p[3].round().clamp(0.0, 255.0) as u8)
-        .collect();
+    // Alpha is always output at 8-bit (full precision passthrough)
+    const BITS_A: u8 = 8;
 
     match technique {
         OutputTechnique::None => {
             // Simple quantization without dithering - no progress needed
-            let (r, g, b, _) = pixels_to_channels_rgba(srgb_pixels);
+            let (r, g, b, a) = pixels_to_channels_rgba(srgb_pixels);
             let r_u8: Vec<u8> = r.iter().map(|v| quantize_no_dither(*v, bits_r)).collect();
             let g_u8: Vec<u8> = g.iter().map(|v| quantize_no_dither(*v, bits_g)).collect();
             let b_u8: Vec<u8> = b.iter().map(|v| quantize_no_dither(*v, bits_b)).collect();
-            interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &alpha_u8)
+            let a_u8: Vec<u8> = a.iter().map(|v| quantize_no_dither(*v, BITS_A)).collect();
+            interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
         OutputTechnique::PerChannel { mode } => {
             // Per-channel error diffusion in sRGB space
-            let (r, g, b, _) = pixels_to_channels_rgba(srgb_pixels);
+            let (r, g, b, a) = pixels_to_channels_rgba(srgb_pixels);
             let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
             let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
-            interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &alpha_u8)
+            let a_u8 = dither_with_mode_bits(&a, width, height, mode, seed.wrapping_add(3), BITS_A, None);
+            interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
         OutputTechnique::ColorspaceAware { mode, space } => {
-            // Joint RGB color-aware dithering with progress
-            let (r, g, b) = colorspace_aware_dither_rgb_channels(
+            // Alpha-aware color-space dithering with progress
+            // Uses alpha visibility weighting for RGB error propagation
+            let (r, g, b, a) = colorspace_aware_dither_rgba_channels(
                 srgb_pixels,
                 width,
                 height,
                 bits_r,
                 bits_g,
                 bits_b,
+                BITS_A,
                 space,
                 mode,
                 seed,
                 progress,
             );
-            interleave_rgba_u8(&r, &g, &b, &alpha_u8)
+            interleave_rgba_u8(&r, &g, &b, &a)
         }
     }
 }

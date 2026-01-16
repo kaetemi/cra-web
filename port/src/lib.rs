@@ -21,6 +21,7 @@ pub mod cra_lab;
 pub mod cra_rgb;
 pub mod dither;
 pub mod dither_rgb;
+pub mod dither_rgba;
 pub mod dither_lab;
 pub mod dither_luminosity;
 pub mod dither_common;
@@ -857,7 +858,7 @@ pub fn dither_gray_with_progress_wasm(
 /// Dither RGBA image and return quantized u8 RGBA data directly
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
-/// Alpha channel is passed through without dithering.
+/// Alpha channel is dithered at 8-bit with alpha-aware RGB error propagation.
 #[wasm_bindgen]
 pub fn dither_rgba_wasm(
     buf: &BufferF32x4,
@@ -903,7 +904,7 @@ pub fn dither_rgba_wasm(
 /// Dither RGBA image with progress callback
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
-/// Alpha channel is passed through without dithering.
+/// Alpha channel is dithered at 8-bit with alpha-aware RGB error propagation.
 /// Progress callback is called after each row with progress (0.0 to 1.0)
 #[wasm_bindgen]
 pub fn dither_rgba_with_progress_wasm(
