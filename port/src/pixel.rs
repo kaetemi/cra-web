@@ -180,72 +180,102 @@ pub fn pixels_to_channels_rgba(pixels: &[Pixel4]) -> (Vec<f32>, Vec<f32>, Vec<f3
     (r, g, b, a)
 }
 
-/// Convert interleaved RGB array (r0,g0,b0,r1,g1,b1,...) to packed Pixel4 array
-pub fn interleaved_to_pixels(data: &[f32]) -> Vec<Pixel4> {
-    debug_assert_eq!(data.len() % 3, 0);
+/// Convert interleaved f32 array to packed Pixel4 array
+/// channels: 3 for RGB (alpha set to 1.0), 4 for RGBA
+pub fn interleaved_f32_to_pixels(data: &[f32], channels: usize) -> Vec<Pixel4> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(data.len() % channels, 0);
 
-    (0..data.len() / 3)
-        .map(|i| Pixel4::rgb(data[i * 3], data[i * 3 + 1], data[i * 3 + 2]))
+    let pixel_count = data.len() / channels;
+    (0..pixel_count)
+        .map(|i| {
+            let base = i * channels;
+            if channels == 4 {
+                Pixel4::new(data[base], data[base + 1], data[base + 2], data[base + 3])
+            } else {
+                Pixel4::new(data[base], data[base + 1], data[base + 2], 1.0)
+            }
+        })
         .collect()
+}
+
+/// Convert packed Pixel4 array to interleaved f32 array
+/// channels: 3 for RGB only, 4 for RGBA
+pub fn pixels_to_interleaved_f32(pixels: &[Pixel4], channels: usize) -> Vec<f32> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    let mut data = Vec::with_capacity(pixels.len() * channels);
+
+    for p in pixels {
+        data.push(p[0]);
+        data.push(p[1]);
+        data.push(p[2]);
+        if channels == 4 {
+            data.push(p[3]);
+        }
+    }
+
+    data
+}
+
+/// Convert interleaved RGB array (r0,g0,b0,r1,g1,b1,...) to packed Pixel4 array
+/// Alpha channel is set to 1.0 (normalized opaque)
+pub fn interleaved_to_pixels(data: &[f32]) -> Vec<Pixel4> {
+    interleaved_f32_to_pixels(data, 3)
 }
 
 /// Convert packed Pixel4 array to interleaved RGB array
 pub fn pixels_to_interleaved(pixels: &[Pixel4]) -> Vec<f32> {
-    let mut data = Vec::with_capacity(pixels.len() * 3);
-
-    for p in pixels {
-        data.push(p[0]);
-        data.push(p[1]);
-        data.push(p[2]);
-    }
-
-    data
+    pixels_to_interleaved_f32(pixels, 3)
 }
 
 /// Convert interleaved RGBA array to packed Pixel4 array
 pub fn interleaved_rgba_to_pixels(data: &[f32]) -> Vec<Pixel4> {
-    debug_assert_eq!(data.len() % 4, 0);
-
-    (0..data.len() / 4)
-        .map(|i| Pixel4::new(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]))
-        .collect()
+    interleaved_f32_to_pixels(data, 4)
 }
 
 /// Convert packed Pixel4 array to interleaved RGBA array
 pub fn pixels_to_interleaved_rgba(pixels: &[Pixel4]) -> Vec<f32> {
-    let mut data = Vec::with_capacity(pixels.len() * 4);
+    pixels_to_interleaved_f32(pixels, 4)
+}
 
-    for p in pixels {
-        data.push(p[0]);
-        data.push(p[1]);
-        data.push(p[2]);
-        data.push(p[3]);
-    }
+/// Convert interleaved u8 data to Pixel4 array (0-255 scale)
+/// channels: 3 for RGB (alpha set to 255), 4 for RGBA
+pub fn u8_to_pixels(data: &[u8], channels: usize) -> Vec<Pixel4> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(data.len() % channels, 0);
 
-    data
+    let pixel_count = data.len() / channels;
+    (0..pixel_count)
+        .map(|i| {
+            let base = i * channels;
+            if channels == 4 {
+                Pixel4::new(
+                    data[base] as f32,
+                    data[base + 1] as f32,
+                    data[base + 2] as f32,
+                    data[base + 3] as f32,
+                )
+            } else {
+                Pixel4::new(
+                    data[base] as f32,
+                    data[base + 1] as f32,
+                    data[base + 2] as f32,
+                    255.0, // Opaque alpha for RGB input
+                )
+            }
+        })
+        .collect()
 }
 
 /// Convert sRGB u8 interleaved (r,g,b,r,g,b,...) to Pixel4 array (0-255 scale)
+/// Alpha channel is set to 255 (fully opaque)
 pub fn srgb_u8_to_pixels(data: &[u8]) -> Vec<Pixel4> {
-    debug_assert_eq!(data.len() % 3, 0);
-
-    (0..data.len() / 3)
-        .map(|i| Pixel4::rgb(data[i * 3] as f32, data[i * 3 + 1] as f32, data[i * 3 + 2] as f32))
-        .collect()
+    u8_to_pixels(data, 3)
 }
 
 /// Convert sRGB u8 interleaved RGBA to Pixel4 array (0-255 scale)
 pub fn srgb_u8_rgba_to_pixels(data: &[u8]) -> Vec<Pixel4> {
-    debug_assert_eq!(data.len() % 4, 0);
-
-    (0..data.len() / 4)
-        .map(|i| Pixel4::new(
-            data[i * 4] as f32,
-            data[i * 4 + 1] as f32,
-            data[i * 4 + 2] as f32,
-            data[i * 4 + 3] as f32,
-        ))
-        .collect()
+    u8_to_pixels(data, 4)
 }
 
 /// Convert Pixel4 array (0-255 scale) to sRGB u8 interleaved

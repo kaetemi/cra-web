@@ -24,17 +24,46 @@ pub fn linear_to_srgb_single(linear: f32) -> f32 {
 }
 
 /// Convert sRGB image to linear RGB (in-place modification of flat array)
+/// For 3-channel RGB data, converts all values.
+/// For 4-channel RGBA data, use `srgb_to_linear_rgba` to skip alpha.
 pub fn srgb_to_linear(data: &mut [f32]) {
     for v in data.iter_mut() {
         *v = srgb_to_linear_single(*v);
     }
 }
 
+/// Convert sRGB image to linear RGB (in-place, 4-channel RGBA data)
+/// Alpha channel is linear and passes through unchanged.
+pub fn srgb_to_linear_rgba(data: &mut [f32]) {
+    debug_assert_eq!(data.len() % 4, 0, "RGBA data length must be divisible by 4");
+    for chunk in data.chunks_exact_mut(4) {
+        chunk[0] = srgb_to_linear_single(chunk[0]);
+        chunk[1] = srgb_to_linear_single(chunk[1]);
+        chunk[2] = srgb_to_linear_single(chunk[2]);
+        // chunk[3] (alpha) passes through unchanged - already linear
+    }
+}
+
 /// Convert linear RGB image to sRGB (in-place modification of flat array)
+/// For 3-channel RGB data, converts all values.
+/// For 4-channel RGBA data, use `linear_to_srgb_rgba` to skip alpha.
 #[allow(dead_code)]
 pub fn linear_to_srgb(data: &mut [f32]) {
     for v in data.iter_mut() {
         *v = linear_to_srgb_single(*v);
+    }
+}
+
+/// Convert linear RGB image to sRGB (in-place, 4-channel RGBA data)
+/// Alpha channel is linear and passes through unchanged.
+#[allow(dead_code)]
+pub fn linear_to_srgb_rgba(data: &mut [f32]) {
+    debug_assert_eq!(data.len() % 4, 0, "RGBA data length must be divisible by 4");
+    for chunk in data.chunks_exact_mut(4) {
+        chunk[0] = linear_to_srgb_single(chunk[0]);
+        chunk[1] = linear_to_srgb_single(chunk[1]);
+        chunk[2] = linear_to_srgb_single(chunk[2]);
+        // chunk[3] (alpha) passes through unchanged - already linear
     }
 }
 
@@ -457,34 +486,36 @@ pub fn interleave_rgba_u8(r: &[u8], g: &[u8], b: &[u8], a: &[u8]) -> Vec<u8> {
 // Pixel scale operations
 // ============================================================================
 
-/// Scale pixel values from 0-1 to 0-255 in-place
+/// Scale pixel values from 0-1 to 0-255 in-place (all 4 channels including alpha)
 pub fn scale_to_255_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] *= 255.0;
         p[1] *= 255.0;
         p[2] *= 255.0;
+        p[3] *= 255.0;
     }
 }
 
-/// Scale pixel values from 0-255 to 0-1 in-place
+/// Scale pixel values from 0-255 to 0-1 in-place (all 4 channels including alpha)
 pub fn scale_from_255_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] /= 255.0;
         p[1] /= 255.0;
         p[2] /= 255.0;
+        p[3] /= 255.0;
     }
 }
 
 #[cfg(test)]
 #[inline]
 fn scale_to_255_pixel(p: Pixel4) -> Pixel4 {
-    Pixel4::new(p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3])
+    Pixel4::new(p[0] * 255.0, p[1] * 255.0, p[2] * 255.0, p[3] * 255.0)
 }
 
 #[cfg(test)]
 #[inline]
 fn scale_from_255_pixel(p: Pixel4) -> Pixel4 {
-    Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3])
+    Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0)
 }
 
 #[cfg(test)]
@@ -511,22 +542,24 @@ fn srgb_255_to_linear_pixel(p: Pixel4) -> Pixel4 {
     )
 }
 
-/// Normalize pixels from 0-255 to 0-1 range in-place
+/// Normalize pixels from 0-255 to 0-1 range in-place (all 4 channels including alpha)
 pub fn normalize_inplace(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] /= 255.0;
         p[1] /= 255.0;
         p[2] /= 255.0;
+        p[3] /= 255.0;
     }
 }
 
-/// Denormalize pixels from 0-1 to 0-255 range in-place
+/// Denormalize pixels from 0-1 to 0-255 range in-place (all 4 channels including alpha)
 /// Clamps output to 0-255 range.
 pub fn denormalize_inplace_clamped(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = (p[0] * 255.0).clamp(0.0, 255.0);
         p[1] = (p[1] * 255.0).clamp(0.0, 255.0);
         p[2] = (p[2] * 255.0).clamp(0.0, 255.0);
+        p[3] = (p[3] * 255.0).clamp(0.0, 255.0);
     }
 }
 
@@ -723,14 +756,30 @@ mod tests {
     fn test_pixel_preserves_alpha() {
         let p = Pixel4::new(0.5, 0.3, 0.7, 0.99);
 
-        // All conversions should preserve the alpha channel
+        // Color space conversions should preserve the alpha channel (alpha is linear)
         assert_eq!(srgb_to_linear_pixel(p)[3], 0.99);
         assert_eq!(linear_to_srgb_pixel(p)[3], 0.99);
         assert_eq!(linear_rgb_to_lab_pixel(p)[3], 0.99);
         assert_eq!(lab_to_linear_rgb_pixel(p)[3], 0.99);
         assert_eq!(linear_rgb_to_oklab_pixel(p)[3], 0.99);
         assert_eq!(oklab_to_linear_rgb_pixel(p)[3], 0.99);
-        assert_eq!(scale_to_255_pixel(p)[3], 0.99);
-        assert_eq!(scale_from_255_pixel(p)[3], 0.99);
+    }
+
+    #[test]
+    fn test_scale_scales_alpha() {
+        // Scale operations should scale all 4 channels including alpha
+        let p = Pixel4::new(0.5, 0.3, 0.7, 0.8);
+
+        let scaled = scale_to_255_pixel(p);
+        assert!((scaled[0] - 127.5).abs() < 1e-5);
+        assert!((scaled[1] - 76.5).abs() < 1e-5);
+        assert!((scaled[2] - 178.5).abs() < 1e-5);
+        assert!((scaled[3] - 204.0).abs() < 1e-5); // 0.8 * 255 = 204
+
+        let back = scale_from_255_pixel(scaled);
+        assert!((back[0] - 0.5).abs() < 1e-5);
+        assert!((back[1] - 0.3).abs() < 1e-5);
+        assert!((back[2] - 0.7).abs() < 1e-5);
+        assert!((back[3] - 0.8).abs() < 1e-5);
     }
 }

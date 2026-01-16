@@ -81,6 +81,24 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
 // Pixel Conversion
 // ============================================================================
 
+/// Convert DynamicImage to normalized f32 with variable channel count
+/// channels: 3 for RGB (alpha discarded), 4 for RGBA
+/// Handles 8-bit, 16-bit, and f32 sources with appropriate precision
+pub fn image_to_f32_normalized_channels(img: &DynamicImage, channels: usize) -> Vec<f32> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    if channels == 4 {
+        image_to_f32_normalized_rgba(img)
+            .into_iter()
+            .flat_map(|[r, g, b, a]| [r, g, b, a])
+            .collect()
+    } else {
+        image_to_f32_normalized(img)
+            .into_iter()
+            .flat_map(|[r, g, b]| [r, g, b])
+            .collect()
+    }
+}
+
 /// Convert DynamicImage to normalized f32 RGB (0-1 range)
 /// Handles 8-bit, 16-bit, and f32 sources with appropriate precision
 pub fn image_to_f32_normalized(img: &DynamicImage) -> Vec<[f32; 3]> {
@@ -184,6 +202,26 @@ pub fn image_to_f32_interleaved_rgba(img: &DynamicImage) -> Vec<f32> {
         .into_iter()
         .flat_map(|[r, g, b, a]| [r, g, b, a])
         .collect()
+}
+
+/// Convert DynamicImage to sRGB f32 0-255 scale with variable channel count
+/// channels: 3 for RGB, 4 for RGBA (alpha also in 0-255 range)
+/// - 8-bit: u8 as f32 (direct cast)
+/// - 16-bit: u16 * 255.0 / 65535.0 directly to 0-255
+/// - f32: assumed 0-1 range, scaled to 0-255 (clamped for HDR)
+pub fn image_to_f32_srgb_255_channels(img: &DynamicImage, channels: usize) -> Vec<f32> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    if channels == 4 {
+        image_to_f32_srgb_255_pixels_rgba(img)
+            .into_iter()
+            .flat_map(|[r, g, b, a]| [r, g, b, a])
+            .collect()
+    } else {
+        image_to_f32_srgb_255_pixels(img)
+            .into_iter()
+            .flat_map(|[r, g, b]| [r, g, b])
+            .collect()
+    }
 }
 
 /// Convert DynamicImage directly to f32 sRGB 0-255 scale (no 0-1 intermediate)

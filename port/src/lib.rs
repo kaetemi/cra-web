@@ -161,11 +161,12 @@ impl LoadedImage {
     }
 
     /// Convert to normalized f32 (0-1) for linear processing path (RGB only)
+    /// Alpha channel is set to 1.0 (fully opaque)
     /// Call this when needs_linear is true
     pub fn to_normalized_buffer(&self) -> BufferF32x4 {
         let normalized = decode::image_to_f32_normalized(&self.image);
         let pixels: Vec<Pixel4> = normalized.into_iter()
-            .map(|[r, g, b]| Pixel4::new(r, g, b, 0.0))
+            .map(|[r, g, b]| Pixel4::new(r, g, b, 1.0))
             .collect();
         BufferF32x4::new(pixels)
     }
@@ -181,11 +182,12 @@ impl LoadedImage {
     }
 
     /// Convert directly to sRGB f32 (0-255) for dither-only path (RGB only)
+    /// Alpha channel is set to 255.0 (fully opaque)
     /// Call this when needs_linear is false (no resize, no grayscale, no ICC)
     pub fn to_srgb_255_buffer(&self) -> BufferF32x4 {
         let srgb_pixels = decode::image_to_f32_srgb_255_pixels(&self.image);
         let pixels: Vec<Pixel4> = srgb_pixels.into_iter()
-            .map(|[r, g, b]| Pixel4::new(r, g, b, 0.0))
+            .map(|[r, g, b]| Pixel4::new(r, g, b, 255.0))
             .collect();
         BufferF32x4::new(pixels)
     }
@@ -267,38 +269,35 @@ pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f3
     ])
 }
 
-/// Create BufferF32x4 from interleaved RGBA f32 data (values 0-1)
+/// Create BufferF32x4 from interleaved f32 data with variable channel count
+/// channels: 3 for RGB (alpha defaults to 1.0), 4 for RGBA
 #[wasm_bindgen]
-pub fn create_buffer_from_rgba_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
-    if data.len() != pixel_count * 4 {
+pub fn create_buffer_from_interleaved_wasm(data: Vec<f32>, pixel_count: usize, channels: usize) -> Result<BufferF32x4, JsValue> {
+    if channels != 3 && channels != 4 {
+        return Err(JsValue::from_str("channels must be 3 or 4"));
+    }
+    if data.len() != pixel_count * channels {
         return Err(JsValue::from_str(&format!(
-            "Data length {} doesn't match pixel_count*4 = {}",
-            data.len(), pixel_count * 4
+            "Data length {} doesn't match pixel_count*channels = {}",
+            data.len(), pixel_count * channels
         )));
     }
 
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]))
-        .collect();
-
+    let pixels = pixel::interleaved_f32_to_pixels(&data, channels);
     Ok(BufferF32x4::new(pixels))
 }
 
+/// Create BufferF32x4 from interleaved RGBA f32 data (values 0-1)
+#[wasm_bindgen]
+pub fn create_buffer_from_rgba_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
+    create_buffer_from_interleaved_wasm(data, pixel_count, 4)
+}
+
 /// Create BufferF32x4 from interleaved RGB f32 data (values 0-1)
+/// Alpha channel defaults to 1.0 (fully opaque)
 #[wasm_bindgen]
 pub fn create_buffer_from_rgb_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
-    if data.len() != pixel_count * 3 {
-        return Err(JsValue::from_str(&format!(
-            "Data length {} doesn't match pixel_count*3 = {}",
-            data.len(), pixel_count * 3
-        )));
-    }
-
-    let pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(data[i * 3], data[i * 3 + 1], data[i * 3 + 2], 0.0))
-        .collect();
-
-    Ok(BufferF32x4::new(pixels))
+    create_buffer_from_interleaved_wasm(data, pixel_count, 3)
 }
 
 // ============================================================================
@@ -328,24 +327,26 @@ pub fn transform_icc_to_linear_srgb_wasm(buf: &mut BufferF32x4, width: usize, he
 // ============================================================================
 
 /// Convert sRGB (0-1) to linear RGB (0-1) in-place
+/// RGB channels are gamma-decoded; alpha channel passes through unchanged (already linear)
 #[wasm_bindgen]
 pub fn srgb_to_linear_wasm(buf: &mut BufferF32x4) {
     color::srgb_to_linear_inplace(buf.as_mut_slice());
 }
 
 /// Convert linear RGB (0-1) to sRGB (0-1) in-place
+/// RGB channels are gamma-encoded; alpha channel passes through unchanged (already linear)
 #[wasm_bindgen]
 pub fn linear_to_srgb_wasm(buf: &mut BufferF32x4) {
     color::linear_to_srgb_inplace(buf.as_mut_slice());
 }
 
-/// Normalize from 0-255 to 0-1 in-place
+/// Normalize from 0-255 to 0-1 in-place (all 4 channels including alpha)
 #[wasm_bindgen]
 pub fn normalize_wasm(buf: &mut BufferF32x4) {
     color::normalize_inplace(buf.as_mut_slice());
 }
 
-/// Denormalize from 0-1 to 0-255 in-place (clamps to 0-255)
+/// Denormalize from 0-1 to 0-255 in-place (all 4 channels including alpha, clamps to 0-255)
 #[wasm_bindgen]
 pub fn denormalize_clamped_wasm(buf: &mut BufferF32x4) {
     color::denormalize_inplace_clamped(buf.as_mut_slice());
