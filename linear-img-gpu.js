@@ -6,8 +6,15 @@
  *
  * Unlike browser-native image scaling (which operates in sRGB space and causes
  * darkening/color shifts), this element converts to linear RGB, resamples with
- * Lanczos3, and converts back to sRGB. Alpha channel is preserved and
- * interpolated linearly (no gamma conversion needed for alpha).
+ * Lanczos3, and converts back to sRGB.
+ *
+ * Alpha-aware interpolation:
+ * - RGB channels are weighted by alpha during interpolation, preventing
+ *   transparent pixels (often black in dithered images) from bleeding color
+ *   into opaque regions.
+ * - Fully transparent regions preserve their underlying RGB values via
+ *   fallback to unweighted interpolation.
+ * - Alpha channel is interpolated normally (no gamma conversion needed).
  *
  * Usage:
  *   <linear-img-gpu src="photo.jpg" width="200" height="150"></linear-img-gpu>
@@ -58,7 +65,8 @@ fn srgbToLinear(s: f32) -> f32 {
 }
 `;
 
-// Horizontal Lanczos3 resample shader (RGBA - 4 channels)
+// Horizontal Lanczos3 resample shader (RGBA - 4 channels, alpha-aware)
+// RGB is weighted by alpha to prevent transparent pixels from bleeding color
 const SHADER_LANCZOS_HORIZONTAL = /* wgsl */ `
 const PI: f32 = 3.14159265358979323846;
 
@@ -84,16 +92,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (y >= params.srcHeight) { return; }
 
     // Coordinate mapping (rescale.rs:81)
-    // src_pos = (dst_i + 0.5) * scale - 0.5 + offset
     let srcPos = (f32(dstX) + 0.5) * params.scale - 0.5 + params.offset;
     let center = i32(floor(srcPos));
 
-    // Compute kernel weights and apply (rescale.rs:84-97)
+    // Alpha-weighted accumulation for RGB
     var sumR: f32 = 0.0;
     var sumG: f32 = 0.0;
     var sumB: f32 = 0.0;
     var sumA: f32 = 0.0;
+    var sumAlphaWeight: f32 = 0.0;
     var weightSum: f32 = 0.0;
+    // Fallback: unweighted RGB for fully transparent regions
+    var sumRUnweighted: f32 = 0.0;
+    var sumGUnweighted: f32 = 0.0;
+    var sumBUnweighted: f32 = 0.0;
 
     let startIdx = max(center - params.radius, 0);
     let endIdx = min(center + params.radius, i32(params.srcWidth) - 1);
@@ -101,28 +113,53 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var si: i32 = startIdx; si <= endIdx; si = si + 1) {
         let d = (srcPos - f32(si)) / params.filterScale;
         let weight = lanczos3(d);
-        weightSum += weight;
 
         let srcIdx = (y * params.srcWidth + u32(si)) * 4u;
-        sumR += input[srcIdx + 0u] * weight;
-        sumG += input[srcIdx + 1u] * weight;
-        sumB += input[srcIdx + 2u] * weight;
-        sumA += input[srcIdx + 3u] * weight;
+        let r = input[srcIdx + 0u];
+        let g = input[srcIdx + 1u];
+        let b = input[srcIdx + 2u];
+        let a = input[srcIdx + 3u];
+
+        let aw = weight * a;
+        sumR += aw * r;
+        sumG += aw * g;
+        sumB += aw * b;
+        sumA += weight * a;
+        sumAlphaWeight += aw;
+        weightSum += weight;
+
+        sumRUnweighted += weight * r;
+        sumGUnweighted += weight * g;
+        sumBUnweighted += weight * b;
     }
 
-    // Normalize weights (rescale.rs:100-103)
+    // Normalize alpha (normal interpolation)
+    var outA: f32 = 0.0;
     if (abs(weightSum) > 1e-8) {
-        sumR /= weightSum;
-        sumG /= weightSum;
-        sumB /= weightSum;
-        sumA /= weightSum;
+        outA = sumA / weightSum;
+    }
+
+    // RGB: alpha-weighted, or fallback to unweighted if all transparent
+    var outR: f32 = 0.0;
+    var outG: f32 = 0.0;
+    var outB: f32 = 0.0;
+    if (abs(sumAlphaWeight) > 1e-8) {
+        let invAw = 1.0 / sumAlphaWeight;
+        outR = sumR * invAw;
+        outG = sumG * invAw;
+        outB = sumB * invAw;
+    } else if (abs(weightSum) > 1e-8) {
+        let invW = 1.0 / weightSum;
+        outR = sumRUnweighted * invW;
+        outG = sumGUnweighted * invW;
+        outB = sumBUnweighted * invW;
     }
 
     let dstIdx = (y * params.dstWidth + dstX) * 4u;
-    output[dstIdx + 0u] = sumR;
-    output[dstIdx + 1u] = sumG;
-    output[dstIdx + 2u] = sumB;
-    output[dstIdx + 3u] = sumA;
+    output[dstIdx + 0u] = outR;
+    output[dstIdx + 1u] = outG;
+    output[dstIdx + 2u] = outB;
+    output[dstIdx + 3u] = outA;
 }
 
 // Lanczos3 kernel (rescale.rs:40-50)
@@ -140,7 +177,8 @@ fn lanczos3(x: f32) -> f32 {
 }
 `;
 
-// Vertical Lanczos3 resample shader (RGBA - 4 channels)
+// Vertical Lanczos3 resample shader (RGBA - 4 channels, alpha-aware)
+// RGB is weighted by alpha to prevent transparent pixels from bleeding color
 const SHADER_LANCZOS_VERTICAL = /* wgsl */ `
 const PI: f32 = 3.14159265358979323846;
 
@@ -169,11 +207,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let srcPos = (f32(dstY) + 0.5) * params.scale - 0.5 + params.offset;
     let center = i32(floor(srcPos));
 
+    // Alpha-weighted accumulation for RGB
     var sumR: f32 = 0.0;
     var sumG: f32 = 0.0;
     var sumB: f32 = 0.0;
     var sumA: f32 = 0.0;
+    var sumAlphaWeight: f32 = 0.0;
     var weightSum: f32 = 0.0;
+    // Fallback: unweighted RGB for fully transparent regions
+    var sumRUnweighted: f32 = 0.0;
+    var sumGUnweighted: f32 = 0.0;
+    var sumBUnweighted: f32 = 0.0;
 
     let startIdx = max(center - params.radius, 0);
     let endIdx = min(center + params.radius, i32(params.srcHeight) - 1);
@@ -181,28 +225,54 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var si: i32 = startIdx; si <= endIdx; si = si + 1) {
         let d = (srcPos - f32(si)) / params.filterScale;
         let weight = lanczos3(d);
-        weightSum += weight;
 
         // Input is (srcHeight x dstWidth) from horizontal pass
         let srcIdx = (u32(si) * params.dstWidth + x) * 4u;
-        sumR += input[srcIdx + 0u] * weight;
-        sumG += input[srcIdx + 1u] * weight;
-        sumB += input[srcIdx + 2u] * weight;
-        sumA += input[srcIdx + 3u] * weight;
+        let r = input[srcIdx + 0u];
+        let g = input[srcIdx + 1u];
+        let b = input[srcIdx + 2u];
+        let a = input[srcIdx + 3u];
+
+        let aw = weight * a;
+        sumR += aw * r;
+        sumG += aw * g;
+        sumB += aw * b;
+        sumA += weight * a;
+        sumAlphaWeight += aw;
+        weightSum += weight;
+
+        sumRUnweighted += weight * r;
+        sumGUnweighted += weight * g;
+        sumBUnweighted += weight * b;
     }
 
+    // Normalize alpha (normal interpolation)
+    var outA: f32 = 0.0;
     if (abs(weightSum) > 1e-8) {
-        sumR /= weightSum;
-        sumG /= weightSum;
-        sumB /= weightSum;
-        sumA /= weightSum;
+        outA = sumA / weightSum;
+    }
+
+    // RGB: alpha-weighted, or fallback to unweighted if all transparent
+    var outR: f32 = 0.0;
+    var outG: f32 = 0.0;
+    var outB: f32 = 0.0;
+    if (abs(sumAlphaWeight) > 1e-8) {
+        let invAw = 1.0 / sumAlphaWeight;
+        outR = sumR * invAw;
+        outG = sumG * invAw;
+        outB = sumB * invAw;
+    } else if (abs(weightSum) > 1e-8) {
+        let invW = 1.0 / weightSum;
+        outR = sumRUnweighted * invW;
+        outG = sumGUnweighted * invW;
+        outB = sumBUnweighted * invW;
     }
 
     let dstIdx = (dstY * params.dstWidth + x) * 4u;
-    output[dstIdx + 0u] = sumR;
-    output[dstIdx + 1u] = sumG;
-    output[dstIdx + 2u] = sumB;
-    output[dstIdx + 3u] = sumA;
+    output[dstIdx + 0u] = outR;
+    output[dstIdx + 1u] = outG;
+    output[dstIdx + 2u] = outB;
+    output[dstIdx + 3u] = outA;
 }
 
 fn lanczos3(x: f32) -> f32 {
