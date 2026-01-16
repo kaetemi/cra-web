@@ -405,10 +405,10 @@ pub fn linear_rgb_to_ycbcr_clamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (y, cb, cr)
 }
 
-/// Convert linear RGB to Y'CbCr without clamping (for out-of-gamut values during dithering)
+/// Convert linear RGB to Y'CbCr (for out-of-gamut values during dithering)
 /// Uses signed sRGB conversion to handle negative values from error accumulation.
 #[inline]
-pub fn linear_rgb_to_ycbcr_unclamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+pub fn linear_rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     // Convert linear to sRGB, preserving sign for out-of-gamut values
     let r_srgb = if r >= 0.0 { linear_to_srgb_single(r) } else { -linear_to_srgb_single(-r) };
     let g_srgb = if g >= 0.0 { linear_to_srgb_single(g) } else { -linear_to_srgb_single(-g) };

@@ -15,7 +15,7 @@
 /// - Random: Random direction per row (mixed modes only)
 
 use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr_clamped, linear_rgb_to_ycbcr_unclamped,
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_clamped,
     linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{
@@ -923,7 +923,7 @@ fn process_pixel(
         (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.space) {
         // Y'CbCr mode: convert through sRGB (unclamped for out-of-gamut)
-        linear_rgb_to_ycbcr_unclamped(lin_r_adj, lin_g_adj, lin_b_adj)
+        linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_lab_space(ctx.space) {
         linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
     } else {

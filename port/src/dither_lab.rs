@@ -210,13 +210,13 @@ impl LabDitherContext {
     /// Convert to distance space for comparison (uses unrotated Lab)
     #[inline]
     fn to_distance_space(&self, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-        use crate::color::linear_rgb_to_ycbcr_unclamped;
+        use crate::color::linear_rgb_to_ycbcr;
         use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 
         if is_linear_rgb_space(self.distance_space) {
             (r, g, b)
         } else if is_ycbcr_space(self.distance_space) {
-            linear_rgb_to_ycbcr_unclamped(r, g, b)
+            linear_rgb_to_ycbcr(r, g, b)
         } else if is_lab_space(self.distance_space) {
             linear_rgb_to_lab(r, g, b)
         } else {
