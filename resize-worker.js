@@ -64,6 +64,9 @@ function processResize(params) {
         const srcHeight = loadedImage.height;
         const hasAlpha = loadedImage.has_alpha;
 
+        // Check for premultiplied alpha (auto: only EXR has premultiplied alpha by default)
+        const needsUnpremultiply = hasAlpha && loadedImage.is_format_premultiplied_default;
+
         // Resize always needs linear path - use RGBA to preserve alpha
         let buffer = loadedImage.to_normalized_buffer_rgba();
 
@@ -78,6 +81,11 @@ function processResize(params) {
         } else {
             // sRGB → linear
             craWasm.srgb_to_linear_wasm(buffer);
+        }
+
+        // Un-premultiply alpha if needed (must be done in linear space)
+        if (needsUnpremultiply) {
+            craWasm.unpremultiply_alpha_wasm(buffer);
         }
 
         // Step 4: Rescale in linear space with progress (handles all 4 channels)
@@ -177,20 +185,35 @@ function processSrgbResize(params) {
         const srcHeight = loadedImage.height;
         const hasAlpha = loadedImage.has_alpha;
 
+        // Check for premultiplied alpha (auto: only EXR has premultiplied alpha by default)
+        const needsUnpremultiply = hasAlpha && loadedImage.is_format_premultiplied_default;
+
         // Use RGBA buffer to preserve alpha
         let buffer = loadedImage.to_normalized_buffer_rgba();
 
         // Handle color profile conversion for fair comparison
+        // Even for "bad" sRGB resize, we need to convert to linear first if we need to un-premultiply
         if (loadedImage.has_non_srgb_icc) {
-            // ICC profile → linear sRGB → sRGB
+            // ICC profile → linear sRGB → (un-premultiply if needed) → sRGB
             const iccProfile = loadedImage.get_icc_profile();
             craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
+            if (needsUnpremultiply) {
+                craWasm.unpremultiply_alpha_wasm(buffer);
+            }
             craWasm.linear_to_srgb_wasm(buffer);
         } else if (inputIsLinear) {
-            // Input is already linear, convert to sRGB for the "bad" sRGB resize
+            // Input is already linear - un-premultiply if needed, then convert to sRGB for the "bad" resize
+            if (needsUnpremultiply) {
+                craWasm.unpremultiply_alpha_wasm(buffer);
+            }
+            craWasm.linear_to_srgb_wasm(buffer);
+        } else if (needsUnpremultiply) {
+            // sRGB input but need to un-premultiply - must go to linear first
+            craWasm.srgb_to_linear_wasm(buffer);
+            craWasm.unpremultiply_alpha_wasm(buffer);
             craWasm.linear_to_srgb_wasm(buffer);
         }
-        // else: already sRGB, no conversion needed
+        // else: already sRGB, no conversion or un-premultiply needed
 
         // WRONG - rescale directly in sRGB space (no linear conversion)
         // This demonstrates the incorrect result for comparison

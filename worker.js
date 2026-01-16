@@ -104,6 +104,7 @@ function decodeImagePrecise(data, preserveAlpha = false) {
         hasIcc: loadedImage.has_non_srgb_icc,  // Only true if non-sRGB
         is16bit: loadedImage.is_16bit,
         hasAlpha: loadedImage.has_alpha,
+        isFormatPremultipliedDefault: loadedImage.is_format_premultiplied_default,  // EXR has premultiplied alpha
         // Convert to normalized (0-1) for color correction
         // Use RGBA buffer if preserving alpha, otherwise RGB
         buffer: preserveAlpha ? loadedImage.to_normalized_buffer_rgba() : loadedImage.to_normalized_buffer(),
@@ -297,6 +298,13 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     }
     if (!refAlreadyLinear) {
         craWasm.srgb_to_linear_wasm(refBuffer);
+    }
+
+    // Un-premultiply alpha if needed (auto: only EXR has premultiplied alpha)
+    // Must happen in linear space after color space conversion
+    if (inputImg.hasAlpha && inputImg.isFormatPremultipliedDefault) {
+        sendConsole('  Un-premultiplying alpha (EXR detected)...');
+        craWasm.unpremultiply_alpha_wasm(inputBuffer);
     }
 
     // Color correction (in linear RGB space)

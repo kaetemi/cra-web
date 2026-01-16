@@ -74,13 +74,17 @@ function processDither(params) {
         // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
         const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
 
+        // Check if input has alpha channel (for output format decision)
+        const hasAlpha = loadedImage.has_alpha;
+
+        // Check if input has premultiplied alpha (auto-detect: only EXR by default)
+        const needsUnpremultiply = hasAlpha && loadedImage.is_format_premultiplied_default;
+
         // Determine if linear processing is needed (matches CLI pattern)
         // Use loaded image's ICC check (single decode, no separate metadata call needed)
         // inputIsLinear counts as needing the linear path (already in linear, process there)
-        const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || inputIsLinear;
-
-        // Check if input has alpha channel (for output format decision)
-        const hasAlpha = loadedImage.has_alpha;
+        // Premultiplied alpha also requires linear path (un-premultiply must happen in linear space)
+        const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || inputIsLinear || needsUnpremultiply;
 
         const pixelCount = processWidth * processHeight;
         const outputData = new Uint8ClampedArray(pixelCount * 4);
@@ -112,6 +116,12 @@ function processDither(params) {
                 // Input is already linear (normal maps, data textures) - no conversion needed
             } else {
                 craWasm.srgb_to_linear_wasm(buffer);
+            }
+
+            // Step 1.5: Un-premultiply alpha if needed (must be done in linear space)
+            if (needsUnpremultiply) {
+                sendProgress(25, 'Un-premultiplying alpha...');
+                craWasm.unpremultiply_alpha_wasm(buffer);
             }
 
             // Step 2: Rescale in linear space (if needed)

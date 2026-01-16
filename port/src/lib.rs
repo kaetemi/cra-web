@@ -121,6 +121,7 @@ pub struct LoadedImage {
     is_f32: bool,
     has_alpha: bool,
     has_non_srgb_icc: bool,
+    is_exr: bool,
 }
 
 #[wasm_bindgen]
@@ -153,6 +154,18 @@ impl LoadedImage {
     #[wasm_bindgen(getter)]
     pub fn has_non_srgb_icc(&self) -> bool {
         self.has_non_srgb_icc
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn is_exr(&self) -> bool {
+        self.is_exr
+    }
+
+    /// Check if this format typically uses premultiplied alpha by default.
+    /// Currently only OpenEXR uses premultiplied alpha by default.
+    #[wasm_bindgen(getter)]
+    pub fn is_format_premultiplied_default(&self) -> bool {
+        self.is_exr
     }
 
     /// Get ICC profile bytes (only if has_non_srgb_icc is true)
@@ -217,6 +230,9 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         .map(|icc| !icc.is_empty() && !decode::is_profile_srgb(icc))
         .unwrap_or(false);
 
+    // Check if format is EXR (which has premultiplied alpha by default)
+    let is_exr = decoded.is_format_premultiplied_default();
+
     Ok(LoadedImage {
         image: decoded.image,
         icc_profile: if has_non_srgb_icc { decoded.icc_profile } else { None },
@@ -226,6 +242,7 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         is_f32: decoded.is_f32,
         has_alpha: decoded.has_alpha,
         has_non_srgb_icc,
+        is_exr,
     })
 }
 
@@ -354,6 +371,21 @@ pub fn normalize_wasm(buf: &mut BufferF32x4) {
 #[wasm_bindgen]
 pub fn denormalize_clamped_wasm(buf: &mut BufferF32x4) {
     color::denormalize_inplace_clamped(buf.as_mut_slice());
+}
+
+/// Un-premultiply alpha in-place (divide RGB by alpha)
+/// This should be called after converting to linear space for images with premultiplied alpha
+/// (like EXR files which have premultiplied alpha by default)
+#[wasm_bindgen]
+pub fn unpremultiply_alpha_wasm(buf: &mut BufferF32x4) {
+    pixel::unpremultiply_alpha_inplace(buf.as_mut_slice());
+}
+
+/// Premultiply alpha in-place (multiply RGB by alpha)
+/// This is the inverse of unpremultiply_alpha_wasm
+#[wasm_bindgen]
+pub fn premultiply_alpha_wasm(buf: &mut BufferF32x4) {
+    pixel::premultiply_alpha_inplace(buf.as_mut_slice());
 }
 
 // ============================================================================

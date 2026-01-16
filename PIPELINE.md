@@ -42,6 +42,23 @@ The pipeline examines embedded ICC profiles to determine color space handling:
 
 In `Auto` mode, the ICC profile is compared against sRGB characteristics. If it differs significantly, the image is transformed through XYZ to linear sRGB using moxcms.
 
+### Premultiplied Alpha Detection
+
+Some image formats store RGB channels pre-multiplied by alpha (`R' = R × α`). This must be undone before processing to avoid incorrect color blending.
+
+| Premultiplied Mode | Behavior |
+|--------------------|----------|
+| `Auto` (default) | Only EXR format is treated as premultiplied |
+| `Yes` | Always un-premultiply after loading |
+| `No` | Never un-premultiply |
+
+When un-premultiplying is needed:
+1. Convert to linear RGB first (color space conversion)
+2. Then divide RGB channels by alpha: `R = R' / α`
+3. Pixels with `α = 0` are left unchanged (RGB should already be 0)
+
+This operation must occur in linear space because premultiplied blending is a linear operation.
+
 ---
 
 ## 2. Path Selection
@@ -55,6 +72,7 @@ Used when any of these conditions apply:
 - Resize operation requested
 - Grayscale output selected
 - Non-sRGB ICC profile detected
+- Premultiplied alpha needs un-premultiplying (EXR by default)
 
 This path converts to linear RGB (0–1 float), performs all processing, then converts back to sRGB.
 
@@ -65,6 +83,7 @@ Used when all of these are true:
 - No resize needed
 - RGB output (not grayscale)
 - Standard sRGB input (no special ICC profile)
+- No premultiplied alpha to un-premultiply
 
 This path converts directly to sRGB float (0–255 range) without gamma decode, avoiding unnecessary round-trips through linear space.
 
@@ -73,7 +92,7 @@ sRGB Direct Path:
   Input (u8/u16) → f32 [0-255] sRGB → Dither → Output
 
 Linear Path:
-  Input → f32 [0-1] linear → Process → sRGB encode → f32 [0-255] → Dither → Output
+  Input → ICC (if needed) → f32 [0-1] linear → Un-premultiply (if needed) → Process → sRGB encode → f32 [0-255] → Dither → Output
 ```
 
 The sRGB direct path preserves full precision for dither-only operations. Even though the range is 0–255, the f32 representation maintains sub-integer precision that participates in error diffusion.
@@ -85,8 +104,20 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-Linear RGB → Resize → Color Correct → Grayscale → sRGB Encode → Dither
+ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Resize → Color Correct → Grayscale → sRGB Encode → Dither
 ```
+
+### 3.0 Un-premultiply Alpha
+
+If the input has premultiplied alpha (automatically detected for EXR, or forced with `--input-premultiplied-alpha yes`), the RGB channels are divided by alpha after conversion to linear space:
+
+```
+R = R' / α
+G = G' / α
+B = B' / α
+```
+
+Pixels with `α = 0` are left unchanged. This must happen in linear space because alpha blending is a linear operation.
 
 ### 3.1 Resize
 

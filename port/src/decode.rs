@@ -6,7 +6,7 @@
 //!
 //! Used by both WASM and CLI for consistent behavior.
 
-use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageReader};
+use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader};
 use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
@@ -19,9 +19,18 @@ use std::path::Path;
 pub struct DecodedImage {
     pub image: DynamicImage,
     pub icc_profile: Option<Vec<u8>>,
+    pub format: Option<ImageFormat>,
     pub is_16bit: bool,
     pub is_f32: bool,
     pub has_alpha: bool,
+}
+
+impl DecodedImage {
+    /// Check if this format typically uses premultiplied alpha by default.
+    /// Currently only OpenEXR uses premultiplied alpha by default.
+    pub fn is_format_premultiplied_default(&self) -> bool {
+        matches!(self.format, Some(ImageFormat::OpenExr))
+    }
 }
 
 /// Load image from file path with ICC profile extraction
@@ -46,6 +55,9 @@ pub fn load_image_from_bytes(data: &[u8]) -> Result<DecodedImage, String> {
 
 /// Internal: load from ImageReader
 fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<DecodedImage, String> {
+    // Capture the format before consuming the reader
+    let format = reader.format();
+
     let mut decoder = reader
         .into_decoder()
         .map_err(|e| format!("Failed to create decoder: {}", e))?;
@@ -71,6 +83,7 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
     Ok(DecodedImage {
         image,
         icc_profile,
+        format,
         is_16bit,
         is_f32,
         has_alpha,

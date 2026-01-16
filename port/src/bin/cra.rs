@@ -30,7 +30,7 @@ use cra_wasm::dither_common::{
 };
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::{dither_output_rgb, dither_output_rgba};
-use cra_wasm::pixel::Pixel4;
+use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
 
 // ============================================================================
 // Enums
@@ -170,6 +170,17 @@ enum InputColorProfile {
     Icc,
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq)]
+enum PremultipliedAlpha {
+    /// Auto-detect based on format (only EXR has premultiplied alpha by default)
+    #[default]
+    Auto,
+    /// Input has premultiplied alpha - un-premultiply after loading
+    Yes,
+    /// Input does not have premultiplied alpha - no conversion needed
+    No,
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, Default)]
 enum ScaleMethod {
     /// Bilinear interpolation (fast, good for moderate scaling)
@@ -266,6 +277,10 @@ struct Args {
     /// Input color profile handling
     #[arg(long, value_enum, default_value_t = InputColorProfile::Auto)]
     input_profile: InputColorProfile,
+
+    /// Input premultiplied alpha handling (auto: only EXR is premultiplied by default)
+    #[arg(long, value_enum, default_value_t = PremultipliedAlpha::Auto)]
+    input_premultiplied_alpha: PremultipliedAlpha,
 
     /// Reference image path (optional - required for histogram matching methods)
     #[arg(short, long)]
@@ -463,10 +478,12 @@ fn determine_effective_profile(
 /// Convert pre-loaded image to linear RGB channels (f32, 0-1 range)
 /// Returns (pixels, width, height, has_alpha)
 /// Always uses RGBA path internally - Pixel4 is float4 so no overhead.
+/// If unpremultiply is true, un-premultiplies alpha after conversion to linear.
 fn convert_to_linear(
     img: &DynamicImage,
     icc_profile: &Option<Vec<u8>>,
     profile_mode: InputColorProfile,
+    unpremultiply: bool,
     verbose: bool,
 ) -> Result<(Vec<Pixel4>, u32, u32, bool), String> {
     let (width, height) = img.dimensions();
@@ -480,6 +497,9 @@ fn convert_to_linear(
         eprintln!("  Dimensions: {}x{}", width, height);
         eprintln!("  Color type: {:?}", img.color());
         eprintln!("  Has alpha: {}", has_alpha);
+        if unpremultiply {
+            eprintln!("  Premultiplied alpha: yes (will un-premultiply)");
+        }
         if let Some(icc) = icc_profile {
             eprintln!("  ICC profile: {} bytes", icc.len());
         } else {
@@ -509,30 +529,29 @@ fn convert_to_linear(
     let normalized = image_to_f32_normalized_rgba(img);
 
     // Apply color space conversion based on effective mode
-    match effective_mode {
+    let mut pixels = match effective_mode {
         InputColorProfile::Icc => {
             // ICC transform handles RGB extraction and alpha merge internally
             let icc = icc_profile.as_ref().expect("ICC mode requires profile");
-            let (pixels, w, h) = convert_icc_to_linear_pixels(&normalized, width, height, icc, verbose)?;
-            Ok((pixels, w, h, has_alpha))
+            let (pixels, _, _) = convert_icc_to_linear_pixels(&normalized, width, height, icc, verbose)?;
+            pixels
         }
         InputColorProfile::Linear => {
             // Already linear, just convert to Pixel4
             if verbose {
                 eprintln!("  Input is linear, no gamma conversion");
             }
-            let pixels: Vec<Pixel4> = normalized
+            normalized
                 .into_iter()
                 .map(|[r, g, b, a]| Pixel4([r, g, b, a]))
-                .collect();
-            Ok((pixels, width, height, has_alpha))
+                .collect()
         }
         InputColorProfile::Srgb | InputColorProfile::Auto => {
             // sRGB input - apply gamma decode (alpha stays linear)
             if verbose {
                 eprintln!("  Applying sRGB gamma decode");
             }
-            let pixels: Vec<Pixel4> = normalized
+            normalized
                 .into_iter()
                 .map(|[r, g, b, a]| Pixel4([
                     srgb_to_linear_single(r),
@@ -540,10 +559,19 @@ fn convert_to_linear(
                     srgb_to_linear_single(b),
                     a, // Alpha is already linear
                 ]))
-                .collect();
-            Ok((pixels, width, height, has_alpha))
+                .collect()
         }
+    };
+
+    // Un-premultiply alpha if needed (done in linear space)
+    if unpremultiply && has_alpha {
+        if verbose {
+            eprintln!("  Un-premultiplying alpha (in linear space)");
+        }
+        unpremultiply_alpha_inplace(&mut pixels);
     }
+
+    Ok((pixels, width, height, has_alpha))
 }
 
 /// Convert pre-loaded image to sRGB (f32, 0-255 range) - no color space conversion
@@ -1026,12 +1054,29 @@ fn main() -> Result<(), String> {
         eprintln!("Loading: {}", args.input.display());
     }
     let decoded_input = load_image_from_path(&args.input)?;
+
+    // Determine if input has premultiplied alpha that needs un-premultiplying
+    // (check before moving fields out of decoded_input)
+    let needs_unpremultiply = match args.input_premultiplied_alpha {
+        PremultipliedAlpha::Yes => true,
+        PremultipliedAlpha::No => false,
+        PremultipliedAlpha::Auto => {
+            // Only EXR has premultiplied alpha by default
+            decoded_input.is_format_premultiplied_default()
+        }
+    };
+
     let input_img = decoded_input.image;
     let input_icc = decoded_input.icc_profile;
+
+    if args.verbose && needs_unpremultiply {
+        eprintln!("  Input has premultiplied alpha (will un-premultiply)");
+    }
 
     // Determine if linear-space processing is needed
     // - Grayscale requires linear for correct luminance computation
     // - Non-sRGB input profiles require linear path for proper color handling
+    // - Premultiplied alpha requires linear path for correct un-premultiplication
     let needs_resize = args.width.is_some() || args.height.is_some();
 
     // Check if ICC profile processing is actually needed (based on file contents, not just CLI flag)
@@ -1051,7 +1096,7 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let needs_linear = needs_reference || needs_resize || format.is_grayscale || needs_profile_processing;
+    let needs_linear = needs_reference || needs_resize || format.is_grayscale || needs_profile_processing || needs_unpremultiply;
 
     // Process image based on whether linear space is needed
     let (dither_result, width, height) = if needs_linear {
@@ -1060,7 +1105,7 @@ fn main() -> Result<(), String> {
             eprintln!("Processing in linear RGB space...");
         }
 
-        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, args.input_profile, args.verbose)?;
+        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, args.input_profile, needs_unpremultiply, args.verbose)?;
 
         // Resize in linear RGB space
         let mut resize_progress = |p: f32| print_progress("Resize", p);
@@ -1087,8 +1132,8 @@ fn main() -> Result<(), String> {
                 eprintln!("Loading: {}", ref_path.display());
             }
             let decoded_ref = load_image_from_path(ref_path)?;
-            // Reference doesn't need alpha - we only use it for color matching
-            let (ref_pixels, ref_width, ref_height, _) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, args.verbose)?;
+            // Reference doesn't need alpha or un-premultiplying - we only use it for color matching
+            let (ref_pixels, ref_width, ref_height, _) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, false, args.verbose)?;
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 

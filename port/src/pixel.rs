@@ -345,6 +345,61 @@ pub fn pixels_to_u8_single_channel(pixels: &[Pixel4], channel: usize) -> Vec<u8>
 }
 
 // ============================================================================
+// Alpha operations
+// ============================================================================
+
+/// Un-premultiply alpha for linear RGB pixels in-place.
+///
+/// Pre-multiplied alpha means RGB channels have already been multiplied by alpha:
+///   premultiplied_r = linear_r * alpha
+///
+/// To un-premultiply, we divide RGB by alpha (with protection for zero alpha):
+///   linear_r = premultiplied_r / alpha
+///
+/// This is typically needed for EXR files which store pre-multiplied alpha by default.
+/// The operation should be performed in linear space (after any color space conversion).
+///
+/// Pixels with alpha = 0 are left unchanged (their RGB values are typically 0 anyway).
+pub fn unpremultiply_alpha_inplace(pixels: &mut [Pixel4]) {
+    for p in pixels.iter_mut() {
+        let alpha = p[3];
+        if alpha > 0.0 {
+            p[0] /= alpha;
+            p[1] /= alpha;
+            p[2] /= alpha;
+            // alpha remains unchanged
+        }
+        // If alpha is 0, RGB should already be 0 in properly premultiplied data
+    }
+}
+
+/// Un-premultiply alpha for linear RGB pixels, returning a new array.
+pub fn unpremultiply_alpha(pixels: &[Pixel4]) -> Vec<Pixel4> {
+    pixels.iter().map(|p| {
+        let alpha = p[3];
+        if alpha > 0.0 {
+            Pixel4::new(p[0] / alpha, p[1] / alpha, p[2] / alpha, alpha)
+        } else {
+            *p
+        }
+    }).collect()
+}
+
+/// Premultiply alpha for linear RGB pixels in-place.
+///
+/// Multiplies RGB channels by alpha, producing pre-multiplied alpha format.
+/// This is the inverse of unpremultiply_alpha_inplace.
+pub fn premultiply_alpha_inplace(pixels: &mut [Pixel4]) {
+    for p in pixels.iter_mut() {
+        let alpha = p[3];
+        p[0] *= alpha;
+        p[1] *= alpha;
+        p[2] *= alpha;
+        // alpha remains unchanged
+    }
+}
+
+// ============================================================================
 // In-place operations
 // ============================================================================
 
