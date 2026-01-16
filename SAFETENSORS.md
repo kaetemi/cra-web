@@ -531,11 +531,13 @@ with safe_open("output.safetensors", framework="pt") as f:
 - Support `F16` tensors
 - Support `RGBA` channels
 - Support `CHW` dimension order
+
+**Level 3 (Enhanced):**
 - Support `bt2020`, `smpte432`, and `xyz` primaries
 - Support all white point identifiers
 - Implement Bradford chromatic adaptation
 
-**Level 3 (Full):**
+**Level 4 (Full):**
 - All Level 2 requirements
 - Support `BF16` tensors
 - Support all defined primaries
