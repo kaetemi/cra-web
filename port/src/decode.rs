@@ -1,13 +1,15 @@
-//! Image decoding with precise 16-bit and ICC profile support
+//! Image decoding with precise 16-bit and ICC/CICP profile support
 //!
 //! This module provides image decoding that preserves full precision:
 //! - 16-bit images are decoded to f32 without 8-bit intermediate
 //! - ICC profiles are extracted and can be applied via moxcms
+//! - CICP (Coding-Independent Code Points) for authoritative color space detection
 //!
 //! Used by both WASM and CLI for consistent behavior.
 
 use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader};
-use moxcms::{CicpProfile, CicpColorPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
+use image::metadata::{Cicp, CicpColorPrimaries, CicpTransferCharacteristics};
+use moxcms::{CicpProfile as MoxcmsCicpProfile, CicpColorPrimaries as MoxcmsCicpColorPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
 
@@ -19,6 +21,7 @@ use std::path::Path;
 pub struct DecodedImage {
     pub image: DynamicImage,
     pub icc_profile: Option<Vec<u8>>,
+    pub cicp: Cicp,
     pub format: Option<ImageFormat>,
     pub is_16bit: bool,
     pub is_f32: bool,
@@ -68,6 +71,11 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
     let image = DynamicImage::from_decoder(decoder)
         .map_err(|e| format!("Failed to decode image: {}", e))?;
 
+    // Extract CICP from the decoded image
+    // Note: Currently defaults to sRGB as decoders don't populate this yet,
+    // but when image crate adds decoder CICP extraction, this will automatically work
+    let cicp = image.color_space();
+
     let is_16bit = matches!(
         image.color(),
         ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
@@ -83,6 +91,7 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
     Ok(DecodedImage {
         image,
         icc_profile,
+        cicp,
         format,
         is_16bit,
         is_f32,
@@ -363,6 +372,56 @@ pub fn image_to_f32_srgb_255_rgba(img: &DynamicImage) -> Vec<f32> {
 }
 
 // ============================================================================
+// CICP (Coding-Independent Code Points) Handling
+// ============================================================================
+
+/// Check if CICP indicates standard sRGB color space.
+/// sRGB = BT.709/sRGB primaries + sRGB transfer function
+/// Note: We only check primaries and transfer - decoded RGB images always have
+/// Identity matrix and FullRange (the decoder handles YCbCr→RGB conversion).
+pub fn is_cicp_srgb(cicp: &Cicp) -> bool {
+    cicp.primaries == CicpColorPrimaries::SRgb
+        && cicp.transfer == CicpTransferCharacteristics::SRgb
+}
+
+/// Check if CICP indicates linear sRGB color space.
+/// Linear sRGB = BT.709/sRGB primaries + Linear transfer
+pub fn is_cicp_linear_srgb(cicp: &Cicp) -> bool {
+    cicp.primaries == CicpColorPrimaries::SRgb
+        && cicp.transfer == CicpTransferCharacteristics::Linear
+}
+
+/// Check if CICP is unspecified (cannot determine color space from CICP alone).
+/// This means we should fall back to ICC profile or assume sRGB.
+pub fn is_cicp_unspecified(cicp: &Cicp) -> bool {
+    cicp.primaries == CicpColorPrimaries::Unspecified
+        || cicp.transfer == CicpTransferCharacteristics::Unspecified
+}
+
+/// Check if CICP indicates a non-sRGB color space that requires conversion.
+/// Returns true if CICP is specified (not unspecified) and not sRGB/linear-sRGB.
+/// Examples: Display P3, BT.2020, Adobe RGB, etc.
+pub fn is_cicp_needs_conversion(cicp: &Cicp) -> bool {
+    !is_cicp_unspecified(cicp) && !is_cicp_srgb(cicp) && !is_cicp_linear_srgb(cicp)
+}
+
+/// Get a human-readable description of the CICP color space.
+pub fn cicp_description(cicp: &Cicp) -> String {
+    if is_cicp_srgb(cicp) {
+        "sRGB".to_string()
+    } else if is_cicp_linear_srgb(cicp) {
+        "Linear sRGB".to_string()
+    } else if is_cicp_unspecified(cicp) {
+        "Unspecified".to_string()
+    } else {
+        format!(
+            "CICP(primaries={:?}, transfer={:?}, matrix={:?}, range={:?})",
+            cicp.primaries, cicp.transfer, cicp.matrix, cicp.full_range
+        )
+    }
+}
+
+// ============================================================================
 // ICC Profile Handling
 // ============================================================================
 
@@ -375,8 +434,9 @@ pub fn make_linear_srgb_profile() -> ColorProfile {
     profile.green_trc = Some(linear_curve.clone());
     profile.blue_trc = Some(linear_curve);
     // Update CICP to reflect linear transfer (BT.709 primaries + linear)
-    profile.cicp = Some(CicpProfile {
-        color_primaries: CicpColorPrimaries::Bt709,
+    // Note: moxcms uses Bt709 matrix + limited range for sRGB profiles (broadcast convention)
+    profile.cicp = Some(MoxcmsCicpProfile {
+        color_primaries: MoxcmsCicpColorPrimaries::Bt709,
         transfer_characteristics: TransferCharacteristics::Linear,
         matrix_coefficients: MatrixCoefficients::Bt709,
         full_range: false,

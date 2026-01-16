@@ -122,6 +122,10 @@ pub struct LoadedImage {
     has_alpha: bool,
     has_non_srgb_icc: bool,
     is_exr: bool,
+    // CICP flags (authoritative color space indicators)
+    is_cicp_srgb: bool,
+    is_cicp_linear: bool,
+    is_cicp_needs_conversion: bool,
 }
 
 #[wasm_bindgen]
@@ -166,6 +170,27 @@ impl LoadedImage {
     #[wasm_bindgen(getter)]
     pub fn is_format_premultiplied_default(&self) -> bool {
         self.is_exr
+    }
+
+    /// CICP indicates standard sRGB color space (authoritative check).
+    /// sRGB = BT.709 primaries + sRGB transfer + Identity matrix + Full range
+    #[wasm_bindgen(getter)]
+    pub fn is_cicp_srgb(&self) -> bool {
+        self.is_cicp_srgb
+    }
+
+    /// CICP indicates linear sRGB color space (authoritative check).
+    /// Linear sRGB = BT.709 primaries + Linear transfer + Identity matrix + Full range
+    #[wasm_bindgen(getter)]
+    pub fn is_cicp_linear(&self) -> bool {
+        self.is_cicp_linear
+    }
+
+    /// CICP indicates a non-sRGB color space that requires conversion.
+    /// Returns true if CICP is specified (not unspecified) and not sRGB/linear-sRGB.
+    #[wasm_bindgen(getter)]
+    pub fn is_cicp_needs_conversion(&self) -> bool {
+        self.is_cicp_needs_conversion
     }
 
     /// Get ICC profile bytes (only if has_non_srgb_icc is true)
@@ -225,10 +250,21 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
 
     let (width, height) = decoded.image.dimensions();
 
-    // Check if ICC is non-sRGB
-    let has_non_srgb_icc = decoded.icc_profile.as_ref()
-        .map(|icc| !icc.is_empty() && !decode::is_profile_srgb(icc))
-        .unwrap_or(false);
+    // Check CICP first (authoritative color space indicators)
+    let is_cicp_srgb = decode::is_cicp_srgb(&decoded.cicp);
+    let is_cicp_linear = decode::is_cicp_linear_srgb(&decoded.cicp);
+    let is_cicp_needs_conversion = decode::is_cicp_needs_conversion(&decoded.cicp);
+
+    // Check if ICC is non-sRGB (only if CICP doesn't indicate sRGB/linear)
+    // CICP takes precedence over ICC as it's more authoritative
+    let has_non_srgb_icc = if is_cicp_srgb || is_cicp_linear {
+        // CICP says it's sRGB or linear, trust that over ICC
+        false
+    } else {
+        decoded.icc_profile.as_ref()
+            .map(|icc| !icc.is_empty() && !decode::is_profile_srgb(icc))
+            .unwrap_or(false)
+    };
 
     // Check if format is EXR (which has premultiplied alpha by default)
     let is_exr = decoded.is_format_premultiplied_default();
@@ -243,6 +279,9 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         has_alpha: decoded.has_alpha,
         has_non_srgb_icc,
         is_exr,
+        is_cicp_srgb,
+        is_cicp_linear,
+        is_cicp_needs_conversion,
     })
 }
 

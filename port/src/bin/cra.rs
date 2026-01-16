@@ -19,8 +19,9 @@ use cra_wasm::binary_format::{
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
-    image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba, is_profile_srgb_verbose,
-    load_image_from_path, transform_icc_to_linear_srgb_pixels,
+    cicp_description, image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba,
+    is_cicp_linear_srgb, is_cicp_needs_conversion, is_cicp_srgb, is_cicp_unspecified,
+    is_profile_srgb_verbose, load_image_from_path, transform_icc_to_linear_srgb_pixels,
 };
 use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
 use cra_wasm::dither_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -433,10 +434,12 @@ fn convert_icc_to_linear_pixels(
     Ok((pixels, width, height))
 }
 
-/// Determine effective color profile mode based on ICC profile detection
+/// Determine effective color profile mode based on CICP and ICC profile detection.
+/// Priority: CICP (authoritative) > ICC profile > assume sRGB
 fn determine_effective_profile(
     profile_mode: InputColorProfile,
     icc_profile: &Option<Vec<u8>>,
+    cicp: &image::metadata::Cicp,
     verbose: bool,
 ) -> InputColorProfile {
     match profile_mode {
@@ -453,21 +456,51 @@ fn determine_effective_profile(
             }
         }
         InputColorProfile::Auto => {
+            // Check CICP first (authoritative, O(1) check)
+            if is_cicp_srgb(cicp) {
+                if verbose {
+                    eprintln!("  CICP indicates sRGB (authoritative)");
+                }
+                return InputColorProfile::Srgb;
+            }
+            if is_cicp_linear_srgb(cicp) {
+                if verbose {
+                    eprintln!("  CICP indicates linear sRGB (authoritative)");
+                }
+                return InputColorProfile::Linear;
+            }
+            if is_cicp_needs_conversion(cicp) {
+                if verbose {
+                    eprintln!("  CICP indicates non-sRGB: {}", cicp_description(cicp));
+                }
+                // CICP indicates non-sRGB but we don't have CICP->linear conversion yet
+                // Fall through to ICC if available
+            }
+
+            // Fall back to ICC profile check (if CICP was unspecified or needs conversion)
             if let Some(icc) = icc_profile {
                 if is_profile_srgb_verbose(icc, verbose) {
-                    if verbose {
-                        eprintln!("  Auto-detected: sRGB-compatible profile");
+                    if verbose && is_cicp_unspecified(cicp) {
+                        eprintln!("  CICP unspecified, ICC profile is sRGB-compatible");
                     }
                     InputColorProfile::Srgb
                 } else {
                     if verbose {
-                        eprintln!("  Auto-detected: non-sRGB profile, using moxcms");
+                        if is_cicp_unspecified(cicp) {
+                            eprintln!("  CICP unspecified, using non-sRGB ICC profile via moxcms");
+                        } else {
+                            eprintln!("  Using ICC profile for color conversion via moxcms");
+                        }
                     }
                     InputColorProfile::Icc
                 }
             } else {
                 if verbose {
-                    eprintln!("  No ICC profile, assuming sRGB");
+                    if is_cicp_unspecified(cicp) {
+                        eprintln!("  CICP unspecified, no ICC profile, assuming sRGB");
+                    } else {
+                        eprintln!("  No ICC profile available, assuming sRGB");
+                    }
                 }
                 InputColorProfile::Srgb
             }
@@ -482,6 +515,7 @@ fn determine_effective_profile(
 fn convert_to_linear(
     img: &DynamicImage,
     icc_profile: &Option<Vec<u8>>,
+    cicp: &image::metadata::Cicp,
     profile_mode: InputColorProfile,
     unpremultiply: bool,
     verbose: bool,
@@ -497,6 +531,7 @@ fn convert_to_linear(
         eprintln!("  Dimensions: {}x{}", width, height);
         eprintln!("  Color type: {:?}", img.color());
         eprintln!("  Has alpha: {}", has_alpha);
+        eprintln!("  CICP: {}", cicp_description(cicp));
         if unpremultiply {
             eprintln!("  Premultiplied alpha: yes (will un-premultiply)");
         }
@@ -507,7 +542,7 @@ fn convert_to_linear(
         }
     }
 
-    let effective_mode = determine_effective_profile(profile_mode, icc_profile, verbose);
+    let effective_mode = determine_effective_profile(profile_mode, icc_profile, cicp, verbose);
 
     if verbose {
         let is_16bit = matches!(
@@ -1068,6 +1103,7 @@ fn main() -> Result<(), String> {
 
     let input_img = decoded_input.image;
     let input_icc = decoded_input.icc_profile;
+    let input_cicp = decoded_input.cicp;
 
     if args.verbose && needs_unpremultiply {
         eprintln!("  Input has premultiplied alpha (will un-premultiply)");
@@ -1079,16 +1115,26 @@ fn main() -> Result<(), String> {
     // - Premultiplied alpha requires linear path for correct un-premultiplication
     let needs_resize = args.width.is_some() || args.height.is_some();
 
-    // Check if ICC profile processing is actually needed (based on file contents, not just CLI flag)
+    // Check if color profile processing is actually needed (based on file contents, not just CLI flag)
+    // Priority: CICP (authoritative) > ICC profile
     let needs_profile_processing = match args.input_profile {
         InputColorProfile::Srgb => false,
         InputColorProfile::Linear => true, // User says input is linear, we need to skip gamma decode
         InputColorProfile::Auto => {
-            // Check if file has a non-sRGB ICC profile
-            input_icc
-                .as_ref()
-                .map(|icc_data| !is_profile_srgb_verbose(icc_data, args.verbose))
-                .unwrap_or(false)
+            // Check CICP first (authoritative)
+            if is_cicp_srgb(&input_cicp) {
+                false // CICP says sRGB, no conversion needed
+            } else if is_cicp_linear_srgb(&input_cicp) {
+                true // CICP says linear, need linear path
+            } else if is_cicp_needs_conversion(&input_cicp) {
+                true // CICP says non-sRGB, need conversion
+            } else {
+                // CICP unspecified, fall back to ICC check
+                input_icc
+                    .as_ref()
+                    .map(|icc_data| !is_profile_srgb_verbose(icc_data, args.verbose))
+                    .unwrap_or(false)
+            }
         }
         InputColorProfile::Icc => {
             // Check if file has any ICC profile
@@ -1105,7 +1151,7 @@ fn main() -> Result<(), String> {
             eprintln!("Processing in linear RGB space...");
         }
 
-        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, args.input_profile, needs_unpremultiply, args.verbose)?;
+        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
 
         // Resize in linear RGB space
         let mut resize_progress = |p: f32| print_progress("Resize", p);
@@ -1133,7 +1179,7 @@ fn main() -> Result<(), String> {
             }
             let decoded_ref = load_image_from_path(ref_path)?;
             // Reference doesn't need alpha or un-premultiplying - we only use it for color matching
-            let (ref_pixels, ref_width, ref_height, _) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, args.ref_profile, false, args.verbose)?;
+            let (ref_pixels, ref_width, ref_height, _) = convert_to_linear(&decoded_ref.image, &decoded_ref.icc_profile, &decoded_ref.cicp, args.ref_profile, false, args.verbose)?;
             let ref_width_usize = ref_width as usize;
             let ref_height_usize = ref_height as usize;
 
