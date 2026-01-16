@@ -270,6 +270,104 @@ fn rescale_bilinear_pixels(
     dst
 }
 
+/// Alpha-aware bilinear interpolation helper
+/// Weights RGB by alpha, falls back to unweighted if total alpha ≈ 0
+#[inline]
+fn bilinear_alpha_aware(
+    p00: Pixel4, p10: Pixel4, p01: Pixel4, p11: Pixel4,
+    fx: f32, fy: f32,
+) -> Pixel4 {
+    // Bilinear weights for each corner
+    let w00 = (1.0 - fx) * (1.0 - fy);
+    let w10 = fx * (1.0 - fy);
+    let w01 = (1.0 - fx) * fy;
+    let w11 = fx * fy;
+
+    // Alpha values
+    let a00 = p00.a();
+    let a10 = p10.a();
+    let a01 = p01.a();
+    let a11 = p11.a();
+
+    // Alpha-weighted sum for RGB
+    let aw00 = w00 * a00;
+    let aw10 = w10 * a10;
+    let aw01 = w01 * a01;
+    let aw11 = w11 * a11;
+    let total_alpha_weight = aw00 + aw10 + aw01 + aw11;
+
+    // Interpolate alpha normally
+    let out_alpha = w00 * a00 + w10 * a10 + w01 * a01 + w11 * a11;
+
+    // RGB: use alpha-weighted interpolation, fall back to normal if all transparent
+    let (out_r, out_g, out_b) = if total_alpha_weight > 1e-8 {
+        let inv_aw = 1.0 / total_alpha_weight;
+        (
+            (aw00 * p00.r() + aw10 * p10.r() + aw01 * p01.r() + aw11 * p11.r()) * inv_aw,
+            (aw00 * p00.g() + aw10 * p10.g() + aw01 * p01.g() + aw11 * p11.g()) * inv_aw,
+            (aw00 * p00.b() + aw10 * p10.b() + aw01 * p01.b() + aw11 * p11.b()) * inv_aw,
+        )
+    } else {
+        // All pixels transparent: use unweighted interpolation to preserve RGB
+        (
+            w00 * p00.r() + w10 * p10.r() + w01 * p01.r() + w11 * p11.r(),
+            w00 * p00.g() + w10 * p10.g() + w01 * p01.g() + w11 * p11.g(),
+            w00 * p00.b() + w10 * p10.b() + w01 * p01.b() + w11 * p11.b(),
+        )
+    };
+
+    Pixel4::new(out_r, out_g, out_b, out_alpha)
+}
+
+/// Rescale Pixel4 array using alpha-aware bilinear interpolation
+/// RGB channels are weighted by alpha during interpolation to prevent
+/// transparent pixels from bleeding color into opaque regions.
+/// Fully transparent regions preserve their underlying RGB values.
+fn rescale_bilinear_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let max_x = (src_width - 1) as f32;
+    let max_y = (src_height - 1) as f32;
+
+    for dst_y in 0..dst_height {
+        for dst_x in 0..dst_width {
+            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
+            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
+
+            let x0 = src_x.floor() as usize;
+            let y0 = src_y.floor() as usize;
+            let x1 = (x0 + 1).min(src_width - 1);
+            let y1 = (y0 + 1).min(src_height - 1);
+            let fx = src_x - x0 as f32;
+            let fy = src_y - y0 as f32;
+
+            let p00 = src[y0 * src_width + x0];
+            let p10 = src[y0 * src_width + x1];
+            let p01 = src[y1 * src_width + x0];
+            let p11 = src[y1 * src_width + x1];
+
+            dst[dst_y * dst_width + dst_x] = bilinear_alpha_aware(p00, p10, p01, p11, fx, fy);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((dst_y + 1) as f32 / dst_height as f32);
+        }
+    }
+
+    dst
+}
+
 /// Lanczos3 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
 #[inline]
@@ -290,6 +388,70 @@ fn lanczos3_resample_row_pixel4_precomputed(
                 sum = sum + src[kw.start_idx + i] * weight;
             }
             dst[dst_i] = sum;
+        }
+    }
+
+    dst
+}
+
+/// Alpha-aware Lanczos3 1D resample for Pixel4 row
+/// RGB is weighted by alpha; alpha is interpolated normally.
+/// Falls back to unweighted RGB if all contributing pixels are transparent.
+#[inline]
+fn lanczos3_resample_row_alpha_precomputed(
+    src: &[Pixel4],
+    kernel_weights: &[KernelWeights],
+) -> Vec<Pixel4> {
+    let dst_len = kernel_weights.len();
+    let mut dst = vec![Pixel4::default(); dst_len];
+
+    for (dst_i, kw) in kernel_weights.iter().enumerate() {
+        if kw.weights.is_empty() {
+            dst[dst_i] = src[kw.fallback_idx];
+        } else {
+            let mut sum_r = 0.0f32;
+            let mut sum_g = 0.0f32;
+            let mut sum_b = 0.0f32;
+            let mut sum_a = 0.0f32;
+            let mut sum_alpha_weight = 0.0f32;
+            let mut sum_weight = 0.0f32;
+            // For fallback: unweighted RGB sum
+            let mut sum_r_unweighted = 0.0f32;
+            let mut sum_g_unweighted = 0.0f32;
+            let mut sum_b_unweighted = 0.0f32;
+
+            for (i, &weight) in kw.weights.iter().enumerate() {
+                let p = src[kw.start_idx + i];
+                let alpha = p.a();
+                let aw = weight * alpha;
+
+                sum_r += aw * p.r();
+                sum_g += aw * p.g();
+                sum_b += aw * p.b();
+                sum_a += weight * alpha;
+                sum_alpha_weight += aw;
+                sum_weight += weight;
+
+                sum_r_unweighted += weight * p.r();
+                sum_g_unweighted += weight * p.g();
+                sum_b_unweighted += weight * p.b();
+            }
+
+            // Normalize alpha (normal interpolation)
+            let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
+
+            // RGB: alpha-weighted or fallback to unweighted
+            let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
+                let inv_aw = 1.0 / sum_alpha_weight;
+                (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
+            } else if sum_weight.abs() > 1e-8 {
+                let inv_w = 1.0 / sum_weight;
+                (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+
+            dst[dst_i] = Pixel4::new(out_r, out_g, out_b, out_a);
         }
     }
 
@@ -368,6 +530,106 @@ fn rescale_lanczos3_pixels(
     dst
 }
 
+/// Alpha-aware Lanczos3 rescale (separable, 2-pass)
+/// RGB channels are weighted by alpha to prevent transparent pixel color bleeding.
+fn rescale_lanczos3_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
+    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+
+    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
+    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
+
+    // Pass 1: Alpha-aware horizontal resample
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+    for y in 0..src_height {
+        let src_row = &src[y * src_width..(y + 1) * src_width];
+        let dst_row = lanczos3_resample_row_alpha_precomputed(src_row, &h_weights);
+        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
+
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Alpha-aware vertical resample
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+
+    for dst_y in 0..dst_height {
+        let kw = &v_weights[dst_y];
+        let dst_row_start = dst_y * dst_width;
+
+        if kw.weights.is_empty() {
+            let src_row_start = kw.fallback_idx * dst_width;
+            dst[dst_row_start..dst_row_start + dst_width]
+                .copy_from_slice(&temp[src_row_start..src_row_start + dst_width]);
+        } else {
+            for x in 0..dst_width {
+                let mut sum_r = 0.0f32;
+                let mut sum_g = 0.0f32;
+                let mut sum_b = 0.0f32;
+                let mut sum_a = 0.0f32;
+                let mut sum_alpha_weight = 0.0f32;
+                let mut sum_weight = 0.0f32;
+                let mut sum_r_unweighted = 0.0f32;
+                let mut sum_g_unweighted = 0.0f32;
+                let mut sum_b_unweighted = 0.0f32;
+
+                for (i, &weight) in kw.weights.iter().enumerate() {
+                    let src_y = kw.start_idx + i;
+                    let p = temp[src_y * dst_width + x];
+                    let alpha = p.a();
+                    let aw = weight * alpha;
+
+                    sum_r += aw * p.r();
+                    sum_g += aw * p.g();
+                    sum_b += aw * p.b();
+                    sum_a += weight * alpha;
+                    sum_alpha_weight += aw;
+                    sum_weight += weight;
+
+                    sum_r_unweighted += weight * p.r();
+                    sum_g_unweighted += weight * p.g();
+                    sum_b_unweighted += weight * p.b();
+                }
+
+                let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
+
+                let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
+                    let inv_aw = 1.0 / sum_alpha_weight;
+                    (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
+                } else if sum_weight.abs() > 1e-8 {
+                    let inv_w = 1.0 / sum_weight;
+                    (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+
+                dst[dst_row_start + x] = Pixel4::new(out_r, out_g, out_b, out_a);
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
+        }
+    }
+
+    dst
+}
+
 /// Rescale Pixel4 image (SIMD-friendly, linear space)
 pub fn rescale(
     src: &[Pixel4],
@@ -403,6 +665,54 @@ pub fn rescale_with_progress(
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+    }
+}
+
+/// Alpha-aware rescale for RGBA images
+///
+/// Unlike regular rescaling which treats all 4 channels equally, this function
+/// weights RGB contributions by alpha during interpolation. This prevents
+/// transparent pixels (which often have arbitrary RGB values, e.g., black in
+/// dithered images) from bleeding their color into opaque regions.
+///
+/// Behavior:
+/// - Opaque regions: RGB interpolated normally (alpha weights are ~1.0)
+/// - Mixed regions: opaque pixels dominate RGB (weighted by their alpha)
+/// - Fully transparent regions: RGB interpolated normally (fallback preserves underlying color)
+/// - Alpha channel: always interpolated normally
+pub fn rescale_with_alpha(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+) -> Vec<Pixel4> {
+    rescale_with_alpha_progress(src, src_width, src_height, dst_width, dst_height, method, scale_mode, None)
+}
+
+/// Alpha-aware rescale with progress callback
+pub fn rescale_with_alpha_progress(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    if src_width == dst_width && src_height == dst_height {
+        if let Some(ref mut cb) = progress {
+            cb(1.0);
+        }
+        return src.to_vec();
+    }
+
+    match method {
+        RescaleMethod::Bilinear => rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Lanczos3 => rescale_lanczos3_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
     }
 }
 
@@ -759,6 +1069,116 @@ mod tests {
                 assert!(p[c] > 0.3 && p[c] < 0.7,
                     "Pixel {} channel {} should be ~0.5 (averaged): {}", i, c, p[c]);
             }
+        }
+    }
+
+    // ========================================================================
+    // Alpha-aware rescaling tests
+    // ========================================================================
+
+    #[test]
+    fn test_alpha_aware_no_bleed_bilinear() {
+        // Test that black transparent pixels don't bleed into white opaque pixels
+        // 2x2: top-left is white opaque, others are black transparent
+        let src = vec![
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+        ];
+
+        // Regular rescale: black pixels bleed into the result
+        let regular = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
+
+        // Alpha-aware rescale: black transparent pixels should not affect RGB
+        let alpha_aware = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
+
+        // The top-left region (where opaque pixel was) should be brighter in alpha-aware
+        // In regular mode, black transparent pixels darken the result
+        let regular_tl = regular[0].r();
+        let alpha_tl = alpha_aware[0].r();
+
+        // Alpha-aware should preserve white better (closer to 1.0)
+        assert!(alpha_tl >= regular_tl,
+            "Alpha-aware top-left ({}) should be >= regular ({})", alpha_tl, regular_tl);
+    }
+
+    #[test]
+    fn test_alpha_aware_preserves_transparent_rgb() {
+        // Test that fully transparent regions preserve their underlying RGB
+        // All pixels transparent, but with different RGB values
+        let src = vec![
+            Pixel4::new(1.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 1.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 0.0, 0.0),
+        ];
+
+        let dst = rescale_with_alpha(&src, 2, 2, 2, 2, RescaleMethod::Bilinear, ScaleMode::Independent);
+
+        // Identity transform should preserve values exactly
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_alpha_aware_lanczos_no_bleed() {
+        // Test that black transparent pixels don't darken opaque regions
+        // Use a larger image to avoid edge effects where Lanczos overshoots
+        // 4x4 with opaque white center, black transparent border
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+        ];
+
+        // Downscale 4x4 -> 2x2 (where black border would blend in)
+        let regular = rescale(&src, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let alpha_aware = rescale_with_alpha(&src, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        // In regular mode, the black border darkens everything
+        // In alpha-aware mode, transparent pixels don't affect RGB
+        // Check center pixel brightness
+        let regular_avg: f32 = regular.iter().map(|p| p.r()).sum::<f32>() / 4.0;
+        let alpha_avg: f32 = alpha_aware.iter().map(|p| p.r()).sum::<f32>() / 4.0;
+
+        assert!(alpha_avg > regular_avg,
+            "Alpha-aware avg brightness ({}) should be > regular ({})", alpha_avg, regular_avg);
+    }
+
+    #[test]
+    fn test_alpha_channel_interpolated_normally() {
+        // Alpha should be interpolated like any other channel
+        // 2x2 with varying alpha
+        let src = vec![
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+        ];
+
+        let dst = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
+
+        // Top-left corner should have highest alpha (near 1.0)
+        // Bottom-right corner should have lowest alpha (near 0.0)
+        assert!(dst[0].a() > 0.5, "Top-left alpha should be high: {}", dst[0].a());
+        assert!(dst[15].a() < 0.5, "Bottom-right alpha should be low: {}", dst[15].a());
+    }
+
+    #[test]
+    fn test_alpha_aware_dithered_pattern() {
+        // Simulate a dithered image: alternating opaque colored and black transparent
+        // This is the problematic case for naive scaling
+        let src = vec![
+            Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0),
+            Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 0.5, 0.0, 1.0),
+        ];
+
+        // Downscale 4x4 -> 2x2
+        let dst = rescale_with_alpha(&src, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        // The RGB should still be approximately orange (1.0, 0.5, 0.0), not darkened by black
+        for p in &dst {
+            // Allow some tolerance due to Lanczos ringing
+            assert!(p.r() > 0.7, "Red should stay high (not darkened by black): {}", p.r());
+            assert!(p.g() > 0.3 && p.g() < 0.7, "Green should be mid-range: {}", p.g());
+            assert!(p.b() < 0.3, "Blue should stay low: {}", p.b());
         }
     }
 }
