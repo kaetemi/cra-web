@@ -9,7 +9,7 @@
 
 use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader};
 use image::metadata::{Cicp, CicpColorPrimaries, CicpTransferCharacteristics};
-use moxcms::{CicpProfile as MoxcmsCicpProfile, CicpColorPrimaries as MoxcmsCicpColorPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
+use moxcms::{CicpProfile as MoxcmsCicpProfile, CicpColorPrimaries as MoxcmsPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
 
@@ -422,6 +422,150 @@ pub fn cicp_description(cicp: &Cicp) -> String {
 }
 
 // ============================================================================
+// CICP to moxcms Profile Conversion
+// ============================================================================
+
+/// Convert image crate CicpColorPrimaries to moxcms CicpColorPrimaries
+fn map_cicp_primaries(primaries: CicpColorPrimaries) -> MoxcmsPrimaries {
+    match primaries {
+        CicpColorPrimaries::SRgb => MoxcmsPrimaries::Bt709,
+        CicpColorPrimaries::Unspecified => MoxcmsPrimaries::Unspecified,
+        CicpColorPrimaries::RgbM => MoxcmsPrimaries::Bt470M,
+        CicpColorPrimaries::RgbB => MoxcmsPrimaries::Bt470Bg,
+        CicpColorPrimaries::Bt601 => MoxcmsPrimaries::Bt601,
+        CicpColorPrimaries::Rgb240m => MoxcmsPrimaries::Smpte240,
+        CicpColorPrimaries::GenericFilm => MoxcmsPrimaries::GenericFilm,
+        CicpColorPrimaries::Rgb2020 => MoxcmsPrimaries::Bt2020,
+        CicpColorPrimaries::Xyz => MoxcmsPrimaries::Xyz,
+        CicpColorPrimaries::SmpteRp431 => MoxcmsPrimaries::Smpte431,
+        CicpColorPrimaries::SmpteRp432 => MoxcmsPrimaries::Smpte432,
+        CicpColorPrimaries::Industry22 => MoxcmsPrimaries::Ebu3213,
+        _ => MoxcmsPrimaries::Unspecified, // Unknown/future values
+    }
+}
+
+/// Convert image crate CicpTransferCharacteristics to moxcms TransferCharacteristics
+fn map_cicp_transfer(transfer: CicpTransferCharacteristics) -> TransferCharacteristics {
+    match transfer {
+        CicpTransferCharacteristics::Bt709 => TransferCharacteristics::Bt709,
+        CicpTransferCharacteristics::Unspecified => TransferCharacteristics::Unspecified,
+        CicpTransferCharacteristics::Bt470M => TransferCharacteristics::Bt470M,
+        CicpTransferCharacteristics::Bt470BG => TransferCharacteristics::Bt470Bg,
+        CicpTransferCharacteristics::Bt601 => TransferCharacteristics::Bt601,
+        CicpTransferCharacteristics::Smpte240m => TransferCharacteristics::Smpte240,
+        CicpTransferCharacteristics::Linear => TransferCharacteristics::Linear,
+        CicpTransferCharacteristics::Log100 => TransferCharacteristics::Log100,
+        CicpTransferCharacteristics::LogSqrt => TransferCharacteristics::Log100sqrt10,
+        CicpTransferCharacteristics::Iec61966_2_4 => TransferCharacteristics::Iec61966,
+        CicpTransferCharacteristics::Bt1361 => TransferCharacteristics::Bt1361,
+        CicpTransferCharacteristics::SRgb => TransferCharacteristics::Srgb,
+        CicpTransferCharacteristics::Bt2020_10bit => TransferCharacteristics::Bt202010bit,
+        CicpTransferCharacteristics::Bt2020_12bit => TransferCharacteristics::Bt202012bit,
+        CicpTransferCharacteristics::Smpte2084 => TransferCharacteristics::Smpte2084,
+        CicpTransferCharacteristics::Smpte428 => TransferCharacteristics::Smpte428,
+        CicpTransferCharacteristics::Bt2100Hlg => TransferCharacteristics::Hlg,
+        _ => TransferCharacteristics::Unspecified, // Unknown/future values
+    }
+}
+
+/// Create a moxcms ColorProfile from image crate CICP metadata.
+/// Returns None if CICP is unspecified.
+pub fn cicp_to_color_profile(cicp: &Cicp) -> Option<ColorProfile> {
+    // Check for unspecified values first
+    if cicp.primaries == CicpColorPrimaries::Unspecified
+        || cicp.transfer == CicpTransferCharacteristics::Unspecified
+    {
+        return None;
+    }
+
+    // Map to moxcms types
+    let cicp_profile = MoxcmsCicpProfile {
+        color_primaries: map_cicp_primaries(cicp.primaries),
+        transfer_characteristics: map_cicp_transfer(cicp.transfer),
+        // For decoded RGB, matrix is always Identity (decoder handles YCbCr→RGB)
+        matrix_coefficients: MatrixCoefficients::Identity,
+        // Decoded RGB is always full range
+        full_range: true,
+    };
+
+    Some(ColorProfile::new_from_cicp(cicp_profile))
+}
+
+/// Check if we can create a valid moxcms profile from CICP.
+/// Returns true if CICP has specified primaries and transfer characteristics.
+pub fn can_use_cicp(cicp: &Cicp) -> bool {
+    cicp.primaries != CicpColorPrimaries::Unspecified
+        && cicp.transfer != CicpTransferCharacteristics::Unspecified
+}
+
+/// Transform image from CICP color space to linear sRGB (interleaved f32)
+/// Input: interleaved RGB f32 (0-1 range)
+/// Output: interleaved RGB f32 (linear sRGB, may be outside 0-1 for wide gamut inputs)
+pub fn transform_cicp_to_linear_srgb(
+    pixels: &[f32],
+    width: usize,
+    height: usize,
+    cicp: &Cicp,
+) -> Result<Vec<f32>, String> {
+    let src_profile = cicp_to_color_profile(cicp)
+        .ok_or_else(|| format!("Cannot create profile from CICP: {}", cicp_description(cicp)))?;
+
+    let linear_srgb = make_linear_srgb_profile();
+
+    // Enable extended range to preserve out-of-gamut colors for wide gamut inputs
+    let options = TransformOptions {
+        allow_extended_range_rgb_xyz: true,
+        ..Default::default()
+    };
+
+    let transform = src_profile
+        .create_transform_f32(
+            Layout::Rgb,
+            &linear_srgb,
+            Layout::Rgb,
+            options,
+        )
+        .map_err(|e| format!("Failed to create CICP transform: {:?}", e))?;
+
+    let pixel_count = width * height;
+    let mut output = vec![0.0f32; pixel_count * 3];
+
+    // Transform row by row
+    let row_size = width * 3;
+    for (src_row, dst_row) in pixels
+        .chunks_exact(row_size)
+        .zip(output.chunks_exact_mut(row_size))
+    {
+        transform
+            .transform(src_row, dst_row)
+            .map_err(|e| format!("CICP transform failed: {:?}", e))?;
+    }
+
+    Ok(output)
+}
+
+/// Transform image from CICP color space to linear sRGB (array of [f32; 3])
+/// Input: array of [r, g, b] f32 (0-1 range)
+/// Output: array of [r, g, b] f32 (linear sRGB, may be outside 0-1 for wide gamut inputs)
+pub fn transform_cicp_to_linear_srgb_pixels(
+    pixels: &[[f32; 4]],
+    width: usize,
+    height: usize,
+    cicp: &Cicp,
+) -> Result<Vec<[f32; 3]>, String> {
+    // Extract RGB (strip alpha for transform)
+    let interleaved: Vec<f32> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
+
+    let result = transform_cicp_to_linear_srgb(&interleaved, width, height, cicp)?;
+
+    // Convert back to array format
+    Ok(result
+        .chunks_exact(3)
+        .map(|c| [c[0], c[1], c[2]])
+        .collect())
+}
+
+// ============================================================================
 // ICC Profile Handling
 // ============================================================================
 
@@ -436,7 +580,7 @@ pub fn make_linear_srgb_profile() -> ColorProfile {
     // Update CICP to reflect linear transfer (BT.709 primaries + linear)
     // Note: moxcms uses Bt709 matrix + limited range for sRGB profiles (broadcast convention)
     profile.cicp = Some(MoxcmsCicpProfile {
-        color_primaries: MoxcmsCicpColorPrimaries::Bt709,
+        color_primaries: MoxcmsPrimaries::Bt709,
         transfer_characteristics: TransferCharacteristics::Linear,
         matrix_coefficients: MatrixCoefficients::Bt709,
         full_range: false,
