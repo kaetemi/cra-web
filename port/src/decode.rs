@@ -469,6 +469,7 @@ fn is_profile_srgb_impl(icc_bytes: &[u8], verbose: bool) -> bool {
     let srgb = ColorProfile::new_srgb();
 
     // Create transform from profile to sRGB
+    // Use default options (clamped) for this simple sRGB check
     let transform = match src_profile.create_transform_8bit(
         Layout::Rgb,
         &srgb,
@@ -521,7 +522,7 @@ fn is_profile_srgb_impl(icc_bytes: &[u8], verbose: bool) -> bool {
 
 /// Transform image from ICC profile to linear sRGB (interleaved f32)
 /// Input: interleaved RGB f32 (0-1 range)
-/// Output: interleaved RGB f32 (0-1 range, linear sRGB)
+/// Output: interleaved RGB f32 (linear sRGB, may be outside 0-1 for wide gamut inputs)
 pub fn transform_icc_to_linear_srgb(
     pixels: &[f32],
     width: usize,
@@ -533,12 +534,19 @@ pub fn transform_icc_to_linear_srgb(
 
     let linear_srgb = make_linear_srgb_profile();
 
+    // Enable extended range to preserve out-of-gamut colors for wide gamut inputs
+    // (e.g., Display P3, BT.2020 colors outside sRGB gamut)
+    let options = TransformOptions {
+        allow_extended_range_rgb_xyz: true,
+        ..Default::default()
+    };
+
     let transform = src_profile
         .create_transform_f32(
             Layout::Rgb,
             &linear_srgb,
             Layout::Rgb,
-            TransformOptions::default(),
+            options,
         )
         .map_err(|e| format!("Failed to create transform: {:?}", e))?;
 
@@ -561,7 +569,7 @@ pub fn transform_icc_to_linear_srgb(
 
 /// Transform image from ICC profile to linear sRGB (array of [f32; 3])
 /// Input: array of [r, g, b] f32 (0-1 range)
-/// Output: array of [r, g, b] f32 (0-1 range, linear sRGB)
+/// Output: array of [r, g, b] f32 (linear sRGB, may be outside 0-1 for wide gamut inputs)
 pub fn transform_icc_to_linear_srgb_pixels(
     pixels: &[[f32; 3]],
     width: usize,
