@@ -138,12 +138,16 @@ function processDither(params) {
             }
 
             // Step 2: Rescale in linear space (if needed)
+            // Use alpha-aware rescaling when image has alpha to prevent transparent pixels
+            // from bleeding their color into opaque regions
             if (doDownscale) {
                 sendProgress(30, 'Rescaling...');
                 const scaleMode = primaryDimension === 'width'
                     ? SCALE_MODE_UNIFORM_WIDTH
                     : SCALE_MODE_UNIFORM_HEIGHT;
-                buffer = craWasm.rescale_rgb_wasm(buffer, currentWidth, currentHeight, processWidth, processHeight, scaleMethod, scaleMode);
+                buffer = hasAlpha
+                    ? craWasm.rescale_rgb_alpha_wasm(buffer, currentWidth, currentHeight, processWidth, processHeight, scaleMethod, scaleMode)
+                    : craWasm.rescale_rgb_wasm(buffer, currentWidth, currentHeight, processWidth, processHeight, scaleMethod, scaleMode);
                 currentWidth = processWidth;
                 currentHeight = processHeight;
             }

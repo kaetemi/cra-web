@@ -712,6 +712,8 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
 }
 
 /// Resize linear RGB image in linear space for correct color blending
+/// When has_alpha is true, uses alpha-aware rescaling to prevent transparent pixels
+/// from bleeding their color into opaque regions.
 fn resize_linear(
     pixels: &[Pixel4],
     src_width: u32,
@@ -719,10 +721,11 @@ fn resize_linear(
     target_width: Option<u32>,
     target_height: Option<u32>,
     method: cra_wasm::rescale::RescaleMethod,
+    has_alpha: bool,
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale_with_progress, ScaleMode};
+    use cra_wasm::rescale::{calculate_target_dimensions, rescale_with_progress, rescale_with_alpha_progress, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -742,21 +745,34 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Bilinear => "Bilinear",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
         };
+        let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(
-            "Resizing in linear RGB ({}): {}x{} -> {}x{}",
-            method_name, src_width, src_height, dst_width, dst_height
+            "Resizing in linear RGB ({}{}): {}x{} -> {}x{}",
+            method_name, alpha_note, src_width, src_height, dst_width, dst_height
         );
     }
 
-    // Rescale directly in linear space for correct color blending
-    let dst_pixels = rescale_with_progress(
-        pixels,
-        src_width as usize, src_height as usize,
-        dst_width, dst_height,
-        method,
-        ScaleMode::Independent,
-        progress,
-    );
+    // Use alpha-aware rescaling when image has alpha channel to prevent
+    // transparent pixels from bleeding their color into opaque regions
+    let dst_pixels = if has_alpha {
+        rescale_with_alpha_progress(
+            pixels,
+            src_width as usize, src_height as usize,
+            dst_width, dst_height,
+            method,
+            ScaleMode::Independent,
+            progress,
+        )
+    } else {
+        rescale_with_progress(
+            pixels,
+            src_width as usize, src_height as usize,
+            dst_width, dst_height,
+            method,
+            ScaleMode::Independent,
+            progress,
+        )
+    };
 
     Ok((dst_pixels, dst_width as u32, dst_height as u32))
 }
@@ -1266,13 +1282,14 @@ fn main() -> Result<(), String> {
             original_has_alpha
         };
 
-        // Resize in linear RGB space
+        // Resize in linear RGB space (use alpha-aware rescaling if image has alpha)
         let mut resize_progress = |p: f32| print_progress("Resize", p);
         let (input_pixels, width, height) = resize_linear(
             &input_pixels,
             src_width, src_height,
             args.width, args.height,
             args.scale_method.to_rescale_method(),
+            original_has_alpha,
             args.verbose,
             if args.progress { Some(&mut resize_progress) } else { None },
         )?;

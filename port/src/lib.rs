@@ -653,6 +653,65 @@ pub fn calculate_dimensions_wasm(
     vec![w as u32, h as u32]
 }
 
+/// Alpha-aware rescale for RGBA images
+/// Unlike regular rescaling, this weights RGB by alpha during interpolation
+/// to prevent transparent pixels from bleeding their color into opaque regions.
+/// method: 0=Bilinear, 1=Lanczos3
+/// scale_mode: 0=Independent, 1=UniformWidth, 2=UniformHeight
+#[wasm_bindgen]
+pub fn rescale_rgb_alpha_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+    scale_mode: u8,
+) -> BufferF32x4 {
+    let result = rescale::rescale_with_alpha(
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
+        rescale_method_from_u8(method),
+        scale_mode_from_u8(scale_mode),
+    );
+    BufferF32x4::new(result)
+}
+
+/// Alpha-aware rescale with progress callback
+#[wasm_bindgen]
+pub fn rescale_rgb_alpha_with_progress_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+    scale_mode: u8,
+    progress_callback: &js_sys::Function,
+) -> BufferF32x4 {
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result = rescale::rescale_with_alpha_progress(
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
+        rescale_method_from_u8(method),
+        scale_mode_from_u8(scale_mode),
+        Some(&mut progress_fn),
+    );
+
+    BufferF32x4::new(result)
+}
+
 // ============================================================================
 // Dithering
 // ============================================================================
