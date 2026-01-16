@@ -62,6 +62,7 @@ function processDither(params) {
             bitsR,
             bitsG,
             bitsB,
+            bitsA = 8,  // Alpha bit depth: 0 to strip alpha, 1-8 to dither
             bitsGray,
             mode,
             isPerceptual,
@@ -185,9 +186,10 @@ function processDither(params) {
 
                 sendProgress(70, 'Dithering RGB...');
                 if (hasAlpha) {
-                    // Use RGBA dithering - alpha is passed through without dithering
+                    // Use RGBA dithering with alpha-aware error propagation
+                    // When bitsA=0, alpha is stripped and RGB-only dithering is used
                     const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
-                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, perceptualSpace, seed,
                         (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering RGBA...')
                     );
                     const rgbaDithered = ditheredBuffer.to_vec();
@@ -231,9 +233,10 @@ function processDither(params) {
 
             sendProgress(50, 'Dithering RGB...');
             if (hasAlpha) {
-                // Use RGBA dithering - alpha is passed through without dithering
+                // Use RGBA dithering with alpha-aware error propagation
+                // When bitsA=0, alpha is stripped and RGB-only dithering is used
                 const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
-                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, perceptualSpace, seed,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering RGBA...')
                 );
                 const rgbaDithered = ditheredBuffer.to_vec();
@@ -271,6 +274,9 @@ function processDither(params) {
 
         sendProgress(100, 'Complete');
 
+        // When bitsA=0, we stripped alpha during dithering (output alpha is 255)
+        const outputHasAlpha = hasAlpha && bitsA > 0;
+
         // Send result back
         sendComplete({
             outputData: outputData,
@@ -280,11 +286,12 @@ function processDither(params) {
             bitsR: isGrayscale ? bitsGray : bitsR,
             bitsG: isGrayscale ? bitsGray : bitsG,
             bitsB: isGrayscale ? bitsGray : bitsB,
+            bitsA: isGrayscale ? 0 : (hasAlpha ? bitsA : 0),
             mode: mode,
             rgbInterleaved: rgbInterleaved,
             rgbaInterleaved: rgbaInterleaved,
             grayChannel: grayChannel,
-            hasAlpha: hasAlpha
+            hasAlpha: outputHasAlpha  // True only if input had alpha AND we preserved it (bitsA > 0)
         });
 
     } catch (error) {

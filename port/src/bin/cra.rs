@@ -832,15 +832,19 @@ fn dither_pixels(
         // Dither
         let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
         if has_alpha {
+            // Current formats are RGB-only, so bits_a=0 strips alpha and uses RGB dithering
+            // TODO: When RGBA formats are added, get bits_a from format
+            let bits_a = 0;
             let interleaved = dither_output_rgba(
                 &linear_pixels,
                 width, height,
-                format.bits_r, format.bits_g, format.bits_b,
+                format.bits_r, format.bits_g, format.bits_b, bits_a,
                 technique,
                 seed,
                 progress,
             );
-            DitherResult { interleaved, is_grayscale: false, has_alpha: true }
+            // has_alpha is false because we stripped it (bits_a=0)
+            DitherResult { interleaved, is_grayscale: false, has_alpha: false }
         } else {
             let interleaved = dither_output_rgb(
                 &linear_pixels,
@@ -875,15 +879,19 @@ fn dither_pixels_srgb_rgb(
 
     let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
     if has_alpha {
+        // Current formats are RGB-only, so bits_a=0 strips alpha and uses RGB dithering
+        // TODO: When RGBA formats are added, get bits_a from format
+        let bits_a = 0;
         let interleaved = dither_output_rgba(
             &pixels,
             width, height,
-            format.bits_r, format.bits_g, format.bits_b,
+            format.bits_r, format.bits_g, format.bits_b, bits_a,
             technique,
             seed,
             progress,
         );
-        DitherResult { interleaved, is_grayscale: false, has_alpha: true }
+        // has_alpha is false because we stripped it (bits_a=0)
+        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
     } else {
         let interleaved = dither_output_rgb(
             &pixels,

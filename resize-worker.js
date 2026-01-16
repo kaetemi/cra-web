@@ -122,11 +122,11 @@ function processResize(params) {
         const dstPixels = dstWidth * dstHeight;
 
         if (hasAlpha) {
-            // Use RGBA dithering - alpha is passed through without dithering
+            // Use RGBA dithering with alpha-aware error propagation
             const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                 resizedBuffer,
                 dstWidth, dstHeight,
-                8, 8, 8,
+                8, 8, 8, 8,  // RGB at 8-bit, alpha at 8-bit
                 ditherTechnique,
                 ditherMode,
                 perceptualSpace,
@@ -266,11 +266,11 @@ function processSrgbResize(params) {
         const dstPixels = dstWidth * dstHeight;
 
         if (hasAlpha) {
-            // Use RGBA dithering - alpha is passed through without dithering
+            // Use RGBA dithering with alpha-aware error propagation
             const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                 resizedBuffer,
                 dstWidth, dstHeight,
-                8, 8, 8,
+                8, 8, 8, 8,  // RGB at 8-bit, alpha at 8-bit
                 ditherTechnique,
                 ditherMode,
                 perceptualSpace,

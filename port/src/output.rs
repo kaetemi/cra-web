@@ -97,16 +97,20 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
 
 /// Dither sRGB 0-255 Pixel4 data to interleaved u8 RGBA output.
 ///
-/// All channels (RGB + alpha) are dithered with alpha-aware error propagation:
+/// When bits_a > 0: All channels (RGB + alpha) are dithered with alpha-aware error propagation:
 /// - Alpha is dithered first using standard single-channel dithering
 /// - RGB channels are dithered with error weighted by alpha visibility
 /// - Fully transparent pixels pass error to neighbors without absorbing it
 /// - Fully opaque pixels behave like standard RGB dithering
 ///
+/// When bits_a == 0: Alpha is stripped and RGB-only dithering is used.
+/// Output alpha channel is set to 255 (fully opaque).
+///
 /// Args:
 ///     srgb_pixels: sRGB Pixel4 array (all channels in 0-255 range)
 ///     width, height: Image dimensions
 ///     bits_r, bits_g, bits_b: Output bit depth per RGB channel (1-8)
+///     bits_a: Output bit depth for alpha (1-8), or 0 to strip alpha
 ///     technique: Dithering technique selection
 ///     seed: Random seed for mixed dithering modes
 ///     progress: Optional callback called after each row with progress (0.0 to 1.0)
@@ -120,12 +124,35 @@ pub fn dither_output_rgba(
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
+    bits_a: u8,
     technique: OutputTechnique,
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    // Alpha is always output at 8-bit (full precision passthrough)
-    const BITS_A: u8 = 8;
+    // When bits_a == 0, strip alpha and use RGB-only dithering
+    if bits_a == 0 {
+        let rgb_data = dither_output_rgb(
+            srgb_pixels,
+            width,
+            height,
+            bits_r,
+            bits_g,
+            bits_b,
+            technique,
+            seed,
+            progress,
+        );
+        // Convert RGB to RGBA with alpha=255
+        let pixels = rgb_data.len() / 3;
+        let mut rgba_data = Vec::with_capacity(pixels * 4);
+        for i in 0..pixels {
+            rgba_data.push(rgb_data[i * 3]);
+            rgba_data.push(rgb_data[i * 3 + 1]);
+            rgba_data.push(rgb_data[i * 3 + 2]);
+            rgba_data.push(255);
+        }
+        return rgba_data;
+    }
 
     match technique {
         OutputTechnique::None => {
@@ -134,7 +161,7 @@ pub fn dither_output_rgba(
             let r_u8: Vec<u8> = r.iter().map(|v| quantize_no_dither(*v, bits_r)).collect();
             let g_u8: Vec<u8> = g.iter().map(|v| quantize_no_dither(*v, bits_g)).collect();
             let b_u8: Vec<u8> = b.iter().map(|v| quantize_no_dither(*v, bits_b)).collect();
-            let a_u8: Vec<u8> = a.iter().map(|v| quantize_no_dither(*v, BITS_A)).collect();
+            let a_u8: Vec<u8> = a.iter().map(|v| quantize_no_dither(*v, bits_a)).collect();
             interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
         OutputTechnique::PerChannel { mode } => {
@@ -143,7 +170,7 @@ pub fn dither_output_rgba(
             let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
             let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
-            let a_u8 = dither_with_mode_bits(&a, width, height, mode, seed.wrapping_add(3), BITS_A, None);
+            let a_u8 = dither_with_mode_bits(&a, width, height, mode, seed.wrapping_add(3), bits_a, None);
             interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
         OutputTechnique::ColorspaceAware { mode, space } => {
@@ -156,7 +183,7 @@ pub fn dither_output_rgba(
                 bits_r,
                 bits_g,
                 bits_b,
-                BITS_A,
+                bits_a,
                 space,
                 mode,
                 seed,

@@ -858,7 +858,8 @@ pub fn dither_gray_with_progress_wasm(
 /// Dither RGBA image and return quantized u8 RGBA data directly
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
-/// Alpha channel is dithered at 8-bit with alpha-aware RGB error propagation.
+/// When bits_a > 0: Alpha channel is dithered with alpha-aware RGB error propagation.
+/// When bits_a == 0: Alpha is stripped and RGB-only dithering is used (output alpha = 255).
 #[wasm_bindgen]
 pub fn dither_rgba_wasm(
     buf: &BufferF32x4,
@@ -867,6 +868,7 @@ pub fn dither_rgba_wasm(
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
+    bits_a: u8,
     technique: u8,
     mode: u8,
     space: u8,
@@ -893,6 +895,7 @@ pub fn dither_rgba_wasm(
         bits_r,
         bits_g,
         bits_b,
+        bits_a,
         output_technique,
         seed,
         None,
@@ -904,7 +907,8 @@ pub fn dither_rgba_wasm(
 /// Dither RGBA image with progress callback
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
-/// Alpha channel is dithered at 8-bit with alpha-aware RGB error propagation.
+/// When bits_a > 0: Alpha channel is dithered with alpha-aware RGB error propagation.
+/// When bits_a == 0: Alpha is stripped and RGB-only dithering is used (output alpha = 255).
 /// Progress callback is called after each row with progress (0.0 to 1.0)
 #[wasm_bindgen]
 pub fn dither_rgba_with_progress_wasm(
@@ -914,6 +918,7 @@ pub fn dither_rgba_with_progress_wasm(
     bits_r: u8,
     bits_g: u8,
     bits_b: u8,
+    bits_a: u8,
     technique: u8,
     mode: u8,
     space: u8,
@@ -947,6 +952,7 @@ pub fn dither_rgba_with_progress_wasm(
         bits_r,
         bits_g,
         bits_b,
+        bits_a,
         output_technique,
         seed,
         Some(&mut progress_fn),
