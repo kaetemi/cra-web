@@ -115,6 +115,7 @@ pub struct LoadedImage {
     // Store the DynamicImage for on-demand conversion
     image: image::DynamicImage,
     icc_profile: Option<Vec<u8>>,
+    cicp: image::metadata::Cicp,
     width: u32,
     height: u32,
     is_16bit: bool,
@@ -272,6 +273,7 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
     Ok(LoadedImage {
         image: decoded.image,
         icc_profile: if has_non_srgb_icc { decoded.icc_profile } else { None },
+        cicp: decoded.cicp,
         width,
         height,
         is_16bit: decoded.is_16bit,
@@ -376,6 +378,29 @@ pub fn transform_icc_to_linear_srgb_wasm(buf: &mut BufferF32x4, width: usize, he
     let pixel_count = width * height;
     let new_pixels: Vec<Pixel4> = (0..pixel_count)
         .map(|i| Pixel4::new(result[i * 3], result[i * 3 + 1], result[i * 3 + 2], pixels[i][3]))
+        .collect();
+
+    *buf = BufferF32x4::new(new_pixels);
+    Ok(())
+}
+
+/// Transform image from CICP color space to linear sRGB (in-place)
+/// Alpha channel is preserved unchanged (color profiles only apply to RGB).
+/// Uses the CICP stored in the LoadedImage.
+#[wasm_bindgen]
+pub fn transform_cicp_to_linear_srgb_wasm(buf: &mut BufferF32x4, width: usize, height: usize, loaded_image: &LoadedImage) -> Result<(), JsValue> {
+    let pixels = buf.as_slice();
+
+    // Extract RGBA for transform (CICP transform takes [f32; 4])
+    let rgba: Vec<[f32; 4]> = pixels.iter().map(|p| [p[0], p[1], p[2], p[3]]).collect();
+
+    let result = decode::transform_cicp_to_linear_srgb_pixels(&rgba, width, height, &loaded_image.cicp)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    // Rebuild pixels preserving original alpha values
+    let pixel_count = width * height;
+    let new_pixels: Vec<Pixel4> = (0..pixel_count)
+        .map(|i| Pixel4::new(result[i][0], result[i][1], result[i][2], pixels[i][3]))
         .collect();
 
     *buf = BufferF32x4::new(new_pixels);

@@ -81,10 +81,11 @@ function processDither(params) {
         const needsUnpremultiply = hasAlpha && loadedImage.is_format_premultiplied_default;
 
         // Determine if linear processing is needed (matches CLI pattern)
-        // Use loaded image's ICC check (single decode, no separate metadata call needed)
+        // Use loaded image's CICP and ICC checks (single decode, no separate metadata call needed)
+        // Priority: CICP (authoritative) > ICC > assume sRGB
         // inputIsLinear counts as needing the linear path (already in linear, process there)
         // Premultiplied alpha also requires linear path (un-premultiply must happen in linear space)
-        const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || inputIsLinear || needsUnpremultiply;
+        const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || loadedImage.is_cicp_needs_conversion || inputIsLinear || needsUnpremultiply;
 
         const pixelCount = processWidth * processHeight;
         const outputData = new Uint8ClampedArray(pixelCount * 4);
@@ -108,13 +109,24 @@ function processDither(params) {
             let buffer = loadedImage.to_normalized_buffer_rgba();
 
             sendProgress(20, 'Converting to linear color space...');
-            // Step 1: Convert to linear (either via ICC, sRGB gamma, or already linear)
-            if (loadedImage.has_non_srgb_icc) {
+            // Step 1: Convert to linear
+            // Priority: CICP sRGB/linear (authoritative) > ICC > CICP conversion > assume sRGB
+            if (loadedImage.is_cicp_srgb) {
+                // CICP says sRGB - use builtin gamma decode
+                craWasm.srgb_to_linear_wasm(buffer);
+            } else if (loadedImage.is_cicp_linear) {
+                // CICP says linear - no conversion needed
+            } else if (loadedImage.has_non_srgb_icc) {
+                // Non-sRGB ICC profile - use ICC transform
                 const iccProfile = loadedImage.get_icc_profile();
                 craWasm.transform_icc_to_linear_srgb_wasm(buffer, currentWidth, currentHeight, iccProfile);
+            } else if (loadedImage.is_cicp_needs_conversion) {
+                // CICP indicates non-sRGB (e.g., Display P3) but no ICC - use CICP transform
+                craWasm.transform_cicp_to_linear_srgb_wasm(buffer, currentWidth, currentHeight, loadedImage);
             } else if (inputIsLinear) {
                 // Input is already linear (normal maps, data textures) - no conversion needed
             } else {
+                // Default: assume sRGB
                 craWasm.srgb_to_linear_wasm(buffer);
             }
 

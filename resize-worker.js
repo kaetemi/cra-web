@@ -70,16 +70,25 @@ function processResize(params) {
         // Resize always needs linear path - use RGBA to preserve alpha
         let buffer = loadedImage.to_normalized_buffer_rgba();
 
-        // Convert to linear (either via ICC, sRGB gamma, or already linear)
+        // Convert to linear
+        // Priority: CICP sRGB/linear (authoritative) > ICC > CICP conversion > assume sRGB
         // Alpha passes through unchanged
-        if (loadedImage.has_non_srgb_icc) {
-            // ICC profile → linear sRGB
+        if (loadedImage.is_cicp_srgb) {
+            // CICP says sRGB - use builtin gamma decode
+            craWasm.srgb_to_linear_wasm(buffer);
+        } else if (loadedImage.is_cicp_linear) {
+            // CICP says linear - no conversion needed
+        } else if (loadedImage.has_non_srgb_icc) {
+            // Non-sRGB ICC profile - use ICC transform
             const iccProfile = loadedImage.get_icc_profile();
             craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
+        } else if (loadedImage.is_cicp_needs_conversion) {
+            // CICP indicates non-sRGB (e.g., Display P3) but no ICC - use CICP transform
+            craWasm.transform_cicp_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, loadedImage);
         } else if (inputIsLinear) {
             // Input is already linear - no conversion needed
         } else {
-            // sRGB → linear
+            // Default: assume sRGB
             craWasm.srgb_to_linear_wasm(buffer);
         }
 
@@ -193,10 +202,31 @@ function processSrgbResize(params) {
 
         // Handle color profile conversion for fair comparison
         // Even for "bad" sRGB resize, we need to convert to linear first if we need to un-premultiply
-        if (loadedImage.has_non_srgb_icc) {
-            // ICC profile → linear sRGB → (un-premultiply if needed) → sRGB
+        // Priority: CICP sRGB/linear (authoritative) > ICC > CICP conversion > assume sRGB
+        if (loadedImage.is_cicp_srgb) {
+            // CICP says sRGB - just handle un-premultiply if needed
+            if (needsUnpremultiply) {
+                craWasm.srgb_to_linear_wasm(buffer);
+                craWasm.unpremultiply_alpha_wasm(buffer);
+                craWasm.linear_to_srgb_wasm(buffer);
+            }
+        } else if (loadedImage.is_cicp_linear) {
+            // CICP says linear - un-premultiply if needed, then convert to sRGB
+            if (needsUnpremultiply) {
+                craWasm.unpremultiply_alpha_wasm(buffer);
+            }
+            craWasm.linear_to_srgb_wasm(buffer);
+        } else if (loadedImage.has_non_srgb_icc) {
+            // Non-sRGB ICC profile → linear sRGB → (un-premultiply if needed) → sRGB
             const iccProfile = loadedImage.get_icc_profile();
             craWasm.transform_icc_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, iccProfile);
+            if (needsUnpremultiply) {
+                craWasm.unpremultiply_alpha_wasm(buffer);
+            }
+            craWasm.linear_to_srgb_wasm(buffer);
+        } else if (loadedImage.is_cicp_needs_conversion) {
+            // CICP indicates non-sRGB (e.g., Display P3) but no ICC - use CICP transform
+            craWasm.transform_cicp_to_linear_srgb_wasm(buffer, srcWidth, srcHeight, loadedImage);
             if (needsUnpremultiply) {
                 craWasm.unpremultiply_alpha_wasm(buffer);
             }

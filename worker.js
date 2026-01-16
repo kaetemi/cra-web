@@ -105,10 +105,16 @@ function decodeImagePrecise(data, preserveAlpha = false) {
         is16bit: loadedImage.is_16bit,
         hasAlpha: loadedImage.has_alpha,
         isFormatPremultipliedDefault: loadedImage.is_format_premultiplied_default,  // EXR has premultiplied alpha
+        // CICP flags (authoritative color space indicators)
+        isCicpSrgb: loadedImage.is_cicp_srgb,
+        isCicpLinear: loadedImage.is_cicp_linear,
+        isCicpNeedsConversion: loadedImage.is_cicp_needs_conversion,
         // Convert to normalized (0-1) for color correction
         // Use RGBA buffer if preserving alpha, otherwise RGB
         buffer: preserveAlpha ? loadedImage.to_normalized_buffer_rgba() : loadedImage.to_normalized_buffer(),
-        iccProfile: loadedImage.has_non_srgb_icc ? loadedImage.get_icc_profile() : null
+        iccProfile: loadedImage.has_non_srgb_icc ? loadedImage.get_icc_profile() : null,
+        // Store loadedImage reference for CICP transform
+        loadedImage: loadedImage
     };
 }
 
@@ -278,20 +284,46 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     let inputAlreadyLinear = false;
     let refAlreadyLinear = false;
 
-    // Apply ICC transform if present (iccProfile only exists if non-sRGB)
-    if (inputImg.iccProfile && inputImg.iccProfile.length > 0) {
+    // Apply color space conversion
+    // Priority: CICP sRGB/linear (authoritative) > ICC > CICP conversion > assume sRGB
+
+    // Input image
+    if (inputImg.isCicpSrgb) {
+        sendConsole('  Input: CICP indicates sRGB');
+        craWasm.srgb_to_linear_wasm(inputBuffer);
+        inputAlreadyLinear = true;
+    } else if (inputImg.isCicpLinear) {
+        sendConsole('  Input: CICP indicates linear sRGB');
+        inputAlreadyLinear = true;
+    } else if (inputImg.iccProfile && inputImg.iccProfile.length > 0) {
         sendConsole('  Applying ICC transform to input...');
         craWasm.transform_icc_to_linear_srgb_wasm(inputBuffer, inputImg.width, inputImg.height, inputImg.iccProfile);
         inputAlreadyLinear = true;
+    } else if (inputImg.isCicpNeedsConversion && inputImg.loadedImage) {
+        sendConsole('  Applying CICP transform to input...');
+        craWasm.transform_cicp_to_linear_srgb_wasm(inputBuffer, inputImg.width, inputImg.height, inputImg.loadedImage);
+        inputAlreadyLinear = true;
     }
 
-    if (refImg.iccProfile && refImg.iccProfile.length > 0) {
+    // Reference image
+    if (refImg.isCicpSrgb) {
+        sendConsole('  Reference: CICP indicates sRGB');
+        craWasm.srgb_to_linear_wasm(refBuffer);
+        refAlreadyLinear = true;
+    } else if (refImg.isCicpLinear) {
+        sendConsole('  Reference: CICP indicates linear sRGB');
+        refAlreadyLinear = true;
+    } else if (refImg.iccProfile && refImg.iccProfile.length > 0) {
         sendConsole('  Applying ICC transform to reference...');
         craWasm.transform_icc_to_linear_srgb_wasm(refBuffer, refImg.width, refImg.height, refImg.iccProfile);
         refAlreadyLinear = true;
+    } else if (refImg.isCicpNeedsConversion && refImg.loadedImage) {
+        sendConsole('  Applying CICP transform to reference...');
+        craWasm.transform_cicp_to_linear_srgb_wasm(refBuffer, refImg.width, refImg.height, refImg.loadedImage);
+        refAlreadyLinear = true;
     }
 
-    // Convert to linear if not already done by ICC transform
+    // Convert to linear if not already done
     sendProgress('process', 'Converting to linear RGB...', 25);
     if (!inputAlreadyLinear) {
         craWasm.srgb_to_linear_wasm(inputBuffer);
