@@ -1,2 +1,3 @@
 - Output profile. Only really need to support sRGB and linear RGB at 8-bit currently
 - Alpha channel. This is important
+- Figure out the exact white points defined by all the various standard ICC profiles and review the behavior of moxcms defined whitepoints
