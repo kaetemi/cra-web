@@ -179,11 +179,17 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
 
     // First decode input to check for alpha
     const inputCheck = craWasm.load_image_wasm(new Uint8Array(inputData));
-    const inputHasAlpha = inputCheck.has_alpha;
+    const originalHasAlpha = inputCheck.has_alpha;
+
+    // Histogram processing doesn't support alpha yet - discard alpha for now
+    const inputHasAlpha = false;
+    if (originalHasAlpha) {
+        sendConsole('Note: Alpha channel discarded (histogram processing does not support alpha)');
+    }
 
     // Decode with full precision (16-bit + ICC extraction)
-    // Use RGBA buffer for input if it has alpha to preserve transparency
-    const inputImg = decodeImagePrecise(inputData, inputHasAlpha);
+    // Always use RGB buffer since histogram processing discards alpha
+    const inputImg = decodeImagePrecise(inputData, false);
     const refImg = decodeImagePrecise(refData, false);  // Reference doesn't need alpha
 
     // Log processing info
@@ -334,7 +340,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
 
     // Un-premultiply alpha if needed (auto: only EXR has premultiplied alpha)
     // Must happen in linear space after color space conversion
-    if (inputImg.hasAlpha && inputImg.isFormatPremultipliedDefault) {
+    // Note: Skipped when alpha is discarded for histogram processing (inputHasAlpha is false)
+    if (inputHasAlpha && inputImg.isFormatPremultipliedDefault) {
         sendConsole('  Un-premultiplying alpha (EXR detected)...');
         craWasm.unpremultiply_alpha_wasm(inputBuffer);
     }

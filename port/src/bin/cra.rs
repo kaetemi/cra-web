@@ -1254,7 +1254,17 @@ fn main() -> Result<(), String> {
             eprintln!("Processing in linear RGB space...");
         }
 
-        let (input_pixels, src_width, src_height, input_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
+        let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
+
+        // Histogram processing doesn't support alpha yet - discard alpha when using reference
+        let input_has_alpha = if needs_reference && original_has_alpha {
+            if args.verbose {
+                eprintln!("  Note: Alpha channel discarded (histogram processing does not support alpha)");
+            }
+            false
+        } else {
+            original_has_alpha
+        };
 
         // Resize in linear RGB space
         let mut resize_progress = |p: f32| print_progress("Resize", p);
