@@ -15,7 +15,7 @@
 /// - Random: Random direction per row (mixed modes only)
 
 use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_unclamped,
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr_clamped, linear_rgb_to_ycbcr_unclamped,
     linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{
@@ -157,7 +157,7 @@ fn build_perceptual_lut(
                     (r_lin, g_lin, b_lin)
                 } else if is_ycbcr_space(space) {
                     // Y'CbCr conversion (goes through sRGB internally)
-                    linear_rgb_to_ycbcr(r_lin, g_lin, b_lin)
+                    linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
                 } else if is_lab_space(space) {
                     linear_rgb_to_lab(r_lin, g_lin, b_lin)
                 } else {
@@ -957,7 +957,7 @@ fn process_pixel(
                     let (l, a, b_ch) = if is_linear_rgb_space(ctx.space) {
                         (r_lin, g_lin, b_lin)
                     } else if is_ycbcr_space(ctx.space) {
-                        linear_rgb_to_ycbcr(r_lin, g_lin, b_lin)
+                        linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
                     } else if is_lab_space(ctx.space) {
                         linear_rgb_to_lab(r_lin, g_lin, b_lin)
                     } else {

@@ -316,10 +316,10 @@ pub fn normalize_wasm(buf: &mut BufferF32x4) {
     color::normalize_inplace(buf.as_mut_slice());
 }
 
-/// Denormalize from 0-1 to 0-255 in-place
+/// Denormalize from 0-1 to 0-255 in-place (clamps to 0-255)
 #[wasm_bindgen]
-pub fn denormalize_wasm(buf: &mut BufferF32x4) {
-    color::denormalize_inplace(buf.as_mut_slice());
+pub fn denormalize_clamped_wasm(buf: &mut BufferF32x4) {
+    color::denormalize_inplace_clamped(buf.as_mut_slice());
 }
 
 // ============================================================================
@@ -927,7 +927,7 @@ mod tests {
         let p = buf.as_slice();
         assert!((p[0][0] - 128.0/255.0).abs() < 0.001);
 
-        denormalize_wasm(&mut buf);
+        denormalize_clamped_wasm(&mut buf);
         let p = buf.as_slice();
         assert!((p[0][0] - 128.0).abs() < 0.01);
     }

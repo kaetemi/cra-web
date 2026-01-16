@@ -28,7 +28,7 @@ use cra_wasm::dither_common::{
     ColorCorrectionMethod, DitherMode, HistogramMode as LibHistogramMode, OutputTechnique,
     PerceptualSpace,
 };
-use cra_wasm::color::{denormalize_inplace, linear_to_srgb_inplace};
+use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::dither_output_rgb;
 use cra_wasm::pixel::Pixel4;
 
@@ -682,7 +682,7 @@ fn dither_pixels(
 
         // Convert linear RGB to sRGB 0-255
         linear_to_srgb_inplace(&mut linear_pixels);
-        denormalize_inplace(&mut linear_pixels);
+        denormalize_inplace_clamped(&mut linear_pixels);
 
         // Dither
         let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);

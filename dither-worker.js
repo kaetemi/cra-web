@@ -150,7 +150,7 @@ function processDither(params) {
                 craWasm.linear_to_srgb_wasm(buffer);
 
                 sendProgress(60, 'Denormalizing...');
-                craWasm.denormalize_wasm(buffer);
+                craWasm.denormalize_clamped_wasm(buffer);
 
                 sendProgress(70, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(

@@ -1010,12 +1010,12 @@ mod tests {
         }
 
         // Test YCbCr: grayscale uses sRGB value, Cb=Cr=0 for neutral grays
-        use crate::color::{linear_rgb_to_ycbcr, linear_to_srgb_single};
+        use crate::color::{linear_rgb_to_ycbcr_clamped, linear_to_srgb_single};
         for &lin1 in &test_grays {
             for &lin2 in &test_grays {
                 // Full YCbCr conversion
-                let (y1, cb1, cr1) = linear_rgb_to_ycbcr(lin1, lin1, lin1);
-                let (y2, cb2, cr2) = linear_rgb_to_ycbcr(lin2, lin2, lin2);
+                let (y1, cb1, cr1) = linear_rgb_to_ycbcr_clamped(lin1, lin1, lin1);
+                let (y2, cb2, cr2) = linear_rgb_to_ycbcr_clamped(lin2, lin2, lin2);
 
                 // Verify Cb and Cr are ~0 for neutral grays
                 assert!(cb1.abs() < 1e-6, "YCbCr Cb1 should be ~0 for gray, got {}", cb1);

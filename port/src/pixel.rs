@@ -230,7 +230,8 @@ pub fn srgb_u8_rgba_to_pixels(data: &[u8]) -> Vec<Pixel4> {
 }
 
 /// Convert Pixel4 array (0-255 scale) to sRGB u8 interleaved
-pub fn pixels_to_srgb_u8(pixels: &[Pixel4]) -> Vec<u8> {
+/// Clamps values to 0-255 range.
+pub fn pixels_to_srgb_u8_clamped(pixels: &[Pixel4]) -> Vec<u8> {
     let mut data = Vec::with_capacity(pixels.len() * 3);
 
     for p in pixels {
@@ -243,7 +244,8 @@ pub fn pixels_to_srgb_u8(pixels: &[Pixel4]) -> Vec<u8> {
 }
 
 /// Convert Pixel4 array (0-255 scale) to sRGB u8 interleaved RGBA
-pub fn pixels_to_srgb_u8_rgba(pixels: &[Pixel4]) -> Vec<u8> {
+/// Clamps values to 0-255 range.
+pub fn pixels_to_srgb_u8_rgba_clamped(pixels: &[Pixel4]) -> Vec<u8> {
     let mut data = Vec::with_capacity(pixels.len() * 4);
 
     for p in pixels {

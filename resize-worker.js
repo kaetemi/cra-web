@@ -94,7 +94,7 @@ function processResize(params) {
         craWasm.linear_to_srgb_wasm(resizedBuffer);
 
         // Step 6: Denormalize to 0-255 in-place
-        craWasm.denormalize_wasm(resizedBuffer);
+        craWasm.denormalize_clamped_wasm(resizedBuffer);
 
         sendProgress(90);
 
@@ -182,7 +182,7 @@ function processSrgbResize(params) {
         );
 
         // Step 4: Denormalize to 0-255 in-place
-        craWasm.denormalize_wasm(resizedBuffer);
+        craWasm.denormalize_clamped_wasm(resizedBuffer);
 
         sendProgress(90);
 
@@ -263,7 +263,7 @@ function processResizePixels(params) {
         craWasm.linear_to_srgb_wasm(resizedBuffer);
 
         // Denormalize to 0-255 in-place
-        craWasm.denormalize_wasm(resizedBuffer);
+        craWasm.denormalize_clamped_wasm(resizedBuffer);
 
         sendProgress(90);
 

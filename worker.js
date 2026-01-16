@@ -309,7 +309,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
 
     // Denormalize to 0-255 in-place
     sendProgress('process', 'Denormalizing...', 65);
-    craWasm.denormalize_wasm(resultBuffer);
+    craWasm.denormalize_clamped_wasm(resultBuffer);
 
     // Dither to RGB888
     sendProgress('process', 'Dithering output...', 70);

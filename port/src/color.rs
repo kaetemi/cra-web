@@ -389,8 +389,9 @@ pub fn oklab_to_linear_rgb_inplace(pixels: &mut [Pixel4]) {
 /// Convert linear RGB (0-1) to Y'CbCr
 /// Internally converts to sRGB first, then applies the Y'CbCr matrix.
 /// Returns (Y', Cb, Cr) where Y' is 0-1 and Cb,Cr are roughly -0.5 to +0.5
+/// Clamps input to 0-1 range before conversion.
 #[inline]
-pub fn linear_rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+pub fn linear_rgb_to_ycbcr_clamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     // Convert linear to sRGB (gamma-encoded)
     let r_srgb = linear_to_srgb_single(r.clamp(0.0, 1.0));
     let g_srgb = linear_to_srgb_single(g.clamp(0.0, 1.0));
@@ -505,7 +506,8 @@ pub fn normalize_inplace(pixels: &mut [Pixel4]) {
 }
 
 /// Denormalize pixels from 0-1 to 0-255 range in-place
-pub fn denormalize_inplace(pixels: &mut [Pixel4]) {
+/// Clamps output to 0-255 range.
+pub fn denormalize_inplace_clamped(pixels: &mut [Pixel4]) {
     for p in pixels.iter_mut() {
         p[0] = (p[0] * 255.0).clamp(0.0, 255.0);
         p[1] = (p[1] * 255.0).clamp(0.0, 255.0);
