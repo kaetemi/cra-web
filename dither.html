@@ -940,7 +940,9 @@
                     parseInt(document.getElementById('perceptual-space').value) : null,
                 seed: parseInt(document.getElementById('seed-input').value) || 0,
                 rgbInterleaved: result.rgbInterleaved,
-                grayChannel: result.grayChannel
+                rgbaInterleaved: result.rgbaInterleaved,
+                grayChannel: result.grayChannel,
+                hasAlpha: result.hasAlpha
             };
 
             // Update download buttons
@@ -1473,6 +1475,27 @@
             }
         });
 
+        // Helper to get RGB interleaved data (extracts from RGBA if needed)
+        function getRgbInterleaved() {
+            if (!lastDitherResult) return null;
+            if (lastDitherResult.rgbInterleaved) {
+                return lastDitherResult.rgbInterleaved;
+            }
+            if (lastDitherResult.rgbaInterleaved) {
+                // Extract RGB from RGBA (drop alpha channel)
+                const rgba = lastDitherResult.rgbaInterleaved;
+                const pixelCount = lastDitherResult.width * lastDitherResult.height;
+                const rgb = new Uint8Array(pixelCount * 3);
+                for (let i = 0; i < pixelCount; i++) {
+                    rgb[i * 3] = rgba[i * 4];
+                    rgb[i * 3 + 1] = rgba[i * 4 + 1];
+                    rgb[i * 3 + 2] = rgba[i * 4 + 2];
+                }
+                return rgb;
+            }
+            return null;
+        }
+
         // Raw download handler - stride=1 means packed, stride>1 means row-aligned
         document.getElementById('download-raw-btn').addEventListener('click', () => {
             if (!lastDitherResult) return;
@@ -1492,8 +1515,9 @@
                         lastDitherResult.bitsR
                     );
                 } else {
+                    const rgbData = getRgbInterleaved();
                     rawData = encode_rgb_packed_wasm(
-                        lastDitherResult.rgbInterleaved,
+                        rgbData,
                         lastDitherResult.width,
                         lastDitherResult.height,
                         lastDitherResult.bitsR,
@@ -1514,8 +1538,9 @@
                         fill
                     );
                 } else {
+                    const rgbData = getRgbInterleaved();
                     rawData = encode_rgb_row_aligned_stride_wasm(
-                        lastDitherResult.rgbInterleaved,
+                        rgbData,
                         lastDitherResult.width,
                         lastDitherResult.height,
                         lastDitherResult.bitsR,
@@ -1542,15 +1567,16 @@
         });
 
         // Per-channel download handler helper - respects stride setting
-        // channel: 0=R, 1=G, 2=B (3=A for RGBA)
+        // channel: 0=R, 1=G, 2=B
         function downloadChannel(channelName, channelIndex, bits) {
-            if (!lastDitherResult || !lastDitherResult.rgbInterleaved) return;
+            const rgbData = getRgbInterleaved();
+            if (!lastDitherResult || !rgbData) return;
 
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
 
             const rawData = encode_channel_row_aligned_stride_wasm(
-                lastDitherResult.rgbInterleaved,
+                rgbData,
                 lastDitherResult.width,
                 lastDitherResult.height,
                 3,  // num_channels (RGB)

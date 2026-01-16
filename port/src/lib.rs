@@ -758,6 +758,105 @@ pub fn dither_gray_with_progress_wasm(
     BufferU8::new(result)
 }
 
+/// Dither RGBA image and return quantized u8 RGBA data directly
+/// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
+/// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
+/// Alpha channel is passed through without dithering.
+#[wasm_bindgen]
+pub fn dither_rgba_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+) -> BufferU8 {
+    use dither_common::OutputTechnique;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let output_technique = match technique {
+        0 => OutputTechnique::None,
+        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        _ => OutputTechnique::ColorspaceAware {
+            mode: dither_mode,
+            space: perceptual_space,
+        },
+    };
+
+    let result_u8 = output::dither_output_rgba(
+        buf.as_slice(),
+        width,
+        height,
+        bits_r,
+        bits_g,
+        bits_b,
+        output_technique,
+        seed,
+        None,
+    );
+
+    BufferU8::new(result_u8)
+}
+
+/// Dither RGBA image with progress callback
+/// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
+/// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
+/// Alpha channel is passed through without dithering.
+/// Progress callback is called after each row with progress (0.0 to 1.0)
+#[wasm_bindgen]
+pub fn dither_rgba_with_progress_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+    progress_callback: &js_sys::Function,
+) -> BufferU8 {
+    use dither_common::OutputTechnique;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let output_technique = match technique {
+        0 => OutputTechnique::None,
+        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        _ => OutputTechnique::ColorspaceAware {
+            mode: dither_mode,
+            space: perceptual_space,
+        },
+    };
+
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result_u8 = output::dither_output_rgba(
+        buf.as_slice(),
+        width,
+        height,
+        bits_r,
+        bits_g,
+        bits_b,
+        output_technique,
+        seed,
+        Some(&mut progress_fn),
+    );
+
+    BufferU8::new(result_u8)
+}
 
 // ============================================================================
 // Binary Format Encoding (takes final u8 data)

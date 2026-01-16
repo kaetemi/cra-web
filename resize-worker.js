@@ -19,8 +19,8 @@ function sendError(error) {
 }
 
 // Send completion to main thread
-function sendComplete(outputData, width, height) {
-    self.postMessage({ type: 'complete', outputData, width, height, requestId: currentRequestId });
+function sendComplete(outputData, width, height, hasAlpha = false) {
+    self.postMessage({ type: 'complete', outputData, width, height, hasAlpha, requestId: currentRequestId });
 }
 
 // Initialize WASM
@@ -62,11 +62,13 @@ function processResize(params) {
         const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
         const srcWidth = loadedImage.width;
         const srcHeight = loadedImage.height;
+        const hasAlpha = loadedImage.has_alpha;
 
-        // Resize always needs linear path
-        let buffer = loadedImage.to_normalized_buffer();
+        // Resize always needs linear path - use RGBA to preserve alpha
+        let buffer = loadedImage.to_normalized_buffer_rgba();
 
         // Convert to linear (either via ICC, sRGB gamma, or already linear)
+        // Alpha passes through unchanged
         if (loadedImage.has_non_srgb_icc) {
             // ICC profile → linear sRGB
             const iccProfile = loadedImage.get_icc_profile();
@@ -78,7 +80,7 @@ function processResize(params) {
             craWasm.srgb_to_linear_wasm(buffer);
         }
 
-        // Step 4: Rescale in linear space with progress
+        // Step 4: Rescale in linear space with progress (handles all 4 channels)
         const resizedBuffer = craWasm.rescale_rgb_with_progress_wasm(
             buffer,
             srcWidth, srcHeight,
@@ -90,40 +92,57 @@ function processResize(params) {
 
         sendProgress(85);
 
-        // Step 5: Convert linear back to sRGB (0-1) in-place
+        // Step 5: Convert linear back to sRGB (0-1) in-place (alpha passes through)
         craWasm.linear_to_srgb_wasm(resizedBuffer);
 
-        // Step 6: Denormalize to 0-255 in-place
+        // Step 6: Denormalize to 0-255 in-place (all 4 channels)
         craWasm.denormalize_clamped_wasm(resizedBuffer);
 
         sendProgress(90);
 
-        // Step 7: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
-            resizedBuffer,
-            dstWidth, dstHeight,
-            8, 8, 8,
-            ditherTechnique,
-            ditherMode,
-            perceptualSpace,
-            0,
-            (progress) => sendProgress(90 + Math.round(progress * 10))  // 90-100% for dither
-        );
-
-        // Extract final RGB u8 data
-        const dithered = ditheredBuffer.to_vec();
-
-        // Convert to RGBA for ImageData
+        // Step 7: Dither to 8-bit output
+        let outputData;
         const dstPixels = dstWidth * dstHeight;
-        const outputData = new Uint8ClampedArray(dstPixels * 4);
-        for (let i = 0; i < dstPixels; i++) {
-            outputData[i * 4] = dithered[i * 3];
-            outputData[i * 4 + 1] = dithered[i * 3 + 1];
-            outputData[i * 4 + 2] = dithered[i * 3 + 2];
-            outputData[i * 4 + 3] = 255;
+
+        if (hasAlpha) {
+            // Use RGBA dithering - alpha is passed through without dithering
+            const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
+                resizedBuffer,
+                dstWidth, dstHeight,
+                8, 8, 8,
+                ditherTechnique,
+                ditherMode,
+                perceptualSpace,
+                0,
+                (progress) => sendProgress(90 + Math.round(progress * 10))
+            );
+            // RGBA output is already in correct format for ImageData
+            outputData = new Uint8ClampedArray(ditheredBuffer.to_vec());
+        } else {
+            // Use RGB dithering for images without alpha
+            const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
+                resizedBuffer,
+                dstWidth, dstHeight,
+                8, 8, 8,
+                ditherTechnique,
+                ditherMode,
+                perceptualSpace,
+                0,
+                (progress) => sendProgress(90 + Math.round(progress * 10))
+            );
+            const dithered = ditheredBuffer.to_vec();
+
+            // Convert RGB to RGBA for ImageData (alpha = 255)
+            outputData = new Uint8ClampedArray(dstPixels * 4);
+            for (let i = 0; i < dstPixels; i++) {
+                outputData[i * 4] = dithered[i * 3];
+                outputData[i * 4 + 1] = dithered[i * 3 + 1];
+                outputData[i * 4 + 2] = dithered[i * 3 + 2];
+                outputData[i * 4 + 3] = 255;
+            }
         }
 
-        sendComplete(outputData, dstWidth, dstHeight);
+        sendComplete(outputData, dstWidth, dstHeight, hasAlpha);
 
     } catch (error) {
         sendError(error);
@@ -156,7 +175,10 @@ function processSrgbResize(params) {
         const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
         const srcWidth = loadedImage.width;
         const srcHeight = loadedImage.height;
-        let buffer = loadedImage.to_normalized_buffer();
+        const hasAlpha = loadedImage.has_alpha;
+
+        // Use RGBA buffer to preserve alpha
+        let buffer = loadedImage.to_normalized_buffer_rgba();
 
         // Handle color profile conversion for fair comparison
         if (loadedImage.has_non_srgb_icc) {
@@ -186,32 +208,48 @@ function processSrgbResize(params) {
 
         sendProgress(90);
 
-        // Step 5: Dither to RGB888
-        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
-            resizedBuffer,
-            dstWidth, dstHeight,
-            8, 8, 8,
-            ditherTechnique,
-            ditherMode,
-            perceptualSpace,
-            0,
-            (progress) => sendProgress(90 + Math.round(progress * 10))  // 90-100% for dither
-        );
-
-        // Extract final RGB u8 data
-        const dithered = ditheredBuffer.to_vec();
-
-        // Convert to RGBA for ImageData
+        // Step 5: Dither to 8-bit output
+        let outputData;
         const dstPixels = dstWidth * dstHeight;
-        const outputData = new Uint8ClampedArray(dstPixels * 4);
-        for (let i = 0; i < dstPixels; i++) {
-            outputData[i * 4] = dithered[i * 3];
-            outputData[i * 4 + 1] = dithered[i * 3 + 1];
-            outputData[i * 4 + 2] = dithered[i * 3 + 2];
-            outputData[i * 4 + 3] = 255;
+
+        if (hasAlpha) {
+            // Use RGBA dithering - alpha is passed through without dithering
+            const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
+                resizedBuffer,
+                dstWidth, dstHeight,
+                8, 8, 8,
+                ditherTechnique,
+                ditherMode,
+                perceptualSpace,
+                0,
+                (progress) => sendProgress(90 + Math.round(progress * 10))
+            );
+            outputData = new Uint8ClampedArray(ditheredBuffer.to_vec());
+        } else {
+            // Use RGB dithering for images without alpha
+            const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
+                resizedBuffer,
+                dstWidth, dstHeight,
+                8, 8, 8,
+                ditherTechnique,
+                ditherMode,
+                perceptualSpace,
+                0,
+                (progress) => sendProgress(90 + Math.round(progress * 10))
+            );
+            const dithered = ditheredBuffer.to_vec();
+
+            // Convert RGB to RGBA for ImageData (alpha = 255)
+            outputData = new Uint8ClampedArray(dstPixels * 4);
+            for (let i = 0; i < dstPixels; i++) {
+                outputData[i * 4] = dithered[i * 3];
+                outputData[i * 4 + 1] = dithered[i * 3 + 1];
+                outputData[i * 4 + 2] = dithered[i * 3 + 2];
+                outputData[i * 4 + 3] = 255;
+            }
         }
 
-        sendComplete(outputData, dstWidth, dstHeight);
+        sendComplete(outputData, dstWidth, dstHeight, hasAlpha);
 
     } catch (error) {
         sendError(error);

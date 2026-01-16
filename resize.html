@@ -384,6 +384,7 @@
         let lastLinearResult = null;
         let lastOutputWidth = 0;
         let lastOutputHeight = 0;
+        let lastHasAlpha = false;
 
         // Scale mode constants (must match Rust enum)
         const SCALE_MODE_INDEPENDENT = 0;
@@ -446,7 +447,7 @@
         }
 
         function handleResizeComplete(data) {
-            const { outputData, width, height } = data;
+            const { outputData, width, height, hasAlpha } = data;
             const imageData = new ImageData(new Uint8ClampedArray(outputData), width, height);
 
             if (pendingComparison) {
@@ -478,6 +479,7 @@
             lastLinearResult = outputData;
             lastOutputWidth = width;
             lastOutputHeight = height;
+            lastHasAlpha = hasAlpha || false;
         }
 
         function handleResizeError(message) {

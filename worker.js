@@ -94,7 +94,7 @@ async function loadScript(scriptName) {
 }
 
 // Decode image using WASM - returns LoadedImage with metadata and pixel access
-function decodeImagePrecise(data) {
+function decodeImagePrecise(data, preserveAlpha = false) {
     // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
     const loadedImage = craWasm.load_image_wasm(new Uint8Array(data));
 
@@ -103,8 +103,10 @@ function decodeImagePrecise(data) {
         height: loadedImage.height,
         hasIcc: loadedImage.has_non_srgb_icc,  // Only true if non-sRGB
         is16bit: loadedImage.is_16bit,
+        hasAlpha: loadedImage.has_alpha,
         // Convert to normalized (0-1) for color correction
-        buffer: loadedImage.to_normalized_buffer(),
+        // Use RGBA buffer if preserving alpha, otherwise RGB
+        buffer: preserveAlpha ? loadedImage.to_normalized_buffer_rgba() : loadedImage.to_normalized_buffer(),
         iccProfile: loadedImage.has_non_srgb_icc ? loadedImage.get_icc_profile() : null
     };
 }
@@ -136,19 +138,26 @@ function rgbaToRgb(rgbaData) {
     return rgb;
 }
 
-// Encode RGB pixels to PNG
-async function encodePng(rgbData, width, height) {
+// Encode RGB or RGBA pixels to PNG
+async function encodePng(data, width, height, isRgba = false) {
     const canvas = new OffscreenCanvas(width, height);
     const ctx = canvas.getContext('2d');
     const imageData = ctx.createImageData(width, height);
 
-    // Convert RGB to RGBA
     const pixels = width * height;
-    for (let i = 0; i < pixels; i++) {
-        imageData.data[i * 4] = rgbData[i * 3];
-        imageData.data[i * 4 + 1] = rgbData[i * 3 + 1];
-        imageData.data[i * 4 + 2] = rgbData[i * 3 + 2];
-        imageData.data[i * 4 + 3] = 255;
+    if (isRgba) {
+        // RGBA data - copy directly
+        for (let i = 0; i < pixels * 4; i++) {
+            imageData.data[i] = data[i];
+        }
+    } else {
+        // RGB data - convert to RGBA with alpha=255
+        for (let i = 0; i < pixels; i++) {
+            imageData.data[i * 4] = data[i * 3];
+            imageData.data[i * 4 + 1] = data[i * 3 + 1];
+            imageData.data[i * 4 + 2] = data[i * 3 + 2];
+            imageData.data[i * 4 + 3] = 255;
+        }
     }
 
     ctx.putImageData(imageData, 0, 0);
@@ -161,9 +170,14 @@ async function encodePng(rgbData, width, height) {
 async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
     sendProgress('process', 'Decoding images (precise)...', 5);
 
+    // First decode input to check for alpha
+    const inputCheck = craWasm.load_image_wasm(new Uint8Array(inputData));
+    const inputHasAlpha = inputCheck.has_alpha;
+
     // Decode with full precision (16-bit + ICC extraction)
-    const inputImg = decodeImagePrecise(inputData);
-    const refImg = decodeImagePrecise(refData);
+    // Use RGBA buffer for input if it has alpha to preserve transparency
+    const inputImg = decodeImagePrecise(inputData, inputHasAlpha);
+    const refImg = decodeImagePrecise(refData, false);  // Reference doesn't need alpha
 
     // Log processing info
     sendConsole(`Processing ${inputImg.width}x${inputImg.height} image with WASM...`);
@@ -311,29 +325,46 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     sendProgress('process', 'Denormalizing...', 65);
     craWasm.denormalize_clamped_wasm(resultBuffer);
 
-    // Dither to RGB888
+    // Dither to 8-bit output
     sendProgress('process', 'Dithering output...', 70);
     const ditherTechnique = colorAwareOutput ? 2 : 1;
-    const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
-        resultBuffer,
-        inputImg.width,
-        inputImg.height,
-        8, 8, 8,  // RGB888
-        ditherTechnique,
-        outputDitherMode,
-        outputDistanceSpace,
-        0,  // seed
-        (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
-    );
 
-    // Extract final u8 RGB data (dither_rgb_with_progress_wasm returns BufferU8 directly)
-    const resultRgb = ditheredBuffer.to_vec();
+    let resultData;
+    if (inputHasAlpha) {
+        // Use RGBA dithering - alpha is passed through without dithering
+        const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
+            resultBuffer,
+            inputImg.width,
+            inputImg.height,
+            8, 8, 8,  // RGB888 (alpha passes through at 8-bit)
+            ditherTechnique,
+            outputDitherMode,
+            outputDistanceSpace,
+            0,  // seed
+            (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
+        );
+        resultData = ditheredBuffer.to_vec();
+    } else {
+        // Use RGB dithering for images without alpha
+        const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
+            resultBuffer,
+            inputImg.width,
+            inputImg.height,
+            8, 8, 8,  // RGB888
+            ditherTechnique,
+            outputDitherMode,
+            outputDistanceSpace,
+            0,  // seed
+            (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
+        );
+        resultData = ditheredBuffer.to_vec();
+    }
 
     const elapsed = performance.now() - startTime;
     sendConsole(`Processing completed in ${elapsed.toFixed(0)}ms`);
 
     sendProgress('process', 'Encoding result...', 80);
-    const outputData = await encodePng(resultRgb, inputImg.width, inputImg.height);
+    const outputData = await encodePng(resultData, inputImg.width, inputImg.height, inputHasAlpha);
 
     return outputData;
 }
