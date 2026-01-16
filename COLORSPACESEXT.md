@@ -249,6 +249,64 @@ The structure is:
 
 **For dithering:** Only relevant if doing HDR. Uses PQ/HLG transfer functions which are outside typical SDR workflows.
 
+## ICC Profiles
+
+ICC profiles are not a color space but a container format for describing color spaces and device characteristics. Defined by the International Color Consortium in ICC.1 (currently ICC.1:2022-05).
+
+### Profile Connection Space (PCS)
+
+All ICC profiles convert to/from a common intermediate called the Profile Connection Space. The PCS is either CIEXYZ or CIELAB, referenced to the D50 illuminant.
+
+**PCS White Point (D50_ICC):**
+
+The ICC specification defines the PCS illuminant as XYZ directly, not chromaticity:
+
+| X | Y | Z |
+|--------|--------|--------|
+| 0.9642 | 1.0000 | 0.8249 |
+
+This is the normative definition from ICC.1:2022-05 Section 7.2.16. Note that this differs slightly from CIE D50:
+
+| Source | X | Y | Z |
+|--------|--------|--------|--------|
+| D50_ICC | 0.9642 | 1.0000 | 0.8249 |
+| D50_CIE | 0.9643 | 1.0000 | 0.8251 |
+
+The difference arises because ICC defines XYZ at 4 decimal places, while CIE D50 chromaticity (0.34567, 0.35850) yields slightly different XYZ when converted. For ICC interoperability, use D50_ICC exactly as specified.
+
+**Binary Representation:**
+
+ICC profiles store XYZ values as s15Fixed16Number. The D50 white point encodes as:
+
+| Component | Hex | Decimal (exact) |
+|-----------|--------|------------------------|
+| X | 0xF6D6 | 0.964202880859375 |
+| Y | 0x10000 | 1.0 |
+| Z | 0xD32D | 0.8249053955078125 |
+
+### Conversion Flow
+
+When converting between two color spaces via ICC profiles:
+
+```
+Source RGB → [Source Profile] → PCS (XYZ D50_ICC) → [Dest Profile] → Dest RGB
+```
+
+Each profile contains:
+- **Colorant matrix** (rXYZ, gXYZ, bXYZ tags): RGB→XYZ transform, already adapted to D50_ICC
+- **TRC curves**: Transfer functions for linearization
+- **CHAD tag** (optional): Chromatic adaptation matrix used to adapt the original colorants to D50
+
+### Computational Model
+
+Per ICC.1:2022-05 Section F.3, the matrix-based conversion is:
+
+```
+XYZ_D50 = colorantMatrix × linear_RGB
+```
+
+The colorant tags are used directly as matrix columns. No additional white point scaling is applied—the adaptation to D50_ICC is already baked into the colorants.
+
 ---
 
 ## Summary
@@ -298,5 +356,9 @@ CIE XYZ (empirical root)
     │       │
     │       └── ICtCp
     │
-    └── Apple RGB
+    ├── Apple RGB
+    │
+    └── ICC PCS (D50_ICC)
+          │
+          └── [all ICC-profiled spaces]
 ```
