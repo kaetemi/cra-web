@@ -106,6 +106,7 @@ Color primaries are specified using identifiers derived from CICP (Coding-Indepe
 
 | Identifier | CICP | Description | Native White Point |
 |------------|------|-------------|-------------------|
+| `unspecified` | 2 | Unspecified (image-referred) | N/A |
 | `bt709` | 1 | ITU-R BT.709-6 | `d65_itu` |
 | `srgb` | 1 | IEC 61966-2-1 (matrix-authoritative) | `d65_srgb` |
 | `bt470m` | 4 | ITU-R BT.470-6 System M | `c_fcc` |
@@ -150,6 +151,7 @@ Transfer characteristics specify the opto-electronic transfer function applied t
 
 | Identifier | CICP | Description |
 |------------|------|-------------|
+| `unspecified` | 2 | Unspecified (image-referred) |
 | `linear` | 8 | Linear (no transfer function) |
 | `srgb` | 13 | IEC 61966-2-1 sRGB |
 
@@ -182,6 +184,22 @@ else:
 ```
 
 Note: Storing nonlinear values is discouraged for processing pipelines. The `srgb` transfer is provided for final output compatibility.
+
+#### unspecified
+
+The `unspecified` value indicates that the color space is unknown or does not correspond to a defined standard. This allows explicit declaration of uncertainty while still requiring the field.
+
+**Semantics:**
+
+- `unspecified` primaries: The RGB primaries are unknown. Implementations should treat the data as device-dependent RGB. For display purposes, assuming sRGB-like primaries is reasonable.
+- `unspecified` transfer: The transfer function is unknown. Implementations should treat the data as image-referred (neither linear light nor a specific gamma). For display purposes, assuming sRGB-like transfer is reasonable.
+
+**Recommendations:**
+
+- Implementations may warn when reading files with `unspecified` values
+- Producers should document the actual color space when known
+- `unspecified` should not be used as a default; prefer explicit color space identification
+- Processing pipelines should avoid converting `unspecified` data to other color spaces, as the conversion would be mathematically undefined
 
 ---
 
@@ -226,6 +244,8 @@ Note: `d65_itu` and `d65_cie` differ slightly due to rounding in the chromaticit
 The `white_point` field is optional for RGB primaries and defaults to the native white point of those primaries.
 
 For `xyz` primaries, `white_point` is required and specifies the illuminant to which the XYZ values are relative.
+
+For `unspecified` primaries, `white_point` is not applicable and should be omitted. If present, implementations should ignore it.
 
 ---
 
@@ -501,8 +521,8 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 1 (Minimal):**
 - Read and write `F32` tensors
-- Support `srgb` and `bt709` primaries
-- Support `linear` and `srgb` transfer
+- Support `unspecified` and `srgb` primaries
+- Support `unspecified`, `linear`, and `srgb` transfer
 - Support `RGB` channels
 - Support `HWC` dimension order
 
