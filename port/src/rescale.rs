@@ -139,176 +139,6 @@ fn calculate_scales(
     }
 }
 
-/// Rescale a single channel using bilinear interpolation
-fn rescale_bilinear(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    scale_mode: ScaleMode,
-) -> Vec<f32> {
-    let mut dst = vec![0.0f32; dst_width * dst_height];
-
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    // Maximum valid coordinate (for clamping)
-    let max_x = (src_width - 1) as f32;
-    let max_y = (src_height - 1) as f32;
-
-    for dst_y in 0..dst_height {
-        for dst_x in 0..dst_width {
-            // Map destination pixel center to source coordinates
-            // Using half-pixel offset: center of dst pixel maps to corresponding position in src
-            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
-            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
-
-            // Get integer and fractional parts (after clamping for correct edge behavior)
-            let x0 = src_x.floor() as usize;
-            let y0 = src_y.floor() as usize;
-            let x1 = (x0 + 1).min(src_width - 1);
-            let y1 = (y0 + 1).min(src_height - 1);
-            let fx = src_x - x0 as f32;
-            let fy = src_y - y0 as f32;
-
-            // Sample four corners
-            let p00 = src[y0 * src_width + x0];
-            let p10 = src[y0 * src_width + x1];
-            let p01 = src[y1 * src_width + x0];
-            let p11 = src[y1 * src_width + x1];
-
-            // Bilinear interpolation
-            let top = p00 * (1.0 - fx) + p10 * fx;
-            let bottom = p01 * (1.0 - fx) + p11 * fx;
-            dst[dst_y * dst_width + dst_x] = top * (1.0 - fy) + bottom * fy;
-        }
-    }
-
-    dst
-}
-
-/// Lanczos3 1D resample using precomputed weights - resamples a contiguous slice
-#[inline]
-fn lanczos3_resample_1d_precomputed(
-    src: &[f32],
-    kernel_weights: &[KernelWeights],
-) -> Vec<f32> {
-    let dst_len = kernel_weights.len();
-    let mut dst = vec![0.0f32; dst_len];
-
-    for (dst_i, kw) in kernel_weights.iter().enumerate() {
-        if kw.weights.is_empty() {
-            dst[dst_i] = src[kw.fallback_idx];
-        } else {
-            let mut sum = 0.0f32;
-            for (i, &weight) in kw.weights.iter().enumerate() {
-                sum += src[kw.start_idx + i] * weight;
-            }
-            dst[dst_i] = sum;
-        }
-    }
-
-    dst
-}
-
-/// Rescale a single channel using Lanczos3 interpolation (separable, 2-pass)
-/// Uses precomputed kernel weights for efficiency
-fn rescale_lanczos3(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    scale_mode: ScaleMode,
-) -> Vec<f32> {
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    // For downscaling, increase filter radius
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
-    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
-    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
-
-    // Precompute weights for horizontal and vertical passes
-    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
-    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
-
-    // Pass 1: Horizontal resample each row (src_width -> dst_width)
-    let mut temp = vec![0.0f32; dst_width * src_height];
-    for y in 0..src_height {
-        let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = lanczos3_resample_1d_precomputed(src_row, &h_weights);
-        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
-    }
-
-    // Pass 2: Vertical resample each column (src_height -> dst_height)
-    let mut dst = vec![0.0f32; dst_width * dst_height];
-    for x in 0..dst_width {
-        // Extract column
-        let col: Vec<f32> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
-        let dst_col = lanczos3_resample_1d_precomputed(&col, &v_weights);
-        for (y, &val) in dst_col.iter().enumerate() {
-            dst[y * dst_width + x] = val;
-        }
-    }
-
-    dst
-}
-
-/// Rescale a single channel
-pub fn rescale_channel(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-) -> Vec<f32> {
-    rescale_channel_uniform(src, src_width, src_height, dst_width, dst_height, method, ScaleMode::Independent)
-}
-
-/// Rescale a single channel with uniform scale mode for perfect AR preservation
-pub fn rescale_channel_uniform(
-    src: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-) -> Vec<f32> {
-    if src_width == dst_width && src_height == dst_height {
-        return src.to_vec();
-    }
-
-    match method {
-        RescaleMethod::Bilinear => rescale_bilinear(src, src_width, src_height, dst_width, dst_height, scale_mode),
-        RescaleMethod::Lanczos3 => rescale_lanczos3(src, src_width, src_height, dst_width, dst_height, scale_mode),
-    }
-}
-
-/// Rescale RGB image (separate channels, linear space)
-pub fn rescale_rgb(
-    r: &[f32],
-    g: &[f32],
-    b: &[f32],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let r_out = rescale_channel_uniform(r, src_width, src_height, dst_width, dst_height, method, scale_mode);
-    let g_out = rescale_channel_uniform(g, src_width, src_height, dst_width, dst_height, method, scale_mode);
-    let b_out = rescale_channel_uniform(b, src_width, src_height, dst_width, dst_height, method, scale_mode);
-    (r_out, g_out, b_out)
-}
-
 /// Check if a number is a power of 2
 #[inline]
 fn is_power_of_2(n: usize) -> bool {
@@ -441,6 +271,7 @@ fn rescale_bilinear_pixels(
 }
 
 /// Lanczos3 1D resample for Pixel4 row using precomputed weights
+/// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
 #[inline]
 fn lanczos3_resample_row_pixel4_precomputed(
     src: &[Pixel4],
@@ -455,11 +286,8 @@ fn lanczos3_resample_row_pixel4_precomputed(
         } else {
             let mut sum = Pixel4::default();
             for (i, &weight) in kw.weights.iter().enumerate() {
-                let sample = src[kw.start_idx + i];
-                sum[0] += sample[0] * weight;
-                sum[1] += sample[1] * weight;
-                sum[2] += sample[2] * weight;
-                sum[3] += sample[3] * weight;
+                // SIMD-friendly: scalar multiply broadcasts weight to all 4 channels
+                sum = sum + src[kw.start_idx + i] * weight;
             }
             dst[dst_i] = sum;
         }
@@ -506,19 +334,34 @@ fn rescale_lanczos3_pixels(
         }
     }
 
-    // Pass 2: Vertical resample each column (src_height -> dst_height)
+    // Pass 2: Vertical resample - process by output row for better cache locality
+    // Each output row reads from multiple input rows (determined by kernel weights)
     // Progress: 50% to 100%
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
-    for x in 0..dst_width {
-        // Extract column
-        let col: Vec<Pixel4> = (0..src_height).map(|y| temp[y * dst_width + x]).collect();
-        let dst_col = lanczos3_resample_row_pixel4_precomputed(&col, &v_weights);
-        for (y, &val) in dst_col.iter().enumerate() {
-            dst[y * dst_width + x] = val;
+
+    for dst_y in 0..dst_height {
+        let kw = &v_weights[dst_y];
+        let dst_row_start = dst_y * dst_width;
+
+        if kw.weights.is_empty() {
+            // Fallback: copy entire row
+            let src_row_start = kw.fallback_idx * dst_width;
+            dst[dst_row_start..dst_row_start + dst_width]
+                .copy_from_slice(&temp[src_row_start..src_row_start + dst_width]);
+        } else {
+            // Convolve: for each output pixel in this row, accumulate from source rows
+            for x in 0..dst_width {
+                let mut sum = Pixel4::default();
+                for (i, &weight) in kw.weights.iter().enumerate() {
+                    let src_y = kw.start_idx + i;
+                    sum = sum + temp[src_y * dst_width + x] * weight;
+                }
+                dst[dst_row_start + x] = sum;
+            }
         }
 
         if let Some(ref mut cb) = progress {
-            cb(0.5 + (x + 1) as f32 / dst_width as f32 * 0.5);
+            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
         }
     }
 
@@ -569,34 +412,45 @@ mod tests {
 
     #[test]
     fn test_bilinear_identity() {
-        // 2x2 image
-        let src = vec![0.0, 0.25, 0.5, 0.75];
-        let dst = rescale_channel(&src, 2, 2, 2, 2, RescaleMethod::Bilinear);
+        // 2x2 image using Pixel4
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.25, 0.25, 0.25, 0.0),
+            Pixel4::new(0.5, 0.5, 0.5, 0.0),
+            Pixel4::new(0.75, 0.75, 0.75, 0.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(src, dst);
     }
 
     #[test]
     fn test_bilinear_upscale() {
         // 2x2 -> 4x4
-        // Source: [0, 1]
-        //         [0, 1]
-        let src = vec![0.0, 1.0, 0.0, 1.0];
-        let dst = rescale_channel(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+        ];
+        let dst = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
         assert_eq!(dst.len(), 16);
         // Output should be in valid range and contain intermediate values
-        for val in &dst {
-            assert!(*val >= 0.0 && *val <= 1.0);
+        for p in &dst {
+            assert!(p[0] >= 0.0 && p[0] <= 1.0);
         }
-        // Should have some variation (not all same value)
-        let min = dst.iter().cloned().fold(f32::INFINITY, f32::min);
-        let max = dst.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
-        assert!(max > min); // There should be some variation
+        // Should have some variation
+        let min = dst.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min);
+        let max = dst.iter().map(|p| p[0]).fold(f32::NEG_INFINITY, f32::max);
+        assert!(max > min);
     }
 
     #[test]
     fn test_lanczos_identity() {
-        let src = vec![0.0, 0.25, 0.5, 0.75];
-        let dst = rescale_channel(&src, 2, 2, 2, 2, RescaleMethod::Lanczos3);
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.25, 0.25, 0.25, 0.0),
+            Pixel4::new(0.5, 0.5, 0.5, 0.0),
+            Pixel4::new(0.75, 0.75, 0.75, 0.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
         assert_eq!(src, dst);
     }
 
@@ -604,16 +458,16 @@ mod tests {
     fn test_lanczos_downscale() {
         // 4x4 -> 2x2
         let src = vec![
-            0.0, 0.0, 1.0, 1.0,
-            0.0, 0.0, 1.0, 1.0,
-            0.0, 0.0, 1.0, 1.0,
-            0.0, 0.0, 1.0, 1.0,
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
         ];
-        let dst = rescale_channel(&src, 4, 4, 2, 2, RescaleMethod::Lanczos3);
+        let dst = rescale(&src, 4, 4, 2, 2, RescaleMethod::Lanczos3, ScaleMode::Independent);
         assert_eq!(dst.len(), 4);
         // Left half should be ~0, right half ~1
-        assert!(dst[0] < 0.5);
-        assert!(dst[1] > 0.5);
+        assert!(dst[0][0] < 0.5);
+        assert!(dst[1][0] > 0.5);
     }
 
     #[test]
@@ -695,18 +549,17 @@ mod tests {
         // Test that 2x upscale then 2x downscale returns approximately original
         // 4x4 -> 8x8 -> 4x4
         let src = vec![
-            0.0, 0.3, 0.6, 1.0,
-            0.1, 0.4, 0.7, 0.9,
-            0.2, 0.5, 0.8, 0.8,
-            0.3, 0.6, 0.9, 0.7,
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.1, 0.1, 0.1, 0.0), Pixel4::new(0.4, 0.4, 0.4, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0),
+            Pixel4::new(0.2, 0.2, 0.2, 0.0), Pixel4::new(0.5, 0.5, 0.5, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0),
+            Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0),
         ];
-        let up = rescale_channel(&src, 4, 4, 8, 8, RescaleMethod::Bilinear);
-        let down = rescale_channel(&up, 8, 8, 4, 4, RescaleMethod::Bilinear);
+        let up = rescale(&src, 4, 4, 8, 8, RescaleMethod::Bilinear, ScaleMode::Independent);
+        let down = rescale(&up, 8, 8, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
 
-        // Should be close to original (within reasonable tolerance for interpolation)
-        for (i, (&orig, &result)) in src.iter().zip(down.iter()).enumerate() {
-            let diff = (orig - result).abs();
-            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig, result, diff);
+        for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
+            let diff = (orig[0] - result[0]).abs();
+            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig[0], result[0], diff);
         }
     }
 
@@ -714,17 +567,17 @@ mod tests {
     fn test_lanczos_roundtrip_2x() {
         // Test that 2x upscale then 2x downscale returns approximately original
         let src = vec![
-            0.0, 0.3, 0.6, 1.0,
-            0.1, 0.4, 0.7, 0.9,
-            0.2, 0.5, 0.8, 0.8,
-            0.3, 0.6, 0.9, 0.7,
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.1, 0.1, 0.1, 0.0), Pixel4::new(0.4, 0.4, 0.4, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0),
+            Pixel4::new(0.2, 0.2, 0.2, 0.0), Pixel4::new(0.5, 0.5, 0.5, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0),
+            Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0),
         ];
-        let up = rescale_channel(&src, 4, 4, 8, 8, RescaleMethod::Lanczos3);
-        let down = rescale_channel(&up, 8, 8, 4, 4, RescaleMethod::Lanczos3);
+        let up = rescale(&src, 4, 4, 8, 8, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let down = rescale(&up, 8, 8, 4, 4, RescaleMethod::Lanczos3, ScaleMode::Independent);
 
-        for (i, (&orig, &result)) in src.iter().zip(down.iter()).enumerate() {
-            let diff = (orig - result).abs();
-            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig, result, diff);
+        for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
+            let diff = (orig[0] - result[0]).abs();
+            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig[0], result[0], diff);
         }
     }
 
@@ -733,16 +586,15 @@ mod tests {
         // A single white pixel in center should stay centered after upscale
         // 3x3 with center pixel white -> 6x6
         let src = vec![
-            0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0,
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
         ];
-        let dst = rescale_channel(&src, 3, 3, 6, 6, RescaleMethod::Bilinear);
+        let dst = rescale(&src, 3, 3, 6, 6, RescaleMethod::Bilinear, ScaleMode::Independent);
 
         // The brightest area should still be in the center region
-        // Center of 6x6 is around pixels (2,2), (2,3), (3,2), (3,3)
-        let center_sum = dst[2 * 6 + 2] + dst[2 * 6 + 3] + dst[3 * 6 + 2] + dst[3 * 6 + 3];
-        let corner_sum = dst[0] + dst[5] + dst[30] + dst[35]; // corners
+        let center_sum = dst[2 * 6 + 2][0] + dst[2 * 6 + 3][0] + dst[3 * 6 + 2][0] + dst[3 * 6 + 3][0];
+        let corner_sum = dst[0][0] + dst[5][0] + dst[30][0] + dst[35][0];
 
         assert!(center_sum > corner_sum, "Center should be brighter than corners");
     }
@@ -752,21 +604,20 @@ mod tests {
         // Edge pixels shouldn't expand or shift weirdly
         // Left column black, right column white
         let src = vec![
-            0.0, 1.0,
-            0.0, 1.0,
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
         ];
-        let up = rescale_channel(&src, 2, 2, 4, 4, RescaleMethod::Bilinear);
+        let up = rescale(&src, 2, 2, 4, 4, RescaleMethod::Bilinear, ScaleMode::Independent);
 
         // Left edge (x=0) should still be darkest
         // Right edge (x=3) should still be brightest
-        let left_avg = (up[0] + up[4] + up[8] + up[12]) / 4.0;
-        let right_avg = (up[3] + up[7] + up[11] + up[15]) / 4.0;
+        let left_avg = (up[0][0] + up[4][0] + up[8][0] + up[12][0]) / 4.0;
+        let right_avg = (up[3][0] + up[7][0] + up[11][0] + up[15][0]) / 4.0;
 
         assert!(left_avg < 0.5, "Left edge should be dark: {}", left_avg);
         assert!(right_avg > 0.5, "Right edge should be bright: {}", right_avg);
     }
 
-    // RGB pixel rescale tests
     #[test]
     fn test_rgb_bilinear_identity() {
         let src = vec![

@@ -538,29 +538,6 @@ pub fn rescale_rgb_with_progress_wasm(
     BufferF32x4::new(result)
 }
 
-/// Rescale grayscale image
-#[wasm_bindgen]
-pub fn rescale_gray_wasm(
-    buf: &BufferF32,
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: u8,
-    scale_mode: u8,
-) -> BufferF32 {
-    let result = rescale::rescale_channel_uniform(
-        buf.as_slice(),
-        src_width,
-        src_height,
-        dst_width,
-        dst_height,
-        rescale_method_from_u8(method),
-        scale_mode_from_u8(scale_mode),
-    );
-    BufferF32::new(result)
-}
-
 /// Calculate target dimensions preserving aspect ratio
 #[wasm_bindgen]
 pub fn calculate_dimensions_wasm(
