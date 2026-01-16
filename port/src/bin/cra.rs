@@ -12,6 +12,7 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
+    encode_argb_packed, encode_argb_row_aligned_stride,
     encode_channel_from_interleaved_row_aligned_stride, encode_gray_packed,
     encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
     is_valid_stride, ColorFormat, StrideFill,
@@ -314,12 +315,20 @@ struct Args {
     #[arg(long)]
     output_raw_b: Option<PathBuf>,
 
+    /// Output raw binary for alpha channel only (optional) - respects --stride
+    /// Requires ARGB format (e.g., ARGB8888, ARGB1555) and input with alpha channel
+    #[arg(long)]
+    output_raw_a: Option<PathBuf>,
+
     /// Output metadata JSON file path (optional)
     #[arg(long)]
     output_meta: Option<PathBuf>,
 
-    /// Output format: RGB with bit counts (e.g., RGB8, RGB332, RGB565, RGB888) or L with bits (e.g., L4, L8).
-    /// Single digit means same for all channels (RGB8 = RGB888, RGB5 = RGB555).
+    /// Output format: RGB, ARGB, or L with bit counts.
+    /// RGB: RGB8 (=RGB888), RGB332, RGB565, RGB888
+    /// ARGB: ARGB8 (=ARGB8888), ARGB4 (=ARGB4444), ARGB1555, ARGB4444, ARGB8888
+    /// Grayscale: L1, L2, L4, L8
+    /// Single digit means same for all channels.
     #[arg(short, long, default_value = "RGB888")]
     format: String,
 
@@ -832,9 +841,8 @@ fn dither_pixels(
         // Dither
         let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
         if has_alpha {
-            // Current formats are RGB-only, so bits_a=0 strips alpha and uses RGB dithering
-            // TODO: When RGBA formats are added, get bits_a from format
-            let bits_a = 0;
+            // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
+            let bits_a = format.bits_a;
             let interleaved = dither_output_rgba(
                 &linear_pixels,
                 width, height,
@@ -843,8 +851,8 @@ fn dither_pixels(
                 seed,
                 progress,
             );
-            // has_alpha is false because we stripped it (bits_a=0)
-            DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+            // Output has alpha only if format supports it (bits_a > 0)
+            DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
         } else {
             let interleaved = dither_output_rgb(
                 &linear_pixels,
@@ -879,9 +887,8 @@ fn dither_pixels_srgb_rgb(
 
     let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
     if has_alpha {
-        // Current formats are RGB-only, so bits_a=0 strips alpha and uses RGB dithering
-        // TODO: When RGBA formats are added, get bits_a from format
-        let bits_a = 0;
+        // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
+        let bits_a = format.bits_a;
         let interleaved = dither_output_rgba(
             &pixels,
             width, height,
@@ -890,8 +897,8 @@ fn dither_pixels_srgb_rgb(
             seed,
             progress,
         );
-        // has_alpha is false because we stripped it (bits_a=0)
-        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+        // Output has alpha only if format supports it (bits_a > 0)
+        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
     } else {
         let interleaved = dither_output_rgb(
             &pixels,
@@ -921,7 +928,19 @@ fn encode_binary(
         } else {
             encode_gray_packed(&result.interleaved, width, height, format.bits_r)
         }
+    } else if result.has_alpha {
+        // ARGB format (Bridgetek EVE ordering: A in MSB, R, G, B toward LSB)
+        if row_aligned {
+            encode_argb_row_aligned_stride(
+                &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b, stride, fill,
+            )
+        } else {
+            encode_argb_packed(
+                &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b,
+            )
+        }
     } else {
+        // RGB format
         if row_aligned {
             encode_rgb_row_aligned_stride(
                 &result.interleaved, width, height, format.bits_r, format.bits_g, format.bits_b, stride, fill,
@@ -1002,6 +1021,9 @@ fn write_metadata(
         json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
         json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
         json.push_str(&format!("  \"bits_b\": {},\n", format.bits_b));
+        if format.has_alpha {
+            json.push_str(&format!("  \"bits_a\": {},\n", format.bits_a));
+        }
     } else {
         json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
     }
@@ -1090,6 +1112,11 @@ fn main() -> Result<(), String> {
         eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
         if format.is_grayscale {
             eprintln!("  Grayscale: {} bits", format.bits_r);
+        } else if format.has_alpha {
+            eprintln!(
+                "  ARGB: {}+{}+{}+{} bits",
+                format.bits_a, format.bits_r, format.bits_g, format.bits_b
+            );
         } else {
             eprintln!(
                 "  RGB: {}+{}+{} bits",
@@ -1111,14 +1138,15 @@ fn main() -> Result<(), String> {
     // Check if at least one output is specified
     let has_channel_output = args.output_raw_r.is_some()
         || args.output_raw_g.is_some()
-        || args.output_raw_b.is_some();
+        || args.output_raw_b.is_some()
+        || args.output_raw_a.is_some();
     if args.output.is_none()
         && args.output_raw.is_none()
         && !has_channel_output
         && args.output_meta.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-raw, --output-raw-r/g/b, or --output-meta"
+            "No output specified. Use --output, --output-raw, --output-raw-r/g/b/a, or --output-meta"
                 .to_string(),
         );
     }
@@ -1131,10 +1159,18 @@ fn main() -> Result<(), String> {
         ));
     }
 
-    // Check channel output compatibility (requires RGB format, not grayscale)
-    if has_channel_output && format.is_grayscale {
+    // Check channel output compatibility (requires RGB/ARGB format, not grayscale)
+    if (args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some()) && format.is_grayscale {
         return Err(
-            "Separate channel outputs (--output-raw-r/g/b) require RGB format, not grayscale"
+            "Separate channel outputs (--output-raw-r/g/b) require RGB/ARGB format, not grayscale"
+                .to_string(),
+        );
+    }
+
+    // Check alpha channel output compatibility (requires ARGB format)
+    if args.output_raw_a.is_some() && !format.has_alpha {
+        return Err(
+            "Alpha channel output (--output-raw-a) requires ARGB format (e.g., ARGB8888, ARGB1555)"
                 .to_string(),
         );
     }
@@ -1370,17 +1406,19 @@ fn main() -> Result<(), String> {
         outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
     }
 
-    // Write separate channel outputs (R, G, B) - encode directly from interleaved data
+    // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
     let fill = args.stride_fill.to_stride_fill();
     let row_aligned = args.stride > 1;
-    let needs_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
-    if needs_channel_output && !dither_result.is_grayscale {
+    let needs_rgb_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
+    let num_channels = if dither_result.has_alpha { 4 } else { 3 };
+
+    if needs_rgb_channel_output && !dither_result.is_grayscale {
         if let Some(ref path) = args.output_raw_r {
             if args.verbose {
                 eprintln!("Writing red channel binary: {}", path.display());
             }
             let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, 3, 0, format.bits_r, args.stride, fill,
+                &dither_result.interleaved, width_usize, height_usize, num_channels, 0, format.bits_r, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
@@ -1395,7 +1433,7 @@ fn main() -> Result<(), String> {
                 eprintln!("Writing green channel binary: {}", path.display());
             }
             let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, 3, 1, format.bits_g, args.stride, fill,
+                &dither_result.interleaved, width_usize, height_usize, num_channels, 1, format.bits_g, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
@@ -1410,7 +1448,7 @@ fn main() -> Result<(), String> {
                 eprintln!("Writing blue channel binary: {}", path.display());
             }
             let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, 3, 2, format.bits_b, args.stride, fill,
+                &dither_result.interleaved, width_usize, height_usize, num_channels, 2, format.bits_b, args.stride, fill,
             );
             let mut file = File::create(path)
                 .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
@@ -1418,6 +1456,26 @@ fn main() -> Result<(), String> {
                 .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
             let label = if row_aligned { "binary_b_row_aligned" } else { "binary_b" };
             outputs.push((label.to_string(), path.clone(), bin_data.len()));
+        }
+    }
+
+    // Write alpha channel output (requires ARGB format and input with alpha)
+    if let Some(ref path) = args.output_raw_a {
+        if dither_result.has_alpha {
+            if args.verbose {
+                eprintln!("Writing alpha channel binary: {}", path.display());
+            }
+            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                &dither_result.interleaved, width_usize, height_usize, num_channels, 3, format.bits_a, args.stride, fill,
+            );
+            let mut file = File::create(path)
+                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+            file.write_all(&bin_data)
+                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+            let label = if row_aligned { "binary_a_row_aligned" } else { "binary_a" };
+            outputs.push((label.to_string(), path.clone(), bin_data.len()));
+        } else {
+            eprintln!("Warning: --output-raw-a specified but input image has no alpha channel, skipping");
         }
     }
 

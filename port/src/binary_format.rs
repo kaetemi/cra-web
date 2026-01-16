@@ -13,10 +13,14 @@
 /// Parsed color format with bit depths per channel
 #[derive(Debug, Clone)]
 pub struct ColorFormat {
-    /// Format name (e.g., "RGB565", "L4")
+    /// Format name (e.g., "RGB565", "ARGB8888", "L4")
     pub name: String,
     /// Whether this is a grayscale format
     pub is_grayscale: bool,
+    /// Whether this format includes an alpha channel
+    pub has_alpha: bool,
+    /// Bits per alpha channel (0 if no alpha)
+    pub bits_a: u8,
     /// Bits per red channel (or grayscale)
     pub bits_r: u8,
     /// Bits per green channel (0 for grayscale)
@@ -28,17 +32,16 @@ pub struct ColorFormat {
 }
 
 impl ColorFormat {
-    /// Parse a format string like "RGB565", "RGB111", "L4", "L8", etc.
+    /// Parse a format string like "RGB565", "ARGB8888", "ARGB1555", "L4", etc.
+    ///
+    /// Supported formats:
+    /// - Grayscale: L1, L2, L4, L8
+    /// - RGB: RGB8 (=RGB888), RGB565, RGB332, RGB666, etc.
+    /// - ARGB: ARGB8 (=ARGB8888), ARGB4 (=ARGB4444), ARGB1555, ARGB4444, etc.
+    ///
+    /// ARGB format uses hardware ordering: A in MSB, then R, G, B in LSB.
     pub fn parse(format: &str) -> Result<Self, String> {
         let format_upper = format.to_uppercase();
-
-        // Alpha channel formats: ARGB - not yet supported
-        if format_upper.starts_with("ARGB") {
-            return Err(format!(
-                "Alpha channel format '{}' is not yet supported. Use RGB formats instead (e.g., RGB8, RGB565).",
-                format
-            ));
-        }
 
         // Grayscale formats: L1, L2, L4, L8
         if format_upper.starts_with('L') {
@@ -54,10 +57,76 @@ impl ColorFormat {
             return Ok(ColorFormat {
                 name: format_upper,
                 is_grayscale: true,
+                has_alpha: false,
+                bits_a: 0,
                 bits_r: bits,
                 bits_g: 0,
                 bits_b: 0,
                 total_bits: bits,
+            });
+        }
+
+        // ARGB formats: ARGB8 (=ARGB8888), ARGB4 (=ARGB4444), ARGB1555, ARGB4444, etc.
+        // Uses hardware ordering: A in MSB, R, G, B toward LSB
+        if format_upper.starts_with("ARGB") {
+            let bits_str = &format_upper[4..];
+
+            let (bits_a, bits_r, bits_g, bits_b): (u8, u8, u8, u8) = match bits_str.len() {
+                // Single digit: same bits for all channels (ARGB8 = ARGB8888)
+                1 => {
+                    let bits: u8 = bits_str
+                        .parse()
+                        .map_err(|_| format!("Invalid bit count in '{}'", format))?;
+                    (bits, bits, bits, bits)
+                }
+                // Four digits: individual channel bits (ARGB1555, ARGB4444, ARGB8888)
+                4 => {
+                    let a: u8 = bits_str[0..1]
+                        .parse()
+                        .map_err(|_| format!("Invalid alpha bit count in '{}'", format))?;
+                    let r: u8 = bits_str[1..2]
+                        .parse()
+                        .map_err(|_| format!("Invalid red bit count in '{}'", format))?;
+                    let g: u8 = bits_str[2..3]
+                        .parse()
+                        .map_err(|_| format!("Invalid green bit count in '{}'", format))?;
+                    let b: u8 = bits_str[3..4]
+                        .parse()
+                        .map_err(|_| format!("Invalid blue bit count in '{}'", format))?;
+                    (a, r, g, b)
+                }
+                _ => {
+                    return Err(format!(
+                        "Invalid ARGB format '{}': expected ARGB followed by 1 digit (e.g., ARGB8) or 4 digits (e.g., ARGB1555)",
+                        format
+                    ));
+                }
+            };
+
+            if bits_a < 1 || bits_a > 8 {
+                return Err(format!("Alpha bits must be 1-8, got {}", bits_a));
+            }
+            if bits_r < 1 || bits_r > 8 {
+                return Err(format!("Red bits must be 1-8, got {}", bits_r));
+            }
+            if bits_g < 1 || bits_g > 8 {
+                return Err(format!("Green bits must be 1-8, got {}", bits_g));
+            }
+            if bits_b < 1 || bits_b > 8 {
+                return Err(format!("Blue bits must be 1-8, got {}", bits_b));
+            }
+
+            let total_bits = bits_a + bits_r + bits_g + bits_b;
+
+            return Ok(ColorFormat {
+                name: format_upper,
+                is_grayscale: false,
+                has_alpha: true,
+                bits_a,
+                bits_r,
+                bits_g,
+                bits_b,
+                total_bits,
             });
         }
 
@@ -109,6 +178,8 @@ impl ColorFormat {
             return Ok(ColorFormat {
                 name: format_upper,
                 is_grayscale: false,
+                has_alpha: false,
+                bits_a: 0,
                 bits_r,
                 bits_g,
                 bits_b,
@@ -117,21 +188,29 @@ impl ColorFormat {
         }
 
         Err(format!(
-            "Unknown format '{}': expected RGB### (e.g., RGB565) or L# (e.g., L4)",
+            "Unknown format '{}': expected ARGB#### (e.g., ARGB1555), RGB### (e.g., RGB565), or L# (e.g., L4)",
             format
         ))
     }
 
-    /// Create a format directly from bit depths
+    /// Create a format directly from bit depths (RGB only, no alpha)
     pub fn from_bits(bits_r: u8, bits_g: u8, bits_b: u8) -> Self {
-        let is_grayscale = bits_g == 0 && bits_b == 0;
+        Self::from_bits_rgba(0, bits_r, bits_g, bits_b)
+    }
+
+    /// Create a format directly from bit depths including alpha
+    pub fn from_bits_rgba(bits_a: u8, bits_r: u8, bits_g: u8, bits_b: u8) -> Self {
+        let is_grayscale = bits_g == 0 && bits_b == 0 && bits_a == 0;
+        let has_alpha = bits_a > 0;
         let total_bits = if is_grayscale {
             bits_r
         } else {
-            bits_r + bits_g + bits_b
+            bits_a + bits_r + bits_g + bits_b
         };
         let name = if is_grayscale {
             format!("L{}", bits_r)
+        } else if has_alpha {
+            format!("ARGB{}{}{}{}", bits_a, bits_r, bits_g, bits_b)
         } else {
             format!("RGB{}{}{}", bits_r, bits_g, bits_b)
         };
@@ -139,6 +218,8 @@ impl ColorFormat {
         ColorFormat {
             name,
             is_grayscale,
+            has_alpha,
+            bits_a,
             bits_r,
             bits_g,
             bits_b,
@@ -156,7 +237,12 @@ impl ColorFormat {
 
     /// Check if this format uses the special RGB666 packing (4 pixels -> 9 bytes)
     pub fn is_rgb666(&self) -> bool {
-        !self.is_grayscale && self.bits_r == 6 && self.bits_g == 6 && self.bits_b == 6
+        !self.is_grayscale && !self.has_alpha && self.bits_r == 6 && self.bits_g == 6 && self.bits_b == 6
+    }
+
+    /// Check if this is an ARGB format (has alpha channel)
+    pub fn is_argb(&self) -> bool {
+        self.has_alpha
     }
 
     /// Get the number of bytes per pixel for binary output (rounded up)
@@ -233,6 +319,27 @@ pub fn encode_gray_pixel(l: u8, bits: u8) -> u32 {
 #[inline]
 pub fn encode_channel_pixel(value: u8, bits: u8) -> u32 {
     (value >> (8 - bits)) as u32
+}
+
+/// Encode ARGB pixel to packed binary format (hardware ordering)
+/// Returns the raw bits as a u32 (caller should mask to appropriate bit width)
+/// Layout: A in MSB, then R, G, B toward LSB
+/// Example ARGB1555: A[15] R[14:10] G[9:5] B[4:0]
+/// Example ARGB8888: A[31:24] R[23:16] G[15:8] B[7:0]
+#[inline]
+pub fn encode_argb_pixel(a: u8, r: u8, g: u8, b: u8, bits_a: u8, bits_r: u8, bits_g: u8, bits_b: u8) -> u32 {
+    // Extract the significant bits from each channel
+    let a_val = (a >> (8 - bits_a)) as u32;
+    let r_val = (r >> (8 - bits_r)) as u32;
+    let g_val = (g >> (8 - bits_g)) as u32;
+    let b_val = (b >> (8 - bits_b)) as u32;
+
+    // Pack as A,R,G,B from MSB to LSB
+    let g_shift = bits_b;
+    let r_shift = bits_b + bits_g;
+    let a_shift = bits_b + bits_g + bits_r;
+
+    (a_val << a_shift) | (r_val << r_shift) | (g_val << g_shift) | b_val
 }
 
 /// Encode RGB666 data using 4-pixel-to-9-byte packing
@@ -625,6 +732,228 @@ pub fn encode_rgb_row_aligned(
     encode_rgb_row_aligned_stride(rgb_data, width, height, bits_r, bits_g, bits_b, 1, StrideFill::Black)
 }
 
+// ============================================================================
+// ARGB Encoding Functions (hardware ordering: A in MSB, R, G, B toward LSB)
+// ============================================================================
+
+/// Write packed binary output for ARGB data (continuous bit stream, no row padding)
+///
+/// Args:
+///     argb_data: Interleaved ARGB data (RGBARGBA..., 4 bytes per pixel, standard RGBA order in memory)
+///     width, height: Image dimensions
+///     bits_a, bits_r, bits_g, bits_b: Output bit depth per channel
+pub fn encode_argb_packed(
+    rgba_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_a: u8,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+) -> Vec<u8> {
+    let total_bits = (bits_a + bits_r + bits_g + bits_b) as usize;
+    let total_pixels = width * height;
+    let mut output = Vec::new();
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        let bytes_per_pixel = (total_bits + 7) / 8;
+        output.reserve(total_pixels * bytes_per_pixel);
+
+        for i in 0..total_pixels {
+            let r = rgba_data[i * 4];
+            let g = rgba_data[i * 4 + 1];
+            let b = rgba_data[i * 4 + 2];
+            let a = rgba_data[i * 4 + 3];
+            let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
+            // Write little-endian (LSB first)
+            for byte_idx in 0..bytes_per_pixel {
+                output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
+            }
+        }
+    } else {
+        // Sub-byte pixels - pack multiple pixels per byte
+        let pixels_per_byte = 8 / total_bits;
+        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
+        output.reserve(total_bytes);
+
+        let mut current_byte: u8 = 0;
+        let mut bits_in_byte: usize = 0;
+
+        for i in 0..total_pixels {
+            let r = rgba_data[i * 4];
+            let g = rgba_data[i * 4 + 1];
+            let b = rgba_data[i * 4 + 2];
+            let a = rgba_data[i * 4 + 3];
+            let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
+
+            // Pack from MSB to LSB
+            let shift = 8 - bits_in_byte - total_bits;
+            current_byte |= (val as u8) << shift;
+            bits_in_byte += total_bits;
+
+            if bits_in_byte == 8 {
+                output.push(current_byte);
+                current_byte = 0;
+                bits_in_byte = 0;
+            }
+        }
+
+        // Flush remaining bits
+        if bits_in_byte > 0 {
+            output.push(current_byte);
+        }
+    }
+
+    output
+}
+
+/// Write row-aligned binary output for ARGB data with configurable stride
+///
+/// Args:
+///     rgba_data: Interleaved RGBA data (RGBARGBA..., 4 bytes per pixel)
+///     width, height: Image dimensions
+///     bits_a, bits_r, bits_g, bits_b: Output bit depth per channel
+///     stride: Row stride alignment in bytes (must be power of 2, 1-128)
+///     fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
+pub fn encode_argb_row_aligned_stride(
+    rgba_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_a: u8,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    stride: usize,
+    fill: StrideFill,
+) -> Vec<u8> {
+    let total_bits = (bits_a + bits_r + bits_g + bits_b) as usize;
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        let bytes_per_pixel = (total_bits + 7) / 8;
+        let raw_bytes_per_row = width * bytes_per_pixel;
+        let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+        let padding = aligned_bytes_per_row - raw_bytes_per_row;
+        let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+        for y in 0..height {
+            // Get last pixel for repeat fill
+            let last_i = y * width + width - 1;
+            let last_r = rgba_data[last_i * 4];
+            let last_g = rgba_data[last_i * 4 + 1];
+            let last_b = rgba_data[last_i * 4 + 2];
+            let last_a = rgba_data[last_i * 4 + 3];
+            let last_val = encode_argb_pixel(last_a, last_r, last_g, last_b, bits_a, bits_r, bits_g, bits_b);
+
+            for x in 0..width {
+                let i = y * width + x;
+                let r = rgba_data[i * 4];
+                let g = rgba_data[i * 4 + 1];
+                let b = rgba_data[i * 4 + 2];
+                let a = rgba_data[i * 4 + 3];
+                let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
+                // Write little-endian (LSB first)
+                for byte_idx in 0..bytes_per_pixel {
+                    output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
+                }
+            }
+            // Add padding bytes to align row to stride
+            match fill {
+                StrideFill::Black => {
+                    for _ in 0..padding {
+                        output.push(0);
+                    }
+                }
+                StrideFill::Repeat => {
+                    // Repeat the encoded last pixel bytes
+                    for i in 0..padding {
+                        let byte_idx = i % bytes_per_pixel;
+                        output.push(((last_val >> (byte_idx * 8)) & 0xFF) as u8);
+                    }
+                }
+            }
+        }
+        return output;
+    }
+
+    // Sub-byte pixels - pack each row separately with padding
+    let pixels_per_byte = 8 / total_bits;
+    let raw_bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+    for y in 0..height {
+        let mut current_byte: u8 = 0;
+        let mut bits_in_byte: usize = 0;
+
+        // Get last pixel for repeat fill
+        let last_i = y * width + width - 1;
+        let last_r = rgba_data[last_i * 4];
+        let last_g = rgba_data[last_i * 4 + 1];
+        let last_b = rgba_data[last_i * 4 + 2];
+        let last_a = rgba_data[last_i * 4 + 3];
+        let last_val = encode_argb_pixel(last_a, last_r, last_g, last_b, bits_a, bits_r, bits_g, bits_b) as u8;
+
+        for x in 0..width {
+            let i = y * width + x;
+            let r = rgba_data[i * 4];
+            let g = rgba_data[i * 4 + 1];
+            let b = rgba_data[i * 4 + 2];
+            let a = rgba_data[i * 4 + 3];
+            let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
+
+            // Pack from MSB to LSB
+            let shift = 8 - bits_in_byte - total_bits;
+            current_byte |= (val as u8) << shift;
+            bits_in_byte += total_bits;
+
+            if bits_in_byte == 8 {
+                output.push(current_byte);
+                current_byte = 0;
+                bits_in_byte = 0;
+            }
+        }
+
+        // Flush remaining bits at end of row
+        if bits_in_byte > 0 {
+            output.push(current_byte);
+        }
+
+        // Add padding bytes to align row to stride
+        match fill {
+            StrideFill::Black => {
+                for _ in 0..padding {
+                    output.push(0);
+                }
+            }
+            StrideFill::Repeat => {
+                // Fill with repeated last pixel value
+                for _ in 0..padding {
+                    output.push(last_val);
+                }
+            }
+        }
+    }
+
+    output
+}
+
+/// Write row-aligned binary output for ARGB data (each row padded to byte boundary)
+/// This is a convenience wrapper with stride=1 and black fill
+pub fn encode_argb_row_aligned(
+    rgba_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_a: u8,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+) -> Vec<u8> {
+    encode_argb_row_aligned_stride(rgba_data, width, height, bits_a, bits_r, bits_g, bits_b, 1, StrideFill::Black)
+}
+
 /// Write packed binary output for grayscale data
 pub fn encode_gray_packed(
     gray_data: &[u8],
@@ -942,11 +1271,32 @@ mod tests {
         assert_eq!(rgb5.bits_b, 5);
         assert_eq!(rgb5.total_bits, 15);
 
-        // Alpha formats should error
-        assert!(ColorFormat::parse("ARGB8").is_err());
-        assert!(ColorFormat::parse("ARGB1555").is_err());
-        let err = ColorFormat::parse("ARGB1555").unwrap_err();
-        assert!(err.contains("not yet supported"));
+        // ARGB formats
+        let argb8 = ColorFormat::parse("ARGB8").unwrap();
+        assert_eq!(argb8.bits_a, 8);
+        assert_eq!(argb8.bits_r, 8);
+        assert_eq!(argb8.bits_g, 8);
+        assert_eq!(argb8.bits_b, 8);
+        assert_eq!(argb8.total_bits, 32);
+        assert!(argb8.has_alpha);
+        assert!(!argb8.is_grayscale);
+        assert!(argb8.supports_binary());
+
+        let argb1555 = ColorFormat::parse("ARGB1555").unwrap();
+        assert_eq!(argb1555.bits_a, 1);
+        assert_eq!(argb1555.bits_r, 5);
+        assert_eq!(argb1555.bits_g, 5);
+        assert_eq!(argb1555.bits_b, 5);
+        assert_eq!(argb1555.total_bits, 16);
+        assert!(argb1555.has_alpha);
+
+        let argb4444 = ColorFormat::parse("ARGB4444").unwrap();
+        assert_eq!(argb4444.bits_a, 4);
+        assert_eq!(argb4444.bits_r, 4);
+        assert_eq!(argb4444.bits_g, 4);
+        assert_eq!(argb4444.bits_b, 4);
+        assert_eq!(argb4444.total_bits, 16);
+        assert!(argb4444.has_alpha);
     }
 
     #[test]
@@ -1093,5 +1443,55 @@ mod tests {
 
         assert_eq!(black_fill, black_via_rgb);
         assert_eq!(repeat_fill, repeat_via_rgb);
+    }
+
+    #[test]
+    fn test_argb_pixel_encoding() {
+        // Test ARGB1555: A[15] R[14:10] G[9:5] B[4:0]
+        // A=255 (1 bit = 1), R=255 (5 bits = 31), G=255 (5 bits = 31), B=255 (5 bits = 31)
+        // Packed: 1 << 15 | 31 << 10 | 31 << 5 | 31 = 0xFFFF
+        let val = encode_argb_pixel(255, 255, 255, 255, 1, 5, 5, 5);
+        assert_eq!(val, 0xFFFF);
+
+        // A=0, R=0, G=0, B=0
+        let val = encode_argb_pixel(0, 0, 0, 0, 1, 5, 5, 5);
+        assert_eq!(val, 0);
+
+        // Test ARGB8888: A[31:24] R[23:16] G[15:8] B[7:0]
+        // A=255, R=128, G=64, B=32
+        let val = encode_argb_pixel(255, 128, 64, 32, 8, 8, 8, 8);
+        // 255 << 24 | 128 << 16 | 64 << 8 | 32 = 0xFF804020
+        assert_eq!(val, 0xFF804020);
+
+        // Test ARGB4444: A[15:12] R[11:8] G[7:4] B[3:0]
+        // A=255 (4 bits = 15), R=255 (4 bits = 15), G=255 (4 bits = 15), B=255 (4 bits = 15)
+        let val = encode_argb_pixel(255, 255, 255, 255, 4, 4, 4, 4);
+        // 15 << 12 | 15 << 8 | 15 << 4 | 15 = 0xFFFF
+        assert_eq!(val, 0xFFFF);
+    }
+
+    #[test]
+    fn test_argb_packed_encoding() {
+        // Test ARGB8888 packed encoding
+        // Create 2 pixels of RGBA data (memory order: R, G, B, A)
+        let rgba = vec![
+            255, 0, 0, 128,     // Pixel 0: R=255, G=0, B=0, A=128
+            0, 255, 0, 255,     // Pixel 1: R=0, G=255, B=0, A=255
+        ];
+
+        let packed = encode_argb_packed(&rgba, 2, 1, 8, 8, 8, 8);
+        assert_eq!(packed.len(), 8); // 2 pixels * 4 bytes
+
+        // Pixel 0: A=128, R=255, G=0, B=0 -> 0x80FF0000, little-endian: 00 00 FF 80
+        assert_eq!(packed[0], 0x00); // B LSB
+        assert_eq!(packed[1], 0x00); // G
+        assert_eq!(packed[2], 0xFF); // R
+        assert_eq!(packed[3], 0x80); // A MSB
+
+        // Pixel 1: A=255, R=0, G=255, B=0 -> 0xFF00FF00, little-endian: 00 FF 00 FF
+        assert_eq!(packed[4], 0x00); // B LSB
+        assert_eq!(packed[5], 0xFF); // G
+        assert_eq!(packed[6], 0x00); // R
+        assert_eq!(packed[7], 0xFF); // A MSB
     }
 }
