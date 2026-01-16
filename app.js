@@ -269,6 +269,7 @@ function handleProcessingComplete(outputData) {
 function handleFileUpload(inputId, previewId, uploadBoxId, isInput) {
     const fileInput = document.getElementById(inputId);
     const preview = document.getElementById(previewId);
+    const previewWrapper = document.getElementById(previewId + '-wrapper');
     const uploadBox = document.getElementById(uploadBoxId);
 
     fileInput.addEventListener('change', async (e) => {
@@ -279,7 +280,7 @@ function handleFileUpload(inputId, previewId, uploadBoxId, isInput) {
         const reader = new FileReader();
         reader.onload = async (event) => {
             preview.src = event.target.result;
-            preview.style.display = 'block';
+            previewWrapper.style.display = 'inline-block';
             uploadBox.classList.add('has-image');
 
             // Hide hints
@@ -530,8 +531,9 @@ async function loadDefaultImages() {
         inputImageData = new Uint8Array(inputArrayBuffer);
 
         const inputPreview = document.getElementById('input-preview');
+        const inputPreviewWrapper = document.getElementById('input-preview-wrapper');
         inputPreview.src = URL.createObjectURL(inputBlob);
-        inputPreview.style.display = 'block';
+        inputPreviewWrapper.style.display = 'inline-block';
         const inputBox = document.getElementById('input-upload');
         inputBox.classList.add('has-image');
         inputBox.querySelectorAll('.hint').forEach(el => el.style.display = 'none');
@@ -543,8 +545,9 @@ async function loadDefaultImages() {
         refImageData = new Uint8Array(refArrayBuffer);
 
         const refPreview = document.getElementById('ref-preview');
+        const refPreviewWrapper = document.getElementById('ref-preview-wrapper');
         refPreview.src = URL.createObjectURL(refBlob);
-        refPreview.style.display = 'block';
+        refPreviewWrapper.style.display = 'inline-block';
         const refBox = document.getElementById('ref-upload');
         refBox.classList.add('has-image');
         refBox.querySelectorAll('.hint').forEach(el => el.style.display = 'none');

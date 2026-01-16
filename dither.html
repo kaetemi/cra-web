@@ -632,6 +632,29 @@
         .error-message.visible {
             display: block;
         }
+
+        /* Alpha checkerboard pattern for transparent images */
+        .alpha-checkerboard {
+            background-image:
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #fff;
+        }
+
+        .upload-box .alpha-checkerboard {
+            display: inline-block;
+            border-radius: 4px;
+        }
+
+        .compare-box .alpha-checkerboard {
+            display: inline-block;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
     </style>
 </head>
 <body>
@@ -649,7 +672,9 @@
             <label>Input Image</label>
             <p class="hint">Click to upload or drag and drop</p>
             <input type="file" id="input-file" accept="image/*">
-            <img id="input-preview" style="display: none;">
+            <div id="input-preview-wrapper" class="alpha-checkerboard" style="display: none;">
+                <img id="input-preview">
+            </div>
         </div>
 
         <div class="options-section">
@@ -818,11 +843,15 @@
         <h3>Result</h3>
         <div class="compare-section">
             <div class="compare-box">
-                <img id="compare-input">
+                <div class="alpha-checkerboard">
+                    <img id="compare-input">
+                </div>
                 <p>Original</p>
             </div>
             <div class="compare-box">
-                <linear-img id="compare-output" method="lanczos"></linear-img>
+                <div class="alpha-checkerboard">
+                    <linear-img id="compare-output" method="lanczos"></linear-img>
+                </div>
                 <p>Dithered</p>
             </div>
         </div>
@@ -1415,8 +1444,9 @@
                 // Create preview image for display (using DataURL for compatibility)
                 const previewUrl = await createPreview(file);
                 const preview = document.getElementById('input-preview');
+                const previewWrapper = document.getElementById('input-preview-wrapper');
                 preview.src = previewUrl;
-                preview.style.display = 'block';
+                previewWrapper.style.display = 'inline-block';
 
                 const uploadBox = document.getElementById('input-upload');
                 uploadBox.classList.add('has-image');

@@ -325,6 +325,35 @@
             color: #555;
         }
 
+        /* Alpha checkerboard pattern for transparent images */
+        .alpha-checkerboard {
+            background-image:
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #fff;
+        }
+
+        .upload-box .alpha-checkerboard {
+            display: inline-block;
+            border-radius: 4px;
+        }
+
+        .compare-box .alpha-checkerboard {
+            display: inline-block;
+            width: 100%;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .compare-box .alpha-checkerboard img {
+            display: block;
+            width: 100%;
+        }
+
         .implementation-section {
             margin-bottom: 30px;
             padding: 15px;
@@ -422,7 +451,9 @@
                 <p class="hint">Click to upload or drag and drop</p>
                 <p class="hint">The image to be color corrected</p>
                 <input type="file" id="input-file" accept="image/*">
-                <img id="input-preview" style="display: none;">
+                <div id="input-preview-wrapper" class="alpha-checkerboard" style="display: none;">
+                    <img id="input-preview">
+                </div>
             </div>
 
             <div class="upload-box" id="ref-upload" onclick="document.getElementById('ref-file').click()">
@@ -430,7 +461,9 @@
                 <p class="hint">Click to upload or drag and drop</p>
                 <p class="hint">The image with target colors</p>
                 <input type="file" id="ref-file" accept="image/*">
-                <img id="ref-preview" style="display: none;">
+                <div id="ref-preview-wrapper" class="alpha-checkerboard" style="display: none;">
+                    <img id="ref-preview">
+                </div>
             </div>
         </div>
 
@@ -587,15 +620,21 @@
         <h3>Result</h3>
         <div class="compare-section">
             <div class="compare-box">
-                <img id="compare-input">
+                <div class="alpha-checkerboard">
+                    <img id="compare-input">
+                </div>
                 <p>Input</p>
             </div>
             <div class="compare-box">
-                <img id="compare-output">
+                <div class="alpha-checkerboard">
+                    <img id="compare-output">
+                </div>
                 <p>Output</p>
             </div>
             <div class="compare-box">
-                <img id="compare-ref">
+                <div class="alpha-checkerboard">
+                    <img id="compare-ref">
+                </div>
                 <p>Reference</p>
             </div>
         </div>

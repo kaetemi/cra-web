@@ -265,6 +265,28 @@
         .preset-btn:hover {
             background: #bdc3c7;
         }
+
+        /* Alpha checkerboard pattern for transparent images */
+        .alpha-checkerboard {
+            background-image:
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #fff;
+        }
+
+        .upload-box .alpha-checkerboard {
+            display: inline-block;
+            border-radius: 4px;
+        }
+
+        .comparison-box .alpha-checkerboard {
+            display: inline-block;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
@@ -351,16 +373,22 @@
         <h3>Result</h3>
         <div class="output-container">
             <div id="single-output" style="display: none;">
-                <canvas id="output-canvas"></canvas>
+                <div class="alpha-checkerboard" style="display: inline-block;">
+                    <canvas id="output-canvas"></canvas>
+                </div>
             </div>
             <div id="comparison-output" class="comparison-container" style="display: none;">
                 <div class="comparison-box">
                     <h4>Linear RGB (correct)</h4>
-                    <canvas id="linear-canvas"></canvas>
+                    <div class="alpha-checkerboard">
+                        <canvas id="linear-canvas"></canvas>
+                    </div>
                 </div>
                 <div class="comparison-box">
                     <h4>sRGB (incorrect)</h4>
-                    <canvas id="srgb-canvas"></canvas>
+                    <div class="alpha-checkerboard">
+                        <canvas id="srgb-canvas"></canvas>
+                    </div>
                 </div>
             </div>
             <p class="output-info" id="output-info"></p>
@@ -767,7 +795,9 @@
                 box.classList.add('has-image');
 
                 box.innerHTML = `
-                    <img id="input-preview" src="${dataUrl}" alt="Preview">
+                    <div class="alpha-checkerboard">
+                        <img id="input-preview" src="${dataUrl}" alt="Preview">
+                    </div>
                     <label>Image loaded: ${width}x${height}</label>
                     <p class="hint">Click to change image</p>
                     <input type="file" id="file-input" accept="image/*">

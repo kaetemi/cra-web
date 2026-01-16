@@ -103,11 +103,19 @@
         }
 
         .comparison-box .image-container {
-            background: #eee;
             display: flex;
             align-items: center;
             justify-content: center;
             min-height: 200px;
+            /* Alpha checkerboard pattern */
+            background-image:
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #fff;
         }
 
         .comparison-box img,
@@ -171,8 +179,22 @@
         }
 
         .example-box linear-img {
+            border-radius: 4px;
+        }
+
+        .example-box .alpha-checkerboard {
+            display: inline-block;
             border: 1px solid #ddd;
             border-radius: 4px;
+            /* Alpha checkerboard pattern */
+            background-image:
+                linear-gradient(45deg, #ccc 25%, transparent 25%),
+                linear-gradient(-45deg, #ccc 25%, transparent 25%),
+                linear-gradient(45deg, transparent 75%, #ccc 75%),
+                linear-gradient(-45deg, transparent 75%, #ccc 75%);
+            background-size: 16px 16px;
+            background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+            background-color: #fff;
         }
 
         .example-box .size-label {
@@ -377,7 +399,9 @@
                 const box = document.createElement('div');
                 box.className = 'example-box';
                 box.innerHTML = `
-                    <linear-img src="${imageSrc}" width="${size}"></linear-img>
+                    <div class="alpha-checkerboard">
+                        <linear-img src="${imageSrc}" width="${size}"></linear-img>
+                    </div>
                     <div class="size-label">${size}px</div>
                 `;
                 exampleGrid.appendChild(box);
