@@ -826,6 +826,7 @@
                     <button class="download-btn secondary" id="download-r-btn" disabled>R Channel</button>
                     <button class="download-btn secondary" id="download-g-btn" disabled>G Channel</button>
                     <button class="download-btn secondary" id="download-b-btn" disabled>B Channel</button>
+                    <button class="download-btn secondary" id="download-a-btn" disabled style="display: none;">Alpha Channel</button>
                 </div>
             </div>
         </div>
@@ -935,6 +936,7 @@
                 bitsR: result.bitsR,
                 bitsG: result.bitsG,
                 bitsB: result.bitsB,
+                bitsA: result.bitsA || 8,  // Alpha bit depth (default 8 if not specified)
                 mode: result.mode,
                 perceptualSpace: document.getElementById('perceptual-toggle').checked ?
                     parseInt(document.getElementById('perceptual-space').value) : null,
@@ -1177,9 +1179,20 @@
                 const rBits = lastDitherResult.bitsR;
                 const gBits = lastDitherResult.bitsG;
                 const bBits = lastDitherResult.bitsB;
+                const aBits = lastDitherResult.bitsA || 8; // Default to 8 bits for alpha
                 document.getElementById('download-r-btn').disabled = ![1,2,4,8].includes(rBits);
                 document.getElementById('download-g-btn').disabled = ![1,2,4,8].includes(gBits);
                 document.getElementById('download-b-btn').disabled = ![1,2,4,8].includes(bBits);
+
+                // Show/enable alpha channel button if output has alpha
+                const alphaBtn = document.getElementById('download-a-btn');
+                if (lastDitherResult.hasAlpha) {
+                    alphaBtn.style.display = 'inline-block';
+                    alphaBtn.disabled = ![1,2,4,8].includes(aBits);
+                } else {
+                    alphaBtn.style.display = 'none';
+                    alphaBtn.disabled = true;
+                }
             }
         }
 
@@ -1591,12 +1604,38 @@
             downloadBlob(blob, `dithered_${channelName}${bits}${strideSuffix}.raw`);
         }
 
+        // Download alpha channel - uses RGBA interleaved data
+        function downloadAlphaChannel() {
+            if (!lastDitherResult || !lastDitherResult.rgbaInterleaved || !lastDitherResult.hasAlpha) return;
+
+            const stride = parseInt(document.getElementById('stride-select').value) || 1;
+            const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
+            const bits = lastDitherResult.bitsA || 8;
+
+            const rawData = encode_channel_row_aligned_stride_wasm(
+                lastDitherResult.rgbaInterleaved,
+                lastDitherResult.width,
+                lastDitherResult.height,
+                4,  // num_channels (RGBA)
+                3,  // channel_index (A is at index 3)
+                bits,
+                stride,
+                fill
+            );
+
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            const strideSuffix = stride > 1 ? `_stride${stride}` : '';
+            downloadBlob(blob, `dithered_A${bits}${strideSuffix}.raw`);
+        }
+
         document.getElementById('download-r-btn').addEventListener('click', () =>
             downloadChannel('R', 0, lastDitherResult?.bitsR));
         document.getElementById('download-g-btn').addEventListener('click', () =>
             downloadChannel('G', 1, lastDitherResult?.bitsG));
         document.getElementById('download-b-btn').addEventListener('click', () =>
             downloadChannel('B', 2, lastDitherResult?.bitsB));
+        document.getElementById('download-a-btn').addEventListener('click', () =>
+            downloadAlphaChannel());
 
         // Initialize
         initWasm();
