@@ -7,7 +7,7 @@
 //! Used by both WASM and CLI for consistent behavior.
 
 use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader};
-use moxcms::{ColorProfile, Layout, ToneReprCurve, TransformOptions};
+use moxcms::{CicpProfile, CicpColorPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
 
@@ -366,13 +366,27 @@ pub fn image_to_f32_srgb_255_rgba(img: &DynamicImage) -> Vec<f32> {
 // ICC Profile Handling
 // ============================================================================
 
-/// Create a linear sRGB profile (sRGB primaries with gamma 1.0)
+/// Create a linear sRGB profile (sRGB primaries with linear TRC)
 pub fn make_linear_srgb_profile() -> ColorProfile {
     let mut profile = ColorProfile::new_srgb();
-    let linear_curve = ToneReprCurve::Parametric(vec![1.0]);
+    // Empty LUT = identity/linear (matches moxcms convention)
+    let linear_curve = ToneReprCurve::Lut(vec![]);
     profile.red_trc = Some(linear_curve.clone());
     profile.green_trc = Some(linear_curve.clone());
     profile.blue_trc = Some(linear_curve);
+    // Update CICP to reflect linear transfer (BT.709 primaries + linear)
+    profile.cicp = Some(CicpProfile {
+        color_primaries: CicpColorPrimaries::Bt709,
+        transfer_characteristics: TransferCharacteristics::Linear,
+        matrix_coefficients: MatrixCoefficients::Bt709,
+        full_range: false,
+    });
+    // Update description to reflect linear
+    profile.description = Some(ProfileText::Localizable(vec![LocalizableString::new(
+        "en".to_string(),
+        "US".to_string(),
+        "Linear sRGB".to_string(),
+    )]));
     profile
 }
 
