@@ -21,6 +21,7 @@ pub struct DecodedImage {
     pub icc_profile: Option<Vec<u8>>,
     pub is_16bit: bool,
     pub is_f32: bool,
+    pub has_alpha: bool,
 }
 
 /// Load image from file path with ICC profile extraction
@@ -62,11 +63,17 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
 
     let is_f32 = matches!(image.color(), ColorType::Rgb32F | ColorType::Rgba32F);
 
+    let has_alpha = matches!(
+        image.color(),
+        ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
+    );
+
     Ok(DecodedImage {
         image,
         icc_profile,
         is_16bit,
         is_f32,
+        has_alpha,
     })
 }
 
@@ -122,6 +129,60 @@ pub fn image_to_f32_interleaved(img: &DynamicImage) -> Vec<f32> {
     image_to_f32_normalized(img)
         .into_iter()
         .flat_map(|[r, g, b]| [r, g, b])
+        .collect()
+}
+
+/// Convert DynamicImage to normalized f32 RGBA (0-1 range)
+/// Handles 8-bit, 16-bit, and f32 sources with appropriate precision
+/// Alpha channel is preserved (linear, no gamma conversion needed)
+pub fn image_to_f32_normalized_rgba(img: &DynamicImage) -> Vec<[f32; 4]> {
+    let (width, height) = img.dimensions();
+    let pixel_count = (width * height) as usize;
+
+    let is_16bit = matches!(
+        img.color(),
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+    );
+
+    let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+
+    if is_f32 {
+        // f32 images: already in float format
+        let rgba32f = img.to_rgba32f();
+        let data = rgba32f.as_raw();
+        (0..pixel_count)
+            .map(|i| [data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]])
+            .collect()
+    } else if is_16bit {
+        let rgba16 = img.to_rgba16();
+        let data = rgba16.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 4] as f32 / 65535.0,
+                data[i * 4 + 1] as f32 / 65535.0,
+                data[i * 4 + 2] as f32 / 65535.0,
+                data[i * 4 + 3] as f32 / 65535.0,
+            ])
+            .collect()
+    } else {
+        let rgba8 = img.to_rgba8();
+        let data = rgba8.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 4] as f32 / 255.0,
+                data[i * 4 + 1] as f32 / 255.0,
+                data[i * 4 + 2] as f32 / 255.0,
+                data[i * 4 + 3] as f32 / 255.0,
+            ])
+            .collect()
+    }
+}
+
+/// Convert DynamicImage to interleaved f32 RGBA (0-1 range)
+pub fn image_to_f32_interleaved_rgba(img: &DynamicImage) -> Vec<f32> {
+    image_to_f32_normalized_rgba(img)
+        .into_iter()
+        .flat_map(|[r, g, b, a]| [r, g, b, a])
         .collect()
 }
 
@@ -184,6 +245,69 @@ pub fn image_to_f32_srgb_255(img: &DynamicImage) -> Vec<f32> {
     image_to_f32_srgb_255_pixels(img)
         .into_iter()
         .flat_map(|[r, g, b]| [r, g, b])
+        .collect()
+}
+
+/// Convert DynamicImage directly to f32 sRGBA 0-255 scale (no 0-1 intermediate)
+/// Returns array of [r, g, b, a] with alpha also in 0-255 range.
+/// - 8-bit: u8 as f32 (direct cast)
+/// - 16-bit: u16 * 255.0 / 65535.0 directly to 0-255
+/// - f32: assumed 0-1 range, scaled to 0-255 (RGB clamped for HDR, alpha clamped)
+pub fn image_to_f32_srgb_255_pixels_rgba(img: &DynamicImage) -> Vec<[f32; 4]> {
+    let (width, height) = img.dimensions();
+    let pixel_count = (width * height) as usize;
+
+    let is_16bit = matches!(
+        img.color(),
+        ColorType::Rgb16 | ColorType::Rgba16 | ColorType::L16 | ColorType::La16
+    );
+
+    let is_f32 = matches!(img.color(), ColorType::Rgb32F | ColorType::Rgba32F);
+
+    if is_f32 {
+        // f32: scale from 0-1 to 0-255, clamp for HDR (this path is for direct output)
+        let rgba32f = img.to_rgba32f();
+        let data = rgba32f.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                (data[i * 4] * 255.0).clamp(0.0, 255.0),
+                (data[i * 4 + 1] * 255.0).clamp(0.0, 255.0),
+                (data[i * 4 + 2] * 255.0).clamp(0.0, 255.0),
+                (data[i * 4 + 3] * 255.0).clamp(0.0, 255.0),
+            ])
+            .collect()
+    } else if is_16bit {
+        // 16-bit: scale from 0-65535 to 0-255
+        let rgba16 = img.to_rgba16();
+        let data = rgba16.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 4] as f32 * 255.0 / 65535.0,
+                data[i * 4 + 1] as f32 * 255.0 / 65535.0,
+                data[i * 4 + 2] as f32 * 255.0 / 65535.0,
+                data[i * 4 + 3] as f32 * 255.0 / 65535.0,
+            ])
+            .collect()
+    } else {
+        // 8-bit: u8 directly as f32 (no arithmetic needed)
+        let rgba8 = img.to_rgba8();
+        let data = rgba8.as_raw();
+        (0..pixel_count)
+            .map(|i| [
+                data[i * 4] as f32,
+                data[i * 4 + 1] as f32,
+                data[i * 4 + 2] as f32,
+                data[i * 4 + 3] as f32,
+            ])
+            .collect()
+    }
+}
+
+/// Convert DynamicImage directly to interleaved f32 sRGBA 0-255 scale (for WASM)
+pub fn image_to_f32_srgb_255_rgba(img: &DynamicImage) -> Vec<f32> {
+    image_to_f32_srgb_255_pixels_rgba(img)
+        .into_iter()
+        .flat_map(|[r, g, b, a]| [r, g, b, a])
         .collect()
 }
 
@@ -386,6 +510,7 @@ pub struct ImageMetadata {
     pub has_icc: bool,
     pub is_16bit: bool,
     pub is_f32: bool,
+    pub has_alpha: bool,
 }
 
 /// Get image metadata and ICC profile without decoding pixels
@@ -412,12 +537,18 @@ pub fn get_metadata_and_icc(file_bytes: &[u8]) -> Result<(ImageMetadata, Option<
 
     let is_f32 = matches!(color_type, ColorType::Rgb32F | ColorType::Rgba32F);
 
+    let has_alpha = matches!(
+        color_type,
+        ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
+    );
+
     let metadata = ImageMetadata {
         width,
         height,
         has_icc: icc_profile.is_some(),
         is_16bit,
         is_f32,
+        has_alpha,
     };
 
     Ok((metadata, icc_profile))

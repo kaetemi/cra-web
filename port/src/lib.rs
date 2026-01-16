@@ -119,6 +119,7 @@ pub struct LoadedImage {
     height: u32,
     is_16bit: bool,
     is_f32: bool,
+    has_alpha: bool,
     has_non_srgb_icc: bool,
 }
 
@@ -145,6 +146,11 @@ impl LoadedImage {
     }
 
     #[wasm_bindgen(getter)]
+    pub fn has_alpha(&self) -> bool {
+        self.has_alpha
+    }
+
+    #[wasm_bindgen(getter)]
     pub fn has_non_srgb_icc(&self) -> bool {
         self.has_non_srgb_icc
     }
@@ -154,7 +160,7 @@ impl LoadedImage {
         self.icc_profile.clone()
     }
 
-    /// Convert to normalized f32 (0-1) for linear processing path
+    /// Convert to normalized f32 (0-1) for linear processing path (RGB only)
     /// Call this when needs_linear is true
     pub fn to_normalized_buffer(&self) -> BufferF32x4 {
         let normalized = decode::image_to_f32_normalized(&self.image);
@@ -164,12 +170,32 @@ impl LoadedImage {
         BufferF32x4::new(pixels)
     }
 
-    /// Convert directly to sRGB f32 (0-255) for dither-only path
+    /// Convert to normalized f32 (0-1) for linear processing path (RGBA with alpha)
+    /// Call this when needs_linear is true and image has alpha
+    pub fn to_normalized_buffer_rgba(&self) -> BufferF32x4 {
+        let normalized = decode::image_to_f32_normalized_rgba(&self.image);
+        let pixels: Vec<Pixel4> = normalized.into_iter()
+            .map(|[r, g, b, a]| Pixel4::new(r, g, b, a))
+            .collect();
+        BufferF32x4::new(pixels)
+    }
+
+    /// Convert directly to sRGB f32 (0-255) for dither-only path (RGB only)
     /// Call this when needs_linear is false (no resize, no grayscale, no ICC)
     pub fn to_srgb_255_buffer(&self) -> BufferF32x4 {
         let srgb_pixels = decode::image_to_f32_srgb_255_pixels(&self.image);
         let pixels: Vec<Pixel4> = srgb_pixels.into_iter()
             .map(|[r, g, b]| Pixel4::new(r, g, b, 0.0))
+            .collect();
+        BufferF32x4::new(pixels)
+    }
+
+    /// Convert directly to sRGB f32 (0-255) for dither-only path (RGBA with alpha)
+    /// Call this when needs_linear is false and image has alpha
+    pub fn to_srgb_255_buffer_rgba(&self) -> BufferF32x4 {
+        let srgb_pixels = decode::image_to_f32_srgb_255_pixels_rgba(&self.image);
+        let pixels: Vec<Pixel4> = srgb_pixels.into_iter()
+            .map(|[r, g, b, a]| Pixel4::new(r, g, b, a))
             .collect();
         BufferF32x4::new(pixels)
     }
@@ -196,12 +222,13 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         height,
         is_16bit: decoded.is_16bit,
         is_f32: decoded.is_f32,
+        has_alpha: decoded.has_alpha,
         has_non_srgb_icc,
     })
 }
 
 /// Get decode metadata without the pixel data (fast - no pixel decoding)
-/// Returns: [width, height, has_icc (0/1), is_16bit (0/1), is_f32 (0/1)]
+/// Returns: [width, height, has_icc (0/1), is_16bit (0/1), is_f32 (0/1), has_alpha (0/1)]
 #[wasm_bindgen]
 pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
     let (metadata, _) = decode::get_metadata_and_icc(&file_bytes)
@@ -213,11 +240,12 @@ pub fn decode_metadata_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
         if metadata.has_icc { 1.0 } else { 0.0 },
         if metadata.is_16bit { 1.0 } else { 0.0 },
         if metadata.is_f32 { 1.0 } else { 0.0 },
+        if metadata.has_alpha { 1.0 } else { 0.0 },
     ])
 }
 
 /// Get metadata and check if ICC profile is non-sRGB (single parse)
-/// Returns: [width, height, has_non_srgb_icc (0/1), is_16bit (0/1), is_f32 (0/1)]
+/// Returns: [width, height, has_non_srgb_icc (0/1), is_16bit (0/1), is_f32 (0/1), has_alpha (0/1)]
 /// This combines decode_metadata + extract_icc + is_icc_srgb check in one call
 #[wasm_bindgen]
 pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f32>, JsValue> {
@@ -235,6 +263,7 @@ pub fn decode_metadata_with_icc_check_wasm(file_bytes: Vec<u8>) -> Result<Vec<f3
         if has_non_srgb_icc { 1.0 } else { 0.0 },
         if metadata.is_16bit { 1.0 } else { 0.0 },
         if metadata.is_f32 { 1.0 } else { 0.0 },
+        if metadata.has_alpha { 1.0 } else { 0.0 },
     ])
 }
 

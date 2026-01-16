@@ -438,6 +438,21 @@ pub fn interleave_rgb_u8(r: &[u8], g: &[u8], b: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Interleave four u8 channels into RGBA output
+pub fn interleave_rgba_u8(r: &[u8], g: &[u8], b: &[u8], a: &[u8]) -> Vec<u8> {
+    let pixels = r.len();
+    let mut out = vec![0u8; pixels * 4];
+
+    for i in 0..pixels {
+        out[i * 4] = r[i];
+        out[i * 4 + 1] = g[i];
+        out[i * 4 + 2] = b[i];
+        out[i * 4 + 3] = a[i];
+    }
+
+    out
+}
+
 // ============================================================================
 // Pixel scale operations
 // ============================================================================
