@@ -1366,6 +1366,14 @@ fn main() -> Result<(), String> {
     let width_usize = width as usize;
     let height_usize = height as usize;
 
+    // Warn if ARGB format requested but input has no alpha
+    if format.has_alpha && !dither_result.has_alpha {
+        eprintln!(
+            "Warning: ARGB format requested but input has no alpha channel. Output will be RGB{}{}{}.",
+            format.bits_r, format.bits_g, format.bits_b
+        );
+    }
+
     // Track outputs for metadata
     let mut outputs: Vec<(String, PathBuf, usize)> = Vec::new();
 

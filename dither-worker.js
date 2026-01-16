@@ -169,13 +169,13 @@ function processDither(params) {
                 // Store for download
                 grayChannel = new Uint8Array(grayDithered);
 
-                // Output as grayscale (R=G=B) with alpha from buffer
+                // Output as grayscale (R=G=B) - no alpha support for grayscale
                 for (let i = 0; i < pixelCount; i++) {
                     const v = grayDithered[i];
                     outputData[i * 4] = v;
                     outputData[i * 4 + 1] = v;
                     outputData[i * 4 + 2] = v;
-                    outputData[i * 4 + 3] = Math.round(bufferData[i * 4 + 3] * 255);
+                    outputData[i * 4 + 3] = 255;
                 }
             } else {
                 sendProgress(50, 'Converting to sRGB...');
@@ -274,8 +274,8 @@ function processDither(params) {
 
         sendProgress(100, 'Complete');
 
-        // When bitsA=0, we stripped alpha during dithering (output alpha is 255)
-        const outputHasAlpha = hasAlpha && bitsA > 0;
+        // Grayscale has no alpha support; RGB has alpha only when bitsA > 0
+        const outputHasAlpha = !isGrayscale && hasAlpha && bitsA > 0;
 
         // Send result back
         sendComplete({
