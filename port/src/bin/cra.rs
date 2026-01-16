@@ -1366,13 +1366,29 @@ fn main() -> Result<(), String> {
     let width_usize = width as usize;
     let height_usize = height as usize;
 
-    // Warn if ARGB format requested but input has no alpha
-    if format.has_alpha && !dither_result.has_alpha {
-        eprintln!(
-            "Warning: ARGB format requested but input has no alpha channel. Output will be RGB{}{}{}.",
-            format.bits_r, format.bits_g, format.bits_b
-        );
-    }
+    // If format requests alpha but input had none, inject opaque alpha channel
+    let dither_result = if format.has_alpha && !dither_result.has_alpha && !dither_result.is_grayscale {
+        if args.verbose {
+            eprintln!("Injecting opaque alpha channel (input had no alpha)");
+        }
+        // Expand RGB (3 bytes/pixel) to RGBA (4 bytes/pixel) with alpha = 255
+        let rgb = &dither_result.interleaved;
+        let pixel_count = width_usize * height_usize;
+        let mut rgba = Vec::with_capacity(pixel_count * 4);
+        for i in 0..pixel_count {
+            rgba.push(rgb[i * 3]);     // R
+            rgba.push(rgb[i * 3 + 1]); // G
+            rgba.push(rgb[i * 3 + 2]); // B
+            rgba.push(255);            // A (fully opaque)
+        }
+        DitherResult {
+            interleaved: rgba,
+            is_grayscale: false,
+            has_alpha: true,
+        }
+    } else {
+        dither_result
+    };
 
     // Track outputs for metadata
     let mut outputs: Vec<(String, PathBuf, usize)> = Vec::new();
