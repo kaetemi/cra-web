@@ -97,10 +97,10 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
 /// Dither sRGB 0-255 Pixel4 data to interleaved u8 RGBA output.
 ///
 /// RGB channels are dithered normally, alpha channel is passed through
-/// without dithering (scaled from 0-1 to 0-255).
+/// without dithering. Alpha is already in 0-255 range (same scale as RGB).
 ///
 /// Args:
-///     srgb_pixels: sRGB Pixel4 array (RGB 0-255 range, alpha 0-1 range)
+///     srgb_pixels: sRGB Pixel4 array (all channels in 0-255 range)
 ///     width, height: Image dimensions
 ///     bits_r, bits_g, bits_b: Output bit depth per RGB channel (1-8)
 ///     technique: Dithering technique selection
@@ -120,10 +120,10 @@ pub fn dither_output_rgba(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    // Extract alpha channel (0-1 range) and scale to 0-255 u8
+    // Extract alpha channel - already in 0-255 range (same scale as RGB)
     let alpha_u8: Vec<u8> = srgb_pixels
         .iter()
-        .map(|p| (p[3] * 255.0).round().clamp(0.0, 255.0) as u8)
+        .map(|p| p[3].round().clamp(0.0, 255.0) as u8)
         .collect();
 
     match technique {

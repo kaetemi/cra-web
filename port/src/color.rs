@@ -23,24 +23,58 @@ pub fn linear_to_srgb_single(linear: f32) -> f32 {
     }
 }
 
+/// Convert sRGB to linear RGB (in-place) with variable channel count.
+/// channels: 3 for RGB (converts all), 4 for RGBA (skips alpha)
+/// Alpha is linear and never needs conversion.
+pub fn srgb_to_linear_channels(data: &mut [f32], channels: usize) {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(data.len() % channels, 0, "data length must be divisible by channel count");
+
+    if channels == 4 {
+        for chunk in data.chunks_exact_mut(4) {
+            chunk[0] = srgb_to_linear_single(chunk[0]);
+            chunk[1] = srgb_to_linear_single(chunk[1]);
+            chunk[2] = srgb_to_linear_single(chunk[2]);
+            // chunk[3] (alpha) passes through unchanged - already linear
+        }
+    } else {
+        for v in data.iter_mut() {
+            *v = srgb_to_linear_single(*v);
+        }
+    }
+}
+
 /// Convert sRGB image to linear RGB (in-place modification of flat array)
 /// For 3-channel RGB data, converts all values.
 /// For 4-channel RGBA data, use `srgb_to_linear_rgba` to skip alpha.
 pub fn srgb_to_linear(data: &mut [f32]) {
-    for v in data.iter_mut() {
-        *v = srgb_to_linear_single(*v);
-    }
+    srgb_to_linear_channels(data, 3)
 }
 
 /// Convert sRGB image to linear RGB (in-place, 4-channel RGBA data)
 /// Alpha channel is linear and passes through unchanged.
 pub fn srgb_to_linear_rgba(data: &mut [f32]) {
-    debug_assert_eq!(data.len() % 4, 0, "RGBA data length must be divisible by 4");
-    for chunk in data.chunks_exact_mut(4) {
-        chunk[0] = srgb_to_linear_single(chunk[0]);
-        chunk[1] = srgb_to_linear_single(chunk[1]);
-        chunk[2] = srgb_to_linear_single(chunk[2]);
-        // chunk[3] (alpha) passes through unchanged - already linear
+    srgb_to_linear_channels(data, 4)
+}
+
+/// Convert linear RGB to sRGB (in-place) with variable channel count.
+/// channels: 3 for RGB (converts all), 4 for RGBA (skips alpha)
+/// Alpha is linear and never needs conversion.
+pub fn linear_to_srgb_channels(data: &mut [f32], channels: usize) {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(data.len() % channels, 0, "data length must be divisible by channel count");
+
+    if channels == 4 {
+        for chunk in data.chunks_exact_mut(4) {
+            chunk[0] = linear_to_srgb_single(chunk[0]);
+            chunk[1] = linear_to_srgb_single(chunk[1]);
+            chunk[2] = linear_to_srgb_single(chunk[2]);
+            // chunk[3] (alpha) passes through unchanged - already linear
+        }
+    } else {
+        for v in data.iter_mut() {
+            *v = linear_to_srgb_single(*v);
+        }
     }
 }
 
@@ -49,22 +83,14 @@ pub fn srgb_to_linear_rgba(data: &mut [f32]) {
 /// For 4-channel RGBA data, use `linear_to_srgb_rgba` to skip alpha.
 #[allow(dead_code)]
 pub fn linear_to_srgb(data: &mut [f32]) {
-    for v in data.iter_mut() {
-        *v = linear_to_srgb_single(*v);
-    }
+    linear_to_srgb_channels(data, 3)
 }
 
 /// Convert linear RGB image to sRGB (in-place, 4-channel RGBA data)
 /// Alpha channel is linear and passes through unchanged.
 #[allow(dead_code)]
 pub fn linear_to_srgb_rgba(data: &mut [f32]) {
-    debug_assert_eq!(data.len() % 4, 0, "RGBA data length must be divisible by 4");
-    for chunk in data.chunks_exact_mut(4) {
-        chunk[0] = linear_to_srgb_single(chunk[0]);
-        chunk[1] = linear_to_srgb_single(chunk[1]);
-        chunk[2] = linear_to_srgb_single(chunk[2]);
-        // chunk[3] (alpha) passes through unchanged - already linear
-    }
+    linear_to_srgb_channels(data, 4)
 }
 
 // ============================================================================
@@ -274,51 +300,101 @@ pub fn lab_to_linear_rgb_inplace(pixels: &mut [Pixel4]) {
     }
 }
 
-/// Convert linear RGB image (HxWx3 flat array) to Lab
-/// Output: L is 0-100, a,b are roughly -127 to +127
+/// Convert linear RGB image to Lab with variable channel count
+/// channels: 3 for RGB, 4 for RGBA (alpha passed through unchanged)
+/// Output: L is 0-100, a,b are roughly -127 to +127, alpha unchanged
 #[allow(dead_code)]
-pub fn image_rgb_to_lab(rgb: &[f32], width: usize, height: usize) -> Vec<f32> {
-    let mut lab = vec![0.0f32; width * height * 3];
+pub fn image_rgb_to_lab_channels(rgb: &[f32], width: usize, height: usize, channels: usize) -> Vec<f32> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(rgb.len(), width * height * channels);
+
+    let mut lab = vec![0.0f32; width * height * channels];
     for i in 0..(width * height) {
-        let idx = i * 3;
+        let idx = i * channels;
         let (l, a, b) = linear_rgb_to_lab(rgb[idx], rgb[idx + 1], rgb[idx + 2]);
         lab[idx] = l;
         lab[idx + 1] = a;
         lab[idx + 2] = b;
+        if channels == 4 {
+            lab[idx + 3] = rgb[idx + 3]; // Alpha passes through unchanged
+        }
     }
     lab
+}
+
+/// Convert linear RGB image (HxWx3 flat array) to Lab
+/// Output: L is 0-100, a,b are roughly -127 to +127
+#[allow(dead_code)]
+pub fn image_rgb_to_lab(rgb: &[f32], width: usize, height: usize) -> Vec<f32> {
+    image_rgb_to_lab_channels(rgb, width, height, 3)
+}
+
+/// Convert Lab image to linear RGB with variable channel count
+/// channels: 3 for Lab only, 4 for Lab+Alpha (alpha passed through unchanged)
+#[allow(dead_code)]
+pub fn image_lab_to_rgb_channels(lab: &[f32], width: usize, height: usize, channels: usize) -> Vec<f32> {
+    assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
+    debug_assert_eq!(lab.len(), width * height * channels);
+
+    let mut rgb = vec![0.0f32; width * height * channels];
+    for i in 0..(width * height) {
+        let idx = i * channels;
+        let (r, g, b) = lab_to_linear_rgb(lab[idx], lab[idx + 1], lab[idx + 2]);
+        rgb[idx] = r;
+        rgb[idx + 1] = g;
+        rgb[idx + 2] = b;
+        if channels == 4 {
+            rgb[idx + 3] = lab[idx + 3]; // Alpha passes through unchanged
+        }
+    }
+    rgb
 }
 
 /// Convert Lab image (HxWx3 flat array) to linear RGB
 #[allow(dead_code)]
 pub fn image_lab_to_rgb(lab: &[f32], width: usize, height: usize) -> Vec<f32> {
-    let mut rgb = vec![0.0f32; width * height * 3];
-    for i in 0..(width * height) {
-        let idx = i * 3;
-        let (r, g, b) = lab_to_linear_rgb(lab[idx], lab[idx + 1], lab[idx + 2]);
-        rgb[idx] = r;
-        rgb[idx + 1] = g;
-        rgb[idx + 2] = b;
-    }
-    rgb
+    image_lab_to_rgb_channels(lab, width, height, 3)
 }
 
-/// Extract a single channel from an interleaved image
+/// Extract a single channel from an interleaved image with variable channel count
+/// channels: number of channels per pixel (e.g., 3 for RGB, 4 for RGBA)
+/// channel: which channel to extract (0-indexed)
 #[allow(dead_code)]
-pub fn extract_channel(img: &[f32], width: usize, height: usize, channel: usize) -> Vec<f32> {
+pub fn extract_channel_from(img: &[f32], width: usize, height: usize, channels: usize, channel: usize) -> Vec<f32> {
+    assert!(channel < channels, "channel index must be less than channel count");
+    debug_assert_eq!(img.len(), width * height * channels);
+
     let mut ch = vec![0.0f32; width * height];
     for i in 0..(width * height) {
-        ch[i] = img[i * 3 + channel];
+        ch[i] = img[i * channels + channel];
     }
     ch
 }
 
-/// Set a single channel in an interleaved image
+/// Extract a single channel from an interleaved 3-channel image
+#[allow(dead_code)]
+pub fn extract_channel(img: &[f32], width: usize, height: usize, channel: usize) -> Vec<f32> {
+    extract_channel_from(img, width, height, 3, channel)
+}
+
+/// Set a single channel in an interleaved image with variable channel count
+/// channels: number of channels per pixel (e.g., 3 for RGB, 4 for RGBA)
+/// channel: which channel to set (0-indexed)
+#[allow(dead_code)]
+pub fn set_channel_in(img: &mut [f32], width: usize, height: usize, channels: usize, channel: usize, data: &[f32]) {
+    assert!(channel < channels, "channel index must be less than channel count");
+    debug_assert_eq!(img.len(), width * height * channels);
+    debug_assert_eq!(data.len(), width * height);
+
+    for i in 0..(width * height) {
+        img[i * channels + channel] = data[i];
+    }
+}
+
+/// Set a single channel in an interleaved 3-channel image
 #[allow(dead_code)]
 pub fn set_channel(img: &mut [f32], width: usize, height: usize, channel: usize, data: &[f32]) {
-    for i in 0..(width * height) {
-        img[i * 3 + channel] = data[i];
-    }
+    set_channel_in(img, width, height, 3, channel, data)
 }
 
 // ============== Oklab color space ==============

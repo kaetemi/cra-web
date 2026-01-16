@@ -1,12 +1,13 @@
 /**
- * <linear-img-gpu> - WebGPU-accelerated linear RGB image resizing
+ * <linear-img-gpu> - WebGPU-accelerated linear RGBA image resizing
  *
  * A standalone custom element that displays images using proper linear RGB
  * interpolation with Lanczos3 resampling, accelerated by WebGPU compute shaders.
  *
  * Unlike browser-native image scaling (which operates in sRGB space and causes
  * darkening/color shifts), this element converts to linear RGB, resamples with
- * Lanczos3, and converts back to sRGB.
+ * Lanczos3, and converts back to sRGB. Alpha channel is preserved and
+ * interpolated linearly (no gamma conversion needed for alpha).
  *
  * Usage:
  *   <linear-img-gpu src="photo.jpg" width="200" height="150"></linear-img-gpu>
@@ -27,6 +28,7 @@
 
 // sRGB to Linear RGB conversion shader
 // Constants from COLORSPACES.md: threshold 0.04045, slope 12.92, gamma 2.4
+// Alpha channel is passed through unchanged (already linear)
 const SHADER_SRGB_TO_LINEAR = /* wgsl */ `
 @group(0) @binding(0) var inputTex: texture_2d<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<f32>;
@@ -37,13 +39,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (gid.x >= dims.x || gid.y >= dims.y) { return; }
 
     let pixel = textureLoad(inputTex, vec2<i32>(gid.xy), 0);
-    let idx = (gid.y * dims.x + gid.x) * 3u;
+    let idx = (gid.y * dims.x + gid.x) * 4u;
 
     // sRGB decode (COLORSPACES.md): if srgb <= 0.04045: linear = srgb / 12.92
     // else: linear = ((srgb + 0.055) / 1.055)^2.4
     output[idx + 0u] = srgbToLinear(pixel.r);
     output[idx + 1u] = srgbToLinear(pixel.g);
     output[idx + 2u] = srgbToLinear(pixel.b);
+    output[idx + 3u] = pixel.a; // Alpha is already linear
 }
 
 fn srgbToLinear(s: f32) -> f32 {
@@ -55,7 +58,7 @@ fn srgbToLinear(s: f32) -> f32 {
 }
 `;
 
-// Horizontal Lanczos3 resample shader
+// Horizontal Lanczos3 resample shader (RGBA - 4 channels)
 const SHADER_LANCZOS_HORIZONTAL = /* wgsl */ `
 const PI: f32 = 3.14159265358979323846;
 
@@ -89,6 +92,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var sumR: f32 = 0.0;
     var sumG: f32 = 0.0;
     var sumB: f32 = 0.0;
+    var sumA: f32 = 0.0;
     var weightSum: f32 = 0.0;
 
     let startIdx = max(center - params.radius, 0);
@@ -99,10 +103,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let weight = lanczos3(d);
         weightSum += weight;
 
-        let srcIdx = (y * params.srcWidth + u32(si)) * 3u;
+        let srcIdx = (y * params.srcWidth + u32(si)) * 4u;
         sumR += input[srcIdx + 0u] * weight;
         sumG += input[srcIdx + 1u] * weight;
         sumB += input[srcIdx + 2u] * weight;
+        sumA += input[srcIdx + 3u] * weight;
     }
 
     // Normalize weights (rescale.rs:100-103)
@@ -110,12 +115,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         sumR /= weightSum;
         sumG /= weightSum;
         sumB /= weightSum;
+        sumA /= weightSum;
     }
 
-    let dstIdx = (y * params.dstWidth + dstX) * 3u;
+    let dstIdx = (y * params.dstWidth + dstX) * 4u;
     output[dstIdx + 0u] = sumR;
     output[dstIdx + 1u] = sumG;
     output[dstIdx + 2u] = sumB;
+    output[dstIdx + 3u] = sumA;
 }
 
 // Lanczos3 kernel (rescale.rs:40-50)
@@ -133,7 +140,7 @@ fn lanczos3(x: f32) -> f32 {
 }
 `;
 
-// Vertical Lanczos3 resample shader
+// Vertical Lanczos3 resample shader (RGBA - 4 channels)
 const SHADER_LANCZOS_VERTICAL = /* wgsl */ `
 const PI: f32 = 3.14159265358979323846;
 
@@ -165,6 +172,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var sumR: f32 = 0.0;
     var sumG: f32 = 0.0;
     var sumB: f32 = 0.0;
+    var sumA: f32 = 0.0;
     var weightSum: f32 = 0.0;
 
     let startIdx = max(center - params.radius, 0);
@@ -176,22 +184,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         weightSum += weight;
 
         // Input is (srcHeight x dstWidth) from horizontal pass
-        let srcIdx = (u32(si) * params.dstWidth + x) * 3u;
+        let srcIdx = (u32(si) * params.dstWidth + x) * 4u;
         sumR += input[srcIdx + 0u] * weight;
         sumG += input[srcIdx + 1u] * weight;
         sumB += input[srcIdx + 2u] * weight;
+        sumA += input[srcIdx + 3u] * weight;
     }
 
     if (abs(weightSum) > 1e-8) {
         sumR /= weightSum;
         sumG /= weightSum;
         sumB /= weightSum;
+        sumA /= weightSum;
     }
 
-    let dstIdx = (dstY * params.dstWidth + x) * 3u;
+    let dstIdx = (dstY * params.dstWidth + x) * 4u;
     output[dstIdx + 0u] = sumR;
     output[dstIdx + 1u] = sumG;
     output[dstIdx + 2u] = sumB;
+    output[dstIdx + 3u] = sumA;
 }
 
 fn lanczos3(x: f32) -> f32 {
@@ -208,8 +219,9 @@ fn lanczos3(x: f32) -> f32 {
 }
 `;
 
-// Linear RGB to sRGB conversion shader
+// Linear RGB to sRGB conversion shader (RGBA - 4 channels)
 // Constants from COLORSPACES.md: threshold 0.0031308, gamma 1/2.4
+// Alpha is passed through unchanged (already linear, no gamma)
 const SHADER_LINEAR_TO_SRGB = /* wgsl */ `
 @group(0) @binding(0) var<storage, read> input: array<f32>;
 @group(0) @binding(1) var<storage, read_write> output: array<u32>;
@@ -225,16 +237,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pixelCount = dims.width * dims.height;
     if (gid.x >= pixelCount) { return; }
 
-    let idx = gid.x * 3u;
+    let idx = gid.x * 4u;
     let r = linearToSrgb(input[idx + 0u]);
     let g = linearToSrgb(input[idx + 1u]);
     let b = linearToSrgb(input[idx + 2u]);
+    let a = input[idx + 3u]; // Alpha is already linear, no conversion
 
     // Pack as RGBA u32 (for easy copy to canvas)
     let ri = u32(clamp(r * 255.0 + 0.5, 0.0, 255.0));
     let gi = u32(clamp(g * 255.0 + 0.5, 0.0, 255.0));
     let bi = u32(clamp(b * 255.0 + 0.5, 0.0, 255.0));
-    output[gid.x] = ri | (gi << 8u) | (bi << 16u) | (255u << 24u);
+    let ai = u32(clamp(a * 255.0 + 0.5, 0.0, 255.0));
+    output[gid.x] = ri | (gi << 8u) | (bi << 16u) | (ai << 24u);
 }
 
 fn linearToSrgb(l: f32) -> f32 {
@@ -366,22 +380,22 @@ class LanczosGPU {
             [srcWidth, srcHeight]
         );
 
-        // Linear RGB buffers (3 floats per pixel)
+        // Linear RGBA buffers (4 floats per pixel)
         const linearSrcBuffer = this.device.createBuffer({
-            size: srcPixels * 3 * 4,
+            size: srcPixels * 4 * 4,
             usage: GPUBufferUsage.STORAGE
         });
 
         // Intermediate buffer after horizontal pass (dstWidth x srcHeight)
         const intermediatePixels = dstWidth * srcHeight;
         const intermediateBuffer = this.device.createBuffer({
-            size: intermediatePixels * 3 * 4,
+            size: intermediatePixels * 4 * 4,
             usage: GPUBufferUsage.STORAGE
         });
 
         // Final linear buffer (dstWidth x dstHeight)
         const linearDstBuffer = this.device.createBuffer({
-            size: dstPixels * 3 * 4,
+            size: dstPixels * 4 * 4,
             usage: GPUBufferUsage.STORAGE
         });
 

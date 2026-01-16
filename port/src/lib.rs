@@ -305,17 +305,21 @@ pub fn create_buffer_from_rgb_wasm(data: Vec<f32>, pixel_count: usize) -> Result
 // ============================================================================
 
 /// Transform image from ICC profile to linear sRGB (in-place)
+/// Alpha channel is preserved unchanged (ICC profiles only apply to RGB).
 #[wasm_bindgen]
 pub fn transform_icc_to_linear_srgb_wasm(buf: &mut BufferF32x4, width: usize, height: usize, icc_bytes: Vec<u8>) -> Result<(), JsValue> {
     let pixels = buf.as_slice();
+
+    // Extract RGB (ICC profile applies only to RGB, not alpha)
     let interleaved: Vec<f32> = pixels.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
 
     let result = decode::transform_icc_to_linear_srgb(&interleaved, width, height, &icc_bytes)
         .map_err(|e| JsValue::from_str(&e))?;
 
+    // Rebuild pixels preserving original alpha values
     let pixel_count = width * height;
     let new_pixels: Vec<Pixel4> = (0..pixel_count)
-        .map(|i| Pixel4::new(result[i * 3], result[i * 3 + 1], result[i * 3 + 2], 0.0))
+        .map(|i| Pixel4::new(result[i * 3], result[i * 3 + 1], result[i * 3 + 2], pixels[i][3]))
         .collect();
 
     *buf = BufferF32x4::new(new_pixels);

@@ -162,7 +162,7 @@ pub fn pixels_to_channels(pixels: &[Pixel4]) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
 }
 
 /// Convert packed Pixel4 array to separate R, G, B, A channel arrays
-/// Note: Alpha is stored in 0-1 range, not scaled to 0-255
+/// All channels (including alpha) are returned in their current scale - no conversion applied.
 pub fn pixels_to_channels_rgba(pixels: &[Pixel4]) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     let len = pixels.len();
     let mut r = Vec::with_capacity(len);
@@ -293,7 +293,7 @@ pub fn pixels_to_srgb_u8_clamped(pixels: &[Pixel4]) -> Vec<u8> {
 }
 
 /// Convert Pixel4 array (0-255 scale) to sRGB u8 interleaved RGBA
-/// Clamps values to 0-255 range.
+/// All channels (RGB + alpha) must be in 0-255 scale. Clamps to 0-255 range.
 pub fn pixels_to_srgb_u8_rgba_clamped(pixels: &[Pixel4]) -> Vec<u8> {
     let mut data = Vec::with_capacity(pixels.len() * 4);
 
@@ -307,9 +307,10 @@ pub fn pixels_to_srgb_u8_rgba_clamped(pixels: &[Pixel4]) -> Vec<u8> {
     data
 }
 
-/// Convert Pixel4 array (RGB 0-255, alpha 0-1) to u8 interleaved with variable channel count.
+/// Convert Pixel4 array to u8 interleaved with variable channel count.
+/// Assumes all channels (including alpha) are in the same 0-255 scale.
 /// - channels=3: outputs RGB only
-/// - channels=4: outputs RGBA with alpha scaled from 0-1 to 0-255
+/// - channels=4: outputs RGBA
 /// Clamps all values to 0-255 range.
 pub fn pixels_to_u8_clamped(pixels: &[Pixel4], channels: usize) -> Vec<u8> {
     assert!(channels == 3 || channels == 4, "channels must be 3 or 4");
@@ -320,8 +321,8 @@ pub fn pixels_to_u8_clamped(pixels: &[Pixel4], channels: usize) -> Vec<u8> {
         data.push(p[1].round().clamp(0.0, 255.0) as u8);
         data.push(p[2].round().clamp(0.0, 255.0) as u8);
         if channels == 4 {
-            // Alpha is stored in 0-1 range, scale to 0-255 for output
-            data.push((p[3] * 255.0).round().clamp(0.0, 255.0) as u8);
+            // Alpha is in the same 0-255 scale as RGB - no additional scaling needed
+            data.push(p[3].round().clamp(0.0, 255.0) as u8);
         }
     }
 
@@ -329,20 +330,15 @@ pub fn pixels_to_u8_clamped(pixels: &[Pixel4], channels: usize) -> Vec<u8> {
 }
 
 /// Extract a single channel from Pixel4 array to u8.
-/// channel: 0=R, 1=G, 2=B, 3=A (alpha scaled from 0-1 to 0-255)
+/// Assumes all channels (including alpha) are in the same 0-255 scale.
+/// channel: 0=R, 1=G, 2=B, 3=A
 pub fn pixels_to_u8_single_channel(pixels: &[Pixel4], channel: usize) -> Vec<u8> {
     assert!(channel < 4, "channel must be 0-3");
     let mut data = Vec::with_capacity(pixels.len());
 
     for p in pixels {
-        let value = if channel == 3 {
-            // Alpha is stored in 0-1 range, scale to 0-255
-            (p[3] * 255.0).round().clamp(0.0, 255.0)
-        } else {
-            // RGB channels are already 0-255
-            p[channel].round().clamp(0.0, 255.0)
-        };
-        data.push(value as u8);
+        // All channels are in the same 0-255 scale
+        data.push(p[channel].round().clamp(0.0, 255.0) as u8);
     }
 
     data
