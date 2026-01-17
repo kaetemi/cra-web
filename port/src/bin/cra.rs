@@ -363,7 +363,7 @@ struct Args {
     #[arg(long)]
     output_meta: Option<PathBuf>,
 
-    /// Output safetensors file path (optional, supports .safetensors or .safetensors.gz)
+    /// Output safetensors file path (optional)
     /// Writes the image as floating-point before dithering.
     #[arg(long)]
     output_safetensors: Option<PathBuf>,
@@ -393,8 +393,9 @@ struct Args {
     /// ARGB: ARGB8 (=ARGB8888), ARGB4 (=ARGB4444), ARGB1555, ARGB4444, ARGB8888
     /// Grayscale: L1, L2, L4, L8
     /// Single digit means same for all channels.
-    #[arg(short, long, default_value = "RGB888")]
-    format: String,
+    /// Default: ARGB8888 if input has alpha, RGB888 otherwise.
+    #[arg(short, long)]
+    format: Option<String>,
 
     /// Histogram matching method (default: none if no reference, cra-oklab if reference provided)
     #[arg(long, value_enum)]
@@ -1388,8 +1389,11 @@ fn write_safetensors_output(
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    // Parse format string
-    let format = ColorFormat::parse(&args.format)?;
+    // Parse format string if explicitly provided; otherwise defer to apply alpha-aware default later
+    // If user specified a format, parse it now to detect grayscale for needs_linear
+    let explicit_format = args.format.as_ref().map(|f| ColorFormat::parse(f)).transpose()?;
+    // For needs_linear calculation: assume non-grayscale if format not specified (default is RGB/ARGB)
+    let is_grayscale_format = explicit_format.as_ref().map(|f| f.is_grayscale).unwrap_or(false);
 
     // Determine histogram method: user-specified, or default based on whether reference is provided
     let histogram = args.histogram.unwrap_or(if args.r#ref.is_some() {
@@ -1407,13 +1411,6 @@ fn main() -> Result<(), String> {
         ));
     }
 
-    // Determine output colorspace for dithering
-    let output_colorspace = args.output_distance_space.unwrap_or(if format.is_grayscale {
-        ColorSpace::LabCie94
-    } else {
-        ColorSpace::Oklab
-    });
-
     let histogram_options = HistogramOptions {
         mode: args.histogram_mode.to_lib_mode(),
         dither_mode: args.histogram_dither.to_dither_mode(),
@@ -1430,34 +1427,6 @@ fn main() -> Result<(), String> {
         args.perceptual,
     );
 
-    if args.verbose {
-        eprintln!("Histogram: {:?}", histogram);
-        eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
-        if format.is_grayscale {
-            eprintln!("  Grayscale: {} bits", format.bits_r);
-        } else if format.has_alpha {
-            eprintln!(
-                "  ARGB: {}+{}+{}+{} bits",
-                format.bits_a, format.bits_r, format.bits_g, format.bits_b
-            );
-        } else {
-            eprintln!(
-                "  RGB: {}+{}+{} bits",
-                format.bits_r, format.bits_g, format.bits_b
-            );
-        }
-        if needs_reference {
-            eprintln!("Histogram mode: {:?}", args.histogram_mode);
-        }
-        eprintln!("Output dither: {:?}", args.output_dither);
-        eprintln!(
-            "Output colorspace: {:?}{}",
-            output_colorspace,
-            if args.output_distance_space.is_none() { " (default)" } else { "" }
-        );
-        eprintln!("Seed: {}", args.seed);
-    }
-
     // Check if at least one output is specified
     let has_channel_output = args.output_raw_r.is_some()
         || args.output_raw_g.is_some()
@@ -1473,30 +1442,6 @@ fn main() -> Result<(), String> {
     {
         return Err(
             "No output specified. Use --output, --output-raw, --output-raw-r/g/b/a, --output-meta, or --output-safetensors"
-                .to_string(),
-        );
-    }
-
-    // Check binary output compatibility
-    if args.output_raw.is_some() && !format.supports_binary() {
-        return Err(format!(
-            "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
-            format.name, format.total_bits
-        ));
-    }
-
-    // Check channel output compatibility (requires RGB/ARGB format, not grayscale)
-    if (args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some()) && format.is_grayscale {
-        return Err(
-            "Separate channel outputs (--output-raw-r/g/b) require RGB/ARGB format, not grayscale"
-                .to_string(),
-        );
-    }
-
-    // Check alpha channel output compatibility (requires ARGB format)
-    if args.output_raw_a.is_some() && !format.has_alpha {
-        return Err(
-            "Alpha channel output (--output-raw-a) requires ARGB format (e.g., ARGB8888, ARGB1555)"
                 .to_string(),
         );
     }
@@ -1543,8 +1488,90 @@ fn main() -> Result<(), String> {
     let input_icc = decoded_input.icc_profile;
     let input_cicp = decoded_input.cicp;
 
+    // Detect if input has alpha channel (before conversion)
+    let input_image_has_alpha = matches!(
+        input_img.color(),
+        ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
+    );
+
+    // Finalize format: use explicit format if provided, otherwise apply alpha-aware default
+    let format = match explicit_format {
+        Some(f) => f,
+        None => {
+            // Default: ARGB8888 if input has alpha, RGB888 otherwise
+            let default_format = if input_image_has_alpha { "ARGB8888" } else { "RGB888" };
+            if args.verbose {
+                eprintln!("  Format: {} (default, based on input alpha)", default_format);
+            }
+            ColorFormat::parse(default_format).expect("Default format should always parse")
+        }
+    };
+
+    // Determine output colorspace for dithering
+    let output_colorspace = args.output_distance_space.unwrap_or(if format.is_grayscale {
+        ColorSpace::LabCie94
+    } else {
+        ColorSpace::Oklab
+    });
+
+    // Now perform format-dependent validation
+    if args.verbose && args.format.is_some() {
+        eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
+        if format.is_grayscale {
+            eprintln!("  Grayscale: {} bits", format.bits_r);
+        } else if format.has_alpha {
+            eprintln!(
+                "  ARGB: {}+{}+{}+{} bits",
+                format.bits_a, format.bits_r, format.bits_g, format.bits_b
+            );
+        } else {
+            eprintln!(
+                "  RGB: {}+{}+{} bits",
+                format.bits_r, format.bits_g, format.bits_b
+            );
+        }
+    }
+
+    // Check binary output compatibility
+    if args.output_raw.is_some() && !format.supports_binary() {
+        return Err(format!(
+            "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
+            format.name, format.total_bits
+        ));
+    }
+
+    // Check channel output compatibility (requires RGB/ARGB format, not grayscale)
+    if (args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some()) && format.is_grayscale {
+        return Err(
+            "Separate channel outputs (--output-raw-r/g/b) require RGB/ARGB format, not grayscale"
+                .to_string(),
+        );
+    }
+
+    // Check alpha channel output compatibility (requires ARGB format)
+    if args.output_raw_a.is_some() && !format.has_alpha {
+        return Err(
+            "Alpha channel output (--output-raw-a) requires ARGB format (e.g., ARGB8888, ARGB1555)"
+                .to_string(),
+        );
+    }
+
     if args.verbose && needs_unpremultiply {
         eprintln!("  Input has premultiplied alpha (will un-premultiply)");
+    }
+
+    if args.verbose {
+        eprintln!("Histogram: {:?}", histogram);
+        if needs_reference {
+            eprintln!("Histogram mode: {:?}", args.histogram_mode);
+        }
+        eprintln!("Output dither: {:?}", args.output_dither);
+        eprintln!(
+            "Output colorspace: {:?}{}",
+            output_colorspace,
+            if args.output_distance_space.is_none() { " (default)" } else { "" }
+        );
+        eprintln!("Seed: {}", args.seed);
     }
 
     // Determine if linear-space processing is needed
@@ -1584,7 +1611,7 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let needs_linear = needs_reference || needs_resize || format.is_grayscale
+    let needs_linear = needs_reference || needs_resize || is_grayscale_format
         || needs_profile_processing || needs_unpremultiply;
 
     // Track effective safetensors settings for metadata
