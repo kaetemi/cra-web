@@ -1314,7 +1314,7 @@
             // Use cra tool for dither (--histogram defaults to none when no --ref)
             let cmd = 'cra -i input.png -o output.png';
 
-            // Add format (only if not default RGB888)
+            // Add format (only if not default: ARGB8888 for alpha inputs, RGB888 for non-alpha)
             if (isGrayscale) {
                 const bitsGray = parseInt(document.getElementById('bits-gray').value);
                 cmd += ` --format L${bitsGray}`;
@@ -1326,11 +1326,16 @@
 
                 // Use ARGB format when alpha is preserved
                 if (inputHasAlpha && bitsA > 0) {
-                    // Use shorthand (ARGB8) when all channels are equal, otherwise full form (ARGB8888)
-                    const allEqual = (bitsA === bitsR && bitsR === bitsG && bitsG === bitsB);
-                    const formatSuffix = allEqual ? bitsA : `${bitsA}${bitsR}${bitsG}${bitsB}`;
-                    cmd += ` --format ARGB${formatSuffix}`;
+                    // Default for alpha inputs is ARGB8888, only add if different
+                    const isDefault = (bitsA === 8 && bitsR === 8 && bitsG === 8 && bitsB === 8);
+                    if (!isDefault) {
+                        // Use shorthand (ARGB8) when all channels are equal, otherwise full form (ARGB8888)
+                        const allEqual = (bitsA === bitsR && bitsR === bitsG && bitsG === bitsB);
+                        const formatSuffix = allEqual ? bitsA : `${bitsA}${bitsR}${bitsG}${bitsB}`;
+                        cmd += ` --format ARGB${formatSuffix}`;
+                    }
                 } else if (bitsR !== 8 || bitsG !== 8 || bitsB !== 8) {
+                    // Default for non-alpha inputs is RGB888, only add if different
                     // Use shorthand (RGB5) when all channels are equal, otherwise full form (RGB565)
                     const formatSuffix = (bitsR === bitsG && bitsG === bitsB) ? bitsR : `${bitsR}${bitsG}${bitsB}`;
                     cmd += ` --format RGB${formatSuffix}`;
