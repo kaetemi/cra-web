@@ -1084,19 +1084,47 @@ fn write_metadata(
     height: u32,
     outputs: &[(String, PathBuf, usize)],
 ) -> Result<(), String> {
+    // Calculate stride and total_size for raw output
+    // Stride = bytes per row (respects --stride alignment)
+    let bits_per_pixel = format.total_bits as usize;
+    let packed_row_bits = width as usize * bits_per_pixel;
+    let packed_row_bytes = (packed_row_bits + 7) / 8;
+    let row_stride = if args.stride > 1 {
+        // Align to stride
+        ((packed_row_bytes + args.stride - 1) / args.stride) * args.stride
+    } else {
+        packed_row_bytes
+    };
+    let total_size = row_stride * height as usize;
+
+    // Get name from output filename (without extension)
+    // Prefer raw output path, then first output, then input, then fallback to "image"
+    let name = args.output_raw.as_ref()
+        .and_then(|p| p.file_stem())
+        .and_then(|s| s.to_str())
+        .or_else(|| outputs.first().and_then(|(_, p, _)| p.file_stem()).and_then(|s| s.to_str()))
+        .or_else(|| args.input.file_stem().and_then(|s| s.to_str()))
+        .unwrap_or("image");
+
     let mut json = String::new();
     json.push_str("{\n");
-    json.push_str(&format!("  \"input\": \"{}\",\n", args.input.display()));
-    if let Some(ref ref_path) = args.r#ref {
-        json.push_str(&format!("  \"reference\": \"{}\",\n", ref_path.display()));
-    }
-    json.push_str(&format!("  \"histogram\": \"{:?}\",\n", histogram));
+
+    // Basic fields
+    json.push_str(&format!("  \"name\": \"{}\",\n", name));
+    json.push_str(&format!("  \"type\": \"bitmap\",\n"));
     json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
     json.push_str(&format!("  \"width\": {},\n", width));
     json.push_str(&format!("  \"height\": {},\n", height));
-    json.push_str(&format!("  \"is_grayscale\": {},\n", format.is_grayscale));
-    json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
 
+    // Raw-file-specific fields (only when raw output is present)
+    if args.output_raw.is_some() {
+        json.push_str(&format!("  \"compressed\": {},\n", 0));
+        json.push_str(&format!("  \"stride\": {},\n", row_stride));
+        json.push_str(&format!("  \"total_size\": {},\n", total_size));
+    }
+
+    // Advanced fields
+    json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
     if !format.is_grayscale {
         json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
         json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
@@ -1107,11 +1135,16 @@ fn write_metadata(
     } else {
         json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
     }
-
-    json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
+    json.push_str(&format!("  \"histogram\": \"{:?}\",\n", histogram));
+    json.push_str(&format!("  \"input\": \"{}\",\n", args.input.display()));
+    json.push_str(&format!("  \"is_grayscale\": {},\n", format.is_grayscale));
     json.push_str(&format!("  \"output_colorspace\": \"{:?}\",\n", output_colorspace));
+    json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
+    if let Some(ref ref_path) = args.r#ref {
+        json.push_str(&format!("  \"reference\": \"{}\",\n", ref_path.display()));
+    }
     json.push_str(&format!("  \"seed\": {},\n", args.seed));
-    json.push_str(&format!("  \"stride\": {},\n", args.stride));
+    json.push_str(&format!("  \"stride_alignment\": {},\n", args.stride));
     json.push_str(&format!("  \"stride_fill\": \"{:?}\",\n", args.stride_fill));
 
     json.push_str("  \"outputs\": [\n");
