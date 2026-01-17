@@ -337,6 +337,7 @@
                     <option value="3">Catmull-Rom (sharp, low ringing)</option>
                     <option value="2">Mitchell (soft, minimal ringing)</option>
                     <option value="0">Bilinear (faster)</option>
+                    <option value="4">Sinc (research only, SLOW)</option>
                 </select>
             </div>
 
@@ -582,7 +583,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc' };
 
             // Map dither mode values to CLI names
             const modeMap = {

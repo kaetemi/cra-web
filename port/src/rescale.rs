@@ -15,6 +15,9 @@ pub enum RescaleMethod {
     CatmullRom,
     /// Lanczos3 - maximum sharpness, some ringing artifacts
     Lanczos3,
+    /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
+    /// WARNING: O(N²) - very slow for large images, severe ringing at edges
+    Sinc,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -36,18 +39,25 @@ impl RescaleMethod {
             "mitchell" => Some(RescaleMethod::Mitchell),
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
+            "sinc" => Some(RescaleMethod::Sinc),
             _ => None,
         }
     }
 
-    /// Get the kernel radius for this method
+    /// Get the kernel radius for this method (0 = full image extent)
     pub fn base_radius(&self) -> f32 {
         match self {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
             RescaleMethod::Lanczos3 => 3.0,
+            RescaleMethod::Sinc => 0.0, // Special: uses full image extent
         }
+    }
+
+    /// Returns true if this method uses full image extent (O(N²))
+    pub fn is_full_extent(&self) -> bool {
+        matches!(self, RescaleMethod::Sinc)
     }
 }
 
@@ -104,6 +114,20 @@ fn lanczos3(x: f32) -> f32 {
     }
 }
 
+/// Pure sinc kernel (non-windowed)
+/// This is the theoretically ideal interpolation kernel for band-limited signals.
+/// Unlike Lanczos, it has no window function and extends to infinity (full image).
+/// WARNING: Causes severe Gibbs phenomenon (ringing) at sharp edges.
+#[inline]
+fn sinc(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else {
+        let pi_x = PI * x;
+        pi_x.sin() / pi_x
+    }
+}
+
 /// Generic kernel evaluation
 #[inline]
 fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
@@ -115,6 +139,7 @@ fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos3 => lanczos3(x),
+        RescaleMethod::Sinc => sinc(x),
     }
 }
 
@@ -570,11 +595,20 @@ fn rescale_kernel_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let base_radius = method.base_radius();
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
-    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
-    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
+
+    // For Sinc, use full image extent; otherwise use kernel's base radius
+    let (radius_x, radius_y) = if method.is_full_extent() {
+        // Full extent: radius covers entire source dimension
+        (src_width as i32, src_height as i32)
+    } else {
+        let base_radius = method.base_radius();
+        (
+            (base_radius * filter_scale_x).ceil() as i32,
+            (base_radius * filter_scale_y).ceil() as i32,
+        )
+    };
 
     // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
     let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
@@ -643,11 +677,19 @@ fn rescale_kernel_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let base_radius = method.base_radius();
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
-    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
-    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
+
+    // For Sinc, use full image extent; otherwise use kernel's base radius
+    let (radius_x, radius_y) = if method.is_full_extent() {
+        (src_width as i32, src_height as i32)
+    } else {
+        let base_radius = method.base_radius();
+        (
+            (base_radius * filter_scale_x).ceil() as i32,
+            (base_radius * filter_scale_y).ceil() as i32,
+        )
+    };
 
     let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
     let v_weights = precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
@@ -763,7 +805,7 @@ pub fn rescale_with_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 
@@ -811,7 +853,7 @@ pub fn rescale_with_alpha_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 

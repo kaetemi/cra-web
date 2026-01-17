@@ -200,6 +200,8 @@ enum ScaleMethod {
     /// Lanczos3: maximum sharpness, some ringing artifacts (recommended)
     #[default]
     Lanczos,
+    /// Pure Sinc (non-windowed): theoretically ideal, full image extent (SLOW, research only)
+    Sinc,
 }
 
 impl ScaleMethod {
@@ -209,6 +211,7 @@ impl ScaleMethod {
             ScaleMethod::Mitchell => cra_wasm::rescale::RescaleMethod::Mitchell,
             ScaleMethod::CatmullRom => cra_wasm::rescale::RescaleMethod::CatmullRom,
             ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
+            ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
         }
     }
 }
@@ -829,6 +832,7 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Mitchell => "Mitchell",
             cra_wasm::rescale::RescaleMethod::CatmullRom => "Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
+            cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

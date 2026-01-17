@@ -778,6 +778,7 @@
                         <option value="3">Catmull-Rom (sharp, low ringing)</option>
                         <option value="2">Mitchell (soft, minimal ringing)</option>
                         <option value="0">Bilinear (fast)</option>
+                        <option value="4">Sinc (research only, SLOW)</option>
                     </select>
                 </div>
                 <p class="scale-hint">Rescaling is performed in linear RGB space for correct color blending.</p>
@@ -1370,7 +1371,7 @@
             // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
                 const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
-                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom' };
+                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc' };
                 if (primaryDimension === 'height') {
                     const height = parseInt(document.getElementById('scale-height').value);
                     cmd += ` --height ${height}`;
