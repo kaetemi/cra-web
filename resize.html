@@ -413,6 +413,7 @@
         let lastOutputWidth = 0;
         let lastOutputHeight = 0;
         let lastHasAlpha = false;
+        let processTimestamp = null; // Timestamp when processing started
 
         // Scale mode constants (must match Rust enum)
         const SCALE_MODE_INDEPENDENT = 0;
@@ -421,6 +422,12 @@
 
         // Pending operation state for comparison mode
         let pendingComparison = null;
+
+        // Generate download filename with timestamp
+        function generateDownloadFilename(width, height, format, ext) {
+            const ts = processTimestamp || Date.now();
+            return `cra_${ts}_${width}x${height}_${format}.${ext}`;
+        }
 
         function initWorker() {
             worker = new Worker('./resize-worker.js', { type: 'module' });
@@ -685,6 +692,9 @@
         function processImage() {
             if (!inputFileBytes || !workerReady) return;
 
+            // Store timestamp when processing starts
+            processTimestamp = Date.now();
+
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
             const outputSection = document.getElementById('output-section');
@@ -756,7 +766,7 @@
             ctx.putImageData(imageData, 0, 0);
 
             const link = document.createElement('a');
-            link.download = `resized_${lastOutputWidth}x${lastOutputHeight}.png`;
+            link.download = generateDownloadFilename(lastOutputWidth, lastOutputHeight, 'RGB8', 'png');
             link.href = canvas.toDataURL('image/png');
             link.click();
         }

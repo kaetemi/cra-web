@@ -39,6 +39,9 @@ let workerReady = false;
 let inputImageData = null;
 let refImageData = null;
 let consoleOutput = null;
+let processTimestamp = null; // Timestamp when processing started
+let lastOutputWidth = 0;
+let lastOutputHeight = 0;
 
 // Format and append a line to console output
 function appendConsole(text) {
@@ -254,7 +257,22 @@ function handleProcessingComplete(outputData) {
     document.getElementById('compare-input').src = document.getElementById('input-preview').src;
     document.getElementById('compare-output').src = url;
     document.getElementById('compare-ref').src = document.getElementById('ref-preview').src;
-    document.getElementById('download-btn').href = url;
+
+    // Get output dimensions from the blob by loading it as an image
+    const img = new Image();
+    img.onload = function() {
+        lastOutputWidth = img.width;
+        lastOutputHeight = img.height;
+        // Update download filename with dimensions
+        const downloadBtn = document.getElementById('download-btn');
+        downloadBtn.href = url;
+        downloadBtn.download = generateDownloadFilename(lastOutputWidth, lastOutputHeight, 'RGB8', 'png');
+    };
+    img.src = url;
+
+    // Set initial download link (will be updated with dimensions once image loads)
+    const downloadBtn = document.getElementById('download-btn');
+    downloadBtn.href = url;
 
     // Generate and display CLI command
     const cliCommand = generateCliCommand();
@@ -558,6 +576,12 @@ async function loadDefaultImages() {
     }
 }
 
+// Generate download filename with timestamp
+function generateDownloadFilename(width, height, format, ext) {
+    const ts = processTimestamp || Date.now();
+    return `cra_${ts}_${width}x${height}_${format}.${ext}`;
+}
+
 // Process images using worker
 function processImages() {
     const method = document.getElementById('method-select').value;
@@ -573,6 +597,9 @@ function processImages() {
     const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
     const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+
+    // Store timestamp when processing starts
+    processTimestamp = Date.now();
 
     const loading = document.getElementById('loading');
     const processBtn = document.getElementById('process-btn');

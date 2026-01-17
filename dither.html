@@ -973,7 +973,13 @@
             const outputUrl = canvas.toDataURL('image/png');
             document.getElementById('compare-input').src = document.getElementById('input-preview').src;
             document.getElementById('compare-output').src = outputUrl;
-            document.getElementById('download-btn').href = outputUrl;
+            const downloadBtn = document.getElementById('download-btn');
+            downloadBtn.href = outputUrl;
+            // Update PNG filename with format
+            const format = result.isGrayscale ? `L${result.bitsR}` :
+                (result.hasAlpha ? `ARGB${result.bitsA || 8}${result.bitsR}${result.bitsG}${result.bitsB}` :
+                `RGB${result.bitsR}${result.bitsG}${result.bitsB}`);
+            downloadBtn.download = generateDownloadFilename(processWidth, processHeight, format, 'png');
 
             // Store dither result for binary downloads
             lastDitherResult = {
@@ -1027,6 +1033,7 @@
         let aspectRatio = 1;
         let updatingSize = false; // Prevent recursive updates
         let primaryDimension = 'width'; // 'width' or 'height' - which dimension is authoritative
+        let processTimestamp = null; // Timestamp when processing started
 
         // Scale mode constants (must match Rust enum)
         const SCALE_MODE_INDEPENDENT = 0;
@@ -1035,6 +1042,12 @@
 
         // Store last dithered result for binary downloads
         let lastDitherResult = null;
+
+        // Generate download filename with timestamp
+        function generateDownloadFilename(width, height, format, ext) {
+            const ts = processTimestamp || Date.now();
+            return `cra_${ts}_${width}x${height}_${format}.${ext}`;
+        }
 
         // Initialize WASM and worker
         async function initWasm() {
@@ -1129,6 +1142,9 @@
         // Process the image using background worker
         async function processImage() {
             if (!inputFileBytes || !workerReady) return;
+
+            // Store timestamp when processing starts
+            processTimestamp = Date.now();
 
             const loading = document.getElementById('loading');
             const errorMsg = document.getElementById('error-message');
@@ -1692,16 +1708,19 @@
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
             const strideSuffix = stride > 1 ? `_stride${stride}` : '';
-            downloadBlob(blob, `dithered_${format}${strideSuffix}.raw`);
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format + strideSuffix, 'raw');
+            downloadBlob(blob, filename);
         });
 
         document.getElementById('download-meta-btn').addEventListener('click', () => {
             const metadata = generateMetadata();
             if (!metadata) return;
 
+            const format = getFormatString();
             const json = JSON.stringify(metadata, null, 2);
             const blob = new Blob([json], { type: 'application/json' });
-            downloadBlob(blob, 'dither_metadata.json');
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'json');
+            downloadBlob(blob, filename);
         });
 
         // Per-channel download handler helper - respects stride setting
@@ -1726,7 +1745,8 @@
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
             const strideSuffix = stride > 1 ? `_stride${stride}` : '';
-            downloadBlob(blob, `dithered_${channelName}${bits}${strideSuffix}.raw`);
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `${channelName}${bits}${strideSuffix}`, 'raw');
+            downloadBlob(blob, filename);
         }
 
         // Download alpha channel - uses RGBA interleaved data
@@ -1750,7 +1770,8 @@
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
             const strideSuffix = stride > 1 ? `_stride${stride}` : '';
-            downloadBlob(blob, `dithered_A${bits}${strideSuffix}.raw`);
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `A${bits}${strideSuffix}`, 'raw');
+            downloadBlob(blob, filename);
         }
 
         document.getElementById('download-r-btn').addEventListener('click', () =>
