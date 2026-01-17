@@ -302,7 +302,7 @@
         <div class="upload-box" id="upload-box">
             <label>Drop image here or click to upload</label>
             <p class="hint">Supports PNG, JPG, WebP</p>
-            <input type="file" id="file-input" accept="image/*">
+            <input type="file" id="file-input" accept="image/*,.safetensors">
         </div>
 
         <div class="error-message" id="error-message"></div>
@@ -800,7 +800,7 @@
                     </div>
                     <label>Image loaded: ${width}x${height}</label>
                     <p class="hint">Click to change image</p>
-                    <input type="file" id="file-input" accept="image/*">
+                    <input type="file" id="file-input" accept="image/*,.safetensors">
                 `;
 
                 // Re-attach event listener to new input element

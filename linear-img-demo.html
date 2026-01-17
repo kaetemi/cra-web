@@ -255,7 +255,7 @@
         <div class="upload-box" id="upload-box">
             <label style="font-weight: 600; color: #555;">Drop image here or click to upload</label>
             <p style="color: #888; font-size: 14px; margin-top: 10px;">Supports PNG, JPG, WebP</p>
-            <input type="file" id="file-input" accept="image/*">
+            <input type="file" id="file-input" accept="image/*,.safetensors">
         </div>
 
         <div id="controls" style="display: none;">
@@ -346,7 +346,7 @@
             uploadBox.innerHTML = `
                 <p style="color: #27ae60; font-weight: 600;">Image loaded: ${file.name}</p>
                 <p style="color: #888; font-size: 13px;">Click to change</p>
-                <input type="file" id="file-input" accept="image/*">
+                <input type="file" id="file-input" accept="image/*,.safetensors">
             `;
             document.getElementById('file-input').addEventListener('change', (e) => {
                 const f = e.target.files[0];

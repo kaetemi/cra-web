@@ -72,8 +72,12 @@ function processDither(params) {
 
         sendProgress(5, 'Loading image...');
 
-        // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
-        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+        // Check for SFI (safetensors) format and use appropriate loader
+        const fileData = new Uint8Array(fileBytes);
+        const isSfi = craWasm.is_sfi_format_wasm(fileData);
+        const loadedImage = isSfi
+            ? craWasm.load_sfi_wasm(fileData)
+            : craWasm.load_image_wasm(fileData);
 
         // Check if input has alpha channel (for output format decision)
         const hasAlpha = loadedImage.has_alpha;

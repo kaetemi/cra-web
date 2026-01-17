@@ -34,6 +34,7 @@ pub mod tiled_lab;
 mod tiling;
 
 pub mod decode;
+pub mod sfi;
 
 use buffer::{BufferF32x4, BufferF32, BufferU8};
 use dither_common::{DitherMode, PerceptualSpace};
@@ -357,6 +358,60 @@ pub fn create_buffer_from_rgba_wasm(data: Vec<f32>, pixel_count: usize) -> Resul
 #[wasm_bindgen]
 pub fn create_buffer_from_rgb_wasm(data: Vec<f32>, pixel_count: usize) -> Result<BufferF32x4, JsValue> {
     create_buffer_from_interleaved_wasm(data, pixel_count, 3)
+}
+
+// ============================================================================
+// SFI (Safetensors Floating-point Image) Format Support
+// ============================================================================
+
+/// Check if file data is in SFI (safetensors) format
+#[wasm_bindgen]
+pub fn is_sfi_format_wasm(file_bytes: &[u8]) -> bool {
+    decode::is_safetensors_format(file_bytes)
+}
+
+/// Load SFI (safetensors) image file, returns LoadedImage
+/// The image is automatically converted to linear sRGB.
+#[wasm_bindgen]
+pub fn load_sfi_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
+    let decoded = decode::load_safetensors_image(&file_bytes)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let (width, height) = image::GenericImageView::dimensions(&decoded.image);
+
+    Ok(LoadedImage {
+        image: decoded.image,
+        icc_profile: None,
+        cicp: decoded.cicp,
+        width,
+        height,
+        is_16bit: false,
+        is_f32: true,
+        has_alpha: decoded.has_alpha,
+        has_non_srgb_icc: false,
+        is_exr: false,
+        is_cicp_srgb: false,  // SFI files are already linear
+        is_cicp_linear: true, // Reported as linear
+        is_cicp_needs_conversion: false,
+    })
+}
+
+/// Write linear RGB buffer to SFI F32 format
+/// Input: BufferF32x4 containing linear RGB pixels (0-1 range)
+/// Output: Vec<u8> containing the safetensors file bytes
+#[wasm_bindgen]
+pub fn write_sfi_f32_wasm(buf: &BufferF32x4, width: u32, height: u32, include_alpha: bool) -> Vec<u8> {
+    sfi::write_sfi_f32(buf.as_slice(), width, height, include_alpha, sfi::SfiTransfer::Linear)
+}
+
+/// Write linear RGB buffer to SFI F16 format
+/// Input: BufferF32x4 containing linear RGB pixels (0-1 range)
+/// Output: Vec<u8> containing the safetensors file bytes
+/// Note: F16 uses round-to-nearest. For optimal precision, error diffusion
+/// specific to F16 precision is recommended but not yet implemented.
+#[wasm_bindgen]
+pub fn write_sfi_f16_wasm(buf: &BufferF32x4, width: u32, height: u32, include_alpha: bool) -> Vec<u8> {
+    sfi::write_sfi_f16(buf.as_slice(), width, height, include_alpha, sfi::SfiTransfer::Linear)
 }
 
 // ============================================================================

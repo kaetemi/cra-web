@@ -58,8 +58,12 @@ function processResize(params) {
             inputIsLinear  // True if input is already linear (normal maps, data textures)
         } = params;
 
-        // Single load - keeps u8/u16 pixels, converts on demand (CLI pattern)
-        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+        // Check for SFI (safetensors) format and use appropriate loader
+        const fileData = new Uint8Array(fileBytes);
+        const isSfi = craWasm.is_sfi_format_wasm(fileData);
+        const loadedImage = isSfi
+            ? craWasm.load_sfi_wasm(fileData)
+            : craWasm.load_image_wasm(fileData);
         const srcWidth = loadedImage.width;
         const srcHeight = loadedImage.height;
         const hasAlpha = loadedImage.has_alpha;
@@ -199,8 +203,12 @@ function processSrgbResize(params) {
             inputIsLinear
         } = params;
 
-        // Single load - keeps u8/u16 pixels, converts on demand
-        const loadedImage = craWasm.load_image_wasm(new Uint8Array(fileBytes));
+        // Check for SFI (safetensors) format and use appropriate loader
+        const fileData = new Uint8Array(fileBytes);
+        const isSfi = craWasm.is_sfi_format_wasm(fileData);
+        const loadedImage = isSfi
+            ? craWasm.load_sfi_wasm(fileData)
+            : craWasm.load_image_wasm(fileData);
         const srcWidth = loadedImage.width;
         const srcHeight = loadedImage.height;
         const hasAlpha = loadedImage.has_alpha;

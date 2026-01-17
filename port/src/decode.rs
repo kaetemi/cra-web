@@ -8,10 +8,12 @@
 //! Used by both WASM and CLI for consistent behavior.
 
 use image::{ColorType, DynamicImage, GenericImageView, ImageDecoder, ImageFormat, ImageReader};
-use image::metadata::{Cicp, CicpColorPrimaries, CicpTransferCharacteristics};
+use image::metadata::{Cicp, CicpColorPrimaries, CicpTransferCharacteristics, CicpVideoFullRangeFlag};
 use moxcms::{CicpProfile as MoxcmsCicpProfile, CicpColorPrimaries as MoxcmsPrimaries, ColorProfile, Layout, LocalizableString, MatrixCoefficients, ProfileText, ToneReprCurve, TransferCharacteristics, TransformOptions};
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
+
+use crate::sfi;
 
 // ============================================================================
 // Image Loading
@@ -834,4 +836,76 @@ pub fn get_metadata_and_icc(file_bytes: &[u8]) -> Result<(ImageMetadata, Option<
 /// Extract ICC profile from image file bytes (without decoding pixels)
 pub fn extract_icc_profile(file_bytes: &[u8]) -> Option<Vec<u8>> {
     get_metadata_and_icc(file_bytes).ok()?.1
+}
+
+// ============================================================================
+// SFI (Safetensors Floating-point Image) Format Support
+// ============================================================================
+
+/// Check if the data is in SFI (safetensors) format
+pub fn is_safetensors_format(data: &[u8]) -> bool {
+    sfi::is_sfi_format(data)
+}
+
+/// Load a safetensors image file and return as DecodedImage
+/// The returned image is already in linear sRGB (if transfer was sRGB, it's been decoded)
+pub fn load_safetensors_image(data: &[u8]) -> Result<DecodedImage, String> {
+    let sfi_image = sfi::read_sfi(data)
+        .map_err(|e| format!("Failed to read safetensors: {}", e))?;
+
+    // Convert SfiImage pixels to DynamicImage
+    let width = sfi_image.width;
+    let height = sfi_image.height;
+    let pixel_count = (width * height) as usize;
+
+    // Build CICP based on SFI metadata
+    // SFI files are already converted to linear during read, so we report linear transfer
+    let cicp = Cicp {
+        primaries: CicpColorPrimaries::SRgb, // SFI srgb primaries = sRGB/BT.709
+        transfer: CicpTransferCharacteristics::Linear, // Already decoded to linear
+        matrix: image::metadata::CicpMatrixCoefficients::Identity,
+        full_range: CicpVideoFullRangeFlag::FullRange,
+    };
+
+    // Create DynamicImage from pixels
+    // SfiImage.pixels are already linear, so we store as Rgba32F
+    let mut rgba_data = Vec::with_capacity(pixel_count * 4);
+    for p in &sfi_image.pixels {
+        rgba_data.push(p[0]);
+        rgba_data.push(p[1]);
+        rgba_data.push(p[2]);
+        rgba_data.push(p[3]);
+    }
+
+    let img_buffer = image::ImageBuffer::<image::Rgba<f32>, Vec<f32>>::from_raw(
+        width, height, rgba_data
+    ).ok_or_else(|| "Failed to create image buffer from SFI data".to_string())?;
+
+    let image = DynamicImage::ImageRgba32F(img_buffer);
+
+    Ok(DecodedImage {
+        image,
+        icc_profile: None, // SFI uses metadata, not ICC
+        cicp,
+        format: None, // No ImageFormat for safetensors
+        is_16bit: false,
+        is_f32: true,
+        has_alpha: sfi_image.has_alpha,
+    })
+}
+
+/// Load image from bytes, automatically detecting SFI format
+pub fn load_image_from_bytes_auto(data: &[u8]) -> Result<DecodedImage, String> {
+    if is_safetensors_format(data) {
+        load_safetensors_image(data)
+    } else {
+        load_image_from_bytes(data)
+    }
+}
+
+/// Load image from path, automatically detecting SFI format
+pub fn load_image_from_path_auto<P: AsRef<Path>>(path: P) -> Result<DecodedImage, String> {
+    let data = std::fs::read(path.as_ref())
+        .map_err(|e| format!("Failed to read {}: {}", path.as_ref().display(), e))?;
+    load_image_from_bytes_auto(&data)
 }
