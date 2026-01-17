@@ -164,7 +164,7 @@ cra-web/
 
 ## Acknowledgements
 
-Web demo and Rust port built with Claude Opus 4.5 using [Claude Code](https://claude.com/product/claude-code).
+Web demo and Rust port built with Claude Opus 4.5 using [Claude Code](https://claude.com/product/claude-code). All markdown documents have been manually reviewed.
 
 ## License
 
