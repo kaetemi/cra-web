@@ -130,8 +130,9 @@ pub fn dither_output_rgba(
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     // When bits_a == 0, strip alpha and use RGB-only dithering
+    // Returns RGB (3 bytes/pixel), not RGBA
     if bits_a == 0 {
-        let rgb_data = dither_output_rgb(
+        return dither_output_rgb(
             srgb_pixels,
             width,
             height,
@@ -142,16 +143,6 @@ pub fn dither_output_rgba(
             seed,
             progress,
         );
-        // Convert RGB to RGBA with alpha=255
-        let pixels = rgb_data.len() / 3;
-        let mut rgba_data = Vec::with_capacity(pixels * 4);
-        for i in 0..pixels {
-            rgba_data.push(rgb_data[i * 3]);
-            rgba_data.push(rgb_data[i * 3 + 1]);
-            rgba_data.push(rgb_data[i * 3 + 2]);
-            rgba_data.push(255);
-        }
-        return rgba_data;
     }
 
     match technique {
