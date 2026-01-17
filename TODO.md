@@ -12,3 +12,9 @@
 
 - Alpha channel for luminosity-only output dithering
 - Separate control for alpha channel dithering (so we can dither alpha with None)
+
+---
+
+- When the rendering pipeline is sRGB-only without colorspace-awareness, alpha channels tend to be interpreted as being in sRGB-space rather than linear space. Might need an option to correct for that, on both input and output, even though it's non-standard? Although technically, I think, it should appear the same regardless (when comparing ARGB8 vs ARGB1), with some minor bias in how the error is propagated...
+
+---
