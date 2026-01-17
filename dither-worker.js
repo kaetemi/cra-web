@@ -195,22 +195,35 @@ function processDither(params) {
                 sendProgress(70, 'Dithering RGB...');
                 if (hasAlpha) {
                     // Use RGBA dithering with alpha-aware error propagation
-                    // When bitsA=0, alpha is stripped and RGB-only dithering is used
+                    // When bitsA=0, returns RGB (3 bytes/pixel); otherwise RGBA (4 bytes/pixel)
                     const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                         buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, perceptualSpace, seed,
-                        (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering RGBA...')
+                        (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering...')
                     );
-                    const rgbaDithered = ditheredBuffer.to_vec();
+                    const ditheredData = ditheredBuffer.to_vec();
 
-                    // Keep interleaved RGBA data for binary export
-                    rgbaInterleaved = new Uint8Array(rgbaDithered);
+                    if (bitsA > 0) {
+                        // Keep interleaved RGBA data for binary export
+                        rgbaInterleaved = new Uint8Array(ditheredData);
 
-                    // Copy RGBA directly to output
-                    for (let i = 0; i < pixelCount; i++) {
-                        outputData[i * 4] = rgbaDithered[i * 4];
-                        outputData[i * 4 + 1] = rgbaDithered[i * 4 + 1];
-                        outputData[i * 4 + 2] = rgbaDithered[i * 4 + 2];
-                        outputData[i * 4 + 3] = rgbaDithered[i * 4 + 3];
+                        // Copy RGBA directly to output
+                        for (let i = 0; i < pixelCount; i++) {
+                            outputData[i * 4] = ditheredData[i * 4];
+                            outputData[i * 4 + 1] = ditheredData[i * 4 + 1];
+                            outputData[i * 4 + 2] = ditheredData[i * 4 + 2];
+                            outputData[i * 4 + 3] = ditheredData[i * 4 + 3];
+                        }
+                    } else {
+                        // bitsA=0: alpha stripped, result is RGB (3 bytes/pixel)
+                        rgbInterleaved = new Uint8Array(ditheredData);
+
+                        // Convert RGB to RGBA for display (alpha = 255)
+                        for (let i = 0; i < pixelCount; i++) {
+                            outputData[i * 4] = ditheredData[i * 3];
+                            outputData[i * 4 + 1] = ditheredData[i * 3 + 1];
+                            outputData[i * 4 + 2] = ditheredData[i * 3 + 2];
+                            outputData[i * 4 + 3] = 255;
+                        }
                     }
                 } else {
                     // Use RGB dithering for images without alpha
@@ -242,22 +255,35 @@ function processDither(params) {
             sendProgress(50, 'Dithering RGB...');
             if (hasAlpha) {
                 // Use RGBA dithering with alpha-aware error propagation
-                // When bitsA=0, alpha is stripped and RGB-only dithering is used
+                // When bitsA=0, returns RGB (3 bytes/pixel); otherwise RGBA (4 bytes/pixel)
                 const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                     buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, perceptualSpace, seed,
-                    (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering RGBA...')
+                    (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering...')
                 );
-                const rgbaDithered = ditheredBuffer.to_vec();
+                const ditheredData = ditheredBuffer.to_vec();
 
-                // Keep interleaved RGBA data for binary export
-                rgbaInterleaved = new Uint8Array(rgbaDithered);
+                if (bitsA > 0) {
+                    // Keep interleaved RGBA data for binary export
+                    rgbaInterleaved = new Uint8Array(ditheredData);
 
-                // Copy RGBA directly to output
-                for (let i = 0; i < pixelCount; i++) {
-                    outputData[i * 4] = rgbaDithered[i * 4];
-                    outputData[i * 4 + 1] = rgbaDithered[i * 4 + 1];
-                    outputData[i * 4 + 2] = rgbaDithered[i * 4 + 2];
-                    outputData[i * 4 + 3] = rgbaDithered[i * 4 + 3];
+                    // Copy RGBA directly to output
+                    for (let i = 0; i < pixelCount; i++) {
+                        outputData[i * 4] = ditheredData[i * 4];
+                        outputData[i * 4 + 1] = ditheredData[i * 4 + 1];
+                        outputData[i * 4 + 2] = ditheredData[i * 4 + 2];
+                        outputData[i * 4 + 3] = ditheredData[i * 4 + 3];
+                    }
+                } else {
+                    // bitsA=0: alpha stripped, result is RGB (3 bytes/pixel)
+                    rgbInterleaved = new Uint8Array(ditheredData);
+
+                    // Convert RGB to RGBA for display (alpha = 255)
+                    for (let i = 0; i < pixelCount; i++) {
+                        outputData[i * 4] = ditheredData[i * 3];
+                        outputData[i * 4 + 1] = ditheredData[i * 3 + 1];
+                        outputData[i * 4 + 2] = ditheredData[i * 3 + 2];
+                        outputData[i * 4 + 3] = 255;
+                    }
                 }
             } else {
                 // Use RGB dithering for images without alpha
