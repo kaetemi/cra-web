@@ -533,12 +533,13 @@ with safe_open("output.safetensors", framework="pt") as f:
 - Support `CHW` dimension order
 
 **Level 3 (Enhanced):**
+- All Level 2 requirements
 - Support `bt2020`, `smpte432`, and `xyz` primaries
 - Support all white point identifiers
 - Implement Bradford chromatic adaptation
 
 **Level 4 (Full):**
-- All Level 2 requirements
+- All Level 3 requirements
 - Support `BF16` tensors
 - Support all defined primaries
 - Support multi-image files
