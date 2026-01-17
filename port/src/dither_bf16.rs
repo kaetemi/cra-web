@@ -36,10 +36,58 @@ pub enum Bf16WorkingSpace {
 // bf16 quantization utilities
 // ============================================================================
 
+/// Get the next representable bf16 toward +∞
+#[inline]
+fn next_up_bf16(x: bf16) -> bf16 {
+    let bits = x.to_bits();
+    // NaN or +inf: return as-is
+    if x.is_nan() || bits == 0x7F80 {
+        return x;
+    }
+    // -0.0 → smallest positive subnormal
+    if bits == 0x8000 {
+        return bf16::from_bits(0x0001);
+    }
+    if bits & 0x8000 == 0 {
+        // Positive: increment moves away from zero (larger)
+        bf16::from_bits(bits + 1)
+    } else {
+        // Negative: decrement moves toward zero (larger)
+        bf16::from_bits(bits - 1)
+    }
+}
+
+/// Get the next representable bf16 toward -∞
+#[inline]
+fn next_down_bf16(x: bf16) -> bf16 {
+    let bits = x.to_bits();
+    // NaN or -inf: return as-is
+    if x.is_nan() || bits == 0xFF80 {
+        return x;
+    }
+    // +0.0 → smallest negative subnormal
+    if bits == 0x0000 {
+        return bf16::from_bits(0x8001);
+    }
+    if bits & 0x8000 == 0 {
+        // Positive: decrement moves toward zero (smaller)
+        bf16::from_bits(bits - 1)
+    } else {
+        // Negative: increment moves away from zero (smaller / more negative)
+        bf16::from_bits(bits + 1)
+    }
+}
+
 /// Get floor and ceiling bf16 candidates for a given f32 value.
 /// Since half 2.3 doesn't have rounding modes, we compute manually.
 #[inline]
 fn get_bf16_bounds(value: f32) -> (bf16, bf16) {
+    // Handle NaN - preserve it
+    if value.is_nan() {
+        let nan = bf16::from_f32(value);
+        return (nan, nan);
+    }
+
     // Round to nearest first
     let rounded = bf16::from_f32(value);
     let rounded_f32 = rounded.to_f32();
@@ -49,12 +97,10 @@ fn get_bf16_bounds(value: f32) -> (bf16, bf16) {
         (rounded, rounded)
     } else if rounded_f32 > value {
         // rounded is ceil, need floor
-        let floor = bf16::from_bits(rounded.to_bits().wrapping_sub(1));
-        (floor, rounded)
+        (next_down_bf16(rounded), rounded)
     } else {
         // rounded is floor, need ceil
-        let ceil = bf16::from_bits(rounded.to_bits().wrapping_add(1));
-        (rounded, ceil)
+        (rounded, next_up_bf16(rounded))
     }
 }
 
@@ -1206,6 +1252,185 @@ mod tests {
             let (floor, ceil) = get_bf16_bounds(v);
             assert!(floor.to_f32() <= v, "floor({}) = {} > {}", v, floor, v);
             assert!(ceil.to_f32() >= v, "ceil({}) = {} < {}", v, ceil, v);
+        }
+    }
+
+    #[test]
+    fn test_bf16_bounds_negative_numbers() {
+        // Test negative numbers - the key bug case
+        let test_values = [-0.5f32, -1.0, -0.123456789, -0.001, -100.0, -1e10, -1e30];
+        for v in test_values {
+            let (floor, ceil) = get_bf16_bounds(v);
+            assert!(
+                floor.to_f32() <= v,
+                "floor({}) = {} > {} (bits: floor=0x{:04X})",
+                v, floor.to_f32(), v, floor.to_bits()
+            );
+            assert!(
+                ceil.to_f32() >= v,
+                "ceil({}) = {} < {} (bits: ceil=0x{:04X})",
+                v, ceil.to_f32(), v, ceil.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn test_bf16_bounds_tiny_negative_rounding_to_minus_zero() {
+        // This is the critical bug case: tiny negative value that rounds to -0.0
+        let value = -1e-45_f32; // Tiny negative, rounds to -0.0
+        let rounded = bf16::from_f32(value);
+        assert_eq!(rounded.to_bits(), 0x8000, "Expected -0.0"); // Verify it rounds to -0.0
+
+        let (floor, ceil) = get_bf16_bounds(value);
+
+        // floor should be negative (smallest negative subnormal or less)
+        assert!(floor.to_f32() <= value, "floor({}) = {} should be <= {}", value, floor.to_f32(), value);
+        assert!(floor.to_bits() >= 0x8000, "floor should be negative, got bits 0x{:04X}", floor.to_bits());
+
+        // ceil should be -0.0 (which equals 0.0)
+        assert!(ceil.to_f32() >= value, "ceil({}) = {} should be >= {}", value, ceil.to_f32(), value);
+    }
+
+    #[test]
+    fn test_bf16_bounds_tiny_positive_rounding_to_zero() {
+        // Tiny positive value that rounds to +0.0
+        let value = 1e-45_f32; // Tiny positive, rounds to +0.0
+        let rounded = bf16::from_f32(value);
+        assert_eq!(rounded.to_bits(), 0x0000, "Expected +0.0"); // Verify it rounds to +0.0
+
+        let (floor, ceil) = get_bf16_bounds(value);
+
+        // floor should be +0.0
+        assert!(floor.to_f32() <= value, "floor({}) = {} should be <= {}", value, floor.to_f32(), value);
+
+        // ceil should be smallest positive subnormal
+        assert!(ceil.to_f32() >= value, "ceil({}) = {} should be >= {}", value, ceil.to_f32(), value);
+    }
+
+    #[test]
+    fn test_bf16_bounds_zero_exact() {
+        // +0.0 is exactly representable
+        let (floor, ceil) = get_bf16_bounds(0.0f32);
+        assert_eq!(floor, ceil);
+        assert_eq!(floor.to_f32(), 0.0);
+    }
+
+    #[test]
+    fn test_next_up_bf16() {
+        // +0.0 -> smallest positive subnormal
+        let x = bf16::from_bits(0x0000);
+        let up = next_up_bf16(x);
+        assert_eq!(up.to_bits(), 0x0001);
+
+        // -0.0 -> smallest positive subnormal (crosses zero boundary)
+        let x = bf16::from_bits(0x8000);
+        let up = next_up_bf16(x);
+        assert_eq!(up.to_bits(), 0x0001);
+
+        // Positive number: increment
+        let x = bf16::from_f32(1.0);
+        let up = next_up_bf16(x);
+        assert!(up.to_f32() > x.to_f32());
+
+        // Negative number: decrement bits (toward zero)
+        let x = bf16::from_f32(-1.0);
+        let up = next_up_bf16(x);
+        assert!(up.to_f32() > x.to_f32());
+        assert!(up.to_f32() < 0.0); // Still negative, just closer to zero
+
+        // +inf stays +inf
+        let x = bf16::from_bits(0x7F80);
+        let up = next_up_bf16(x);
+        assert_eq!(up.to_bits(), 0x7F80);
+    }
+
+    #[test]
+    fn test_next_down_bf16() {
+        // +0.0 -> smallest negative subnormal (crosses zero boundary)
+        let x = bf16::from_bits(0x0000);
+        let down = next_down_bf16(x);
+        assert_eq!(down.to_bits(), 0x8001);
+
+        // -0.0 -> smallest negative subnormal
+        let x = bf16::from_bits(0x8000);
+        let down = next_down_bf16(x);
+        assert_eq!(down.to_bits(), 0x8001);
+
+        // Positive number: decrement
+        let x = bf16::from_f32(1.0);
+        let down = next_down_bf16(x);
+        assert!(down.to_f32() < x.to_f32());
+
+        // Negative number: increment bits (away from zero)
+        let x = bf16::from_f32(-1.0);
+        let down = next_down_bf16(x);
+        assert!(down.to_f32() < x.to_f32()); // More negative
+
+        // -inf stays -inf
+        let x = bf16::from_bits(0xFF80);
+        let down = next_down_bf16(x);
+        assert_eq!(down.to_bits(), 0xFF80);
+    }
+
+    #[test]
+    fn test_bf16_bounds_infinity() {
+        // +inf
+        let (floor, ceil) = get_bf16_bounds(f32::INFINITY);
+        assert!(floor.is_infinite() && floor.to_f32() > 0.0);
+        assert!(ceil.is_infinite() && ceil.to_f32() > 0.0);
+
+        // -inf
+        let (floor, ceil) = get_bf16_bounds(f32::NEG_INFINITY);
+        assert!(floor.is_infinite() && floor.to_f32() < 0.0);
+        assert!(ceil.is_infinite() && ceil.to_f32() < 0.0);
+    }
+
+    #[test]
+    fn test_bf16_bounds_nan() {
+        let (floor, ceil) = get_bf16_bounds(f32::NAN);
+        assert!(floor.is_nan());
+        assert!(ceil.is_nan());
+    }
+
+    #[test]
+    fn test_bf16_bounds_subnormal() {
+        // Test values in subnormal range
+        let smallest_positive_subnormal = bf16::from_bits(0x0001).to_f32();
+        let (floor, ceil) = get_bf16_bounds(smallest_positive_subnormal);
+        assert_eq!(floor, ceil); // Exactly representable
+
+        // Value between 0 and smallest subnormal
+        let tiny = smallest_positive_subnormal / 2.0;
+        let (floor, ceil) = get_bf16_bounds(tiny);
+        assert!(floor.to_f32() <= tiny);
+        assert!(ceil.to_f32() >= tiny);
+    }
+
+    #[test]
+    fn test_bf16_bounds_adjacency() {
+        // Verify floor and ceil are adjacent (or equal)
+        let test_values = [0.123456789f32, -0.987654321, 1.5, -1.5, 0.001, -0.001, 1000.0, -1000.0];
+        for v in test_values {
+            let (floor, ceil) = get_bf16_bounds(v);
+            if floor != ceil {
+                // They should be adjacent bf16 values
+                let floor_bits = floor.to_bits();
+                let ceil_bits = ceil.to_bits();
+
+                // For positive floor: ceil = floor + 1 bit
+                // For negative ceil near zero: trickier
+                if floor.to_f32() >= 0.0 {
+                    assert_eq!(ceil_bits, floor_bits + 1,
+                        "For v={}, floor=0x{:04X}, ceil=0x{:04X} are not adjacent",
+                        v, floor_bits, ceil_bits);
+                } else if ceil.to_f32() <= 0.0 {
+                    // Both negative: floor has higher bit value
+                    assert_eq!(floor_bits, ceil_bits + 1,
+                        "For v={}, floor=0x{:04X}, ceil=0x{:04X} are not adjacent",
+                        v, floor_bits, ceil_bits);
+                }
+                // else: floor negative, ceil positive/zero - crossing zero boundary
+            }
         }
     }
 
