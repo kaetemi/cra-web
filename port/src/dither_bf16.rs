@@ -37,11 +37,25 @@ pub enum Bf16WorkingSpace {
 // ============================================================================
 
 /// Get floor and ceiling bf16 candidates for a given f32 value.
+/// Since half 2.3 doesn't have rounding modes, we compute manually.
 #[inline]
 fn get_bf16_bounds(value: f32) -> (bf16, bf16) {
-    let floor = bf16::from_f32_round_toward_neg_infinity(value);
-    let ceil = bf16::from_f32_round_toward_pos_infinity(value);
-    (floor, ceil)
+    // Round to nearest first
+    let rounded = bf16::from_f32(value);
+    let rounded_f32 = rounded.to_f32();
+
+    if rounded_f32 == value {
+        // Exactly representable
+        (rounded, rounded)
+    } else if rounded_f32 > value {
+        // rounded is ceil, need floor
+        let floor = bf16::from_bits(rounded.to_bits().wrapping_sub(1));
+        (floor, rounded)
+    } else {
+        // rounded is floor, need ceil
+        let ceil = bf16::from_bits(rounded.to_bits().wrapping_add(1));
+        (rounded, ceil)
+    }
 }
 
 /// Convert sRGB f32 (0-1) to linear f32
@@ -1380,9 +1394,9 @@ mod tests {
         let a: Vec<f32> = vec![1.0; 100];
 
         let spaces = [
-            PerceptualSpace::LinearRgb,
+            PerceptualSpace::LinearRGB,
             PerceptualSpace::OkLab,
-            PerceptualSpace::CieLab,
+            PerceptualSpace::LabCIE76,
             PerceptualSpace::YCbCr,
         ];
 
@@ -1408,7 +1422,7 @@ mod tests {
 
         let (r_out, g_out, b_out, _) = dither_rgba_bf16(
             &r, &g, &b, &a, 10, 10,
-            PerceptualSpace::LinearRgb, Bf16WorkingSpace::Linear
+            PerceptualSpace::LinearRGB, Bf16WorkingSpace::Linear
         );
 
         // Verify HDR values are preserved (approximately)

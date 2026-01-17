@@ -25,6 +25,8 @@ pub mod dither_rgba;
 pub mod dither_lab;
 pub mod dither_luminosity;
 pub mod dither_common;
+pub mod dither_fp16;
+pub mod dither_bf16;
 mod histogram;
 pub mod output;
 pub mod pixel;

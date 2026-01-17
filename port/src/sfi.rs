@@ -696,6 +696,189 @@ pub fn write_sfi_f32_premultiplied(
     write_sfi_internal(pixels, width, height, include_alpha, transfer, SfiDtype::F32, alpha_premultiplied)
 }
 
+/// Write pre-dithered F16 RGB(A) channels to SFI format.
+/// Takes separate channel data as f16 slices (already dithered).
+pub fn write_sfi_f16_channels(
+    r_channel: &[f16],
+    g_channel: &[f16],
+    b_channel: &[f16],
+    a_channel: Option<&[f16]>,
+    width: u32,
+    height: u32,
+    transfer: SfiTransfer,
+) -> Vec<u8> {
+    write_sfi_channels_internal(
+        r_channel, g_channel, b_channel, a_channel,
+        width, height, transfer, SfiDtype::F16, false,
+    )
+}
+
+/// Write pre-dithered BF16 RGB(A) channels to SFI format.
+/// Takes separate channel data as bf16 slices (already dithered).
+pub fn write_sfi_bf16_channels(
+    r_channel: &[bf16],
+    g_channel: &[bf16],
+    b_channel: &[bf16],
+    a_channel: Option<&[bf16]>,
+    width: u32,
+    height: u32,
+    transfer: SfiTransfer,
+) -> Vec<u8> {
+    write_sfi_bf16_channels_internal(
+        r_channel, g_channel, b_channel, a_channel,
+        width, height, transfer, false,
+    )
+}
+
+fn write_sfi_channels_internal(
+    r_channel: &[f16],
+    g_channel: &[f16],
+    b_channel: &[f16],
+    a_channel: Option<&[f16]>,
+    width: u32,
+    height: u32,
+    transfer: SfiTransfer,
+    dtype: SfiDtype,
+    alpha_premultiplied: bool,
+) -> Vec<u8> {
+    let include_alpha = a_channel.is_some();
+    let num_channels = if include_alpha { 4 } else { 3 };
+    let channels = if include_alpha { SfiChannels::Rgba } else { SfiChannels::Rgb };
+    let pixel_count = (width * height) as usize;
+    let element_size = dtype.bytes_per_element();
+    let tensor_bytes = pixel_count * num_channels * element_size;
+
+    // Build metadata JSON
+    let mut metadata = Map::new();
+    metadata.insert("format".to_string(), json!("sfi"));
+    metadata.insert("version".to_string(), json!("1.0"));
+    metadata.insert("primaries".to_string(), json!("srgb"));
+    metadata.insert("transfer".to_string(), json!(transfer.as_str()));
+    metadata.insert("channels".to_string(), json!(channels.as_str()));
+    metadata.insert("dimension_order".to_string(), json!("HWC"));
+    if include_alpha {
+        metadata.insert("alpha_premultiplied".to_string(), json!(if alpha_premultiplied { "true" } else { "false" }));
+    }
+
+    // Build tensor info
+    let shape = if include_alpha {
+        json!([height, width, 4])
+    } else {
+        json!([height, width, 3])
+    };
+
+    let mut tensor_info = Map::new();
+    tensor_info.insert("dtype".to_string(), json!(dtype.as_str()));
+    tensor_info.insert("shape".to_string(), shape);
+    tensor_info.insert("data_offsets".to_string(), json!([0, tensor_bytes]));
+
+    // Build header object
+    let mut header = Map::new();
+    header.insert("__metadata__".to_string(), Value::Object(metadata));
+    header.insert("image".to_string(), Value::Object(tensor_info));
+
+    // Serialize header to JSON
+    let header_json = serde_json::to_string(&header).unwrap();
+    let header_bytes = header_json.as_bytes();
+    let header_size = header_bytes.len() as u64;
+
+    // Calculate total output size
+    let total_size = 8 + header_bytes.len() + tensor_bytes;
+    let mut output = Vec::with_capacity(total_size);
+
+    // Write header size (u64 LE)
+    output.extend_from_slice(&header_size.to_le_bytes());
+
+    // Write header JSON
+    output.extend_from_slice(header_bytes);
+
+    // Write tensor data (already dithered, just interleave and write)
+    for i in 0..pixel_count {
+        output.extend_from_slice(&r_channel[i].to_le_bytes());
+        output.extend_from_slice(&g_channel[i].to_le_bytes());
+        output.extend_from_slice(&b_channel[i].to_le_bytes());
+        if let Some(a) = a_channel {
+            output.extend_from_slice(&a[i].to_le_bytes());
+        }
+    }
+
+    output
+}
+
+fn write_sfi_bf16_channels_internal(
+    r_channel: &[bf16],
+    g_channel: &[bf16],
+    b_channel: &[bf16],
+    a_channel: Option<&[bf16]>,
+    width: u32,
+    height: u32,
+    transfer: SfiTransfer,
+    alpha_premultiplied: bool,
+) -> Vec<u8> {
+    let include_alpha = a_channel.is_some();
+    let num_channels = if include_alpha { 4 } else { 3 };
+    let channels = if include_alpha { SfiChannels::Rgba } else { SfiChannels::Rgb };
+    let pixel_count = (width * height) as usize;
+    let element_size = SfiDtype::BF16.bytes_per_element();
+    let tensor_bytes = pixel_count * num_channels * element_size;
+
+    // Build metadata JSON
+    let mut metadata = Map::new();
+    metadata.insert("format".to_string(), json!("sfi"));
+    metadata.insert("version".to_string(), json!("1.0"));
+    metadata.insert("primaries".to_string(), json!("srgb"));
+    metadata.insert("transfer".to_string(), json!(transfer.as_str()));
+    metadata.insert("channels".to_string(), json!(channels.as_str()));
+    metadata.insert("dimension_order".to_string(), json!("HWC"));
+    if include_alpha {
+        metadata.insert("alpha_premultiplied".to_string(), json!(if alpha_premultiplied { "true" } else { "false" }));
+    }
+
+    // Build tensor info
+    let shape = if include_alpha {
+        json!([height, width, 4])
+    } else {
+        json!([height, width, 3])
+    };
+
+    let mut tensor_info = Map::new();
+    tensor_info.insert("dtype".to_string(), json!(SfiDtype::BF16.as_str()));
+    tensor_info.insert("shape".to_string(), shape);
+    tensor_info.insert("data_offsets".to_string(), json!([0, tensor_bytes]));
+
+    // Build header object
+    let mut header = Map::new();
+    header.insert("__metadata__".to_string(), Value::Object(metadata));
+    header.insert("image".to_string(), Value::Object(tensor_info));
+
+    // Serialize header to JSON
+    let header_json = serde_json::to_string(&header).unwrap();
+    let header_bytes = header_json.as_bytes();
+    let header_size = header_bytes.len() as u64;
+
+    // Calculate total output size
+    let total_size = 8 + header_bytes.len() + tensor_bytes;
+    let mut output = Vec::with_capacity(total_size);
+
+    // Write header size (u64 LE)
+    output.extend_from_slice(&header_size.to_le_bytes());
+
+    // Write header JSON
+    output.extend_from_slice(header_bytes);
+
+    // Write tensor data (already dithered, just interleave and write)
+    for i in 0..pixel_count {
+        output.extend_from_slice(&r_channel[i].to_le_bytes());
+        output.extend_from_slice(&g_channel[i].to_le_bytes());
+        output.extend_from_slice(&b_channel[i].to_le_bytes());
+        if let Some(a) = a_channel {
+            output.extend_from_slice(&a[i].to_le_bytes());
+        }
+    }
+
+    output
+}
+
 fn write_sfi_internal(
     pixels: &[Pixel4],
     width: u32,

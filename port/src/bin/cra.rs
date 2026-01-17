@@ -17,7 +17,9 @@ use cra_wasm::binary_format::{
     encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
     is_valid_stride, ColorFormat, StrideFill,
 };
-use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32};
+use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
+use cra_wasm::dither_fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
+use cra_wasm::dither_bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
@@ -365,6 +367,14 @@ struct Args {
     /// Strip alpha channel from safetensors output
     #[arg(long)]
     safetensors_no_alpha: bool,
+
+    /// Dithering method for safetensors FP16/BF16 output quantization (FP32 ignores this)
+    #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
+    safetensors_dither: DitherMethod,
+
+    /// Perceptual space for safetensors dithering distance metric
+    #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
+    safetensors_distance_space: ColorSpace,
 
     /// Output format: RGB, ARGB, L with bit counts.
     /// RGB: RGB8 (=RGB888), RGB332, RGB565, RGB888
@@ -1132,7 +1142,16 @@ fn write_metadata(
 // Safetensors Output Helper
 // ============================================================================
 
+/// Options for safetensors dithering
+struct SafetensorsDitherOptions {
+    dither_mode: DitherMode,
+    perceptual_space: PerceptualSpace,
+    seed: u32,
+}
+
 /// Write safetensors output file (linear or sRGB FP32/FP16/BF16)
+/// For FP16/BF16, applies error diffusion dithering for optimal precision.
+#[allow(clippy::too_many_arguments)]
 fn write_safetensors_output(
     path: &PathBuf,
     pixels: &[Pixel4],
@@ -1141,6 +1160,7 @@ fn write_safetensors_output(
     include_alpha: bool,
     transfer: SfiTransfer,
     format: SafetensorsFormat,
+    dither_opts: Option<&SafetensorsDitherOptions>,
     verbose: bool,
 ) -> Result<usize, String> {
     let transfer_name = match transfer {
@@ -1165,16 +1185,106 @@ fn write_safetensors_output(
         );
     }
 
-    // Print precision warning for reduced precision formats
-    if matches!(format, SafetensorsFormat::Fp16 | SafetensorsFormat::Bf16) {
-        eprintln!("Note: {} output uses round-to-nearest. For optimal precision, error diffusion", format_name);
-        eprintln!("      specific to {} precision is recommended but not yet implemented.", format_name);
-    }
+    let width_usize = width as usize;
+    let height_usize = height as usize;
+
+    // Extract channels from Pixel4 array
+    let r_channel: Vec<f32> = pixels.iter().map(|p| p[0]).collect();
+    let g_channel: Vec<f32> = pixels.iter().map(|p| p[1]).collect();
+    let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
+    let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
 
     let sfi_data = match format {
-        SafetensorsFormat::Fp32 => write_sfi_f32(pixels, width, height, include_alpha, transfer),
-        SafetensorsFormat::Fp16 => write_sfi_f16(pixels, width, height, include_alpha, transfer),
-        SafetensorsFormat::Bf16 => write_sfi_bf16(pixels, width, height, include_alpha, transfer),
+        SafetensorsFormat::Fp32 => {
+            // FP32 has enough precision - no dithering needed
+            write_sfi_f32(pixels, width, height, include_alpha, transfer)
+        }
+        SafetensorsFormat::Fp16 => {
+            // Determine working space based on transfer
+            let working_space = match transfer {
+                SfiTransfer::Linear => Fp16WorkingSpace::Linear,
+                SfiTransfer::Srgb | SfiTransfer::Unspecified => Fp16WorkingSpace::Srgb,
+            };
+
+            if let Some(opts) = dither_opts {
+                if verbose {
+                    eprintln!("  Dithering to FP16 ({:?}, {:?})", opts.dither_mode, opts.perceptual_space);
+                }
+
+                if include_alpha {
+                    let (r_out, g_out, b_out, a_out) = dither_rgba_f16_with_mode(
+                        &r_channel, &g_channel, &b_channel, &a_channel,
+                        width_usize, height_usize,
+                        opts.perceptual_space,
+                        working_space,
+                        opts.dither_mode,
+                        opts.seed,
+                        None,
+                    );
+                    write_sfi_f16_channels(&r_out, &g_out, &b_out, Some(&a_out), width, height, transfer)
+                } else {
+                    let (r_out, g_out, b_out) = dither_rgb_f16_with_mode(
+                        &r_channel, &g_channel, &b_channel,
+                        width_usize, height_usize,
+                        opts.perceptual_space,
+                        working_space,
+                        opts.dither_mode,
+                        opts.seed,
+                        None,
+                    );
+                    write_sfi_f16_channels(&r_out, &g_out, &b_out, None, width, height, transfer)
+                }
+            } else {
+                // No dithering - use round-to-nearest
+                if verbose {
+                    eprintln!("  Note: FP16 output uses round-to-nearest (no dithering)");
+                }
+                write_sfi_f16(pixels, width, height, include_alpha, transfer)
+            }
+        }
+        SafetensorsFormat::Bf16 => {
+            // Determine working space based on transfer
+            let working_space = match transfer {
+                SfiTransfer::Linear => Bf16WorkingSpace::Linear,
+                SfiTransfer::Srgb | SfiTransfer::Unspecified => Bf16WorkingSpace::Srgb,
+            };
+
+            if let Some(opts) = dither_opts {
+                if verbose {
+                    eprintln!("  Dithering to BF16 ({:?}, {:?})", opts.dither_mode, opts.perceptual_space);
+                }
+
+                if include_alpha {
+                    let (r_out, g_out, b_out, a_out) = dither_rgba_bf16_with_mode(
+                        &r_channel, &g_channel, &b_channel, &a_channel,
+                        width_usize, height_usize,
+                        opts.perceptual_space,
+                        working_space,
+                        opts.dither_mode,
+                        opts.seed,
+                        None,
+                    );
+                    write_sfi_bf16_channels(&r_out, &g_out, &b_out, Some(&a_out), width, height, transfer)
+                } else {
+                    let (r_out, g_out, b_out) = dither_rgb_bf16_with_mode(
+                        &r_channel, &g_channel, &b_channel,
+                        width_usize, height_usize,
+                        opts.perceptual_space,
+                        working_space,
+                        opts.dither_mode,
+                        opts.seed,
+                        None,
+                    );
+                    write_sfi_bf16_channels(&r_out, &g_out, &b_out, None, width, height, transfer)
+                }
+            } else {
+                // No dithering - use round-to-nearest
+                if verbose {
+                    eprintln!("  Note: BF16 output uses round-to-nearest (no dithering)");
+                }
+                write_sfi_bf16(pixels, width, height, include_alpha, transfer)
+            }
+        }
     };
 
     let data_len = sfi_data.len();
@@ -1477,6 +1587,12 @@ fn main() -> Result<(), String> {
             } else {
                 pixels_to_dither.clone()
             };
+            // Create dither options for FP16/BF16 (FP32 ignores these)
+            let dither_opts = SafetensorsDitherOptions {
+                dither_mode: args.safetensors_dither.to_dither_mode(),
+                perceptual_space: args.safetensors_distance_space.to_perceptual_space(),
+                seed: args.seed,
+            };
             write_safetensors_output(
                 sfi_path,
                 &output_pixels,
@@ -1485,6 +1601,7 @@ fn main() -> Result<(), String> {
                 include_alpha,
                 transfer,
                 args.safetensors_format,
+                Some(&dither_opts),
                 args.verbose,
             )?;
         }
@@ -1542,6 +1659,12 @@ fn main() -> Result<(), String> {
                     .map(|p| Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0))
                     .collect()
             };
+            // Create dither options for FP16/BF16 (FP32 ignores these)
+            let dither_opts = SafetensorsDitherOptions {
+                dither_mode: args.safetensors_dither.to_dither_mode(),
+                perceptual_space: args.safetensors_distance_space.to_perceptual_space(),
+                seed: args.seed,
+            };
             write_safetensors_output(
                 sfi_path,
                 &output_pixels,
@@ -1550,6 +1673,7 @@ fn main() -> Result<(), String> {
                 include_alpha,
                 transfer,
                 args.safetensors_format,
+                Some(&dither_opts),
                 args.verbose,
             )?;
         }
