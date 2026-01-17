@@ -152,14 +152,39 @@ fn is_power_of_2(n: usize) -> bool {
 /// 1. Power of 2 takes precedence
 /// 2. Clean division of source dimension takes precedence
 /// 3. Otherwise, largest dimension is primary
+///
+/// Set `force_exact` to true to skip the automatic uniform scaling detection
+/// and use the exact dimensions provided (even if they cause slight distortion).
 pub fn calculate_target_dimensions(
     src_width: usize,
     src_height: usize,
     target_width: Option<usize>,
     target_height: Option<usize>,
 ) -> (usize, usize) {
+    calculate_target_dimensions_exact(src_width, src_height, target_width, target_height, false)
+}
+
+/// Calculate target dimensions with explicit control over uniform scaling
+///
+/// When `force_exact` is false (default), automatically adjusts dimensions to
+/// preserve aspect ratio if they're within 1 pixel of uniform scaling.
+///
+/// When `force_exact` is true, uses the exact dimensions provided without
+/// any automatic adjustment, allowing intentional non-uniform scaling.
+pub fn calculate_target_dimensions_exact(
+    src_width: usize,
+    src_height: usize,
+    target_width: Option<usize>,
+    target_height: Option<usize>,
+    force_exact: bool,
+) -> (usize, usize) {
     match (target_width, target_height) {
         (Some(w), Some(h)) => {
+            // If force_exact, skip all automatic adjustment
+            if force_exact {
+                return (w, h);
+            }
+
             // Calculate what uniform AR would give us from each dimension
             let h_from_w = (w as f64 * src_height as f64 / src_width as f64).round() as usize;
             let w_from_h = (h as f64 * src_width as f64 / src_height as f64).round() as usize;

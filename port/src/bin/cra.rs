@@ -400,6 +400,15 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ScaleMethod::Lanczos)]
     scale_method: ScaleMethod,
 
+    /// Disable automatic uniform scaling detection
+    ///
+    /// By default, when both --width and --height are specified and result in nearly
+    /// uniform scaling (within 1 pixel of preserving aspect ratio), the tool automatically
+    /// enforces uniform scaling. Use this flag to disable that behavior and use the
+    /// exact dimensions specified, even if it causes slight aspect ratio distortion.
+    #[arg(long)]
+    non_uniform: bool,
+
     /// Enable verbose output
     #[arg(short, long)]
     verbose: bool,
@@ -714,6 +723,7 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
 /// Resize linear RGB image in linear space for correct color blending
 /// When has_alpha is true, uses alpha-aware rescaling to prevent transparent pixels
 /// from bleeding their color into opaque regions.
+/// When force_exact is true, disables automatic uniform scaling detection.
 fn resize_linear(
     pixels: &[Pixel4],
     src_width: u32,
@@ -722,18 +732,20 @@ fn resize_linear(
     target_height: Option<u32>,
     method: cra_wasm::rescale::RescaleMethod,
     has_alpha: bool,
+    force_exact: bool,
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions, rescale_with_progress, rescale_with_alpha_progress, ScaleMode};
+    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress, rescale_with_alpha_progress, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
-    let (dst_width, dst_height) = calculate_target_dimensions(
+    let (dst_width, dst_height) = calculate_target_dimensions_exact(
         src_width as usize,
         src_height as usize,
         tw,
         th,
+        force_exact,
     );
 
     if dst_width == src_width as usize && dst_height == src_height as usize {
@@ -1290,6 +1302,7 @@ fn main() -> Result<(), String> {
             args.width, args.height,
             args.scale_method.to_rescale_method(),
             original_has_alpha,
+            args.non_uniform,
             args.verbose,
             if args.progress { Some(&mut resize_progress) } else { None },
         )?;

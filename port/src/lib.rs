@@ -640,6 +640,7 @@ pub fn rescale_rgb_with_progress_wasm(
 }
 
 /// Calculate target dimensions preserving aspect ratio
+/// Automatically enforces uniform scaling when dimensions are within 1 pixel of uniform AR.
 #[wasm_bindgen]
 pub fn calculate_dimensions_wasm(
     src_width: u32,
@@ -650,6 +651,22 @@ pub fn calculate_dimensions_wasm(
     let tw = if target_width == 0 { None } else { Some(target_width as usize) };
     let th = if target_height == 0 { None } else { Some(target_height as usize) };
     let (w, h) = rescale::calculate_target_dimensions(src_width as usize, src_height as usize, tw, th);
+    vec![w as u32, h as u32]
+}
+
+/// Calculate target dimensions with explicit control over uniform scaling
+/// When force_exact is true, uses exact dimensions without automatic uniform scaling adjustment.
+#[wasm_bindgen]
+pub fn calculate_dimensions_exact_wasm(
+    src_width: u32,
+    src_height: u32,
+    target_width: u32,
+    target_height: u32,
+    force_exact: bool,
+) -> Vec<u32> {
+    let tw = if target_width == 0 { None } else { Some(target_width as usize) };
+    let th = if target_height == 0 { None } else { Some(target_height as usize) };
+    let (w, h) = rescale::calculate_target_dimensions_exact(src_width as usize, src_height as usize, tw, th, force_exact);
     vec![w as u32, h as u32]
 }
 
