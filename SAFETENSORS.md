@@ -528,7 +528,7 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 2 (Recommended):**
 - All Level 1 requirements
-- Support `F16` tensors
+- Support `F16` and `BF16` tensors
 - Support `RGBA` channels and the premultiplied alpha flag
 - Support `CHW` dimension order
 
@@ -540,7 +540,6 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 4 (Full):**
 - All Level 3 requirements
-- Support `BF16` tensors
 - Support all defined primaries
 - Support multi-image files
 

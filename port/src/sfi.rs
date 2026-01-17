@@ -8,7 +8,7 @@
 //! - Support RGB and RGBA channels
 //! - Support HWC and CHW dimension order
 
-use half::f16;
+use half::{bf16, f16};
 use serde_json::{json, Map, Value};
 
 use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
@@ -183,6 +183,7 @@ impl SfiDimensionOrder {
 pub enum SfiDtype {
     F32,
     F16,
+    BF16,
 }
 
 impl SfiDtype {
@@ -190,6 +191,7 @@ impl SfiDtype {
         match s {
             "F32" => Ok(SfiDtype::F32),
             "F16" => Ok(SfiDtype::F16),
+            "BF16" => Ok(SfiDtype::BF16),
             _ => Err(SfiError::InvalidDtype(s.to_string())),
         }
     }
@@ -198,13 +200,14 @@ impl SfiDtype {
         match self {
             SfiDtype::F32 => "F32",
             SfiDtype::F16 => "F16",
+            SfiDtype::BF16 => "BF16",
         }
     }
 
     fn bytes_per_element(&self) -> usize {
         match self {
             SfiDtype::F32 => 4,
-            SfiDtype::F16 => 2,
+            SfiDtype::F16 | SfiDtype::BF16 => 2,
         }
     }
 }
@@ -289,9 +292,15 @@ pub fn is_sfi_format(data: &[u8]) -> bool {
 // Reading SFI Files
 // ============================================================================
 
-/// Read an SFI file and return the decoded image.
-/// Automatically converts to linear RGB if transfer is sRGB.
+/// Read an SFI file and return the decoded image, converting to linear RGB.
+/// This is the common case for image processing pipelines.
 pub fn read_sfi(data: &[u8]) -> Result<SfiImage, SfiError> {
+    read_sfi_with_transfer(data, SfiTransfer::Linear)
+}
+
+/// Read an SFI file and return the decoded image with specified output transfer.
+/// - `target_transfer`: The desired output transfer function (Linear or Srgb)
+pub fn read_sfi_with_transfer(data: &[u8], target_transfer: SfiTransfer) -> Result<SfiImage, SfiError> {
     // Read header size
     if data.len() < 8 {
         return Err(SfiError::FileTooShort);
@@ -434,7 +443,7 @@ pub fn read_sfi(data: &[u8]) -> Result<SfiImage, SfiError> {
 
     // Read pixels based on dtype and dimension order
     let has_alpha = channels == SfiChannels::Rgba;
-    let pixels = read_pixels(tensor_data, width, height, dtype, dimension_order, num_channels, transfer)?;
+    let pixels = read_pixels(tensor_data, width, height, dtype, dimension_order, num_channels, transfer, target_transfer)?;
 
     Ok(SfiImage {
         pixels,
@@ -446,7 +455,7 @@ pub fn read_sfi(data: &[u8]) -> Result<SfiImage, SfiError> {
     })
 }
 
-/// Read pixel data from tensor bytes
+/// Read pixel data from tensor bytes, converting from source to target transfer
 fn read_pixels(
     data: &[u8],
     width: usize,
@@ -454,10 +463,15 @@ fn read_pixels(
     dtype: SfiDtype,
     dimension_order: SfiDimensionOrder,
     num_channels: usize,
-    transfer: SfiTransfer,
+    source_transfer: SfiTransfer,
+    target_transfer: SfiTransfer,
 ) -> Result<Vec<Pixel4>, SfiError> {
     let pixel_count = width * height;
     let mut pixels = Vec::with_capacity(pixel_count);
+
+    // Determine conversion needed
+    let needs_srgb_to_linear = source_transfer == SfiTransfer::Srgb && target_transfer == SfiTransfer::Linear;
+    let needs_linear_to_srgb = source_transfer == SfiTransfer::Linear && target_transfer == SfiTransfer::Srgb;
 
     match dtype {
         SfiDtype::F32 => {
@@ -468,9 +482,10 @@ fn read_pixels(
             for i in 0..pixel_count {
                 let (r, g, b, a) = read_pixel_at(&float_data, i, width, height, dimension_order, num_channels);
 
-                // Convert to linear if transfer is sRGB
-                let (r, g, b) = if transfer == SfiTransfer::Srgb {
+                let (r, g, b) = if needs_srgb_to_linear {
                     (srgb_to_linear_single(r), srgb_to_linear_single(g), srgb_to_linear_single(b))
+                } else if needs_linear_to_srgb {
+                    (linear_to_srgb_single(r), linear_to_srgb_single(g), linear_to_srgb_single(b))
                 } else {
                     (r, g, b)
                 };
@@ -486,9 +501,29 @@ fn read_pixels(
             for i in 0..pixel_count {
                 let (r, g, b, a) = read_pixel_at_f16(&f16_data, i, width, height, dimension_order, num_channels);
 
-                // Convert to linear if transfer is sRGB
-                let (r, g, b) = if transfer == SfiTransfer::Srgb {
+                let (r, g, b) = if needs_srgb_to_linear {
                     (srgb_to_linear_single(r), srgb_to_linear_single(g), srgb_to_linear_single(b))
+                } else if needs_linear_to_srgb {
+                    (linear_to_srgb_single(r), linear_to_srgb_single(g), linear_to_srgb_single(b))
+                } else {
+                    (r, g, b)
+                };
+
+                pixels.push(Pixel4::new(r, g, b, a));
+            }
+        }
+        SfiDtype::BF16 => {
+            let bf16_data: Vec<bf16> = data.chunks_exact(2)
+                .map(|chunk| bf16::from_le_bytes([chunk[0], chunk[1]]))
+                .collect();
+
+            for i in 0..pixel_count {
+                let (r, g, b, a) = read_pixel_at_bf16(&bf16_data, i, width, height, dimension_order, num_channels);
+
+                let (r, g, b) = if needs_srgb_to_linear {
+                    (srgb_to_linear_single(r), srgb_to_linear_single(g), srgb_to_linear_single(b))
+                } else if needs_linear_to_srgb {
+                    (linear_to_srgb_single(r), linear_to_srgb_single(g), linear_to_srgb_single(b))
                 } else {
                     (r, g, b)
                 };
@@ -567,6 +602,39 @@ fn read_pixel_at_f16(
     }
 }
 
+/// Read a single pixel at index i from bf16 data
+fn read_pixel_at_bf16(
+    data: &[bf16],
+    pixel_idx: usize,
+    width: usize,
+    height: usize,
+    dim_order: SfiDimensionOrder,
+    num_channels: usize,
+) -> (f32, f32, f32, f32) {
+    let y = pixel_idx / width;
+    let x = pixel_idx % width;
+
+    match dim_order {
+        SfiDimensionOrder::Hwc => {
+            let base = (y * width + x) * num_channels;
+            let r = data[base].to_f32();
+            let g = data[base + 1].to_f32();
+            let b = data[base + 2].to_f32();
+            let a = if num_channels == 4 { data[base + 3].to_f32() } else { 1.0 };
+            (r, g, b, a)
+        }
+        SfiDimensionOrder::Chw => {
+            let plane_size = height * width;
+            let offset = y * width + x;
+            let r = data[offset].to_f32();
+            let g = data[plane_size + offset].to_f32();
+            let b = data[2 * plane_size + offset].to_f32();
+            let a = if num_channels == 4 { data[3 * plane_size + offset].to_f32() } else { 1.0 };
+            (r, g, b, a)
+        }
+    }
+}
+
 // ============================================================================
 // Writing SFI Files
 // ============================================================================
@@ -583,7 +651,6 @@ pub fn write_sfi_f32(
 }
 
 /// Write linear RGB pixels to SFI F16 format.
-/// Returns the encoded bytes and whether precision warning should be shown.
 pub fn write_sfi_f16(
     pixels: &[Pixel4],
     width: u32,
@@ -592,6 +659,17 @@ pub fn write_sfi_f16(
     transfer: SfiTransfer,
 ) -> Vec<u8> {
     write_sfi_internal(pixels, width, height, include_alpha, transfer, SfiDtype::F16, false)
+}
+
+/// Write linear RGB pixels to SFI BF16 format.
+pub fn write_sfi_bf16(
+    pixels: &[Pixel4],
+    width: u32,
+    height: u32,
+    include_alpha: bool,
+    transfer: SfiTransfer,
+) -> Vec<u8> {
+    write_sfi_internal(pixels, width, height, include_alpha, transfer, SfiDtype::BF16, false)
 }
 
 /// Write linear RGB pixels to SFI F16 format with alpha premultiply flag.
@@ -677,24 +755,14 @@ fn write_sfi_internal(
     // Write header JSON
     output.extend_from_slice(header_bytes);
 
-    // Write tensor data
+    // Write tensor data (no colorspace conversion - caller provides data in correct space)
+    // Only dtype conversion is performed here
     match dtype {
         SfiDtype::F32 => {
             for pixel in pixels.iter() {
-                // Apply transfer function if needed (linear -> sRGB)
-                let (r, g, b) = if transfer == SfiTransfer::Srgb {
-                    (
-                        linear_to_srgb_single(pixel[0]),
-                        linear_to_srgb_single(pixel[1]),
-                        linear_to_srgb_single(pixel[2]),
-                    )
-                } else {
-                    (pixel[0], pixel[1], pixel[2])
-                };
-
-                output.extend_from_slice(&r.to_le_bytes());
-                output.extend_from_slice(&g.to_le_bytes());
-                output.extend_from_slice(&b.to_le_bytes());
+                output.extend_from_slice(&pixel[0].to_le_bytes());
+                output.extend_from_slice(&pixel[1].to_le_bytes());
+                output.extend_from_slice(&pixel[2].to_le_bytes());
                 if include_alpha {
                     output.extend_from_slice(&pixel[3].to_le_bytes());
                 }
@@ -702,23 +770,23 @@ fn write_sfi_internal(
         }
         SfiDtype::F16 => {
             for pixel in pixels.iter() {
-                // Apply transfer function if needed (linear -> sRGB)
-                let (r, g, b) = if transfer == SfiTransfer::Srgb {
-                    (
-                        linear_to_srgb_single(pixel[0]),
-                        linear_to_srgb_single(pixel[1]),
-                        linear_to_srgb_single(pixel[2]),
-                    )
-                } else {
-                    (pixel[0], pixel[1], pixel[2])
-                };
-
                 // Convert to f16 using round-to-nearest (default for half crate)
-                output.extend_from_slice(&f16::from_f32(r).to_le_bytes());
-                output.extend_from_slice(&f16::from_f32(g).to_le_bytes());
-                output.extend_from_slice(&f16::from_f32(b).to_le_bytes());
+                output.extend_from_slice(&f16::from_f32(pixel[0]).to_le_bytes());
+                output.extend_from_slice(&f16::from_f32(pixel[1]).to_le_bytes());
+                output.extend_from_slice(&f16::from_f32(pixel[2]).to_le_bytes());
                 if include_alpha {
                     output.extend_from_slice(&f16::from_f32(pixel[3]).to_le_bytes());
+                }
+            }
+        }
+        SfiDtype::BF16 => {
+            for pixel in pixels.iter() {
+                // Convert to bf16 using round-to-nearest (default for half crate)
+                output.extend_from_slice(&bf16::from_f32(pixel[0]).to_le_bytes());
+                output.extend_from_slice(&bf16::from_f32(pixel[1]).to_le_bytes());
+                output.extend_from_slice(&bf16::from_f32(pixel[2]).to_le_bytes());
+                if include_alpha {
+                    output.extend_from_slice(&bf16::from_f32(pixel[3]).to_le_bytes());
                 }
             }
         }
@@ -797,19 +865,52 @@ mod tests {
     }
 
     #[test]
-    fn test_srgb_transfer_roundtrip() {
-        let pixels = vec![
-            Pixel4::new(0.5, 0.5, 0.5, 1.0), // Mid-gray in linear
+    fn test_write_and_read_bf16() {
+        let pixels = create_test_pixels();
+        let data = write_sfi_bf16(&pixels, 2, 2, false, SfiTransfer::Linear);
+
+        let image = read_sfi(&data).unwrap();
+        assert_eq!(image.dtype, SfiDtype::BF16);
+
+        // BF16 has lower precision (7 mantissa bits vs 10 for F16)
+        for (orig, loaded) in pixels.iter().zip(image.pixels.iter()) {
+            assert!((orig[0] - loaded[0]).abs() < 0.01);
+            assert!((orig[1] - loaded[1]).abs() < 0.01);
+            assert!((orig[2] - loaded[2]).abs() < 0.01);
+        }
+    }
+
+    #[test]
+    fn test_srgb_transfer_read_converts_to_linear() {
+        // Write sRGB data (0.5 in sRGB space) - write does NOT convert
+        let srgb_pixels = vec![
+            Pixel4::new(0.5, 0.5, 0.5, 1.0), // 0.5 in sRGB space
         ];
 
-        // Write with sRGB transfer
-        let data = write_sfi_f32(&pixels, 1, 1, false, SfiTransfer::Srgb);
+        let data = write_sfi_f32(&srgb_pixels, 1, 1, false, SfiTransfer::Srgb);
 
-        // Read back - should return linear values
+        // Read back - should convert sRGB to linear
         let image = read_sfi(&data).unwrap();
 
-        // Original linear 0.5 should roundtrip through sRGB encode/decode
-        assert!((image.pixels[0][0] - 0.5).abs() < 1e-5);
+        // sRGB 0.5 → linear is approximately 0.214
+        let expected_linear = srgb_to_linear_single(0.5);
+        assert!((image.pixels[0][0] - expected_linear).abs() < 1e-5);
+    }
+
+    #[test]
+    fn test_linear_transfer_no_conversion() {
+        // Write linear data - write does NOT convert
+        let linear_pixels = vec![
+            Pixel4::new(0.5, 0.5, 0.5, 1.0), // 0.5 in linear space
+        ];
+
+        let data = write_sfi_f32(&linear_pixels, 1, 1, false, SfiTransfer::Linear);
+
+        // Read back - no conversion needed for linear
+        let image = read_sfi(&data).unwrap();
+
+        // Should get back exactly what we wrote
+        assert!((image.pixels[0][0] - 0.5).abs() < 1e-6);
     }
 
     #[test]

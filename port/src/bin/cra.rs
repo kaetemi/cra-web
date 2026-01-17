@@ -17,13 +17,14 @@ use cra_wasm::binary_format::{
     encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
     is_valid_stride, ColorFormat, StrideFill,
 };
+use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32};
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
     can_use_cicp, cicp_description, image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba,
     is_cicp_linear_srgb, is_cicp_needs_conversion, is_cicp_srgb, is_cicp_unspecified,
-    is_profile_srgb_verbose, load_image_from_path, transform_cicp_to_linear_srgb_pixels,
-    transform_icc_to_linear_srgb_pixels,
+    is_profile_srgb_verbose, load_image_from_path, load_image_from_path_auto,
+    transform_cicp_to_linear_srgb_pixels, transform_icc_to_linear_srgb_pixels,
 };
 use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
 use cra_wasm::dither_luminosity::colorspace_aware_dither_gray_with_mode;
@@ -242,6 +243,30 @@ impl StrideFillArg {
     }
 }
 
+/// Safetensors output data format
+#[derive(Debug, Clone, Copy, ValueEnum, Default)]
+enum SafetensorsFormat {
+    /// 32-bit floating point (highest precision)
+    #[default]
+    Fp32,
+    /// 16-bit floating point (IEEE half precision)
+    Fp16,
+    /// Brain floating point (16-bit, same exponent range as FP32)
+    Bf16,
+}
+
+/// Safetensors transfer function
+#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq)]
+enum SafetensorsTransfer {
+    /// Auto: linear if processing path, sRGB if non-processing path
+    Auto,
+    /// Linear light (no gamma curve)
+    Linear,
+    /// sRGB transfer function (gamma-encoded, most common)
+    #[default]
+    Srgb,
+}
+
 // ============================================================================
 // Progress Bar
 // ============================================================================
@@ -324,7 +349,24 @@ struct Args {
     #[arg(long)]
     output_meta: Option<PathBuf>,
 
-    /// Output format: RGB, ARGB, or L with bit counts.
+    /// Output safetensors file path (optional, supports .safetensors or .safetensors.gz)
+    /// Writes the image as floating-point before dithering.
+    #[arg(long)]
+    output_safetensors: Option<PathBuf>,
+
+    /// Safetensors output transfer function
+    #[arg(long, value_enum, default_value_t = SafetensorsTransfer::Srgb)]
+    safetensors_transfer: SafetensorsTransfer,
+
+    /// Safetensors output data format
+    #[arg(long, value_enum, default_value_t = SafetensorsFormat::Fp32)]
+    safetensors_format: SafetensorsFormat,
+
+    /// Strip alpha channel from safetensors output
+    #[arg(long)]
+    safetensors_no_alpha: bool,
+
+    /// Output format: RGB, ARGB, L with bit counts.
     /// RGB: RGB8 (=RGB888), RGB332, RGB565, RGB888
     /// ARGB: ARGB8 (=ARGB8888), ARGB4 (=ARGB4444), ARGB1555, ARGB4444, ARGB8888
     /// Grayscale: L1, L2, L4, L8
@@ -1087,6 +1129,69 @@ fn write_metadata(
 }
 
 // ============================================================================
+// Safetensors Output Helper
+// ============================================================================
+
+/// Write safetensors output file (linear or sRGB FP32/FP16/BF16)
+fn write_safetensors_output(
+    path: &PathBuf,
+    pixels: &[Pixel4],
+    width: u32,
+    height: u32,
+    include_alpha: bool,
+    transfer: SfiTransfer,
+    format: SafetensorsFormat,
+    verbose: bool,
+) -> Result<usize, String> {
+    let transfer_name = match transfer {
+        SfiTransfer::Linear => "linear",
+        SfiTransfer::Srgb => "sRGB",
+        SfiTransfer::Unspecified => "unspecified",
+    };
+
+    let format_name = match format {
+        SafetensorsFormat::Fp32 => "FP32",
+        SafetensorsFormat::Fp16 => "FP16",
+        SafetensorsFormat::Bf16 => "BF16",
+    };
+
+    if verbose {
+        eprintln!(
+            "Safetensors output: {} ({}, {}, {})",
+            path.display(),
+            format_name,
+            transfer_name,
+            if include_alpha { "RGBA" } else { "RGB" }
+        );
+    }
+
+    // Print precision warning for reduced precision formats
+    if matches!(format, SafetensorsFormat::Fp16 | SafetensorsFormat::Bf16) {
+        eprintln!("Note: {} output uses round-to-nearest. For optimal precision, error diffusion", format_name);
+        eprintln!("      specific to {} precision is recommended but not yet implemented.", format_name);
+    }
+
+    let sfi_data = match format {
+        SafetensorsFormat::Fp32 => write_sfi_f32(pixels, width, height, include_alpha, transfer),
+        SafetensorsFormat::Fp16 => write_sfi_f16(pixels, width, height, include_alpha, transfer),
+        SafetensorsFormat::Bf16 => write_sfi_bf16(pixels, width, height, include_alpha, transfer),
+    };
+
+    let data_len = sfi_data.len();
+
+    let mut file = File::create(path)
+        .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+    file.write_all(&sfi_data)
+        .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+
+    if verbose {
+        eprintln!("  Written {} bytes", data_len);
+    }
+
+    Ok(data_len)
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -1172,9 +1277,10 @@ fn main() -> Result<(), String> {
         && args.output_raw.is_none()
         && !has_channel_output
         && args.output_meta.is_none()
+        && args.output_safetensors.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-raw, --output-raw-r/g/b/a, or --output-meta"
+            "No output specified. Use --output, --output-raw, --output-raw-r/g/b/a, --output-meta, or --output-safetensors"
                 .to_string(),
         );
     }
@@ -1212,10 +1318,11 @@ fn main() -> Result<(), String> {
     }
 
     // Pre-load input image with ICC profile (single file open)
+    // Uses auto-detection to support SFI (safetensors) format
     if args.verbose {
         eprintln!("Loading: {}", args.input.display());
     }
-    let decoded_input = load_image_from_path(&args.input)?;
+    let decoded_input = load_image_from_path_auto(&args.input)?;
 
     // Determine if input has premultiplied alpha that needs un-premultiplying
     // (check before moving fields out of decoded_input)
@@ -1273,11 +1380,12 @@ fn main() -> Result<(), String> {
         }
     };
 
-    let needs_linear = needs_reference || needs_resize || format.is_grayscale || needs_profile_processing || needs_unpremultiply;
+    let needs_linear = needs_reference || needs_resize || format.is_grayscale
+        || needs_profile_processing || needs_unpremultiply;
 
     // Process image based on whether linear space is needed
     let (dither_result, width, height) = if needs_linear {
-        // Linear RGB path: load -> resize -> color correct -> dither
+        // Linear RGB path: load -> resize -> color correct -> safetensors -> dither
         if args.verbose {
             eprintln!("Processing in linear RGB space...");
         }
@@ -1346,6 +1454,41 @@ fn main() -> Result<(), String> {
             input_pixels
         };
 
+        // Write safetensors output (linear path) - before dithering
+        // Data is linear 0-1, auto resolves to linear transfer
+        if let Some(ref sfi_path) = args.output_safetensors {
+            let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
+            let transfer = match args.safetensors_transfer {
+                SafetensorsTransfer::Auto => SfiTransfer::Linear,
+                SafetensorsTransfer::Linear => SfiTransfer::Linear,
+                SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
+            };
+            // Convert to target transfer (write function doesn't convert)
+            let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Srgb {
+                // Linear → sRGB conversion
+                pixels_to_dither.iter()
+                    .map(|p| Pixel4::new(
+                        linear_to_srgb_single(p[0]),
+                        linear_to_srgb_single(p[1]),
+                        linear_to_srgb_single(p[2]),
+                        p[3],
+                    ))
+                    .collect()
+            } else {
+                pixels_to_dither.clone()
+            };
+            write_safetensors_output(
+                sfi_path,
+                &output_pixels,
+                width,
+                height,
+                include_alpha,
+                transfer,
+                args.safetensors_format,
+                args.verbose,
+            )?;
+        }
+
         let mut dither_progress = |p: f32| print_progress("Dither", p);
         let result = dither_pixels(
             pixels_to_dither,
@@ -1372,6 +1515,44 @@ fn main() -> Result<(), String> {
         }
 
         let (input_pixels, width, height, input_has_alpha) = convert_to_srgb_255(&input_img, args.verbose);
+
+        // Write safetensors output (sRGB path) - normalize 0-255 to 0-1 range
+        // Data is sRGB 0-255, auto resolves to sRGB transfer
+        if let Some(ref sfi_path) = args.output_safetensors {
+            let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
+            let transfer = match args.safetensors_transfer {
+                SafetensorsTransfer::Auto => SfiTransfer::Srgb,
+                SafetensorsTransfer::Linear => SfiTransfer::Linear,
+                SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
+            };
+            // Normalize 0-255 to 0-1 and convert to target transfer
+            let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Linear {
+                // sRGB 0-255 → normalize → sRGB → linear
+                input_pixels.iter()
+                    .map(|p| Pixel4::new(
+                        srgb_to_linear_single(p[0] / 255.0),
+                        srgb_to_linear_single(p[1] / 255.0),
+                        srgb_to_linear_single(p[2] / 255.0),
+                        p[3] / 255.0,
+                    ))
+                    .collect()
+            } else {
+                // sRGB 0-255 → normalize (stays sRGB)
+                input_pixels.iter()
+                    .map(|p| Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0))
+                    .collect()
+            };
+            write_safetensors_output(
+                sfi_path,
+                &output_pixels,
+                width,
+                height,
+                include_alpha,
+                transfer,
+                args.safetensors_format,
+                args.verbose,
+            )?;
+        }
 
         let mut dither_progress = |p: f32| print_progress("Dither", p);
         let result = dither_pixels_srgb_rgb(
