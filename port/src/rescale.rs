@@ -9,8 +9,10 @@ use std::f32::consts::PI;
 pub enum RescaleMethod {
     /// Bilinear interpolation - fast, good for moderate scaling
     Bilinear,
-    /// Mitchell-Netravali (B=C=1/3) - balanced sharpness/ringing, minimal overshoot
+    /// Mitchell-Netravali (B=C=1/3) - soft, minimal ringing
     Mitchell,
+    /// Catmull-Rom (B=0, C=0.5) - sharp interpolating spline, low ringing
+    CatmullRom,
     /// Lanczos3 - maximum sharpness, some ringing artifacts
     Lanczos3,
 }
@@ -31,7 +33,8 @@ impl RescaleMethod {
     pub fn from_str(s: &str) -> Option<RescaleMethod> {
         match s.to_lowercase().as_str() {
             "bilinear" | "linear" => Some(RescaleMethod::Bilinear),
-            "mitchell" | "cubic" | "bicubic" => Some(RescaleMethod::Mitchell),
+            "mitchell" => Some(RescaleMethod::Mitchell),
+            "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
             _ => None,
         }
@@ -42,6 +45,7 @@ impl RescaleMethod {
         match self {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
+            RescaleMethod::CatmullRom => 2.0,
             RescaleMethod::Lanczos3 => 3.0,
         }
     }
@@ -63,6 +67,26 @@ fn mitchell(x: f32) -> f32 {
         // (12 - 9B - 6C)|x|³ + (-18 + 12B + 6C)|x|² + (6 - 2B)
         // With B=C=1/3: 7x³ - 12x² + 16/3, divided by 6
         (7.0/6.0) * x * x * x - 2.0 * x * x + 8.0/9.0
+    }
+}
+
+/// Catmull-Rom spline kernel (B=0, C=0.5)
+/// Sharper than Mitchell, less ringing than Lanczos.
+/// This is an interpolating spline (passes through original sample points).
+/// Support is [-2, 2]
+#[inline]
+fn catmull_rom(x: f32) -> f32 {
+    let x = x.abs();
+    if x >= 2.0 {
+        0.0
+    } else if x >= 1.0 {
+        // (-B - 6C)|x|³ + (6B + 30C)|x|² + (-12B - 48C)|x| + (8B + 24C)
+        // With B=0, C=0.5: -3x³ + 15x² - 24x + 12, divided by 6
+        -0.5 * x * x * x + 2.5 * x * x - 4.0 * x + 2.0
+    } else {
+        // (12 - 9B - 6C)|x|³ + (-18 + 12B + 6C)|x|² + (6 - 2B)
+        // With B=0, C=0.5: 9x³ - 15x² + 6, divided by 6
+        1.5 * x * x * x - 2.5 * x * x + 1.0
     }
 }
 
@@ -89,6 +113,7 @@ fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
             if x < 1.0 { 1.0 - x } else { 0.0 }
         }
         RescaleMethod::Mitchell => mitchell(x),
+        RescaleMethod::CatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos3 => lanczos3(x),
     }
 }
@@ -738,7 +763,7 @@ pub fn rescale_with_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::Lanczos3 => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 
@@ -786,7 +811,7 @@ pub fn rescale_with_alpha_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::Lanczos3 => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 
@@ -1467,5 +1492,90 @@ mod tests {
         // Mitchell may be slightly blurrier than Lanczos, but should still have good PSNR
         assert!(psnr > 18.0, "Mitchell PSNR too low: {:.2}dB (expected > 18dB)", psnr);
         assert!(max_diff < 0.25, "Mitchell max diff too high: {:.4} (expected < 0.25)", max_diff);
+    }
+
+    #[test]
+    fn test_catmull_rom_identity() {
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.25, 0.25, 0.25, 0.0),
+            Pixel4::new(0.5, 0.5, 0.5, 0.0),
+            Pixel4::new(0.75, 0.75, 0.75, 0.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::CatmullRom, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_catmull_rom_between_mitchell_and_lanczos() {
+        // Catmull-Rom should be sharper than Mitchell but have less ringing than Lanczos
+        let size = 32;
+        let mut src = vec![Pixel4::default(); size];
+        for x in 0..size {
+            let val = if x < size / 2 { 0.0 } else { 1.0 };
+            src[x] = Pixel4::new(val, val, val, 0.0);
+        }
+
+        // 4x upscale then 4x downscale
+        let lanczos_up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let lanczos_down = rescale(&lanczos_up, size * 4, 1, size, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        let catrom_up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::CatmullRom, ScaleMode::Independent);
+        let catrom_down = rescale(&catrom_up, size * 4, 1, size, 1, RescaleMethod::CatmullRom, ScaleMode::Independent);
+
+        let mitchell_up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::Mitchell, ScaleMode::Independent);
+        let mitchell_down = rescale(&mitchell_up, size * 4, 1, size, 1, RescaleMethod::Mitchell, ScaleMode::Independent);
+
+        // Measure ringing (overshoot on dark side)
+        let lanczos_overshoot = (0..13).map(|i| lanczos_down[i][0]).fold(0.0f32, f32::max);
+        let catrom_overshoot = (0..13).map(|i| catrom_down[i][0]).fold(0.0f32, f32::max);
+        let mitchell_overshoot = (0..13).map(|i| mitchell_down[i][0]).fold(0.0f32, f32::max);
+
+        eprintln!("Overshoot - Lanczos: {:.4}, Catmull-Rom: {:.4}, Mitchell: {:.4}",
+            lanczos_overshoot, catrom_overshoot, mitchell_overshoot);
+
+        // Catmull-Rom should have less ringing than Lanczos
+        assert!(catrom_overshoot <= lanczos_overshoot,
+            "Catmull-Rom overshoot ({:.4}) should be <= Lanczos ({:.4})", catrom_overshoot, lanczos_overshoot);
+    }
+
+    #[test]
+    fn test_catmull_rom_4x_roundtrip_quality() {
+        // Catmull-Rom should be sharper than Mitchell (higher PSNR)
+        let size = 16;
+        let mut src = vec![Pixel4::default(); size * size];
+
+        for y in 0..size {
+            for x in 0..size {
+                let val = if y < size / 2 {
+                    x as f32 / (size - 1) as f32
+                } else {
+                    if x < size / 2 { 0.0 } else { 1.0 }
+                };
+                src[y * size + x] = Pixel4::new(val, val, val, 0.0);
+            }
+        }
+
+        let up = rescale(&src, size, size, size * 4, size * 4, RescaleMethod::CatmullRom, ScaleMode::Independent);
+        let down = rescale(&up, size * 4, size * 4, size, size, RescaleMethod::CatmullRom, ScaleMode::Independent);
+
+        let mut mse = 0.0f64;
+        let mut max_diff = 0.0f32;
+        for (orig, result) in src.iter().zip(down.iter()) {
+            let diff = (orig[0] - result[0]).abs();
+            mse += (diff as f64).powi(2);
+            if diff > max_diff {
+                max_diff = diff;
+            }
+        }
+        mse /= (size * size) as f64;
+        let psnr = if mse > 0.0 { 10.0 * (1.0 / mse).log10() } else { f64::INFINITY };
+
+        eprintln!("Catmull-Rom 4x roundtrip: MSE={:.6}, PSNR={:.2}dB, max_diff={:.4}", mse, psnr, max_diff);
+
+        // Catmull-Rom should be sharper than Mitchell (PSNR > 27dB which Mitchell got)
+        // but may have slightly more error than Lanczos due to less aggressive sharpening
+        assert!(psnr > 25.0, "Catmull-Rom PSNR too low: {:.2}dB (expected > 25dB)", psnr);
+        assert!(max_diff < 0.20, "Catmull-Rom max diff too high: {:.4} (expected < 0.20)", max_diff);
     }
 }

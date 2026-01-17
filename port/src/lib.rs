@@ -74,6 +74,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
     match method {
         1 => rescale::RescaleMethod::Lanczos3,
         2 => rescale::RescaleMethod::Mitchell,
+        3 => rescale::RescaleMethod::CatmullRom,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

@@ -333,8 +333,9 @@
             <div class="option-row" style="margin-top: 20px;">
                 <label>Interpolation:</label>
                 <select id="interpolation">
-                    <option value="1" selected>Lanczos (max sharpness)</option>
-                    <option value="2">Mitchell (balanced, less ringing)</option>
+                    <option value="3" selected>Catmull-Rom (sharp, low ringing)</option>
+                    <option value="1">Lanczos (max sharpness, more ringing)</option>
+                    <option value="2">Mitchell (soft, minimal ringing)</option>
                     <option value="0">Bilinear (faster)</option>
                 </select>
             </div>
@@ -492,6 +493,12 @@
                     pendingComparison.linearResult = imageData;
                     pendingComparison.stage = 'srgb';
 
+                    // Store linear result for download (before sRGB overwrites)
+                    lastLinearResult = outputData;
+                    lastOutputWidth = width;
+                    lastOutputHeight = height;
+                    lastHasAlpha = hasAlpha || false;
+
                     // Start sRGB (bad) resize - use simple Floyd-Steinberg without color-awareness
                     worker.postMessage({
                         type: 'resize-srgb',
@@ -509,13 +516,13 @@
                 // Single result mode
                 displaySingleResult(imageData, width, height);
                 finishProcessing();
-            }
 
-            // Store for download
-            lastLinearResult = outputData;
-            lastOutputWidth = width;
-            lastOutputHeight = height;
-            lastHasAlpha = hasAlpha || false;
+                // Store for download
+                lastLinearResult = outputData;
+                lastOutputWidth = width;
+                lastOutputHeight = height;
+                lastHasAlpha = hasAlpha || false;
+            }
         }
 
         function handleResizeError(message) {
@@ -575,7 +582,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom' };
 
             // Map dither mode values to CLI names
             const modeMap = {
@@ -609,8 +616,8 @@
                 cmd += ` --height ${lastOutputHeight}`;
             }
 
-            // Add scale method (only if not default lanczos)
-            if (interpolation === 0) {
+            // Add scale method (only if not default catmull-rom)
+            if (interpolation !== 3) {
                 cmd += ` --scale-method ${interpolationMap[interpolation]}`;
             }
 

@@ -774,8 +774,9 @@
                 <div class="size-inputs" style="margin-top: 10px;">
                     <label for="scale-method">Method:</label>
                     <select id="scale-method">
-                        <option value="1" selected>Lanczos (max sharpness)</option>
-                        <option value="2">Mitchell (balanced, less ringing)</option>
+                        <option value="3" selected>Catmull-Rom (sharp, low ringing)</option>
+                        <option value="1">Lanczos (max sharpness, more ringing)</option>
+                        <option value="2">Mitchell (soft, minimal ringing)</option>
                         <option value="0">Bilinear (fast)</option>
                     </select>
                 </div>
@@ -1368,8 +1369,8 @@
 
             // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
-                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
-                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell' };
+                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 3;
+                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom' };
                 if (primaryDimension === 'height') {
                     const height = parseInt(document.getElementById('scale-height').value);
                     cmd += ` --height ${height}`;
@@ -1377,8 +1378,8 @@
                     const width = parseInt(document.getElementById('scale-width').value);
                     cmd += ` --width ${width}`;
                 }
-                // Only add scale method if not default lanczos
-                if (scaleMethod !== 1) {
+                // Only add scale method if not default catmull-rom
+                if (scaleMethod !== 3) {
                     cmd += ` --scale-method ${scaleMethodMap[scaleMethod]}`;
                 }
             }
