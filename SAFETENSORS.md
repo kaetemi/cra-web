@@ -575,6 +575,12 @@ Extensions must not redefine the meaning of existing fields. Unknown fields shou
 
 ---
 
+## Compression
+
+The compressed variant of this file format is simply `.safetensors.gz`.
+
+---
+
 ## References
 
 - Safetensors format: https://huggingface.co/docs/safetensors
