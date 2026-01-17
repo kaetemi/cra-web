@@ -918,3 +918,46 @@ pub fn load_image_from_path_auto<P: AsRef<Path>>(path: P) -> Result<DecodedImage
         .map_err(|e| format!("Failed to read {}: {}", path.as_ref().display(), e))?;
     load_image_from_bytes_auto(&data)
 }
+
+/// Load a raw binary image file using provided metadata
+///
+/// This function decodes packed binary formats (RGB565, RGB888, L8, ARGB8888, etc.)
+/// and converts them to standard RGBA u8 format using bit replication.
+///
+/// Raw files are always assumed to be sRGB. No color space conversion is applied.
+pub fn load_raw_image<P: AsRef<Path>>(
+    path: P,
+    metadata: &crate::binary_format::RawImageMetadata,
+) -> Result<DecodedImage, String> {
+    let data = std::fs::read(path.as_ref())
+        .map_err(|e| format!("Failed to read {}: {}", path.as_ref().display(), e))?;
+
+    let decoded = crate::binary_format::decode_raw_image(&data, metadata)?;
+
+    // Convert RGBA u8 data to DynamicImage
+    let img = image::RgbaImage::from_raw(
+        decoded.width as u32,
+        decoded.height as u32,
+        decoded.pixels,
+    )
+    .ok_or_else(|| "Failed to create image from raw data".to_string())?;
+
+    // Create unspecified CICP (raw files don't have color metadata)
+    let cicp = Cicp {
+        primaries: CicpColorPrimaries::Unspecified,
+        transfer: CicpTransferCharacteristics::Unspecified,
+        matrix: image::metadata::CicpMatrixCoefficients::Identity,
+        full_range: CicpVideoFullRangeFlag::FullRange,
+    };
+
+    Ok(DecodedImage {
+        image: DynamicImage::ImageRgba8(img),
+        icc_profile: None, // Raw files don't have embedded ICC profiles
+        cicp,
+        format: None, // Not a standard image format
+        is_16bit: false, // Output is always 8-bit
+        is_f32: false,
+        has_alpha: decoded.has_alpha,
+        is_premultiplied_alpha: false, // Raw files are not premultiplied
+    })
+}

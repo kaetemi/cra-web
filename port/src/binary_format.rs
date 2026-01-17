@@ -1231,6 +1231,496 @@ pub fn format_is_grayscale(format: &str) -> bool {
         .unwrap_or(false)
 }
 
+// ============================================================================
+// Raw File Decoding (binary to sRGB u8)
+// ============================================================================
+
+/// Metadata for loading a raw binary image file
+#[derive(Debug, Clone)]
+pub struct RawImageMetadata {
+    /// Color format string (e.g., "RGB565", "RGB888", "L8", "ARGB8888")
+    pub format: String,
+    /// Image width in pixels
+    pub width: usize,
+    /// Image height in pixels
+    pub height: usize,
+    /// Row stride in bytes (0 = packed, no padding)
+    pub stride: usize,
+}
+
+impl RawImageMetadata {
+    /// Parse from a JSON string
+    pub fn from_json(json: &str) -> Result<Self, String> {
+        // Simple manual JSON parsing to avoid adding serde dependency for this
+        let json = json.trim();
+        if !json.starts_with('{') || !json.ends_with('}') {
+            return Err("Invalid JSON: expected object".to_string());
+        }
+
+        let inner = &json[1..json.len() - 1];
+        let mut format: Option<String> = None;
+        let mut width: Option<usize> = None;
+        let mut height: Option<usize> = None;
+        let mut stride: usize = 0;
+
+        // Split by commas (being careful about nested structures)
+        for part in inner.split(',') {
+            let part = part.trim();
+            if let Some(colon_pos) = part.find(':') {
+                let key = part[..colon_pos].trim().trim_matches('"');
+                let value = part[colon_pos + 1..].trim();
+
+                match key {
+                    "format" => {
+                        format = Some(value.trim_matches('"').to_string());
+                    }
+                    "width" => {
+                        width = Some(value.parse().map_err(|_| format!("Invalid width: {}", value))?);
+                    }
+                    "height" => {
+                        height = Some(value.parse().map_err(|_| format!("Invalid height: {}", value))?);
+                    }
+                    "stride" => {
+                        stride = value.parse().map_err(|_| format!("Invalid stride: {}", value))?;
+                    }
+                    _ => {} // Ignore unknown keys
+                }
+            }
+        }
+
+        let format = format.ok_or("Missing required field: format")?;
+        let width = width.ok_or("Missing required field: width")?;
+        let height = height.ok_or("Missing required field: height")?;
+
+        Ok(RawImageMetadata {
+            format,
+            width,
+            height,
+            stride,
+        })
+    }
+}
+
+/// Bit-replicate a value from src_bits to 8 bits (per BITDEPTH.md)
+/// This is the correct way to extend bit depths to u8.
+#[inline]
+pub fn bit_replicate_to_u8(value: u32, src_bits: u8) -> u8 {
+    if src_bits >= 8 {
+        return (value & 0xFF) as u8;
+    }
+    if src_bits == 0 {
+        return 0;
+    }
+
+    // Bit replication: ABC -> ABCABCAB for 3-bit to 8-bit
+    // General: shift value left, OR with shifted copies
+    let mut result = 0u32;
+    let mut shift = 8 - src_bits;
+    result |= value << shift;
+
+    // Fill remaining bits by replicating
+    while shift >= src_bits {
+        shift -= src_bits;
+        result |= value << shift;
+    }
+
+    // Handle partial replication at the end
+    if shift > 0 {
+        result |= value >> (src_bits - shift);
+    }
+
+    result as u8
+}
+
+/// Decode a single RGB pixel from packed bits
+/// Returns (R, G, B) as u8 values (bit-replicated to 8 bits)
+#[inline]
+pub fn decode_rgb_pixel(packed: u32, bits_r: u8, bits_g: u8, bits_b: u8) -> (u8, u8, u8) {
+    // Layout: R in MSB, then G, then B in LSB
+    let b_mask = (1u32 << bits_b) - 1;
+    let g_mask = (1u32 << bits_g) - 1;
+    let r_mask = (1u32 << bits_r) - 1;
+
+    let b_val = packed & b_mask;
+    let g_val = (packed >> bits_b) & g_mask;
+    let r_val = (packed >> (bits_b + bits_g)) & r_mask;
+
+    (
+        bit_replicate_to_u8(r_val, bits_r),
+        bit_replicate_to_u8(g_val, bits_g),
+        bit_replicate_to_u8(b_val, bits_b),
+    )
+}
+
+/// Decode a single ARGB pixel from packed bits
+/// Returns (R, G, B, A) as u8 values (bit-replicated to 8 bits)
+/// Layout: A in MSB, then R, G, B toward LSB
+#[inline]
+pub fn decode_argb_pixel(packed: u32, bits_a: u8, bits_r: u8, bits_g: u8, bits_b: u8) -> (u8, u8, u8, u8) {
+    let b_mask = (1u32 << bits_b) - 1;
+    let g_mask = (1u32 << bits_g) - 1;
+    let r_mask = (1u32 << bits_r) - 1;
+    let a_mask = (1u32 << bits_a) - 1;
+
+    let b_val = packed & b_mask;
+    let g_val = (packed >> bits_b) & g_mask;
+    let r_val = (packed >> (bits_b + bits_g)) & r_mask;
+    let a_val = (packed >> (bits_b + bits_g + bits_r)) & a_mask;
+
+    (
+        bit_replicate_to_u8(r_val, bits_r),
+        bit_replicate_to_u8(g_val, bits_g),
+        bit_replicate_to_u8(b_val, bits_b),
+        bit_replicate_to_u8(a_val, bits_a),
+    )
+}
+
+/// Decode a grayscale pixel from packed bits
+/// Returns L as u8 (bit-replicated to 8 bits)
+#[inline]
+pub fn decode_gray_pixel(packed: u32, bits: u8) -> u8 {
+    let mask = (1u32 << bits) - 1;
+    let val = packed & mask;
+    bit_replicate_to_u8(val, bits)
+}
+
+/// Result of decoding a raw image
+pub struct DecodedRawImage {
+    /// Interleaved RGBA u8 data (always 4 bytes per pixel)
+    pub pixels: Vec<u8>,
+    /// Image width
+    pub width: usize,
+    /// Image height
+    pub height: usize,
+    /// Whether the original format had alpha
+    pub has_alpha: bool,
+    /// Whether the original format was grayscale
+    pub is_grayscale: bool,
+}
+
+/// Decode a raw binary image file to interleaved RGBA u8
+///
+/// This decodes packed binary formats (RGB565, RGB888, L8, ARGB8888, etc.)
+/// and converts them to standard RGBA u8 format using bit replication
+/// as specified in BITDEPTH.md.
+///
+/// The output is always sRGB RGBA with 8 bits per channel.
+/// For RGB formats, alpha is set to 255 (fully opaque).
+/// For grayscale formats, R=G=B=L and A=255.
+pub fn decode_raw_image(data: &[u8], metadata: &RawImageMetadata) -> Result<DecodedRawImage, String> {
+    let format = ColorFormat::parse(&metadata.format)?;
+    let width = metadata.width;
+    let height = metadata.height;
+    let pixel_count = width * height;
+
+    // Calculate expected row stride
+    let total_bits = format.total_bits as usize;
+    let bytes_per_pixel = (total_bits + 7) / 8;
+    let packed_bytes_per_row = if total_bits >= 8 {
+        width * bytes_per_pixel
+    } else {
+        let pixels_per_byte = 8 / total_bits;
+        (width + pixels_per_byte - 1) / pixels_per_byte
+    };
+
+    let row_stride = if metadata.stride > 0 {
+        metadata.stride
+    } else {
+        packed_bytes_per_row
+    };
+
+    // Validate data size
+    let expected_size = row_stride * height;
+    if data.len() < expected_size {
+        return Err(format!(
+            "Raw data too small: got {} bytes, expected at least {} bytes ({}x{}, stride={})",
+            data.len(), expected_size, width, height, row_stride
+        ));
+    }
+
+    // Allocate output buffer (always RGBA)
+    let mut pixels = vec![0u8; pixel_count * 4];
+
+    // Special case: RGB666 (4 pixels per 9 bytes)
+    if format.is_rgb666() {
+        decode_rgb666_raw(data, width, height, row_stride, &mut pixels)?;
+        return Ok(DecodedRawImage {
+            pixels,
+            width,
+            height,
+            has_alpha: false,
+            is_grayscale: false,
+        });
+    }
+
+    // Decode based on format type
+    if format.is_grayscale {
+        decode_gray_raw(data, width, height, row_stride, format.bits_r, &mut pixels)?;
+        Ok(DecodedRawImage {
+            pixels,
+            width,
+            height,
+            has_alpha: false,
+            is_grayscale: true,
+        })
+    } else if format.has_alpha {
+        decode_argb_raw(data, width, height, row_stride, format.bits_a, format.bits_r, format.bits_g, format.bits_b, &mut pixels)?;
+        Ok(DecodedRawImage {
+            pixels,
+            width,
+            height,
+            has_alpha: true,
+            is_grayscale: false,
+        })
+    } else {
+        decode_rgb_raw(data, width, height, row_stride, format.bits_r, format.bits_g, format.bits_b, &mut pixels)?;
+        Ok(DecodedRawImage {
+            pixels,
+            width,
+            height,
+            has_alpha: false,
+            is_grayscale: false,
+        })
+    }
+}
+
+/// Decode grayscale raw data
+fn decode_gray_raw(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    row_stride: usize,
+    bits: u8,
+    output: &mut [u8],
+) -> Result<(), String> {
+    let total_bits = bits as usize;
+
+    if total_bits >= 8 {
+        // Byte-aligned (L8)
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let l = data[row_start + x];
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = l;
+                output[out_idx + 1] = l;
+                output[out_idx + 2] = l;
+                output[out_idx + 3] = 255;
+            }
+        }
+    } else {
+        // Sub-byte (L1, L2, L4)
+        let pixels_per_byte = 8 / total_bits;
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let byte_idx = x / pixels_per_byte;
+                let bit_offset = (pixels_per_byte - 1 - (x % pixels_per_byte)) * total_bits;
+                let mask = (1u32 << bits) - 1;
+                let packed = ((data[row_start + byte_idx] >> bit_offset) as u32) & mask;
+                let l = decode_gray_pixel(packed, bits);
+
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = l;
+                output[out_idx + 1] = l;
+                output[out_idx + 2] = l;
+                output[out_idx + 3] = 255;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Decode RGB raw data
+fn decode_rgb_raw(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    row_stride: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    output: &mut [u8],
+) -> Result<(), String> {
+    let total_bits = (bits_r + bits_g + bits_b) as usize;
+    let bytes_per_pixel = (total_bits + 7) / 8;
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let pixel_start = row_start + x * bytes_per_pixel;
+
+                // Read little-endian
+                let mut packed = 0u32;
+                for i in 0..bytes_per_pixel {
+                    packed |= (data[pixel_start + i] as u32) << (i * 8);
+                }
+
+                let (r, g, b) = decode_rgb_pixel(packed, bits_r, bits_g, bits_b);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = r;
+                output[out_idx + 1] = g;
+                output[out_idx + 2] = b;
+                output[out_idx + 3] = 255;
+            }
+        }
+    } else {
+        // Sub-byte pixels (rare for RGB, but handle it)
+        let pixels_per_byte = 8 / total_bits;
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let byte_idx = x / pixels_per_byte;
+                let bit_offset = (pixels_per_byte - 1 - (x % pixels_per_byte)) * total_bits;
+                let mask = (1u32 << total_bits) - 1;
+                let packed = ((data[row_start + byte_idx] >> bit_offset) as u32) & mask;
+
+                let (r, g, b) = decode_rgb_pixel(packed, bits_r, bits_g, bits_b);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = r;
+                output[out_idx + 1] = g;
+                output[out_idx + 2] = b;
+                output[out_idx + 3] = 255;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Decode ARGB raw data
+fn decode_argb_raw(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    row_stride: usize,
+    bits_a: u8,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    output: &mut [u8],
+) -> Result<(), String> {
+    let total_bits = (bits_a + bits_r + bits_g + bits_b) as usize;
+    let bytes_per_pixel = (total_bits + 7) / 8;
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let pixel_start = row_start + x * bytes_per_pixel;
+
+                // Read little-endian
+                let mut packed = 0u32;
+                for i in 0..bytes_per_pixel {
+                    packed |= (data[pixel_start + i] as u32) << (i * 8);
+                }
+
+                let (r, g, b, a) = decode_argb_pixel(packed, bits_a, bits_r, bits_g, bits_b);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = r;
+                output[out_idx + 1] = g;
+                output[out_idx + 2] = b;
+                output[out_idx + 3] = a;
+            }
+        }
+    } else {
+        // Sub-byte pixels (rare for ARGB)
+        let pixels_per_byte = 8 / total_bits;
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let byte_idx = x / pixels_per_byte;
+                let bit_offset = (pixels_per_byte - 1 - (x % pixels_per_byte)) * total_bits;
+                let mask = (1u32 << total_bits) - 1;
+                let packed = ((data[row_start + byte_idx] >> bit_offset) as u32) & mask;
+
+                let (r, g, b, a) = decode_argb_pixel(packed, bits_a, bits_r, bits_g, bits_b);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = r;
+                output[out_idx + 1] = g;
+                output[out_idx + 2] = b;
+                output[out_idx + 3] = a;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Decode RGB666 raw data (special 4-pixels-per-9-bytes packing)
+fn decode_rgb666_raw(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    row_stride: usize,
+    output: &mut [u8],
+) -> Result<(), String> {
+    // RGB666 packs 4 pixels into 9 bytes
+    // Each pixel is 18 bits: R6 G6 B6 (R in MSB, B in LSB)
+    // Pixels are packed sequentially into the 72-bit block
+
+    let groups_per_row = (width + 3) / 4;
+
+    for y in 0..height {
+        let row_start = y * row_stride;
+
+        for group in 0..groups_per_row {
+            let group_start = row_start + group * 9;
+
+            // Read 9 bytes (72 bits)
+            let mut bits72 = [0u8; 9];
+            for i in 0..9 {
+                if group_start + i < data.len() {
+                    bits72[i] = data[group_start + i];
+                }
+            }
+
+            // Extract 4 pixels from the 72-bit block
+            for i in 0..4 {
+                let x = group * 4 + i;
+                if x >= width {
+                    break;
+                }
+
+                // Each pixel is at bit offset i * 18
+                // Extract 18 bits for this pixel
+                let bit_offset = i * 2; // Byte offset in the 9-byte block
+                let first_byte = i * 2;
+
+                // Read 3 bytes containing this pixel's 18 bits
+                let b0 = bits72[first_byte] as u32;
+                let b1 = bits72[first_byte + 1] as u32;
+                let b2 = bits72[first_byte + 2] as u32;
+
+                let shifted = b0 | (b1 << 8) | (b2 << 16);
+                let rgb18 = (shifted >> bit_offset) & 0x3FFFF; // 18 bits
+
+                // Extract B6, G6, R6 (B in LSB, R in MSB)
+                let b6 = (rgb18 & 0x3F) as u8;
+                let g6 = ((rgb18 >> 6) & 0x3F) as u8;
+                let r6 = ((rgb18 >> 12) & 0x3F) as u8;
+
+                // Bit-replicate 6 bits to 8 bits
+                let r = bit_replicate_to_u8(r6 as u32, 6);
+                let g = bit_replicate_to_u8(g6 as u32, 6);
+                let b = bit_replicate_to_u8(b6 as u32, 6);
+
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = r;
+                output[out_idx + 1] = g;
+                output[out_idx + 2] = b;
+                output[out_idx + 3] = 255;
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1493,5 +1983,159 @@ mod tests {
         assert_eq!(packed[5], 0xFF); // G
         assert_eq!(packed[6], 0x00); // R
         assert_eq!(packed[7], 0xFF); // A MSB
+    }
+
+    // ============================================================================
+    // Raw Decoding Tests
+    // ============================================================================
+
+    #[test]
+    fn test_bit_replicate_to_u8() {
+        // 1-bit to 8-bit: 1 -> 11111111 = 255
+        assert_eq!(bit_replicate_to_u8(1, 1), 255);
+        assert_eq!(bit_replicate_to_u8(0, 1), 0);
+
+        // 2-bit to 8-bit: 11 -> 11111111 = 255
+        assert_eq!(bit_replicate_to_u8(3, 2), 255);
+        assert_eq!(bit_replicate_to_u8(2, 2), 0xAA); // 10 -> 10101010
+
+        // 4-bit to 8-bit: 1111 -> 11111111 = 255
+        assert_eq!(bit_replicate_to_u8(15, 4), 255);
+        assert_eq!(bit_replicate_to_u8(8, 4), 0x88); // 1000 -> 10001000
+
+        // 5-bit to 8-bit: 11111 -> 11111111 (with truncation)
+        assert_eq!(bit_replicate_to_u8(31, 5), 255);
+
+        // 6-bit to 8-bit: 111111 -> 11111111
+        assert_eq!(bit_replicate_to_u8(63, 6), 255);
+        assert_eq!(bit_replicate_to_u8(32, 6), 0x82); // 100000 -> 10000010
+
+        // 8-bit: passthrough
+        assert_eq!(bit_replicate_to_u8(128, 8), 128);
+    }
+
+    #[test]
+    fn test_decode_rgb565() {
+        // White pixel: R=31, G=63, B=31 packed as little-endian 0xFFFF
+        let packed: u32 = 0xFFFF;
+        let (r, g, b) = decode_rgb_pixel(packed, 5, 6, 5);
+        assert_eq!(r, 255);
+        assert_eq!(g, 255);
+        assert_eq!(b, 255);
+
+        // Black pixel
+        let (r, g, b) = decode_rgb_pixel(0, 5, 6, 5);
+        assert_eq!(r, 0);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+
+        // Red pixel: R=31, G=0, B=0
+        // R at bits [15:11], so 31 << 11 = 0xF800
+        let packed: u32 = 0xF800;
+        let (r, g, b) = decode_rgb_pixel(packed, 5, 6, 5);
+        assert_eq!(r, 255);
+        assert_eq!(g, 0);
+        assert_eq!(b, 0);
+    }
+
+    #[test]
+    fn test_decode_raw_image_rgb888() {
+        // Create a simple 2x2 RGB888 image
+        // RGB888 is packed with R in MSB, stored little-endian (so BGR memory order)
+        // Encode test data properly to match our format
+        let rgb_test = vec![
+            255, 0, 0,    // Red pixel (R=255, G=0, B=0)
+            0, 255, 0,    // Green pixel
+            0, 0, 255,    // Blue pixel
+            255, 255, 0,  // Yellow pixel
+        ];
+
+        // Encode using our encoder to get proper format
+        let data = encode_rgb_packed(&rgb_test, 2, 2, 8, 8, 8, StrideFill::Black);
+
+        let metadata = RawImageMetadata {
+            format: "RGB888".to_string(),
+            width: 2,
+            height: 2,
+            stride: 0, // packed
+        };
+
+        let decoded = decode_raw_image(&data, &metadata).unwrap();
+        assert_eq!(decoded.width, 2);
+        assert_eq!(decoded.height, 2);
+        assert!(!decoded.has_alpha);
+        assert!(!decoded.is_grayscale);
+
+        // Check pixels (RGBA format) - should match original RGB values
+        assert_eq!(&decoded.pixels[0..4], &[255, 0, 0, 255]); // Red
+        assert_eq!(&decoded.pixels[4..8], &[0, 255, 0, 255]); // Green
+        assert_eq!(&decoded.pixels[8..12], &[0, 0, 255, 255]); // Blue
+        assert_eq!(&decoded.pixels[12..16], &[255, 255, 0, 255]); // Yellow
+    }
+
+    #[test]
+    fn test_decode_raw_image_l8() {
+        // Create a simple 2x2 L8 image
+        let data = vec![0, 128, 192, 255];
+
+        let metadata = RawImageMetadata {
+            format: "L8".to_string(),
+            width: 2,
+            height: 2,
+            stride: 0,
+        };
+
+        let decoded = decode_raw_image(&data, &metadata).unwrap();
+        assert!(decoded.is_grayscale);
+
+        // Check pixels (grayscale expanded to RGBA)
+        assert_eq!(&decoded.pixels[0..4], &[0, 0, 0, 255]);
+        assert_eq!(&decoded.pixels[4..8], &[128, 128, 128, 255]);
+        assert_eq!(&decoded.pixels[8..12], &[192, 192, 192, 255]);
+        assert_eq!(&decoded.pixels[12..16], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn test_raw_metadata_from_json() {
+        let json = r#"{"format": "RGB565", "width": 128, "height": 64, "stride": 256}"#;
+        let meta = RawImageMetadata::from_json(json).unwrap();
+        assert_eq!(meta.format, "RGB565");
+        assert_eq!(meta.width, 128);
+        assert_eq!(meta.height, 64);
+        assert_eq!(meta.stride, 256);
+
+        // Without stride (defaults to 0)
+        let json = r#"{"format": "L8", "width": 32, "height": 32}"#;
+        let meta = RawImageMetadata::from_json(json).unwrap();
+        assert_eq!(meta.format, "L8");
+        assert_eq!(meta.stride, 0);
+    }
+
+    #[test]
+    fn test_encode_decode_roundtrip_rgb565() {
+        // Create test data: 4 pixels
+        let r = vec![255, 0, 128, 64];
+        let g = vec![0, 255, 128, 192];
+        let b = vec![128, 64, 255, 0];
+        let rgb: Vec<u8> = r.iter().zip(g.iter()).zip(b.iter())
+            .flat_map(|((r, g), b)| vec![*r, *g, *b])
+            .collect();
+
+        // Encode to RGB565
+        let encoded = encode_rgb_packed(&rgb, 4, 1, 5, 6, 5, StrideFill::Black);
+
+        // Decode back
+        let metadata = RawImageMetadata {
+            format: "RGB565".to_string(),
+            width: 4,
+            height: 1,
+            stride: 0,
+        };
+        let decoded = decode_raw_image(&encoded, &metadata).unwrap();
+
+        // Values should match after bit replication (5/6 bits expanded to 8)
+        // The decoding correctly bit-replicates, so 5-bit 31 -> 255, not 248
+        assert_eq!(decoded.pixels[0], 255); // R: 255 -> 5bit 31 -> 8bit 255
+        assert_eq!(decoded.pixels[4], 0);   // R: 0 -> 5bit 0 -> 8bit 0
     }
 }

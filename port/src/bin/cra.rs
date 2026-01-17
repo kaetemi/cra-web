@@ -15,7 +15,7 @@ use cra_wasm::binary_format::{
     encode_argb_packed, encode_argb_row_aligned_stride,
     encode_channel_from_interleaved_row_aligned_stride, encode_gray_packed,
     encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
-    is_valid_stride, ColorFormat, StrideFill,
+    is_valid_stride, ColorFormat, StrideFill, RawImageMetadata,
 };
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither_fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
@@ -25,7 +25,7 @@ use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
     can_use_cicp, cicp_description, image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba,
     is_cicp_linear_srgb, is_cicp_needs_conversion, is_cicp_srgb, is_cicp_unspecified,
-    is_profile_srgb_verbose, load_image_from_path, load_image_from_path_auto,
+    is_profile_srgb_verbose, load_image_from_path, load_image_from_path_auto, load_raw_image,
     transform_cicp_to_linear_srgb_pixels, transform_icc_to_linear_srgb_pixels,
 };
 use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
@@ -305,6 +305,18 @@ struct Args {
     /// Input image path
     #[arg(short, long)]
     input: PathBuf,
+
+    /// Input metadata for raw binary files (JSON format)
+    ///
+    /// Required fields: format, width, height
+    /// Optional fields: stride (default: 0 = packed)
+    ///
+    /// Raw files are always assumed to be sRGB.
+    ///
+    /// Example: '{"format": "RGB565", "width": 128, "height": 64}'
+    /// Supported formats: RGB888, RGB565, RGB332, L8, L4, L2, L1, ARGB8888, ARGB1555, etc.
+    #[arg(long, value_name = "JSON")]
+    input_metadata: Option<String>,
 
     /// Input color profile handling
     #[arg(long, value_enum, default_value_t = InputColorProfile::Auto)]
@@ -1499,10 +1511,22 @@ fn main() -> Result<(), String> {
 
     // Pre-load input image with ICC profile (single file open)
     // Uses auto-detection to support SFI (safetensors) format
+    // Or raw binary format if --input-metadata is provided
     if args.verbose {
         eprintln!("Loading: {}", args.input.display());
     }
-    let decoded_input = load_image_from_path_auto(&args.input)?;
+    let decoded_input = if let Some(ref metadata_json) = args.input_metadata {
+        // Parse metadata and load as raw binary file
+        let raw_metadata = RawImageMetadata::from_json(metadata_json)
+            .map_err(|e| format!("Invalid --input-metadata: {}", e))?;
+        if args.verbose {
+            eprintln!("  Raw format: {} ({}x{}, stride={})",
+                raw_metadata.format, raw_metadata.width, raw_metadata.height, raw_metadata.stride);
+        }
+        load_raw_image(&args.input, &raw_metadata)?
+    } else {
+        load_image_from_path_auto(&args.input)?
+    };
 
     // Determine if input has premultiplied alpha that needs un-premultiplying
     // (check before moving fields out of decoded_input)
