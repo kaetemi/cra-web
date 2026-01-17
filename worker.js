@@ -383,7 +383,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             resultBuffer,
             inputImg.width,
             inputImg.height,
-            8, 8, 8,  // RGB888 (alpha passes through at 8-bit)
+            8, 8, 8, 8,  // RGBA8888
             ditherTechnique,
             outputDitherMode,
             outputDistanceSpace,
