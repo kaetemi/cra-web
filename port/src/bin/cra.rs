@@ -1079,8 +1079,10 @@ struct SafetensorsMetadata {
     format: SafetensorsFormat,
     transfer: SfiTransfer,
     has_alpha: bool,
-    dither: DitherMethod,
-    distance_space: ColorSpace,
+    /// Dither method for FP16/BF16 quantization (None for FP32 - no dithering applied)
+    dither: Option<DitherMethod>,
+    /// Perceptual space for dithering distance metric (None for FP32 - no dithering applied)
+    distance_space: Option<ColorSpace>,
 }
 
 fn write_metadata(
@@ -1093,20 +1095,8 @@ fn write_metadata(
     height: u32,
     outputs: &[(String, PathBuf, usize)],
     safetensors_meta: Option<&SafetensorsMetadata>,
+    has_integer_output: bool,
 ) -> Result<(), String> {
-    // Calculate stride and total_size for raw output
-    // Stride = bytes per row (respects --stride alignment)
-    let bits_per_pixel = format.total_bits as usize;
-    let packed_row_bits = width as usize * bits_per_pixel;
-    let packed_row_bytes = (packed_row_bits + 7) / 8;
-    let row_stride = if args.stride > 1 {
-        // Align to stride
-        ((packed_row_bytes + args.stride - 1) / args.stride) * args.stride
-    } else {
-        packed_row_bytes
-    };
-    let total_size = row_stride * height as usize;
-
     // Get name from output filename (without extension)
     // Prefer raw output path, then first output, then input, then fallback to "image"
     let name = args.output_raw.as_ref()
@@ -1122,15 +1112,47 @@ fn write_metadata(
     // Basic fields
     json.push_str(&format!("  \"name\": \"{}\",\n", name));
     json.push_str(&format!("  \"type\": \"bitmap\",\n"));
-    json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
     json.push_str(&format!("  \"width\": {},\n", width));
     json.push_str(&format!("  \"height\": {},\n", height));
 
-    // Raw-file-specific fields (only when raw output is present)
-    if args.output_raw.is_some() {
-        json.push_str(&format!("  \"compressed\": {},\n", 0));
-        json.push_str(&format!("  \"stride\": {},\n", row_stride));
-        json.push_str(&format!("  \"total_size\": {},\n", total_size));
+    // Integer format fields (only when integer output is present: PNG, raw, or channel outputs)
+    if has_integer_output {
+        json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
+        json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
+        if !format.is_grayscale {
+            json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
+            json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
+            json.push_str(&format!("  \"bits_b\": {},\n", format.bits_b));
+            if format.has_alpha {
+                json.push_str(&format!("  \"bits_a\": {},\n", format.bits_a));
+            }
+        } else {
+            json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
+        }
+        json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
+        json.push_str(&format!("  \"output_colorspace\": \"{:?}\",\n", output_colorspace));
+
+        // Raw-file-specific fields (only when raw output is present)
+        if args.output_raw.is_some() {
+            // Calculate stride and total_size for raw output
+            // Stride = bytes per row (respects --stride alignment)
+            let bits_per_pixel = format.total_bits as usize;
+            let packed_row_bits = width as usize * bits_per_pixel;
+            let packed_row_bytes = (packed_row_bits + 7) / 8;
+            let row_stride = if args.stride > 1 {
+                // Align to stride
+                ((packed_row_bytes + args.stride - 1) / args.stride) * args.stride
+            } else {
+                packed_row_bytes
+            };
+            let total_size = row_stride * height as usize;
+
+            json.push_str(&format!("  \"stride_alignment\": {},\n", args.stride));
+            json.push_str(&format!("  \"stride_fill\": \"{:?}\",\n", args.stride_fill));
+            json.push_str(&format!("  \"compressed\": {},\n", 0));
+            json.push_str(&format!("  \"stride\": {},\n", row_stride));
+            json.push_str(&format!("  \"total_size\": {},\n", total_size));
+        }
     }
 
     // Safetensors-specific fields (only when safetensors output is present)
@@ -1143,33 +1165,22 @@ fn write_metadata(
         json.push_str(&format!("  \"safetensors_format\": \"{:?}\",\n", sfi.format));
         json.push_str(&format!("  \"safetensors_transfer\": \"{}\",\n", transfer_str));
         json.push_str(&format!("  \"safetensors_has_alpha\": {},\n", sfi.has_alpha));
-        json.push_str(&format!("  \"safetensors_dither\": \"{:?}\",\n", sfi.dither));
-        json.push_str(&format!("  \"safetensors_distance_space\": \"{:?}\",\n", sfi.distance_space));
+        // Dither fields only for FP16/BF16 (FP32 doesn't apply dithering)
+        if let Some(dither) = sfi.dither {
+            json.push_str(&format!("  \"safetensors_dither\": \"{:?}\",\n", dither));
+        }
+        if let Some(space) = sfi.distance_space {
+            json.push_str(&format!("  \"safetensors_distance_space\": \"{:?}\",\n", space));
+        }
     }
 
-    // Advanced fields
-    json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
-    if !format.is_grayscale {
-        json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
-        json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
-        json.push_str(&format!("  \"bits_b\": {},\n", format.bits_b));
-        if format.has_alpha {
-            json.push_str(&format!("  \"bits_a\": {},\n", format.bits_a));
-        }
-    } else {
-        json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
-    }
+    // Common fields
     json.push_str(&format!("  \"histogram\": \"{:?}\",\n", histogram));
     json.push_str(&format!("  \"input\": \"{}\",\n", args.input.display()));
-    json.push_str(&format!("  \"is_grayscale\": {},\n", format.is_grayscale));
-    json.push_str(&format!("  \"output_colorspace\": \"{:?}\",\n", output_colorspace));
-    json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
     if let Some(ref ref_path) = args.r#ref {
         json.push_str(&format!("  \"reference\": \"{}\",\n", ref_path.display()));
     }
     json.push_str(&format!("  \"seed\": {},\n", args.seed));
-    json.push_str(&format!("  \"stride_alignment\": {},\n", args.stride));
-    json.push_str(&format!("  \"stride_fill\": \"{:?}\",\n", args.stride_fill));
 
     json.push_str("  \"outputs\": [\n");
     for (i, (output_type, output_path, size)) in outputs.iter().enumerate() {
@@ -1440,9 +1451,11 @@ fn main() -> Result<(), String> {
         || args.output_raw_g.is_some()
         || args.output_raw_b.is_some()
         || args.output_raw_a.is_some();
-    if args.output.is_none()
-        && args.output_raw.is_none()
-        && !has_channel_output
+    // Integer output = PNG, raw binary, or channel outputs (requires dithering)
+    let has_integer_output = args.output.is_some()
+        || args.output_raw.is_some()
+        || has_channel_output;
+    if !has_integer_output
         && args.output_meta.is_none()
         && args.output_safetensors.is_none()
     {
@@ -1634,12 +1647,18 @@ fn main() -> Result<(), String> {
                 SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
             };
             // Record effective settings for metadata
+            // Dither settings only apply to FP16/BF16 (FP32 has enough precision)
+            let (dither, distance_space) = if matches!(args.safetensors_format, SafetensorsFormat::Fp32) {
+                (None, None)
+            } else {
+                (Some(args.safetensors_dither), Some(args.safetensors_distance_space))
+            };
             safetensors_meta = Some(SafetensorsMetadata {
                 format: args.safetensors_format,
                 transfer,
                 has_alpha: include_alpha,
-                dither: args.safetensors_dither,
-                distance_space: args.safetensors_distance_space,
+                dither,
+                distance_space,
             });
             // Convert to target transfer (write function doesn't convert)
             let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Srgb {
@@ -1674,22 +1693,28 @@ fn main() -> Result<(), String> {
             )?;
         }
 
-        let mut dither_progress = |p: f32| print_progress("Dither", p);
-        let result = dither_pixels(
-            pixels_to_dither,
-            width_usize,
-            height_usize,
-            &format,
-            !args.no_colorspace_aware_output,
-            output_dither_mode,
-            output_colorspace.to_perceptual_space(),
-            args.seed,
-            input_has_alpha,
-            if args.progress { Some(&mut dither_progress) } else { None },
-        );
-        if args.progress {
-            clear_progress();
-        }
+        // Only perform dithering if integer output is needed
+        let result = if has_integer_output {
+            let mut dither_progress = |p: f32| print_progress("Dither", p);
+            let result = dither_pixels(
+                pixels_to_dither,
+                width_usize,
+                height_usize,
+                &format,
+                !args.no_colorspace_aware_output,
+                output_dither_mode,
+                output_colorspace.to_perceptual_space(),
+                args.seed,
+                input_has_alpha,
+                if args.progress { Some(&mut dither_progress) } else { None },
+            );
+            if args.progress {
+                clear_progress();
+            }
+            Some(result)
+        } else {
+            None
+        };
 
         (result, width, height)
     } else {
@@ -1711,12 +1736,18 @@ fn main() -> Result<(), String> {
                 SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
             };
             // Record effective settings for metadata
+            // Dither settings only apply to FP16/BF16 (FP32 has enough precision)
+            let (dither, distance_space) = if matches!(args.safetensors_format, SafetensorsFormat::Fp32) {
+                (None, None)
+            } else {
+                (Some(args.safetensors_dither), Some(args.safetensors_distance_space))
+            };
             safetensors_meta = Some(SafetensorsMetadata {
                 format: args.safetensors_format,
                 transfer,
                 has_alpha: include_alpha,
-                dither: args.safetensors_dither,
-                distance_space: args.safetensors_distance_space,
+                dither,
+                distance_space,
             });
             // Normalize 0-255 to 0-1 and convert to target transfer
             let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Linear {
@@ -1754,22 +1785,28 @@ fn main() -> Result<(), String> {
             )?;
         }
 
-        let mut dither_progress = |p: f32| print_progress("Dither", p);
-        let result = dither_pixels_srgb_rgb(
-            input_pixels,
-            width as usize,
-            height as usize,
-            &format,
-            !args.no_colorspace_aware_output,
-            output_dither_mode,
-            output_colorspace.to_perceptual_space(),
-            args.seed,
-            input_has_alpha,
-            if args.progress { Some(&mut dither_progress) } else { None },
-        );
-        if args.progress {
-            clear_progress();
-        }
+        // Only perform dithering if integer output is needed
+        let result = if has_integer_output {
+            let mut dither_progress = |p: f32| print_progress("Dither", p);
+            let result = dither_pixels_srgb_rgb(
+                input_pixels,
+                width as usize,
+                height as usize,
+                &format,
+                !args.no_colorspace_aware_output,
+                output_dither_mode,
+                output_colorspace.to_perceptual_space(),
+                args.seed,
+                input_has_alpha,
+                if args.progress { Some(&mut dither_progress) } else { None },
+            );
+            if args.progress {
+                clear_progress();
+            }
+            Some(result)
+        } else {
+            None
+        };
 
         (result, width, height)
     };
@@ -1777,150 +1814,153 @@ fn main() -> Result<(), String> {
     let width_usize = width as usize;
     let height_usize = height as usize;
 
-    // If format requests alpha but input had none, inject opaque alpha channel
-    let dither_result = if format.has_alpha && !dither_result.has_alpha && !dither_result.is_grayscale {
-        if args.verbose {
-            eprintln!("Injecting opaque alpha channel (input had no alpha)");
-        }
-        // Expand RGB (3 bytes/pixel) to RGBA (4 bytes/pixel) with alpha = 255
-        let rgb = &dither_result.interleaved;
-        let pixel_count = width_usize * height_usize;
-        let mut rgba = Vec::with_capacity(pixel_count * 4);
-        for i in 0..pixel_count {
-            rgba.push(rgb[i * 3]);     // R
-            rgba.push(rgb[i * 3 + 1]); // G
-            rgba.push(rgb[i * 3 + 2]); // B
-            rgba.push(255);            // A (fully opaque)
-        }
-        DitherResult {
-            interleaved: rgba,
-            is_grayscale: false,
-            has_alpha: true,
-        }
-    } else {
-        dither_result
-    };
-
     // Track outputs for metadata
     let mut outputs: Vec<(String, PathBuf, usize)> = Vec::new();
 
-    // Write PNG output
-    if let Some(ref png_path) = args.output {
-        if args.verbose {
-            eprintln!("Writing PNG: {}", png_path.display());
-        }
-
-        if format.is_grayscale {
-            save_png_grayscale(png_path, &dither_result.interleaved, width, height)?;
-        } else if dither_result.has_alpha {
-            save_png_rgba(png_path, &dither_result.interleaved, width, height)?;
+    // Write integer outputs (PNG, raw binary, channel outputs) - only if dithering was performed
+    if let Some(dither_result) = dither_result {
+        // If format requests alpha but input had none, inject opaque alpha channel
+        let dither_result = if format.has_alpha && !dither_result.has_alpha && !dither_result.is_grayscale {
+            if args.verbose {
+                eprintln!("Injecting opaque alpha channel (input had no alpha)");
+            }
+            // Expand RGB (3 bytes/pixel) to RGBA (4 bytes/pixel) with alpha = 255
+            let rgb = &dither_result.interleaved;
+            let pixel_count = width_usize * height_usize;
+            let mut rgba = Vec::with_capacity(pixel_count * 4);
+            for i in 0..pixel_count {
+                rgba.push(rgb[i * 3]);     // R
+                rgba.push(rgb[i * 3 + 1]); // G
+                rgba.push(rgb[i * 3 + 2]); // B
+                rgba.push(255);            // A (fully opaque)
+            }
+            DitherResult {
+                interleaved: rgba,
+                is_grayscale: false,
+                has_alpha: true,
+            }
         } else {
-            save_png_rgb(png_path, &dither_result.interleaved, width, height)?;
+            dither_result
+        };
+
+        // Write PNG output
+        if let Some(ref png_path) = args.output {
+            if args.verbose {
+                eprintln!("Writing PNG: {}", png_path.display());
+            }
+
+            if format.is_grayscale {
+                save_png_grayscale(png_path, &dither_result.interleaved, width, height)?;
+            } else if dither_result.has_alpha {
+                save_png_rgba(png_path, &dither_result.interleaved, width, height)?;
+            } else {
+                save_png_rgb(png_path, &dither_result.interleaved, width, height)?;
+            }
+
+            let size = std::fs::metadata(png_path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
+            outputs.push(("png".to_string(), png_path.clone(), size));
         }
 
-        let size = std::fs::metadata(png_path)
-            .map(|m| m.len() as usize)
-            .unwrap_or(0);
-        outputs.push(("png".to_string(), png_path.clone(), size));
-    }
+        // Write binary output (respects --stride setting, default 1 = packed)
+        if let Some(ref bin_path) = args.output_raw {
+            let fill = args.stride_fill.to_stride_fill();
+            let row_aligned = args.stride > 1;
 
-    // Write binary output (respects --stride setting, default 1 = packed)
-    if let Some(ref bin_path) = args.output_raw {
+            if args.verbose {
+                if row_aligned {
+                    eprintln!(
+                        "Writing binary (stride={}, fill={:?}): {}",
+                        args.stride, args.stride_fill, bin_path.display()
+                    );
+                } else {
+                    eprintln!("Writing binary (packed): {}", bin_path.display());
+                }
+            }
+
+            let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, row_aligned, args.stride, fill);
+
+            let mut file = File::create(bin_path)
+                .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
+            file.write_all(&bin_data)
+                .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
+
+            let label = if row_aligned { "binary_row_aligned" } else { "binary_packed" };
+            outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
+        }
+
+        // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
         let fill = args.stride_fill.to_stride_fill();
         let row_aligned = args.stride > 1;
+        let needs_rgb_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
+        let num_channels = if dither_result.has_alpha { 4 } else { 3 };
 
-        if args.verbose {
-            if row_aligned {
-                eprintln!(
-                    "Writing binary (stride={}, fill={:?}): {}",
-                    args.stride, args.stride_fill, bin_path.display()
+        if needs_rgb_channel_output && !dither_result.is_grayscale {
+            if let Some(ref path) = args.output_raw_r {
+                if args.verbose {
+                    eprintln!("Writing red channel binary: {}", path.display());
+                }
+                let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                    &dither_result.interleaved, width_usize, height_usize, num_channels, 0, format.bits_r, args.stride, fill,
                 );
+                let mut file = File::create(path)
+                    .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+                file.write_all(&bin_data)
+                    .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+                let label = if row_aligned { "binary_r_row_aligned" } else { "binary_r" };
+                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+            }
+
+            if let Some(ref path) = args.output_raw_g {
+                if args.verbose {
+                    eprintln!("Writing green channel binary: {}", path.display());
+                }
+                let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                    &dither_result.interleaved, width_usize, height_usize, num_channels, 1, format.bits_g, args.stride, fill,
+                );
+                let mut file = File::create(path)
+                    .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+                file.write_all(&bin_data)
+                    .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+                let label = if row_aligned { "binary_g_row_aligned" } else { "binary_g" };
+                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+            }
+
+            if let Some(ref path) = args.output_raw_b {
+                if args.verbose {
+                    eprintln!("Writing blue channel binary: {}", path.display());
+                }
+                let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                    &dither_result.interleaved, width_usize, height_usize, num_channels, 2, format.bits_b, args.stride, fill,
+                );
+                let mut file = File::create(path)
+                    .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+                file.write_all(&bin_data)
+                    .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+                let label = if row_aligned { "binary_b_row_aligned" } else { "binary_b" };
+                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+            }
+        }
+
+        // Write alpha channel output (requires ARGB format and input with alpha)
+        if let Some(ref path) = args.output_raw_a {
+            if dither_result.has_alpha {
+                if args.verbose {
+                    eprintln!("Writing alpha channel binary: {}", path.display());
+                }
+                let bin_data = encode_channel_from_interleaved_row_aligned_stride(
+                    &dither_result.interleaved, width_usize, height_usize, num_channels, 3, format.bits_a, args.stride, fill,
+                );
+                let mut file = File::create(path)
+                    .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
+                file.write_all(&bin_data)
+                    .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+                let label = if row_aligned { "binary_a_row_aligned" } else { "binary_a" };
+                outputs.push((label.to_string(), path.clone(), bin_data.len()));
             } else {
-                eprintln!("Writing binary (packed): {}", bin_path.display());
+                eprintln!("Warning: --output-raw-a specified but input image has no alpha channel, skipping");
             }
-        }
-
-        let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, row_aligned, args.stride, fill);
-
-        let mut file = File::create(bin_path)
-            .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
-        file.write_all(&bin_data)
-            .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
-
-        let label = if row_aligned { "binary_row_aligned" } else { "binary_packed" };
-        outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
-    }
-
-    // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
-    let fill = args.stride_fill.to_stride_fill();
-    let row_aligned = args.stride > 1;
-    let needs_rgb_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
-    let num_channels = if dither_result.has_alpha { 4 } else { 3 };
-
-    if needs_rgb_channel_output && !dither_result.is_grayscale {
-        if let Some(ref path) = args.output_raw_r {
-            if args.verbose {
-                eprintln!("Writing red channel binary: {}", path.display());
-            }
-            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, num_channels, 0, format.bits_r, args.stride, fill,
-            );
-            let mut file = File::create(path)
-                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
-            file.write_all(&bin_data)
-                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-            let label = if row_aligned { "binary_r_row_aligned" } else { "binary_r" };
-            outputs.push((label.to_string(), path.clone(), bin_data.len()));
-        }
-
-        if let Some(ref path) = args.output_raw_g {
-            if args.verbose {
-                eprintln!("Writing green channel binary: {}", path.display());
-            }
-            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, num_channels, 1, format.bits_g, args.stride, fill,
-            );
-            let mut file = File::create(path)
-                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
-            file.write_all(&bin_data)
-                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-            let label = if row_aligned { "binary_g_row_aligned" } else { "binary_g" };
-            outputs.push((label.to_string(), path.clone(), bin_data.len()));
-        }
-
-        if let Some(ref path) = args.output_raw_b {
-            if args.verbose {
-                eprintln!("Writing blue channel binary: {}", path.display());
-            }
-            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, num_channels, 2, format.bits_b, args.stride, fill,
-            );
-            let mut file = File::create(path)
-                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
-            file.write_all(&bin_data)
-                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-            let label = if row_aligned { "binary_b_row_aligned" } else { "binary_b" };
-            outputs.push((label.to_string(), path.clone(), bin_data.len()));
-        }
-    }
-
-    // Write alpha channel output (requires ARGB format and input with alpha)
-    if let Some(ref path) = args.output_raw_a {
-        if dither_result.has_alpha {
-            if args.verbose {
-                eprintln!("Writing alpha channel binary: {}", path.display());
-            }
-            let bin_data = encode_channel_from_interleaved_row_aligned_stride(
-                &dither_result.interleaved, width_usize, height_usize, num_channels, 3, format.bits_a, args.stride, fill,
-            );
-            let mut file = File::create(path)
-                .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
-            file.write_all(&bin_data)
-                .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-            let label = if row_aligned { "binary_a_row_aligned" } else { "binary_a" };
-            outputs.push((label.to_string(), path.clone(), bin_data.len()));
-        } else {
-            eprintln!("Warning: --output-raw-a specified but input image has no alpha channel, skipping");
         }
     }
 
@@ -1939,6 +1979,7 @@ fn main() -> Result<(), String> {
             height,
             &outputs,
             safetensors_meta.as_ref(),
+            has_integer_output,
         )?;
     }
 
