@@ -521,8 +521,8 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 1 (Minimal):**
 - Read and write `F32` tensors
-- Support `unspecified` and `srgb` primaries
-- Support `unspecified`, `linear`, and `srgb` transfer
+- Support `unspecified` (assume srgb) and `srgb` primaries
+- Support `unspecified` (assume srgb), `linear`, and `srgb` transfer
 - Support `RGB` channels
 - Support `HWC` dimension order
 
