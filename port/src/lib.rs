@@ -73,6 +73,7 @@ fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
 fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
     match method {
         1 => rescale::RescaleMethod::Lanczos3,
+        2 => rescale::RescaleMethod::Mitchell,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

@@ -333,7 +333,8 @@
             <div class="option-row" style="margin-top: 20px;">
                 <label>Interpolation:</label>
                 <select id="interpolation">
-                    <option value="1" selected>Lanczos (best quality)</option>
+                    <option value="1" selected>Lanczos (max sharpness)</option>
+                    <option value="2">Mitchell (balanced, less ringing)</option>
                     <option value="0">Bilinear (faster)</option>
                 </select>
             </div>
@@ -574,7 +575,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell' };
 
             // Map dither mode values to CLI names
             const modeMap = {

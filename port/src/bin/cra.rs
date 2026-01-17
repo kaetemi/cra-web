@@ -193,7 +193,9 @@ enum PremultipliedAlpha {
 enum ScaleMethod {
     /// Bilinear interpolation (fast, good for moderate scaling)
     Bilinear,
-    /// Lanczos3 (high quality, recommended for significant down/upscaling)
+    /// Mitchell-Netravali (B=C=1/3): balanced sharpness with minimal ringing
+    Mitchell,
+    /// Lanczos3 (maximum sharpness, some ringing artifacts)
     #[default]
     Lanczos,
 }
@@ -202,6 +204,7 @@ impl ScaleMethod {
     fn to_rescale_method(self) -> cra_wasm::rescale::RescaleMethod {
         match self {
             ScaleMethod::Bilinear => cra_wasm::rescale::RescaleMethod::Bilinear,
+            ScaleMethod::Mitchell => cra_wasm::rescale::RescaleMethod::Mitchell,
             ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
         }
     }
@@ -820,6 +823,7 @@ fn resize_linear(
     if verbose {
         let method_name = match method {
             cra_wasm::rescale::RescaleMethod::Bilinear => "Bilinear",
+            cra_wasm::rescale::RescaleMethod::Mitchell => "Mitchell",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };

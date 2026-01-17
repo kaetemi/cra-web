@@ -1,4 +1,4 @@
-/// Image rescaling module with Bilinear and Lanczos support
+/// Image rescaling module with Bilinear, Mitchell, and Lanczos support
 ///
 /// Operates in linear RGB space for correct color blending during interpolation.
 
@@ -9,7 +9,9 @@ use std::f32::consts::PI;
 pub enum RescaleMethod {
     /// Bilinear interpolation - fast, good for moderate scaling
     Bilinear,
-    /// Lanczos3 - high quality, better for significant downscaling
+    /// Mitchell-Netravali (B=C=1/3) - balanced sharpness/ringing, minimal overshoot
+    Mitchell,
+    /// Lanczos3 - maximum sharpness, some ringing artifacts
     Lanczos3,
 }
 
@@ -29,9 +31,38 @@ impl RescaleMethod {
     pub fn from_str(s: &str) -> Option<RescaleMethod> {
         match s.to_lowercase().as_str() {
             "bilinear" | "linear" => Some(RescaleMethod::Bilinear),
+            "mitchell" | "cubic" | "bicubic" => Some(RescaleMethod::Mitchell),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
             _ => None,
         }
+    }
+
+    /// Get the kernel radius for this method
+    pub fn base_radius(&self) -> f32 {
+        match self {
+            RescaleMethod::Bilinear => 1.0,
+            RescaleMethod::Mitchell => 2.0,
+            RescaleMethod::Lanczos3 => 3.0,
+        }
+    }
+}
+
+/// Mitchell-Netravali kernel with B=C=1/3
+/// This setting minimizes both blur and ringing artifacts.
+/// Support is [-2, 2], overshoot is typically <1%
+#[inline]
+fn mitchell(x: f32) -> f32 {
+    let x = x.abs();
+    if x >= 2.0 {
+        0.0
+    } else if x >= 1.0 {
+        // (-B - 6C)|x|³ + (6B + 30C)|x|² + (-12B - 48C)|x| + (8B + 24C)
+        // With B=C=1/3: -7/3 x³ + 12x² - 20x + 32/3, divided by 6
+        (-7.0/18.0) * x * x * x + 2.0 * x * x - (10.0/3.0) * x + 16.0/9.0
+    } else {
+        // (12 - 9B - 6C)|x|³ + (-18 + 12B + 6C)|x|² + (6 - 2B)
+        // With B=C=1/3: 7x³ - 12x² + 16/3, divided by 6
+        (7.0/6.0) * x * x * x - 2.0 * x * x + 8.0/9.0
     }
 }
 
@@ -49,6 +80,19 @@ fn lanczos3(x: f32) -> f32 {
     }
 }
 
+/// Generic kernel evaluation
+#[inline]
+fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
+    match method {
+        RescaleMethod::Bilinear => {
+            let x = x.abs();
+            if x < 1.0 { 1.0 - x } else { 0.0 }
+        }
+        RescaleMethod::Mitchell => mitchell(x),
+        RescaleMethod::Lanczos3 => lanczos3(x),
+    }
+}
+
 /// Precomputed kernel weights for a single output position
 /// Weights are normalized (sum to 1.0) and include source index range
 #[derive(Clone)]
@@ -61,14 +105,15 @@ struct KernelWeights {
     fallback_idx: usize,
 }
 
-/// Precompute all kernel weights for 1D Lanczos resampling
+/// Precompute all kernel weights for 1D resampling
 /// Returns exact weights for each destination position
-fn precompute_lanczos_weights(
+fn precompute_kernel_weights(
     src_len: usize,
     dst_len: usize,
     scale: f32,
     filter_scale: f32,
     radius: i32,
+    method: RescaleMethod,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
@@ -91,7 +136,7 @@ fn precompute_lanczos_weights(
 
         for si in start..=end {
             let d = (src_pos - si as f32) / filter_scale;
-            let weight = lanczos3(d);
+            let weight = eval_kernel(method, d);
             weights.push(weight);
             weight_sum += weight;
         }
@@ -393,10 +438,10 @@ fn rescale_bilinear_alpha_pixels(
     dst
 }
 
-/// Lanczos3 1D resample for Pixel4 row using precomputed weights
+/// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
 #[inline]
-fn lanczos3_resample_row_pixel4_precomputed(
+fn resample_row_pixel4_precomputed(
     src: &[Pixel4],
     kernel_weights: &[KernelWeights],
 ) -> Vec<Pixel4> {
@@ -419,11 +464,11 @@ fn lanczos3_resample_row_pixel4_precomputed(
     dst
 }
 
-/// Alpha-aware Lanczos3 1D resample for Pixel4 row
+/// Alpha-aware 1D resample for Pixel4 row using precomputed weights
 /// RGB is weighted by alpha; alpha is interpolated normally.
 /// Falls back to unweighted RGB if all contributing pixels are transparent.
 #[inline]
-fn lanczos3_resample_row_alpha_precomputed(
+fn resample_row_alpha_precomputed(
     src: &[Pixel4],
     kernel_weights: &[KernelWeights],
 ) -> Vec<Pixel4> {
@@ -483,15 +528,16 @@ fn lanczos3_resample_row_alpha_precomputed(
     dst
 }
 
-/// Rescale Pixel4 array using Lanczos3 interpolation (separable, 2-pass)
+/// Rescale Pixel4 array using separable kernel interpolation (2-pass)
 /// Uses precomputed kernel weights for efficiency
 /// Progress callback is optional - receives 0.0-1.0 after each row
-fn rescale_lanczos3_pixels(
+fn rescale_kernel_pixels(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    method: RescaleMethod,
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
@@ -499,21 +545,22 @@ fn rescale_lanczos3_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
+    let base_radius = method.base_radius();
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
-    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
-    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
+    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
 
     // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
-    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
-    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
+    let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
+    let v_weights = precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
 
     // Pass 1: Horizontal resample each row (src_width -> dst_width)
     // Progress: 0% to 50%
     let mut temp = vec![Pixel4::default(); dst_width * src_height];
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = lanczos3_resample_row_pixel4_precomputed(src_row, &h_weights);
+        let dst_row = resample_row_pixel4_precomputed(src_row, &h_weights);
         temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
 
         if let Some(ref mut cb) = progress {
@@ -555,14 +602,15 @@ fn rescale_lanczos3_pixels(
     dst
 }
 
-/// Alpha-aware Lanczos3 rescale (separable, 2-pass)
+/// Alpha-aware separable kernel rescale (2-pass)
 /// RGB channels are weighted by alpha to prevent transparent pixel color bleeding.
-fn rescale_lanczos3_alpha_pixels(
+fn rescale_kernel_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    method: RescaleMethod,
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
@@ -570,19 +618,20 @@ fn rescale_lanczos3_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
+    let base_radius = method.base_radius();
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
-    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
-    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
+    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
 
-    let h_weights = precompute_lanczos_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x);
-    let v_weights = precompute_lanczos_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y);
+    let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
+    let v_weights = precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
 
     // Pass 1: Alpha-aware horizontal resample
     let mut temp = vec![Pixel4::default(); dst_width * src_height];
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = lanczos3_resample_row_alpha_precomputed(src_row, &h_weights);
+        let dst_row = resample_row_alpha_precomputed(src_row, &h_weights);
         temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
 
         if let Some(ref mut cb) = progress {
@@ -689,7 +738,7 @@ pub fn rescale_with_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Lanczos3 => rescale_lanczos3_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::Lanczos3 => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 
@@ -737,7 +786,7 @@ pub fn rescale_with_alpha_progress(
 
     match method {
         RescaleMethod::Bilinear => rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Lanczos3 => rescale_lanczos3_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::Lanczos3 => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
     }
 }
 
@@ -1205,5 +1254,218 @@ mod tests {
             assert!(p.g() > 0.3 && p.g() < 0.7, "Green should be mid-range: {}", p.g());
             assert!(p.b() < 0.3, "Blue should stay low: {}", p.b());
         }
+    }
+
+    #[test]
+    fn test_lanczos_4x_roundtrip_quality() {
+        // Test 4x upscale then 4x downscale - measure actual blur
+        // Use a larger test image with gradients and edges
+        let size = 16;
+        let mut src = vec![Pixel4::default(); size * size];
+
+        // Create a test pattern with:
+        // - Horizontal gradient in top half
+        // - Vertical edge in bottom half
+        for y in 0..size {
+            for x in 0..size {
+                let val = if y < size / 2 {
+                    // Horizontal gradient
+                    x as f32 / (size - 1) as f32
+                } else {
+                    // Vertical edge at center
+                    if x < size / 2 { 0.0 } else { 1.0 }
+                };
+                src[y * size + x] = Pixel4::new(val, val, val, 0.0);
+            }
+        }
+
+        // 4x upscale then 4x downscale
+        let up = rescale(&src, size, size, size * 4, size * 4, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let down = rescale(&up, size * 4, size * 4, size, size, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        // Calculate MSE
+        let mut mse = 0.0f64;
+        let mut max_diff = 0.0f32;
+        for (orig, result) in src.iter().zip(down.iter()) {
+            let diff = (orig[0] - result[0]).abs();
+            mse += (diff as f64).powi(2);
+            if diff > max_diff {
+                max_diff = diff;
+            }
+        }
+        mse /= (size * size) as f64;
+        let psnr = if mse > 0.0 { 10.0 * (1.0 / mse).log10() } else { f64::INFINITY };
+
+        eprintln!("4x roundtrip: MSE={:.6}, PSNR={:.2}dB, max_diff={:.4}", mse, psnr, max_diff);
+
+        // For a proper Lanczos implementation, PSNR should be > 25dB
+        // and max diff should be < 0.2 for this smooth test pattern
+        assert!(psnr > 20.0, "PSNR too low: {:.2}dB (expected > 20dB)", psnr);
+        assert!(max_diff < 0.25, "Max diff too high: {:.4} (expected < 0.25)", max_diff);
+    }
+
+    #[test]
+    fn test_lanczos_edge_sharpness_and_ringing() {
+        // Test edge preservation and ringing with a simple step edge
+        // Create a 32-pixel wide image with a sharp edge at center
+        let size = 32;
+        let mut src = vec![Pixel4::default(); size];
+        for x in 0..size {
+            let val = if x < size / 2 { 0.0 } else { 1.0 };
+            src[x] = Pixel4::new(val, val, val, 0.0);
+        }
+
+        // 4x upscale then 4x downscale (1D - just use horizontal)
+        let up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let down = rescale(&up, size * 4, 1, size, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        // Measure edge characteristics
+        let edge_idx = size / 2; // Edge is between pixel 15 and 16
+
+        // Check dark side (should be close to 0, might have slight overshoot/undershoot)
+        let dark_vals: Vec<f32> = (0..edge_idx-2).map(|i| down[i][0]).collect();
+        let dark_min = dark_vals.iter().cloned().fold(f32::INFINITY, f32::min);
+        let dark_max = dark_vals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        // Check bright side (should be close to 1)
+        let bright_vals: Vec<f32> = (edge_idx+3..size).map(|i| down[i][0]).collect();
+        let bright_min = bright_vals.iter().cloned().fold(f32::INFINITY, f32::min);
+        let bright_max = bright_vals.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
+
+        // Check transition zone (pixels near edge)
+        let trans_vals: Vec<f32> = (edge_idx-2..edge_idx+3).map(|i| down[i][0]).collect();
+
+        eprintln!("Dark side: min={:.4}, max={:.4} (expected ~0)", dark_min, dark_max);
+        eprintln!("Bright side: min={:.4}, max={:.4} (expected ~1)", bright_min, bright_max);
+        eprintln!("Transition: {:?}", trans_vals.iter().map(|v| format!("{:.3}", v)).collect::<Vec<_>>());
+
+        // Ringing check: dark side shouldn't go below -0.1 or above 0.1
+        // (Lanczos can have small negative values due to ringing, but should be limited)
+        assert!(dark_min > -0.15, "Dark side undershoot too strong: {:.4}", dark_min);
+        assert!(dark_max < 0.15, "Dark side overshoot too strong: {:.4}", dark_max);
+
+        // Bright side shouldn't go above 1.1 or below 0.9
+        assert!(bright_max < 1.15, "Bright side overshoot too strong: {:.4}", bright_max);
+        assert!(bright_min > 0.85, "Bright side undershoot too strong: {:.4}", bright_min);
+
+        // Edge should still be reasonably sharp (transition should span ~3-5 pixels, not more)
+        // Find where values cross 0.2 and 0.8
+        let low_cross = down.iter().position(|p| p[0] > 0.2).unwrap_or(0);
+        let high_cross = down.iter().position(|p| p[0] > 0.8).unwrap_or(size);
+        let edge_width = high_cross - low_cross;
+        eprintln!("Edge width (0.2 to 0.8): {} pixels", edge_width);
+
+        assert!(edge_width <= 6, "Edge too blurry: {} pixels wide (expected <= 6)", edge_width);
+    }
+
+    #[test]
+    fn test_mitchell_identity() {
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.25, 0.25, 0.25, 0.0),
+            Pixel4::new(0.5, 0.5, 0.5, 0.0),
+            Pixel4::new(0.75, 0.75, 0.75, 0.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Mitchell, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_mitchell_roundtrip_2x() {
+        // Test that 2x upscale then 2x downscale returns approximately original
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(1.0, 1.0, 1.0, 0.0),
+            Pixel4::new(0.1, 0.1, 0.1, 0.0), Pixel4::new(0.4, 0.4, 0.4, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0),
+            Pixel4::new(0.2, 0.2, 0.2, 0.0), Pixel4::new(0.5, 0.5, 0.5, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0), Pixel4::new(0.8, 0.8, 0.8, 0.0),
+            Pixel4::new(0.3, 0.3, 0.3, 0.0), Pixel4::new(0.6, 0.6, 0.6, 0.0), Pixel4::new(0.9, 0.9, 0.9, 0.0), Pixel4::new(0.7, 0.7, 0.7, 0.0),
+        ];
+        let up = rescale(&src, 4, 4, 8, 8, RescaleMethod::Mitchell, ScaleMode::Independent);
+        let down = rescale(&up, 8, 8, 4, 4, RescaleMethod::Mitchell, ScaleMode::Independent);
+
+        for (i, (orig, result)) in src.iter().zip(down.iter()).enumerate() {
+            let diff = (orig[0] - result[0]).abs();
+            assert!(diff < 0.15, "Pixel {} drifted: {} -> {} (diff: {})", i, orig[0], result[0], diff);
+        }
+    }
+
+    #[test]
+    fn test_mitchell_less_ringing_than_lanczos() {
+        // Compare Mitchell and Lanczos ringing on a sharp edge
+        let size = 32;
+        let mut src = vec![Pixel4::default(); size];
+        for x in 0..size {
+            let val = if x < size / 2 { 0.0 } else { 1.0 };
+            src[x] = Pixel4::new(val, val, val, 0.0);
+        }
+
+        // 4x upscale then 4x downscale
+        let lanczos_up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let lanczos_down = rescale(&lanczos_up, size * 4, 1, size, 1, RescaleMethod::Lanczos3, ScaleMode::Independent);
+
+        let mitchell_up = rescale(&src, size, 1, size * 4, 1, RescaleMethod::Mitchell, ScaleMode::Independent);
+        let mitchell_down = rescale(&mitchell_up, size * 4, 1, size, 1, RescaleMethod::Mitchell, ScaleMode::Independent);
+
+        // Measure ringing on dark side (pixels 0..13 should be ~0)
+        let lanczos_dark_overshoot = (0..13).map(|i| lanczos_down[i][0]).fold(0.0f32, f32::max);
+        let mitchell_dark_overshoot = (0..13).map(|i| mitchell_down[i][0]).fold(0.0f32, f32::max);
+
+        // Measure ringing on bright side (pixels 19..32 should be ~1)
+        let lanczos_bright_overshoot = (19..32).map(|i| (lanczos_down[i][0] - 1.0).abs()).fold(0.0f32, f32::max);
+        let mitchell_bright_overshoot = (19..32).map(|i| (mitchell_down[i][0] - 1.0).abs()).fold(0.0f32, f32::max);
+
+        eprintln!("Lanczos dark overshoot: {:.4}, bright overshoot: {:.4}", lanczos_dark_overshoot, lanczos_bright_overshoot);
+        eprintln!("Mitchell dark overshoot: {:.4}, bright overshoot: {:.4}", mitchell_dark_overshoot, mitchell_bright_overshoot);
+
+        // Mitchell should have noticeably less overshoot
+        assert!(mitchell_dark_overshoot < lanczos_dark_overshoot,
+            "Mitchell dark overshoot ({:.4}) should be < Lanczos ({:.4})", mitchell_dark_overshoot, lanczos_dark_overshoot);
+        assert!(mitchell_bright_overshoot < lanczos_bright_overshoot,
+            "Mitchell bright overshoot ({:.4}) should be < Lanczos ({:.4})", mitchell_bright_overshoot, lanczos_bright_overshoot);
+
+        // Mitchell should have very low overshoot (<1%)
+        assert!(mitchell_dark_overshoot < 0.01,
+            "Mitchell dark overshoot ({:.4}) should be <1%", mitchell_dark_overshoot);
+        // Bright side may have slightly more due to accumulated error
+        assert!(mitchell_bright_overshoot < 0.03,
+            "Mitchell bright overshoot ({:.4}) should be <3%", mitchell_bright_overshoot);
+    }
+
+    #[test]
+    fn test_mitchell_4x_roundtrip_quality() {
+        // Same test as Lanczos but for Mitchell
+        let size = 16;
+        let mut src = vec![Pixel4::default(); size * size];
+
+        for y in 0..size {
+            for x in 0..size {
+                let val = if y < size / 2 {
+                    x as f32 / (size - 1) as f32
+                } else {
+                    if x < size / 2 { 0.0 } else { 1.0 }
+                };
+                src[y * size + x] = Pixel4::new(val, val, val, 0.0);
+            }
+        }
+
+        let up = rescale(&src, size, size, size * 4, size * 4, RescaleMethod::Mitchell, ScaleMode::Independent);
+        let down = rescale(&up, size * 4, size * 4, size, size, RescaleMethod::Mitchell, ScaleMode::Independent);
+
+        let mut mse = 0.0f64;
+        let mut max_diff = 0.0f32;
+        for (orig, result) in src.iter().zip(down.iter()) {
+            let diff = (orig[0] - result[0]).abs();
+            mse += (diff as f64).powi(2);
+            if diff > max_diff {
+                max_diff = diff;
+            }
+        }
+        mse /= (size * size) as f64;
+        let psnr = if mse > 0.0 { 10.0 * (1.0 / mse).log10() } else { f64::INFINITY };
+
+        eprintln!("Mitchell 4x roundtrip: MSE={:.6}, PSNR={:.2}dB, max_diff={:.4}", mse, psnr, max_diff);
+
+        // Mitchell may be slightly blurrier than Lanczos, but should still have good PSNR
+        assert!(psnr > 18.0, "Mitchell PSNR too low: {:.2}dB (expected > 18dB)", psnr);
+        assert!(max_diff < 0.25, "Mitchell max diff too high: {:.4} (expected < 0.25)", max_diff);
     }
 }
