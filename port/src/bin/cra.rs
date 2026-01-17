@@ -195,10 +195,10 @@ enum ScaleMethod {
     Bilinear,
     /// Mitchell-Netravali (B=C=1/3): soft, minimal ringing
     Mitchell,
-    /// Catmull-Rom (B=0, C=0.5): sharp, low ringing (recommended)
-    #[default]
+    /// Catmull-Rom (B=0, C=0.5): sharp, low ringing
     CatmullRom,
-    /// Lanczos3: maximum sharpness, some ringing artifacts
+    /// Lanczos3: maximum sharpness, some ringing artifacts (recommended)
+    #[default]
     Lanczos,
 }
 

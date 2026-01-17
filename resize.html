@@ -333,8 +333,8 @@
             <div class="option-row" style="margin-top: 20px;">
                 <label>Interpolation:</label>
                 <select id="interpolation">
-                    <option value="3" selected>Catmull-Rom (sharp, low ringing)</option>
-                    <option value="1">Lanczos (max sharpness, more ringing)</option>
+                    <option value="1" selected>Lanczos (sharp, recommended)</option>
+                    <option value="3">Catmull-Rom (sharp, low ringing)</option>
                     <option value="2">Mitchell (soft, minimal ringing)</option>
                     <option value="0">Bilinear (faster)</option>
                 </select>
@@ -616,8 +616,8 @@
                 cmd += ` --height ${lastOutputHeight}`;
             }
 
-            // Add scale method (only if not default catmull-rom)
-            if (interpolation !== 3) {
+            // Add scale method (only if not default lanczos)
+            if (interpolation !== 1) {
                 cmd += ` --scale-method ${interpolationMap[interpolation]}`;
             }
 
