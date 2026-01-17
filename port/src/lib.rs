@@ -125,6 +125,8 @@ pub struct LoadedImage {
     has_alpha: bool,
     has_non_srgb_icc: bool,
     is_exr: bool,
+    // Whether this image has premultiplied alpha (from metadata or format default)
+    is_premultiplied_alpha: bool,
     // CICP flags (authoritative color space indicators)
     is_cicp_srgb: bool,
     is_cicp_linear: bool,
@@ -168,11 +170,11 @@ impl LoadedImage {
         self.is_exr
     }
 
-    /// Check if this format typically uses premultiplied alpha by default.
-    /// Currently only OpenEXR uses premultiplied alpha by default.
+    /// Check if this image has premultiplied alpha that needs un-premultiplying.
+    /// For safetensors, this comes from metadata. For other formats, it's the format default.
     #[wasm_bindgen(getter)]
     pub fn is_format_premultiplied_default(&self) -> bool {
-        self.is_exr
+        self.is_premultiplied_alpha
     }
 
     /// CICP indicates standard sRGB color space (authoritative check).
@@ -269,8 +271,8 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
             .unwrap_or(false)
     };
 
-    // Check if format is EXR (which has premultiplied alpha by default)
-    let is_exr = decoded.is_format_premultiplied_default();
+    // Check if format is EXR (for backwards compatibility flag)
+    let is_exr = matches!(decoded.format, Some(image::ImageFormat::OpenExr));
 
     Ok(LoadedImage {
         image: decoded.image,
@@ -283,6 +285,7 @@ pub fn load_image_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         has_alpha: decoded.has_alpha,
         has_non_srgb_icc,
         is_exr,
+        is_premultiplied_alpha: decoded.is_premultiplied_alpha,
         is_cicp_srgb,
         is_cicp_linear,
         is_cicp_needs_conversion,
@@ -390,6 +393,7 @@ pub fn load_sfi_wasm(file_bytes: Vec<u8>) -> Result<LoadedImage, JsValue> {
         has_alpha: decoded.has_alpha,
         has_non_srgb_icc: false,
         is_exr: false,
+        is_premultiplied_alpha: decoded.is_premultiplied_alpha,
         is_cicp_srgb: false,  // SFI files are already linear
         is_cicp_linear: true, // Reported as linear
         is_cicp_needs_conversion: false,

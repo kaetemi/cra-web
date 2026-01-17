@@ -28,13 +28,17 @@ pub struct DecodedImage {
     pub is_16bit: bool,
     pub is_f32: bool,
     pub has_alpha: bool,
+    /// Whether this image has premultiplied alpha.
+    /// For safetensors, this comes from metadata. For other formats, it's the format default.
+    pub is_premultiplied_alpha: bool,
 }
 
 impl DecodedImage {
-    /// Check if this format typically uses premultiplied alpha by default.
-    /// Currently only OpenEXR uses premultiplied alpha by default.
+    /// Check if this image has premultiplied alpha that needs un-premultiplying.
+    /// For safetensors, this comes from the alpha_premultiplied metadata.
+    /// For other formats, it's the format default (e.g., EXR uses premultiplied by default).
     pub fn is_format_premultiplied_default(&self) -> bool {
-        matches!(self.format, Some(ImageFormat::OpenExr))
+        self.is_premultiplied_alpha
     }
 }
 
@@ -90,6 +94,9 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
         ColorType::La8 | ColorType::Rgba8 | ColorType::La16 | ColorType::Rgba16 | ColorType::Rgba32F
     );
 
+    // EXR uses premultiplied alpha by default
+    let is_premultiplied_alpha = matches!(format, Some(ImageFormat::OpenExr));
+
     Ok(DecodedImage {
         image,
         icc_profile,
@@ -98,6 +105,7 @@ fn load_from_reader<R: BufRead + Seek>(reader: ImageReader<R>) -> Result<Decoded
         is_16bit,
         is_f32,
         has_alpha,
+        is_premultiplied_alpha,
     })
 }
 
@@ -891,6 +899,7 @@ pub fn load_safetensors_image(data: &[u8]) -> Result<DecodedImage, String> {
         is_16bit: false,
         is_f32: true,
         has_alpha: sfi_image.has_alpha,
+        is_premultiplied_alpha: sfi_image.metadata.alpha_premultiplied,
     })
 }
 
