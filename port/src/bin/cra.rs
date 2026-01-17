@@ -1009,7 +1009,7 @@ fn encode_binary(
             encode_gray_packed(&result.interleaved, width, height, format.bits_r)
         }
     } else if result.has_alpha {
-        // ARGB format (Bridgetek EVE ordering: A in MSB, R, G, B toward LSB)
+        // ARGB format (hardware ordering: A in MSB, R, G, B toward LSB)
         if row_aligned {
             encode_argb_row_aligned_stride(
                 &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b, stride, fill,
@@ -1074,6 +1074,15 @@ fn save_png_rgba(path: &PathBuf, data: &[u8], width: u32, height: u32) -> Result
 // Metadata JSON
 // ============================================================================
 
+/// Effective safetensors settings (resolved from args + context)
+struct SafetensorsMetadata {
+    format: SafetensorsFormat,
+    transfer: SfiTransfer,
+    has_alpha: bool,
+    dither: DitherMethod,
+    distance_space: ColorSpace,
+}
+
 fn write_metadata(
     path: &PathBuf,
     args: &Args,
@@ -1083,6 +1092,7 @@ fn write_metadata(
     width: u32,
     height: u32,
     outputs: &[(String, PathBuf, usize)],
+    safetensors_meta: Option<&SafetensorsMetadata>,
 ) -> Result<(), String> {
     // Calculate stride and total_size for raw output
     // Stride = bytes per row (respects --stride alignment)
@@ -1121,6 +1131,20 @@ fn write_metadata(
         json.push_str(&format!("  \"compressed\": {},\n", 0));
         json.push_str(&format!("  \"stride\": {},\n", row_stride));
         json.push_str(&format!("  \"total_size\": {},\n", total_size));
+    }
+
+    // Safetensors-specific fields (only when safetensors output is present)
+    if let Some(sfi) = safetensors_meta {
+        let transfer_str = match sfi.transfer {
+            SfiTransfer::Linear => "linear",
+            SfiTransfer::Srgb => "srgb",
+            SfiTransfer::Unspecified => "unspecified",
+        };
+        json.push_str(&format!("  \"safetensors_format\": \"{:?}\",\n", sfi.format));
+        json.push_str(&format!("  \"safetensors_transfer\": \"{}\",\n", transfer_str));
+        json.push_str(&format!("  \"safetensors_has_alpha\": {},\n", sfi.has_alpha));
+        json.push_str(&format!("  \"safetensors_dither\": \"{:?}\",\n", sfi.dither));
+        json.push_str(&format!("  \"safetensors_distance_space\": \"{:?}\",\n", sfi.distance_space));
     }
 
     // Advanced fields
@@ -1526,6 +1550,9 @@ fn main() -> Result<(), String> {
     let needs_linear = needs_reference || needs_resize || format.is_grayscale
         || needs_profile_processing || needs_unpremultiply;
 
+    // Track effective safetensors settings for metadata
+    let mut safetensors_meta: Option<SafetensorsMetadata> = None;
+
     // Process image based on whether linear space is needed
     let (dither_result, width, height) = if needs_linear {
         // Linear RGB path: load -> resize -> color correct -> safetensors -> dither
@@ -1606,6 +1633,14 @@ fn main() -> Result<(), String> {
                 SafetensorsTransfer::Linear => SfiTransfer::Linear,
                 SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
             };
+            // Record effective settings for metadata
+            safetensors_meta = Some(SafetensorsMetadata {
+                format: args.safetensors_format,
+                transfer,
+                has_alpha: include_alpha,
+                dither: args.safetensors_dither,
+                distance_space: args.safetensors_distance_space,
+            });
             // Convert to target transfer (write function doesn't convert)
             let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Srgb {
                 // Linear → sRGB conversion
@@ -1675,6 +1710,14 @@ fn main() -> Result<(), String> {
                 SafetensorsTransfer::Linear => SfiTransfer::Linear,
                 SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
             };
+            // Record effective settings for metadata
+            safetensors_meta = Some(SafetensorsMetadata {
+                format: args.safetensors_format,
+                transfer,
+                has_alpha: include_alpha,
+                dither: args.safetensors_dither,
+                distance_space: args.safetensors_distance_space,
+            });
             // Normalize 0-255 to 0-1 and convert to target transfer
             let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Linear {
                 // sRGB 0-255 → normalize → sRGB → linear
@@ -1895,6 +1938,7 @@ fn main() -> Result<(), String> {
             width,
             height,
             &outputs,
+            safetensors_meta.as_ref(),
         )?;
     }
 
