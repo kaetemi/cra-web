@@ -1,24 +1,25 @@
-//! EWA (Elliptical Weighted Average) resampling
+//! EWA (Elliptical Weighted Average) resampling with radial sinc-Lanczos kernels
 //!
-//! This module implements EWA resampling using radially symmetric 2D Lanczos kernels.
+//! This module implements EWA resampling using 1D sinc-Lanczos applied radially.
 //! Unlike separable 2-pass convolution, EWA uses a true 2D filter footprint which
 //! provides better quality for diagonal edges and non-uniform scaling.
 //!
-//! For axis-aligned uniform scaling, EWA with a radially symmetric kernel is
-//! mathematically equivalent to 2D convolution with that kernel, but the filter
-//! shape is circular rather than rectangular (as in separable filtering).
+//! NOTE: This is "radial sinc-Lanczos", not true jinc-based EWA Lanczos.
+//! True EWA Lanczos uses jinc (J1 Bessel) as the 2D analog of sinc.
+//! The current implementation uses sinc(r)*sinc(r/a) on the radial distance,
+//! which is a common simplification but not mathematically optimal for 2D.
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
 use super::kernels::{lanczos2, lanczos3};
 
-/// Evaluate the 2D radially symmetric Lanczos kernel
-/// Uses the 1D Lanczos function on the radial distance
+/// Evaluate the radial sinc-Lanczos kernel
+/// Uses the 1D sinc-Lanczos function on the radial distance
 #[inline]
 fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
     match method {
-        RescaleMethod::EWALanczos2 => lanczos2(r),
-        RescaleMethod::EWALanczos3 => lanczos3(r),
+        RescaleMethod::EWASincLanczos2 => lanczos2(r),
+        RescaleMethod::EWASincLanczos3 => lanczos3(r),
         // For the base methods, also support them
         RescaleMethod::Lanczos2 => lanczos2(r),
         RescaleMethod::Lanczos3 => lanczos3(r),
@@ -30,8 +31,8 @@ fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
 #[inline]
 fn ewa_radius(method: RescaleMethod) -> f32 {
     match method {
-        RescaleMethod::EWALanczos2 | RescaleMethod::Lanczos2 => 2.0,
-        RescaleMethod::EWALanczos3 | RescaleMethod::Lanczos3 => 3.0,
+        RescaleMethod::EWASincLanczos2 | RescaleMethod::Lanczos2 => 2.0,
+        RescaleMethod::EWASincLanczos3 | RescaleMethod::Lanczos3 => 3.0,
         _ => 3.0,
     }
 }

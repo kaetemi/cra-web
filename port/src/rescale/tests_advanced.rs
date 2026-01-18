@@ -654,7 +654,7 @@ fn test_ewa_lanczos3_downscale() {
     }
 
     let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
-                      RescaleMethod::EWALanczos3, ScaleMode::Independent);
+                      RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
 
     assert_eq!(dst.len(), dst_size * dst_size);
 
@@ -686,7 +686,7 @@ fn test_ewa_lanczos3_upscale() {
     }
 
     let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
-                      RescaleMethod::EWALanczos3, ScaleMode::Independent);
+                      RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
 
     assert_eq!(dst.len(), dst_size * dst_size);
 
@@ -717,7 +717,7 @@ fn test_ewa_comparable_to_separable() {
     let separable = rescale(&src, src_size, src_size, dst_size, dst_size,
                             RescaleMethod::Lanczos3, ScaleMode::Independent);
     let ewa = rescale(&src, src_size, src_size, dst_size, dst_size,
-                      RescaleMethod::EWALanczos3, ScaleMode::Independent);
+                      RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
 
     // EWA and separable should produce reasonably similar results
     // (not identical due to different filter shapes, but close)
@@ -744,8 +744,8 @@ fn test_ewa_alpha_aware() {
         Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
     ];
 
-    let regular_ewa = rescale(&src, 2, 2, 4, 4, RescaleMethod::EWALanczos3, ScaleMode::Independent);
-    let alpha_ewa = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+    let regular_ewa = rescale(&src, 2, 2, 4, 4, RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
+    let alpha_ewa = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
 
     // Alpha-aware mode should produce valid results (no NaN/inf)
     for p in &alpha_ewa {
@@ -778,11 +778,11 @@ fn test_ewa_lanczos2_vs_lanczos3() {
     }
 
     // 2x upscale then 2x downscale
-    let l2_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWALanczos2, ScaleMode::Independent);
-    let l2_down = rescale(&l2_up, size * 2, size * 2, size, size, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+    let l2_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWASincLanczos2, ScaleMode::Independent);
+    let l2_down = rescale(&l2_up, size * 2, size * 2, size, size, RescaleMethod::EWASincLanczos2, ScaleMode::Independent);
 
-    let l3_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWALanczos3, ScaleMode::Independent);
-    let l3_down = rescale(&l3_up, size * 2, size * 2, size, size, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+    let l3_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
+    let l3_down = rescale(&l3_up, size * 2, size * 2, size, size, RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
 
     // Both should produce valid results
     for (i, (p2, p3)) in l2_down.iter().zip(l3_down.iter()).enumerate() {

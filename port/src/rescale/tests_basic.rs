@@ -344,7 +344,7 @@ fn test_ewa_lanczos3_identity() {
         Pixel4::new(0.5, 0.5, 0.5, 1.0),
         Pixel4::new(0.75, 0.75, 0.75, 1.0),
     ];
-    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWASincLanczos3, ScaleMode::Independent);
     assert_eq!(src, dst);
 }
 
@@ -356,7 +356,7 @@ fn test_ewa_lanczos2_identity() {
         Pixel4::new(0.5, 0.5, 0.5, 1.0),
         Pixel4::new(0.75, 0.75, 0.75, 1.0),
     ];
-    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWASincLanczos2, ScaleMode::Independent);
     assert_eq!(src, dst);
 }
 

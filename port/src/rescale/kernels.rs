@@ -145,8 +145,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         }
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
-        RescaleMethod::Lanczos2 | RescaleMethod::EWALanczos2 => lanczos2(x),
-        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWALanczos3 => lanczos3(x),
+        RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 => lanczos2(x),
+        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Box => box_filter(x),
         // PeakedCosine uses its own specialized precomputation with scale-dependent parameters
