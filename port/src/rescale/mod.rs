@@ -26,11 +26,16 @@ pub enum RescaleMethod {
     Mitchell,
     /// Catmull-Rom (B=0, C=0.5) - sharp interpolating spline, low ringing
     CatmullRom,
+    /// Lanczos2 - good sharpness with less ringing than Lanczos3
+    Lanczos2,
     /// Lanczos3 - maximum sharpness, some ringing artifacts
     Lanczos3,
     /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
     /// WARNING: O(N²) - very slow for large images, severe ringing at edges
     Sinc,
+    /// Lanczos2 with scatter-based accumulation (experimental)
+    /// Inverts the loop: each source pixel scatters to destination pixels
+    Lanczos2Scatter,
     /// Lanczos3 with scatter-based accumulation (experimental)
     /// Inverts the loop: each source pixel scatters to destination pixels
     Lanczos3Scatter,
@@ -57,8 +62,10 @@ impl RescaleMethod {
             "bilinear" | "linear" => Some(RescaleMethod::Bilinear),
             "mitchell" => Some(RescaleMethod::Mitchell),
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
+            "lanczos2" => Some(RescaleMethod::Lanczos2),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
             "sinc" => Some(RescaleMethod::Sinc),
+            "lanczos2-scatter" | "lanczos2_scatter" => Some(RescaleMethod::Lanczos2Scatter),
             "lanczos-scatter" | "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
             _ => None,
@@ -71,6 +78,7 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
+            RescaleMethod::Lanczos2 | RescaleMethod::Lanczos2Scatter => 2.0,
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
         }
@@ -83,12 +91,13 @@ impl RescaleMethod {
 
     /// Returns true if this is a scatter-based method
     pub fn is_scatter(&self) -> bool {
-        matches!(self, RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
+        matches!(self, RescaleMethod::Lanczos2Scatter | RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
     }
 
     /// Get the underlying kernel method for scatter variants
     pub fn kernel_method(&self) -> RescaleMethod {
         match self {
+            RescaleMethod::Lanczos2Scatter => RescaleMethod::Lanczos2,
             RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
             RescaleMethod::SincScatter => RescaleMethod::Sinc,
             other => *other,
@@ -260,10 +269,10 @@ pub fn rescale_with_progress(
 
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
-        RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
+        RescaleMethod::Lanczos2Scatter | RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
     }
@@ -313,10 +322,10 @@ pub fn rescale_with_alpha_progress(
 
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
-        RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
+        RescaleMethod::Lanczos2Scatter | RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
     }

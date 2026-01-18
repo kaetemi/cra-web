@@ -45,6 +45,21 @@ pub fn catmull_rom(x: f32) -> f32 {
     }
 }
 
+/// Lanczos kernel with a=2
+/// Smaller window than Lanczos3, less ringing but also less sharp.
+#[inline]
+pub fn lanczos2(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 2.0 {
+        0.0
+    } else {
+        let pi_x = PI * x;
+        let pi_x_2 = pi_x / 2.0;
+        (pi_x.sin() / pi_x) * (pi_x_2.sin() / pi_x_2)
+    }
+}
+
 /// Lanczos kernel with a=3
 #[inline]
 pub fn lanczos3(x: f32) -> f32 {
@@ -83,6 +98,7 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         }
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
+        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos2Scatter => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
     }

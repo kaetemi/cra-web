@@ -197,11 +197,15 @@ enum ScaleMethod {
     Mitchell,
     /// Catmull-Rom (B=0, C=0.5): sharp, low ringing
     CatmullRom,
+    /// Lanczos2: good sharpness, less ringing than Lanczos3
+    Lanczos2,
     /// Lanczos3: maximum sharpness, some ringing artifacts (recommended)
     #[default]
     Lanczos,
     /// Pure Sinc (non-windowed): theoretically ideal, full image extent (SLOW, research only)
     Sinc,
+    /// Lanczos2 with scatter-based accumulation (experimental)
+    Lanczos2Scatter,
     /// Lanczos3 with scatter-based accumulation (experimental)
     LanczosScatter,
     /// Sinc with scatter-based accumulation (experimental, SLOW)
@@ -214,8 +218,10 @@ impl ScaleMethod {
             ScaleMethod::Bilinear => cra_wasm::rescale::RescaleMethod::Bilinear,
             ScaleMethod::Mitchell => cra_wasm::rescale::RescaleMethod::Mitchell,
             ScaleMethod::CatmullRom => cra_wasm::rescale::RescaleMethod::CatmullRom,
+            ScaleMethod::Lanczos2 => cra_wasm::rescale::RescaleMethod::Lanczos2,
             ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
             ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
+            ScaleMethod::Lanczos2Scatter => cra_wasm::rescale::RescaleMethod::Lanczos2Scatter,
             ScaleMethod::LanczosScatter => cra_wasm::rescale::RescaleMethod::Lanczos3Scatter,
             ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
         }
@@ -837,8 +843,10 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Bilinear => "Bilinear",
             cra_wasm::rescale::RescaleMethod::Mitchell => "Mitchell",
             cra_wasm::rescale::RescaleMethod::CatmullRom => "Catmull-Rom",
+            cra_wasm::rescale::RescaleMethod::Lanczos2 => "Lanczos2",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
+            cra_wasm::rescale::RescaleMethod::Lanczos2Scatter => "Lanczos2 Scatter",
             cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
             cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
         };
