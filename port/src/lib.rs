@@ -77,6 +77,12 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         8 => rescale::RescaleMethod::Lanczos2Scatter,
         9 => rescale::RescaleMethod::LanczosMixed,
         10 => rescale::RescaleMethod::LanczosMixedScatter,
+        11 => rescale::RescaleMethod::Lanczos4,
+        12 => rescale::RescaleMethod::Lanczos4Scatter,
+        13 => rescale::RescaleMethod::Lanczos5,
+        14 => rescale::RescaleMethod::Lanczos5Scatter,
+        15 => rescale::RescaleMethod::Lanczos6,
+        16 => rescale::RescaleMethod::Lanczos6Scatter,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

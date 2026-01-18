@@ -86,6 +86,51 @@ pub fn lanczos3(x: f32) -> f32 {
     }
 }
 
+/// Lanczos kernel with a=4
+/// Sharper than Lanczos3, more ringing artifacts.
+#[inline]
+pub fn lanczos4(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 4.0 {
+        0.0
+    } else {
+        let pi_x = PI * x;
+        let pi_x_4 = pi_x / 4.0;
+        (pi_x.sin() / pi_x) * (pi_x_4.sin() / pi_x_4)
+    }
+}
+
+/// Lanczos kernel with a=5
+/// Very sharp, noticeable ringing on edges.
+#[inline]
+pub fn lanczos5(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 5.0 {
+        0.0
+    } else {
+        let pi_x = PI * x;
+        let pi_x_5 = pi_x / 5.0;
+        (pi_x.sin() / pi_x) * (pi_x_5.sin() / pi_x_5)
+    }
+}
+
+/// Lanczos kernel with a=6
+/// Extremely sharp, approaching sinc behavior. Significant ringing.
+#[inline]
+pub fn lanczos6(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 6.0 {
+        0.0
+    } else {
+        let pi_x = PI * x;
+        let pi_x_6 = pi_x / 6.0;
+        (pi_x.sin() / pi_x) * (pi_x_6.sin() / pi_x_6)
+    }
+}
+
 /// Pure sinc kernel (non-windowed)
 /// This is the theoretically ideal interpolation kernel for band-limited signals.
 /// Unlike Lanczos, it has no window function and extends to infinity (full image).
@@ -112,6 +157,9 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::CatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos2Scatter => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => lanczos3(x),
+        RescaleMethod::Lanczos4 | RescaleMethod::Lanczos4Scatter => lanczos4(x),
+        RescaleMethod::Lanczos5 | RescaleMethod::Lanczos5Scatter => lanczos5(x),
+        RescaleMethod::Lanczos6 | RescaleMethod::Lanczos6Scatter => lanczos6(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         // Mixed methods should not call eval_kernel directly - they use eval_kernel_mixed
         RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
