@@ -56,6 +56,9 @@ pub enum RescaleMethod {
     Lanczos3Integrated,
     /// Sinc with integrated pixel area (more accurate weights, uses full image extent)
     SincIntegrated,
+    /// Box filter: true area integration with partial pixel contributions
+    /// Physically correct for light: computes exact overlap between destination and source pixels
+    Box,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -90,6 +93,7 @@ impl RescaleMethod {
             "mixed35" | "lanczos35-mixed" => Some(RescaleMethod::Lanczos35Mixed),
             "lanczos3-integrated" | "lanczos3_integrated" | "integrated" => Some(RescaleMethod::Lanczos3Integrated),
             "sinc-integrated" | "sinc_integrated" => Some(RescaleMethod::SincIntegrated),
+            "box" | "area" | "nearest" => Some(RescaleMethod::Box),
             _ => None,
         }
     }
@@ -111,6 +115,7 @@ impl RescaleMethod {
             RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,  // 2+3 -> 3
             RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
             RescaleMethod::Lanczos35Mixed => 5.0,  // 3+5 -> 5
+            RescaleMethod::Box => 1.0,  // Box filter has radius 0.5, but we use 1 to sample neighboring pixels
         }
     }
 
@@ -315,7 +320,7 @@ pub fn rescale_with_progress(
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
         RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc | RescaleMethod::SincIntegrated => {
+        RescaleMethod::Sinc | RescaleMethod::SincIntegrated | RescaleMethod::Box => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
@@ -381,7 +386,7 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
         RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc | RescaleMethod::SincIntegrated => {
+        RescaleMethod::Sinc | RescaleMethod::SincIntegrated | RescaleMethod::Box => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {

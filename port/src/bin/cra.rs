@@ -226,6 +226,8 @@ enum ScaleMethod {
     Lanczos3Integrated,
     /// Sinc with integrated pixel area (more accurate, uses full image extent, SLOW)
     SincIntegrated,
+    /// Box filter: true area integration with partial pixel contributions
+    Box,
 }
 
 impl ScaleMethod {
@@ -248,6 +250,7 @@ impl ScaleMethod {
             ScaleMethod::Lanczos35Mixed => cra_wasm::rescale::RescaleMethod::Lanczos35Mixed,
             ScaleMethod::Lanczos3Integrated => cra_wasm::rescale::RescaleMethod::Lanczos3Integrated,
             ScaleMethod::SincIntegrated => cra_wasm::rescale::RescaleMethod::SincIntegrated,
+            ScaleMethod::Box => cra_wasm::rescale::RescaleMethod::Box,
         }
     }
 }
@@ -881,6 +884,7 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Lanczos35Mixed => "Mixed Lanczos 3+5",
             cra_wasm::rescale::RescaleMethod::Lanczos3Integrated => "Lanczos3 Integrated",
             cra_wasm::rescale::RescaleMethod::SincIntegrated => "Sinc Integrated (full extent)",
+            cra_wasm::rescale::RescaleMethod::Box => "Box (area average)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

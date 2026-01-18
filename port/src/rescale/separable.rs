@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_integrated_kernel_weights, precompute_integrated_sinc_weights, eval_kernel_mixed, eval_kernel_mixed_24, eval_kernel_mixed_35, select_kernel_for_source};
+use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_integrated_kernel_weights, precompute_integrated_sinc_weights, precompute_box_weights, eval_kernel_mixed, eval_kernel_mixed_24, eval_kernel_mixed_35, select_kernel_for_source};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -131,6 +131,7 @@ pub fn rescale_kernel_pixels(
 
     // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
     // Use integrated weights for *Integrated methods (more accurate, especially for downscaling)
+    // Box uses true area integration for physically correct averaging
     let (h_weights, v_weights) = match method {
         RescaleMethod::Lanczos3Integrated => (
             precompute_integrated_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x),
@@ -139,6 +140,10 @@ pub fn rescale_kernel_pixels(
         RescaleMethod::SincIntegrated => (
             precompute_integrated_sinc_weights(src_width, dst_width, scale_x, filter_scale_x),
             precompute_integrated_sinc_weights(src_height, dst_height, scale_y, filter_scale_y),
+        ),
+        RescaleMethod::Box => (
+            precompute_box_weights(src_width, dst_width, scale_x, filter_scale_x),
+            precompute_box_weights(src_height, dst_height, scale_y, filter_scale_y),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),
@@ -224,6 +229,7 @@ pub fn rescale_kernel_alpha_pixels(
     };
 
     // Use integrated weights for *Integrated methods (more accurate, especially for downscaling)
+    // Box uses true area integration for physically correct averaging
     let (h_weights, v_weights) = match method {
         RescaleMethod::Lanczos3Integrated => (
             precompute_integrated_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x),
@@ -232,6 +238,10 @@ pub fn rescale_kernel_alpha_pixels(
         RescaleMethod::SincIntegrated => (
             precompute_integrated_sinc_weights(src_width, dst_width, scale_x, filter_scale_x),
             precompute_integrated_sinc_weights(src_height, dst_height, scale_y, filter_scale_y),
+        ),
+        RescaleMethod::Box => (
+            precompute_box_weights(src_width, dst_width, scale_x, filter_scale_x),
+            precompute_box_weights(src_height, dst_height, scale_y, filter_scale_y),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),

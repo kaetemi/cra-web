@@ -145,6 +145,54 @@ pub fn sinc(x: f32) -> f32 {
     }
 }
 
+/// Box filter (rectangular window) - point sampled version
+/// Returns 1.0 for |x| <= 0.5, 0.0 otherwise.
+/// Note: For proper area-averaged box filtering, use box_integrated instead.
+#[inline]
+pub fn box_filter(x: f32) -> f32 {
+    if x.abs() <= 0.5 {
+        1.0
+    } else {
+        0.0
+    }
+}
+
+/// Compute the exact overlap between a destination pixel's footprint and a source pixel.
+///
+/// This computes the true box integral: the fraction of source pixel `si` that falls
+/// within the destination pixel's footprint.
+///
+/// For a destination pixel at position `dst_pos`:
+/// - Its footprint in source space is: [src_pos - half_width, src_pos + half_width]
+/// - where half_width = 0.5 * filter_scale (filter_scale = src_size / dst_size)
+///
+/// For source pixel `si`:
+/// - Its area spans: [si - 0.5, si + 0.5]
+///
+/// The overlap is the intersection of these two intervals.
+///
+/// This gives physically correct area averaging:
+/// - For upscaling (filter_scale < 1): partial source pixel coverage
+/// - For downscaling (filter_scale > 1): multiple source pixels averaged proportionally
+#[inline]
+pub fn box_integrated(src_pos: f32, si: f32, filter_scale: f32) -> f32 {
+    // Destination pixel's footprint in source coordinates
+    let half_width = 0.5 * filter_scale;
+    let dst_start = src_pos - half_width;
+    let dst_end = src_pos + half_width;
+
+    // Source pixel's area
+    let src_start = si - 0.5;
+    let src_end = si + 0.5;
+
+    // Compute overlap
+    let overlap_start = dst_start.max(src_start);
+    let overlap_end = dst_end.min(src_end);
+
+    // Return the overlap length (0 if no overlap)
+    (overlap_end - overlap_start).max(0.0)
+}
+
 /// Generic kernel evaluation
 #[inline]
 pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
@@ -161,6 +209,7 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Lanczos5 => lanczos5(x),
         RescaleMethod::Lanczos6 => lanczos6(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated => sinc(x),
+        RescaleMethod::Box => box_filter(x),
         // Mixed methods should not call eval_kernel directly - they use specialized eval functions
         RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
         RescaleMethod::Lanczos24Mixed => lanczos4(x),
@@ -373,6 +422,62 @@ pub fn precompute_integrated_kernel_weights(
 
         for si in start..=end {
             let weight = lanczos3_integrated(src_pos, si as f32, filter_scale);
+            weights.push(weight);
+            weight_sum += weight;
+        }
+
+        // Normalize weights
+        if weight_sum.abs() > 1e-8 {
+            for w in &mut weights {
+                *w /= weight_sum;
+            }
+        }
+
+        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+
+        all_weights.push(KernelWeights {
+            start_idx: start,
+            weights,
+            fallback_idx: fallback,
+        });
+    }
+
+    all_weights
+}
+
+/// Precompute box filter weights using true area integration
+/// Computes exact pixel overlap between destination and source pixels
+pub fn precompute_box_weights(
+    src_len: usize,
+    dst_len: usize,
+    scale: f32,
+    filter_scale: f32,
+) -> Vec<KernelWeights> {
+    let mut all_weights = Vec::with_capacity(dst_len);
+
+    // Center offset
+    let mapped_src_len = dst_len as f32 * scale;
+    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+
+    // Box filter radius depends on filter_scale:
+    // The destination pixel footprint is filter_scale wide in source space
+    // We need to sample all source pixels that could overlap this footprint
+    let box_radius = (0.5 * filter_scale).ceil() as i32 + 1;
+
+    for dst_i in 0..dst_len {
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+        let center = src_pos.floor() as i32;
+
+        // Find the valid source index range
+        let start = (center - box_radius).max(0) as usize;
+        let end = ((center + box_radius) as usize).min(src_len - 1);
+
+        // Collect box integrated weights for each source pixel
+        let mut weights = Vec::with_capacity(end - start + 1);
+        let mut weight_sum = 0.0f32;
+
+        for si in start..=end {
+            let weight = box_integrated(src_pos, si as f32, filter_scale);
             weights.push(weight);
             weight_sum += weight;
         }
