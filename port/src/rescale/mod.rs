@@ -52,6 +52,10 @@ pub enum RescaleMethod {
     Lanczos24Mixed,
     /// Mixed Lanczos 3+5: randomly switches between Lanczos3 and Lanczos5 per source pixel
     Lanczos35Mixed,
+    /// Lanczos3 with integrated pixel area (more accurate weights, especially for downscaling)
+    Lanczos3Integrated,
+    /// Sinc with integrated pixel area (more accurate weights, uses full image extent)
+    SincIntegrated,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -84,6 +88,8 @@ impl RescaleMethod {
             "lanczos-mixed-scatter" | "lanczos_mixed_scatter" | "mixed-scatter" | "mixed23-scatter" => Some(RescaleMethod::LanczosMixedScatter),
             "mixed24" | "lanczos24-mixed" => Some(RescaleMethod::Lanczos24Mixed),
             "mixed35" | "lanczos35-mixed" => Some(RescaleMethod::Lanczos35Mixed),
+            "lanczos3-integrated" | "lanczos3_integrated" | "integrated" => Some(RescaleMethod::Lanczos3Integrated),
+            "sinc-integrated" | "sinc_integrated" => Some(RescaleMethod::SincIntegrated),
             _ => None,
         }
     }
@@ -96,11 +102,11 @@ impl RescaleMethod {
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
             RescaleMethod::Lanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::Lanczos3Integrated => 3.0,
             RescaleMethod::Lanczos4 => 4.0,
             RescaleMethod::Lanczos5 => 5.0,
             RescaleMethod::Lanczos6 => 6.0,
-            RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
+            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated => 0.0, // Special: uses full image extent
             // Mixed uses the larger radius of the pair
             RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,  // 2+3 -> 3
             RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
@@ -110,7 +116,7 @@ impl RescaleMethod {
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated)
     }
 
     /// Returns true if this is a scatter-based method
@@ -307,9 +313,9 @@ pub fn rescale_with_progress(
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
-        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
+        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
         RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc => {
+        RescaleMethod::Sinc | RescaleMethod::SincIntegrated => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
@@ -373,9 +379,9 @@ pub fn rescale_with_alpha_progress(
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
-        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
+        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
         RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc => {
+        RescaleMethod::Sinc | RescaleMethod::SincIntegrated => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {

@@ -222,6 +222,10 @@ enum ScaleMethod {
     Lanczos24Mixed,
     /// Mixed Lanczos 3+5 (experimental): randomly switches between Lanczos3/5 per source pixel
     Lanczos35Mixed,
+    /// Lanczos3 with integrated pixel area (more accurate weights for downscaling)
+    Lanczos3Integrated,
+    /// Sinc with integrated pixel area (more accurate, uses full image extent, SLOW)
+    SincIntegrated,
 }
 
 impl ScaleMethod {
@@ -242,6 +246,8 @@ impl ScaleMethod {
             ScaleMethod::LanczosMixedScatter => cra_wasm::rescale::RescaleMethod::LanczosMixedScatter,
             ScaleMethod::Lanczos24Mixed => cra_wasm::rescale::RescaleMethod::Lanczos24Mixed,
             ScaleMethod::Lanczos35Mixed => cra_wasm::rescale::RescaleMethod::Lanczos35Mixed,
+            ScaleMethod::Lanczos3Integrated => cra_wasm::rescale::RescaleMethod::Lanczos3Integrated,
+            ScaleMethod::SincIntegrated => cra_wasm::rescale::RescaleMethod::SincIntegrated,
         }
     }
 }
@@ -873,6 +879,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::LanczosMixedScatter => "Mixed Lanczos 2+3 Scatter",
             cra_wasm::rescale::RescaleMethod::Lanczos24Mixed => "Mixed Lanczos 2+4",
             cra_wasm::rescale::RescaleMethod::Lanczos35Mixed => "Mixed Lanczos 3+5",
+            cra_wasm::rescale::RescaleMethod::Lanczos3Integrated => "Lanczos3 Integrated",
+            cra_wasm::rescale::RescaleMethod::SincIntegrated => "Sinc Integrated (full extent)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(
