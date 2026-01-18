@@ -280,7 +280,8 @@ fn resample_row_variance_adaptive(
         let start = (center - effective_radius).max(0) as usize;
         let end = ((center + effective_radius) as usize).min(src_len - 1);
 
-        let mut sum = Pixel4::default();
+        // First pass: compute weights and weight_sum
+        let mut weights_for_dst: Vec<(usize, f32)> = Vec::new();
         let mut weight_sum = 0.0f32;
 
         for si in start..=end {
@@ -290,18 +291,20 @@ fn resample_row_variance_adaptive(
             }
 
             let weight = eval_lanczos(d, kernel_lobes);
-            sum = sum + src[si] * weight;
+            weights_for_dst.push((si, weight));
             weight_sum += weight;
-
-            // Track contribution (unnormalized - we'll normalize later)
-            contributions[si] += weight;
         }
 
-        // Normalize output pixel
+        // Second pass: compute output and track normalized contributions
         if weight_sum.abs() > 1e-8 {
-            dst_pixels.push(sum * (1.0 / weight_sum));
-            // Note: contributions are accumulated as raw weights, then normalized
-            // globally after all destination pixels are processed
+            let inv_sum = 1.0 / weight_sum;
+            let mut sum = Pixel4::default();
+            for &(si, weight) in &weights_for_dst {
+                sum = sum + src[si] * weight;
+                // Track normalized contribution: what fraction of this dest pixel came from src[si]
+                contributions[si] += weight * inv_sum;
+            }
+            dst_pixels.push(sum * inv_sum);
         } else {
             let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
             dst_pixels.push(src[fallback]);
@@ -309,14 +312,13 @@ fn resample_row_variance_adaptive(
         }
     }
 
-    // Normalize contributions: each source pixel should have total contribution
-    // equal to (dst_len / src_len) for perfect energy conservation
-    // Actually, we want contribution[i] to represent "how much of source[i] was used"
-    // If contribution[i] == 1.0, source[i] was fully accounted for
-    // We need to scale by the expected contribution which is dst_len / src_len
-    let expected_total = dst_len as f32 / src_len as f32;
+    // Scale contributions by scale factor to normalize:
+    // - At 1:1 scale, expected emission = 1.0, so contribution * 1.0 = contribution
+    // - At 2:1 downscale (scale=2), expected emission = 0.5, so contribution * 2.0 normalizes to 1.0
+    // - At 1:2 upscale (scale=0.5), expected emission = 2.0, so contribution * 0.5 normalizes to 1.0
+    // After this, contribution[i] == 1.0 means source pixel i was perfectly sampled.
     for c in &mut contributions {
-        *c /= expected_total.max(1e-8);
+        *c *= scale;
     }
 
     ResampleResult {
