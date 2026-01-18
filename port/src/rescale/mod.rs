@@ -56,8 +56,9 @@ pub enum RescaleMethod {
     Lanczos3Integrated,
     /// Sinc with integrated pixel area (more accurate weights, uses full image extent)
     SincIntegrated,
-    /// Box filter: true area integration with partial pixel contributions
-    /// Physically correct for light: computes exact overlap between destination and source pixels
+    /// Box filter: true area integration computing exact overlap between dest and source pixels.
+    /// - Upscaling: nearest-neighbor (dest pixel smaller than source, samples one pixel)
+    /// - Downscaling: proper area average (dest pixel covers multiple sources, weighted by overlap)
     Box,
 }
 
@@ -115,7 +116,7 @@ impl RescaleMethod {
             RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,  // 2+3 -> 3
             RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
             RescaleMethod::Lanczos35Mixed => 5.0,  // 3+5 -> 5
-            RescaleMethod::Box => 1.0,  // Box filter has radius 0.5, but we use 1 to sample neighboring pixels
+            RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
         }
     }
 

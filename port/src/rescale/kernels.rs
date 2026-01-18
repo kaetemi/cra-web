@@ -159,21 +159,20 @@ pub fn box_filter(x: f32) -> f32 {
 
 /// Compute the exact overlap between a destination pixel's footprint and a source pixel.
 ///
-/// This computes the true box integral: the fraction of source pixel `si` that falls
-/// within the destination pixel's footprint.
+/// For a destination pixel centered at `src_pos` (in source coordinates):
+/// - Its footprint spans: [src_pos - half_width, src_pos + half_width]
+/// - where half_width = 0.5 * filter_scale, and filter_scale = src_size / dst_size
 ///
-/// For a destination pixel at position `dst_pos`:
-/// - Its footprint in source space is: [src_pos - half_width, src_pos + half_width]
-/// - where half_width = 0.5 * filter_scale (filter_scale = src_size / dst_size)
-///
-/// For source pixel `si`:
+/// For source pixel `si` (centered at integer position si):
 /// - Its area spans: [si - 0.5, si + 0.5]
 ///
-/// The overlap is the intersection of these two intervals.
+/// Returns the length of the intersection (overlap) between these two intervals.
 ///
-/// This gives physically correct area averaging:
-/// - For upscaling (filter_scale < 1): partial source pixel coverage
-/// - For downscaling (filter_scale > 1): multiple source pixels averaged proportionally
+/// Behavior by scale:
+/// - Upscaling (filter_scale < 1): dest footprint < 1 source pixel, so most dest pixels
+///   fall entirely within one source pixel (nearest-neighbor), with boundary pixels blended
+/// - Downscaling (filter_scale > 1): dest footprint > 1 source pixel, so each dest pixel
+///   properly averages multiple source pixels weighted by their overlap area
 #[inline]
 pub fn box_integrated(src_pos: f32, si: f32, filter_scale: f32) -> f32 {
     // Destination pixel's footprint in source coordinates
@@ -445,8 +444,12 @@ pub fn precompute_integrated_kernel_weights(
     all_weights
 }
 
-/// Precompute box filter weights using true area integration
-/// Computes exact pixel overlap between destination and source pixels
+/// Precompute box filter weights using true area integration.
+///
+/// Unlike other kernels, box filter should receive the raw scale (src/dst) as filter_scale,
+/// NOT the clamped max(scale, 1.0) value. This ensures:
+/// - Upscaling: dest footprint < source pixel → nearest-neighbor behavior
+/// - Downscaling: dest footprint > source pixel → proper area averaging
 pub fn precompute_box_weights(
     src_len: usize,
     dst_len: usize,

@@ -226,7 +226,7 @@ enum ScaleMethod {
     Lanczos3Integrated,
     /// Sinc with integrated pixel area (more accurate, uses full image extent, SLOW)
     SincIntegrated,
-    /// Box filter: true area integration with partial pixel contributions
+    /// Box filter: nearest-neighbor for upscaling, proper area average for downscaling
     Box,
 }
 

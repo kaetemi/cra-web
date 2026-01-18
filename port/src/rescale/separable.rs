@@ -142,8 +142,10 @@ pub fn rescale_kernel_pixels(
             precompute_integrated_sinc_weights(src_height, dst_height, scale_y, filter_scale_y),
         ),
         RescaleMethod::Box => (
-            precompute_box_weights(src_width, dst_width, scale_x, filter_scale_x),
-            precompute_box_weights(src_height, dst_height, scale_y, filter_scale_y),
+            // Box filter uses raw scale (not clamped) for true area integration
+            // scale = src/dst, which is exactly the dest pixel footprint in source space
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),
@@ -240,8 +242,9 @@ pub fn rescale_kernel_alpha_pixels(
             precompute_integrated_sinc_weights(src_height, dst_height, scale_y, filter_scale_y),
         ),
         RescaleMethod::Box => (
-            precompute_box_weights(src_width, dst_width, scale_x, filter_scale_x),
-            precompute_box_weights(src_height, dst_height, scale_y, filter_scale_y),
+            // Box filter uses raw scale (not clamped) for true area integration
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),
