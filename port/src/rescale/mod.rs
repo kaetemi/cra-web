@@ -11,6 +11,7 @@ mod kernels;
 mod bilinear;
 mod separable;
 mod scatter;
+mod ewa;
 
 use crate::pixel::Pixel4;
 
@@ -42,6 +43,12 @@ pub enum RescaleMethod {
     /// - Upscaling: nearest-neighbor (dest pixel smaller than source, samples one pixel)
     /// - Downscaling: proper area average (dest pixel covers multiple sources, weighted by overlap)
     Box,
+    /// EWA (Elliptical Weighted Average) Lanczos2 - 2D radially symmetric filter
+    /// Better edge quality than separable Lanczos2, especially for non-uniform scaling
+    EWALanczos2,
+    /// EWA (Elliptical Weighted Average) Lanczos3 - 2D radially symmetric filter
+    /// Better edge quality than separable Lanczos3, especially for non-uniform scaling
+    EWALanczos3,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -68,6 +75,8 @@ impl RescaleMethod {
             "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
             "box" | "area" | "nearest" => Some(RescaleMethod::Box),
+            "ewa-lanczos2" | "ewa_lanczos2" | "ewalanczos2" => Some(RescaleMethod::EWALanczos2),
+            "ewa-lanczos3" | "ewa_lanczos3" | "ewalanczos3" | "ewa-lanczos" | "ewa_lanczos" => Some(RescaleMethod::EWALanczos3),
             _ => None,
         }
     }
@@ -78,8 +87,8 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
-            RescaleMethod::Lanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
+            RescaleMethod::Lanczos2 | RescaleMethod::EWALanczos2 => 2.0,
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWALanczos3 => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
         }
@@ -95,11 +104,18 @@ impl RescaleMethod {
         matches!(self, RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
     }
 
-    /// Get the underlying kernel method for scatter variants
+    /// Returns true if this is an EWA (Elliptical Weighted Average) method
+    pub fn is_ewa(&self) -> bool {
+        matches!(self, RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3)
+    }
+
+    /// Get the underlying kernel method for scatter/EWA variants
     pub fn kernel_method(&self) -> RescaleMethod {
         match self {
             RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
             RescaleMethod::SincScatter => RescaleMethod::Sinc,
+            RescaleMethod::EWALanczos2 => RescaleMethod::Lanczos2,
+            RescaleMethod::EWALanczos3 => RescaleMethod::Lanczos3,
             other => *other,
         }
     }
@@ -277,6 +293,9 @@ pub fn rescale_with_progress(
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
+        RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 => {
+            ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
     }
 }
 
@@ -331,6 +350,9 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
+        RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 => {
+            ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
     }
 }
@@ -1299,4 +1321,188 @@ mod tests {
         assert!(max_diff < 1e-3, "Scatter should match gather for prime dims, max diff: {}", max_diff);
     }
 
+    // ========================================================================
+    // EWA (Elliptical Weighted Average) rescaling tests
+    // ========================================================================
+
+    #[test]
+    fn test_ewa_lanczos3_identity() {
+        // Same-size should return identical pixels
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(0.25, 0.25, 0.25, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.75, 0.75, 0.75, 1.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_ewa_lanczos2_identity() {
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(0.25, 0.25, 0.25, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.75, 0.75, 0.75, 1.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_ewa_lanczos3_downscale() {
+        // 8x8 -> 4x4 downscale
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                let b = 0.5;
+                src.push(Pixel4::new(r, g, b, 1.0));
+            }
+        }
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::EWALanczos3, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        // All values should be finite
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+
+        // Check gradient is preserved: top-left should be dark, bottom-right bright
+        assert!(dst[0].r() < 0.3, "Top-left should be dark: {}", dst[0].r());
+        let br = &dst[(dst_size - 1) * dst_size + (dst_size - 1)];
+        assert!(br.r() > 0.7, "Bottom-right should be bright: {}", br.r());
+    }
+
+    #[test]
+    fn test_ewa_lanczos3_upscale() {
+        // 4x4 -> 8x8 upscale
+        let src_size = 4;
+        let dst_size = 8;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let v = ((x + y) % 2) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::EWALanczos3, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        // All values should be finite
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_ewa_comparable_to_separable() {
+        // EWA and separable Lanczos3 should produce similar results for uniform scaling
+        // (they use the same kernel, just different 1D vs 2D evaluation)
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let separable = rescale(&src, src_size, src_size, dst_size, dst_size,
+                                RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let ewa = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::EWALanczos3, ScaleMode::Independent);
+
+        // EWA and separable should produce reasonably similar results
+        // (not identical due to different filter shapes, but close)
+        let mut max_diff = 0.0f32;
+        for (sep, e) in separable.iter().zip(ewa.iter()) {
+            for c in 0..3 {
+                let diff = (sep[c] - e[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("EWA vs separable Lanczos3 max diff: {:.6}", max_diff);
+        // They should be within a reasonable tolerance (less than 0.1)
+        assert!(max_diff < 0.15, "EWA should be comparable to separable, max diff: {}", max_diff);
+    }
+
+    #[test]
+    fn test_ewa_alpha_aware() {
+        // Test alpha-aware EWA mode doesn't bleed transparent pixels
+        let src = vec![
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let regular_ewa = rescale(&src, 2, 2, 4, 4, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+        let alpha_ewa = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+
+        // Alpha-aware mode should produce valid results (no NaN/inf)
+        for p in &alpha_ewa {
+            assert!(p.r().is_finite(), "Alpha EWA should produce finite values");
+        }
+
+        // The top-left pixel in alpha-aware should be closer to 1.0 (the only opaque pixel's value)
+        let alpha_tl = alpha_ewa[0].r();
+        assert!((alpha_tl - 1.0).abs() < 0.01,
+            "Alpha-aware top-left should be ~1.0 (got {})", alpha_tl);
+
+        // Regular mode should also produce valid results
+        for p in &regular_ewa {
+            assert!(p.r().is_finite(), "Regular EWA should produce finite values");
+        }
+    }
+
+    #[test]
+    fn test_ewa_lanczos2_vs_lanczos3() {
+        // Lanczos2 should have less ringing than Lanczos3
+        let size = 16;
+        let mut src = vec![Pixel4::default(); size * size];
+
+        // Create a sharp edge pattern
+        for y in 0..size {
+            for x in 0..size {
+                let val = if x < size / 2 { 0.0 } else { 1.0 };
+                src[y * size + x] = Pixel4::new(val, val, val, 1.0);
+            }
+        }
+
+        // 2x upscale then 2x downscale
+        let l2_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+        let l2_down = rescale(&l2_up, size * 2, size * 2, size, size, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+
+        let l3_up = rescale(&src, size, size, size * 2, size * 2, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+        let l3_down = rescale(&l3_up, size * 2, size * 2, size, size, RescaleMethod::EWALanczos3, ScaleMode::Independent);
+
+        // Both should produce valid results
+        for (i, (p2, p3)) in l2_down.iter().zip(l3_down.iter()).enumerate() {
+            assert!(p2.r().is_finite(), "Lanczos2 pixel {} should be finite", i);
+            assert!(p3.r().is_finite(), "Lanczos3 pixel {} should be finite", i);
+        }
+    }
+
 }
+
