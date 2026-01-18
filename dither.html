@@ -1520,9 +1520,8 @@
             return metadata;
         }
 
-        // Event handlers
-        document.getElementById('input-file').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
+        // Core file handling logic - called from both file input and drag-drop
+        async function handleFile(file) {
             if (!file) return;
 
             try {
@@ -1587,7 +1586,10 @@
             } catch (err) {
                 console.error('Failed to load image:', err);
             }
-        });
+        }
+
+        // Event handlers
+        document.getElementById('input-file').addEventListener('change', (e) => handleFile(e.target.files[0]));
 
         document.getElementById('process-btn').addEventListener('click', processImage);
 
@@ -1696,11 +1698,7 @@
 
             const file = e.dataTransfer.files[0];
             if (file && (file.type.startsWith('image/') || !file.type)) {
-                const input = document.getElementById('input-file');
-                const dt = new DataTransfer();
-                dt.items.add(file);
-                input.files = dt.files;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
+                handleFile(file);
             }
         });
 

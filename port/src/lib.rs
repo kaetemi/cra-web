@@ -82,6 +82,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         15 => rescale::RescaleMethod::EWACatmullRom,
         16 => rescale::RescaleMethod::Jinc,
         17 => rescale::RescaleMethod::StochasticJinc,
+        18 => rescale::RescaleMethod::StochasticJincScatter,
         20 => rescale::RescaleMethod::Box,
         _ => rescale::RescaleMethod::Bilinear,
     }

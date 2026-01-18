@@ -428,7 +428,8 @@
                     <option value="20">★ Box (nearest up, area-average down)</option>
                     <option value="4">Sinc (research only, SLOW)</option>
                     <option value="16">Jinc (2D sinc analog, research only, SLOW)</option>
-                    <option value="17">Stochastic Jinc (probabilistic sampling)</option>
+                    <option value="17">Stochastic Jinc (gather, probabilistic)</option>
+                    <option value="18">Stochastic Jinc Scatter (scatter, probabilistic)</option>
                     <option value="5">Lanczos3 Scatter (experimental)</option>
                     <option value="6">Sinc Scatter (experimental, SLOW)</option>
                 </select>
@@ -690,7 +691,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 20: 'box' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 20: 'box' };
 
             // Map dither mode values to CLI names
             const modeMap = {
@@ -912,8 +913,8 @@
             document.getElementById('file-input').click();
         });
 
-        async function handleFileSelect(e) {
-            const file = e.target.files[0];
+        // Core file handling logic - called from both file input and drag-drop
+        async function handleFile(file) {
             if (!file) return;
 
             try {
@@ -954,7 +955,7 @@
                 `;
 
                 // Re-attach event listener to new input element
-                document.getElementById('file-input').addEventListener('change', handleFileSelect);
+                document.getElementById('file-input').addEventListener('change', (e) => handleFile(e.target.files[0]));
 
                 updateProcessButtonState();
                 document.getElementById('error-message').classList.remove('visible');
@@ -964,7 +965,7 @@
             }
         }
 
-        document.getElementById('file-input').addEventListener('change', handleFileSelect);
+        document.getElementById('file-input').addEventListener('change', (e) => handleFile(e.target.files[0]));
 
         // Drag and drop
         document.getElementById('upload-box').addEventListener('dragover', (e) => {
@@ -981,11 +982,7 @@
             e.currentTarget.style.borderColor = '';
             const file = e.dataTransfer.files[0];
             if (file && (file.type.startsWith('image/') || file.name.endsWith('.safetensors') || !file.type)) {
-                const input = document.getElementById('file-input');
-                const dt = new DataTransfer();
-                dt.items.add(file);
-                input.files = dt.files;
-                input.dispatchEvent(new Event('change', { bubbles: true }));
+                handleFile(file);
             }
         });
 

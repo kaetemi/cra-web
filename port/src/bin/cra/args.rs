@@ -193,8 +193,10 @@ pub enum ScaleMethod {
     EwaCatmullRom,
     /// Pure Jinc (unwindowed): 2D analog of sinc, full image extent (SLOW, research only)
     Jinc,
-    /// Stochastic Jinc: jinc with random sampling (experimental)
+    /// Stochastic Jinc: jinc with Gaussian sampling, gather-based (experimental)
     StochasticJinc,
+    /// Stochastic Jinc Scatter: jinc with Gaussian sampling, scatter-based (experimental)
+    StochasticJincScatter,
 }
 
 impl ScaleMethod {
@@ -217,6 +219,7 @@ impl ScaleMethod {
             ScaleMethod::EwaCatmullRom => cra_wasm::rescale::RescaleMethod::EWACatmullRom,
             ScaleMethod::Jinc => cra_wasm::rescale::RescaleMethod::Jinc,
             ScaleMethod::StochasticJinc => cra_wasm::rescale::RescaleMethod::StochasticJinc,
+            ScaleMethod::StochasticJincScatter => cra_wasm::rescale::RescaleMethod::StochasticJincScatter,
         }
     }
 }
