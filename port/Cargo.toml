@@ -30,7 +30,7 @@ clap = { version = "4", features = ["derive"], optional = true }
 
 [[bin]]
 name = "cra"
-path = "src/bin/cra.rs"
+path = "src/bin/cra/main.rs"
 required-features = ["cli"]
 
 [profile.release]
