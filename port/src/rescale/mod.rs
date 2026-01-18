@@ -10,6 +10,7 @@
 mod kernels;
 mod bilinear;
 mod separable;
+mod scatter;
 
 use crate::pixel::Pixel4;
 
@@ -30,6 +31,12 @@ pub enum RescaleMethod {
     /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
     /// WARNING: O(N²) - very slow for large images, severe ringing at edges
     Sinc,
+    /// Lanczos3 with scatter-based accumulation (experimental)
+    /// Inverts the loop: each source pixel scatters to destination pixels
+    Lanczos3Scatter,
+    /// Sinc with scatter-based accumulation (experimental)
+    /// WARNING: O(N²) - very slow for large images
+    SincScatter,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -52,6 +59,8 @@ impl RescaleMethod {
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
             "sinc" => Some(RescaleMethod::Sinc),
+            "lanczos-scatter" | "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
+            "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
             _ => None,
         }
     }
@@ -62,14 +71,28 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
-            RescaleMethod::Lanczos3 => 3.0,
-            RescaleMethod::Sinc => 0.0, // Special: uses full image extent
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
+            RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
         }
     }
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter)
+    }
+
+    /// Returns true if this is a scatter-based method
+    pub fn is_scatter(&self) -> bool {
+        matches!(self, RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
+    }
+
+    /// Get the underlying kernel method for scatter variants
+    pub fn kernel_method(&self) -> RescaleMethod {
+        match self {
+            RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
+            RescaleMethod::SincScatter => RescaleMethod::Sinc,
+            other => *other,
+        }
     }
 }
 
@@ -240,6 +263,9 @@ pub fn rescale_with_progress(
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
+        RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
+            scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
     }
 }
 
@@ -289,6 +315,9 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
+        RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
+            scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
     }
 }
@@ -1059,5 +1088,201 @@ mod tests {
         // but may have slightly more error than Lanczos due to less aggressive sharpening
         assert!(psnr > 25.0, "Catmull-Rom PSNR too low: {:.2}dB (expected > 25dB)", psnr);
         assert!(max_diff < 0.20, "Catmull-Rom max diff too high: {:.4} (expected < 0.20)", max_diff);
+    }
+
+    // ========================================================================
+    // Scatter-based rescaling tests
+    // ========================================================================
+
+    #[test]
+    fn test_lanczos_scatter_matches_gather_downscale() {
+        // Scatter and gather should produce identical results for deterministic blending
+        // 8x8 -> 4x4 downscale
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                let b = 0.5;
+                src.push(Pixel4::new(r, g, b, 1.0));
+            }
+        }
+
+        let gather = rescale(&src, src_size, src_size, dst_size, dst_size,
+                             RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let scatter = rescale(&src, src_size, src_size, dst_size, dst_size,
+                              RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+
+        // Results should be nearly identical (within floating point tolerance)
+        let mut max_diff = 0.0f32;
+        for (g, s) in gather.iter().zip(scatter.iter()) {
+            for c in 0..4 {
+                let diff = (g[c] - s[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("Lanczos scatter vs gather max diff: {:.6}", max_diff);
+        assert!(max_diff < 1e-4, "Scatter should match gather, max diff: {}", max_diff);
+    }
+
+    #[test]
+    fn test_lanczos_scatter_matches_gather_upscale() {
+        // Test upscaling: 4x4 -> 8x8
+        let src_size = 4;
+        let dst_size = 8;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let v = ((x + y) % 2) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let gather = rescale(&src, src_size, src_size, dst_size, dst_size,
+                             RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let scatter = rescale(&src, src_size, src_size, dst_size, dst_size,
+                              RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+
+        let mut max_diff = 0.0f32;
+        for (g, s) in gather.iter().zip(scatter.iter()) {
+            for c in 0..4 {
+                let diff = (g[c] - s[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("Lanczos scatter vs gather upscale max diff: {:.6}", max_diff);
+        assert!(max_diff < 1e-4, "Scatter should match gather, max diff: {}", max_diff);
+    }
+
+    #[test]
+    fn test_sinc_scatter_matches_gather() {
+        // Sinc scatter vs gather - use smaller image due to O(N²)
+        // 6x6 -> 4x4
+        let src_size = 6;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let gather = rescale(&src, src_size, src_size, dst_size, dst_size,
+                             RescaleMethod::Sinc, ScaleMode::Independent);
+        let scatter = rescale(&src, src_size, src_size, dst_size, dst_size,
+                              RescaleMethod::SincScatter, ScaleMode::Independent);
+
+        let mut max_diff = 0.0f32;
+        for (g, s) in gather.iter().zip(scatter.iter()) {
+            for c in 0..4 {
+                let diff = (g[c] - s[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("Sinc scatter vs gather max diff: {:.6}", max_diff);
+        assert!(max_diff < 1e-4, "Scatter should match gather, max diff: {}", max_diff);
+    }
+
+    #[test]
+    fn test_lanczos_scatter_identity() {
+        // Same-size should return identical pixels
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(0.25, 0.25, 0.25, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.75, 0.75, 0.75, 1.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_lanczos_scatter_alpha_aware() {
+        // Test alpha-aware scatter mode doesn't bleed transparent pixels
+        let src = vec![
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let regular_gather = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let regular_scatter = rescale(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+        let alpha_scatter = rescale_with_alpha(&src, 2, 2, 4, 4, RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+
+        // Regular scatter should match regular gather
+        let mut max_diff = 0.0f32;
+        for (g, s) in regular_gather.iter().zip(regular_scatter.iter()) {
+            for c in 0..4 {
+                let diff = (g[c] - s[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+        assert!(max_diff < 1e-4, "Regular scatter should match gather");
+
+        // Alpha-aware mode should produce valid results (no NaN/inf)
+        // and should have different values than regular mode (due to alpha weighting)
+        for p in &alpha_scatter {
+            assert!(p.r().is_finite(), "Alpha scatter should produce finite values");
+        }
+
+        // The top-left pixel in alpha-aware should be closer to 1.0 (the only opaque pixel's value)
+        // while regular mode may have overshoot due to Lanczos ringing with the black transparent pixels
+        let alpha_tl = alpha_scatter[0].r();
+        assert!((alpha_tl - 1.0).abs() < 0.01,
+            "Alpha-aware top-left should be ~1.0 (got {})", alpha_tl);
+    }
+
+    #[test]
+    fn test_scatter_prime_dimensions() {
+        // Test with prime dimensions to stress-test weight computation
+        // 97x89 -> 53x47
+        let src_w = 97;
+        let src_h = 89;
+        let dst_w = 53;
+        let dst_h = 47;
+
+        let mut src = Vec::with_capacity(src_w * src_h);
+        for y in 0..src_h {
+            for x in 0..src_w {
+                let r = x as f32 / (src_w - 1) as f32;
+                let g = y as f32 / (src_h - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let gather = rescale(&src, src_w, src_h, dst_w, dst_h,
+                             RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let scatter = rescale(&src, src_w, src_h, dst_w, dst_h,
+                              RescaleMethod::Lanczos3Scatter, ScaleMode::Independent);
+
+        let mut max_diff = 0.0f32;
+        for (g, s) in gather.iter().zip(scatter.iter()) {
+            for c in 0..4 {
+                let diff = (g[c] - s[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("Scatter vs gather prime dimensions max diff: {:.6}", max_diff);
+        assert!(max_diff < 1e-3, "Scatter should match gather for prime dims, max diff: {}", max_diff);
     }
 }

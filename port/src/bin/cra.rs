@@ -202,6 +202,10 @@ enum ScaleMethod {
     Lanczos,
     /// Pure Sinc (non-windowed): theoretically ideal, full image extent (SLOW, research only)
     Sinc,
+    /// Lanczos3 with scatter-based accumulation (experimental)
+    LanczosScatter,
+    /// Sinc with scatter-based accumulation (experimental, SLOW)
+    SincScatter,
 }
 
 impl ScaleMethod {
@@ -212,6 +216,8 @@ impl ScaleMethod {
             ScaleMethod::CatmullRom => cra_wasm::rescale::RescaleMethod::CatmullRom,
             ScaleMethod::Lanczos => cra_wasm::rescale::RescaleMethod::Lanczos3,
             ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
+            ScaleMethod::LanczosScatter => cra_wasm::rescale::RescaleMethod::Lanczos3Scatter,
+            ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
         }
     }
 }
@@ -833,6 +839,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::CatmullRom => "Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
+            cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
+            cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

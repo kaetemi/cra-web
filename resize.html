@@ -338,6 +338,8 @@
                     <option value="2">Mitchell (soft, minimal ringing)</option>
                     <option value="0">Bilinear (faster)</option>
                     <option value="4">Sinc (research only, SLOW)</option>
+                    <option value="5">Lanczos Scatter (experimental)</option>
+                    <option value="6">Sinc Scatter (experimental, SLOW)</option>
                 </select>
             </div>
 
@@ -583,7 +585,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter' };
 
             // Map dither mode values to CLI names
             const modeMap = {

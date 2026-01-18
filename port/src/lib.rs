@@ -71,6 +71,8 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         2 => rescale::RescaleMethod::Mitchell,
         3 => rescale::RescaleMethod::CatmullRom,
         4 => rescale::RescaleMethod::Sinc,
+        5 => rescale::RescaleMethod::Lanczos3Scatter,
+        6 => rescale::RescaleMethod::SincScatter,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }
