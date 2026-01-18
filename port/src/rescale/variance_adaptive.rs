@@ -236,6 +236,8 @@ struct ResampleResult {
     pixels: Vec<Pixel4>,
     /// Contribution sum for each source pixel (how much it was sampled)
     contributions: Vec<f32>,
+    /// Destination variance (Catmull-Rom interpolated from source variance)
+    dst_var: Vec<f32>,
 }
 
 /// Variance-adaptive 1D resample with contribution tracking
@@ -324,6 +326,7 @@ fn resample_row_variance_adaptive(
     ResampleResult {
         pixels: dst_pixels,
         contributions,
+        dst_var,
     }
 }
 
@@ -463,6 +466,7 @@ pub fn rescale_variance_adaptive(
 
     let mut temp = vec![Pixel4::default(); dst_width * src_height];
     let mut h_contributions = vec![0.0f32; src_width * src_height];
+    let mut h_dst_vars: Vec<Vec<f32>> = Vec::with_capacity(src_height);
 
     for y in 0..src_height {
         let src_row = &src[y * src_width..(y + 1) * src_width];
@@ -483,6 +487,7 @@ pub fn rescale_variance_adaptive(
 
         temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&result.pixels);
         h_contributions[y * src_width..(y + 1) * src_width].copy_from_slice(&result.contributions);
+        h_dst_vars.push(result.dst_var);
 
         if let Some(ref mut cb) = progress {
             cb((y + 1) as f32 / src_height as f32 * 0.25);
@@ -500,15 +505,14 @@ pub fn rescale_variance_adaptive(
         // Calculate error
         let error = calculate_error(src_row, contrib_row);
 
-        // Get destination variance for scatter weighting
-        let inbetween_var = calculate_inbetween_variance(&temp[y * dst_width..(y + 1) * dst_width]);
-        let dst_var = calculate_pixel_variance(&inbetween_var, dst_width);
+        // Use the same dst_var that was computed during gather (from source variance)
+        let dst_var = &h_dst_vars[y];
 
         // Scatter error to destination
         scatter_error(
             &mut temp[y * dst_width..(y + 1) * dst_width],
             &error,
-            &dst_var,
+            dst_var,
             scale_x,
         );
 
@@ -524,6 +528,7 @@ pub fn rescale_variance_adaptive(
     let v_seed = seed ^ 0x9E3779B9;
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
     let mut v_contributions = vec![0.0f32; dst_width * src_height];
+    let mut v_dst_vars: Vec<Vec<f32>> = Vec::with_capacity(dst_width);
 
     // Process column by column
     for x in 0..dst_width {
@@ -555,6 +560,9 @@ pub fn rescale_variance_adaptive(
         for (y, &contrib) in result.contributions.iter().enumerate() {
             v_contributions[y * dst_width + x] = contrib;
         }
+
+        // Store dst_var for scatter phase
+        v_dst_vars.push(result.dst_var);
     }
 
     if let Some(ref mut cb) = progress {
@@ -579,26 +587,24 @@ pub fn rescale_variance_adaptive(
         // Calculate error
         let error = calculate_error(&src_col, &contrib_col);
 
-        // Extract destination column for variance calculation
-        let dst_col: Vec<Pixel4> = (0..dst_height)
+        // Use the same dst_var that was computed during gather (from source variance)
+        let dst_var = &v_dst_vars[x];
+
+        // Extract destination column for modification
+        let mut dst_col: Vec<Pixel4> = (0..dst_height)
             .map(|y| dst[y * dst_width + x])
             .collect();
 
-        // Get destination variance for scatter weighting
-        let inbetween_var = calculate_inbetween_variance(&dst_col);
-        let dst_var = calculate_pixel_variance(&inbetween_var, dst_height);
-
         // Scatter error to destination column
-        let mut dst_col_mut = dst_col;
         scatter_error(
-            &mut dst_col_mut,
+            &mut dst_col,
             &error,
-            &dst_var,
+            dst_var,
             scale_y,
         );
 
         // Write back to destination
-        for (y, pixel) in dst_col_mut.into_iter().enumerate() {
+        for (y, pixel) in dst_col.into_iter().enumerate() {
             dst[y * dst_width + x] = pixel;
         }
     }
