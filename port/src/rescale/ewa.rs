@@ -315,16 +315,17 @@ pub fn rescale_ewa_alpha_pixels(
     dst
 }
 
-/// Stochastic EWA Jinc resampling with fixed sample count
+/// Stochastic EWA Jinc resampling with adaptive sample count
 ///
 /// Uses Monte Carlo sampling with Gaussian-distributed sample positions.
-/// Instead of evaluating all pixels, takes a fixed number of samples per
-/// output pixel, with positions drawn from a 2D Gaussian distribution.
-/// The Gaussian acts as an implicit window for the unwindowed jinc kernel.
+/// Instead of evaluating all pixels, takes samples drawn from a 2D Gaussian.
+/// Sample count matches what an EWA Lanczos5 would use (π × radius²), scaling
+/// with filter_scale² for proper coverage when downscaling.
 ///
 /// Parameters:
-/// - NUM_SAMPLES: 64 samples per output pixel
-/// - Sigma scales with image size for consistent coverage
+/// - Base radius: 5.0 (Lanczos5 equivalent)
+/// - Sample count: π × (radius × filter_scale)², clamped to [64, 4096]
+/// - Sigma: radius × filter_scale (Gaussian matches kernel support)
 pub fn rescale_stochastic_jinc_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -334,8 +335,6 @@ pub fn rescale_stochastic_jinc_pixels(
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    const NUM_SAMPLES: usize = 64;
-
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
@@ -343,12 +342,17 @@ pub fn rescale_stochastic_jinc_pixels(
     // Filter scale: expand kernel when downscaling
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
+    let filter_scale = filter_scale_x.max(filter_scale_y);
 
-    // Sigma for Gaussian sampling - scale with filter to maintain coverage
-    let base_sigma = 3.0f32;  // Base sigma in output space
-    let sigma_x = base_sigma * filter_scale_x;
-    let sigma_y = base_sigma * filter_scale_y;
-    let sigma = sigma_x.max(sigma_y);  // Use max for isotropic sampling
+    // Match Lanczos5 sample count: π × r² where r = base_radius × filter_scale
+    const BASE_RADIUS: f32 = 5.0;
+    let scaled_radius = BASE_RADIUS * filter_scale;
+    let num_samples = (std::f32::consts::PI * scaled_radius * scaled_radius)
+        .round()
+        .clamp(64.0, 4096.0) as usize;
+
+    // Sigma for Gaussian sampling - matches the kernel support radius
+    let sigma = scaled_radius;
 
     // Center offsets for uniform scaling
     let mapped_src_width = dst_width as f32 * scale_x;
@@ -370,7 +374,7 @@ pub fn rescale_stochastic_jinc_pixels(
             let mut sum = Pixel4::default();
             let mut weight_sum = 0.0f32;
 
-            for sample_idx in 0..NUM_SAMPLES {
+            for sample_idx in 0..num_samples {
                 // Generate Gaussian-distributed offset
                 let (dx, dy) = gaussian_sample_2d(dst_x, dst_y, sample_idx, sigma);
 
@@ -417,7 +421,7 @@ pub fn rescale_stochastic_jinc_pixels(
     dst
 }
 
-/// Alpha-aware stochastic EWA Jinc resampling with fixed sample count
+/// Alpha-aware stochastic EWA Jinc resampling with adaptive sample count
 /// RGB channels are weighted by alpha to prevent transparent pixel color bleeding
 pub fn rescale_stochastic_jinc_alpha_pixels(
     src: &[Pixel4],
@@ -428,18 +432,23 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
     scale_mode: ScaleMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    const NUM_SAMPLES: usize = 64;
-
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
+    let filter_scale = filter_scale_x.max(filter_scale_y);
 
-    // Sigma for Gaussian sampling
-    let base_sigma = 3.0f32;
-    let sigma = (base_sigma * filter_scale_x).max(base_sigma * filter_scale_y);
+    // Match Lanczos5 sample count: π × r² where r = base_radius × filter_scale
+    const BASE_RADIUS: f32 = 5.0;
+    let scaled_radius = BASE_RADIUS * filter_scale;
+    let num_samples = (std::f32::consts::PI * scaled_radius * scaled_radius)
+        .round()
+        .clamp(64.0, 4096.0) as usize;
+
+    // Sigma for Gaussian sampling - matches the kernel support radius
+    let sigma = scaled_radius;
 
     let mapped_src_width = dst_width as f32 * scale_x;
     let mapped_src_height = dst_height as f32 * scale_y;
@@ -469,7 +478,7 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
             let mut sum_g_unweighted = 0.0f32;
             let mut sum_b_unweighted = 0.0f32;
 
-            for sample_idx in 0..NUM_SAMPLES {
+            for sample_idx in 0..num_samples {
                 // Generate Gaussian-distributed offset
                 let (dx, dy) = gaussian_sample_2d(dst_x, dst_y, sample_idx, sigma);
 
