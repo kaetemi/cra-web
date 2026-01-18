@@ -21,7 +21,7 @@
 //!
 //! 4. **Error calculation**: error[i] = source[i] * (1.0 - contribution[i])
 //!
-//! 5. **Error scatter**: Scatter error using Lanczos7 window (no variance weighting),
+//! 5. **Error scatter**: Scatter error using Lanczos7 window weighted by dest variance,
 //!    normalized to 1 for energy conservation.
 
 use std::f32::consts::PI;
@@ -31,12 +31,12 @@ use super::{ScaleMode, calculate_scales};
 use super::kernels::{wang_hash, lanczos2, lanczos3, lanczos4, lanczos5, lanczos6, catmull_rom};
 
 // ============================================================================
-// Lanczos7 window for error scatter (smooth, non-negative in support)
+// Lanczos7 window for error scatter (wide, smooth, non-negative in support)
 // ============================================================================
 
 /// Lanczos7 window function: sinc(x/7) for |x| < 7
 /// This is just the window part, NOT the full Lanczos kernel (sinc(x) * sinc(x/7)).
-/// The window is smooth and non-negative within its support, making it
+/// The window is smooth, wide, and non-negative within its support, making it
 /// ideal for error scatter where we don't want to introduce new artifacts.
 #[inline]
 fn lanczos7_window(x: f32) -> f32 {
@@ -352,11 +352,11 @@ fn calculate_error(src: &[Pixel4], contributions: &[f32]) -> Vec<Pixel4> {
 }
 
 /// Scatter error from source pixels to destination pixels
-/// Uses Lanczos7 window (smooth, wide scatter without variance weighting)
+/// Uses Lanczos7 window weighted by destination variance
 fn scatter_error(
     dst: &mut [Pixel4],
     error: &[Pixel4],
-    _dst_var: &[f32],  // Kept for potential future use
+    dst_var: &[f32],
     scale: f32,
 ) {
     let src_len = error.len();
@@ -389,7 +389,7 @@ fn scatter_error(
         let start = (center - scatter_radius).max(0) as usize;
         let end = ((center + scatter_radius) as usize).min(dst_len - 1);
 
-        // Calculate scatter weights: Lanczos7 window (no variance weighting)
+        // Calculate scatter weights: Lanczos7 window * destination variance
         let mut weights = Vec::with_capacity(end - start + 1);
         let mut weight_sum = 0.0f32;
 
@@ -400,9 +400,11 @@ fn scatter_error(
                 continue;
             }
 
-            // Lanczos7 window weight only (no variance multiplier)
+            // Lanczos7 window weight * destination variance
             // Window is already non-negative within support, no abs needed
-            let weight = lanczos7_window(d);
+            let base_weight = lanczos7_window(d);
+            let var_weight = dst_var[di].max(0.001); // Minimum variance to avoid zero
+            let weight = base_weight * var_weight;
             weights.push(weight);
             weight_sum += weight;
         }
