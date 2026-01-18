@@ -73,8 +73,6 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         4 => rescale::RescaleMethod::Sinc,
         5 => rescale::RescaleMethod::Lanczos3Scatter,
         6 => rescale::RescaleMethod::SincScatter,
-        7 => rescale::RescaleMethod::Lanczos3Prob,
-        8 => rescale::RescaleMethod::SincProb,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }
