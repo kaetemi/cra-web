@@ -11,6 +11,7 @@ mod kernels;
 mod bilinear;
 mod separable;
 mod scatter;
+mod probabilistic;
 
 use crate::pixel::Pixel4;
 
@@ -37,6 +38,12 @@ pub enum RescaleMethod {
     /// Sinc with scatter-based accumulation (experimental)
     /// WARNING: O(N²) - very slow for large images
     SincScatter,
+    /// Lanczos3 with probabilistic two-sample signed approach (experimental)
+    /// Samples from positive and negative weight distributions separately
+    Lanczos3Prob,
+    /// Sinc with probabilistic two-sample signed approach (experimental)
+    /// WARNING: O(N²) - very slow for large images
+    SincProb,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -61,6 +68,8 @@ impl RescaleMethod {
             "sinc" => Some(RescaleMethod::Sinc),
             "lanczos-scatter" | "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
+            "lanczos-prob" | "lanczos3-prob" | "lanczos_prob" => Some(RescaleMethod::Lanczos3Prob),
+            "sinc-prob" | "sinc_prob" => Some(RescaleMethod::SincProb),
             _ => None,
         }
     }
@@ -71,14 +80,14 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
-            RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::Lanczos3Prob => 3.0,
+            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincProb => 0.0,
         }
     }
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincProb)
     }
 
     /// Returns true if this is a scatter-based method
@@ -86,11 +95,16 @@ impl RescaleMethod {
         matches!(self, RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
     }
 
-    /// Get the underlying kernel method for scatter variants
+    /// Returns true if this is a probabilistic method
+    pub fn is_probabilistic(&self) -> bool {
+        matches!(self, RescaleMethod::Lanczos3Prob | RescaleMethod::SincProb)
+    }
+
+    /// Get the underlying kernel method for scatter/probabilistic variants
     pub fn kernel_method(&self) -> RescaleMethod {
         match self {
-            RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
-            RescaleMethod::SincScatter => RescaleMethod::Sinc,
+            RescaleMethod::Lanczos3Scatter | RescaleMethod::Lanczos3Prob => RescaleMethod::Lanczos3,
+            RescaleMethod::SincScatter | RescaleMethod::SincProb => RescaleMethod::Sinc,
             other => *other,
         }
     }
@@ -266,6 +280,10 @@ pub fn rescale_with_progress(
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
+        RescaleMethod::Lanczos3Prob | RescaleMethod::SincProb => {
+            // Use a fixed seed for reproducibility (could be made configurable)
+            probabilistic::rescale_prob_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, 0x12345678, progress)
+        }
     }
 }
 
@@ -318,6 +336,9 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
+        RescaleMethod::Lanczos3Prob | RescaleMethod::SincProb => {
+            probabilistic::rescale_prob_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, 0x12345678, progress)
         }
     }
 }
@@ -1284,5 +1305,157 @@ mod tests {
 
         eprintln!("Scatter vs gather prime dimensions max diff: {:.6}", max_diff);
         assert!(max_diff < 1e-3, "Scatter should match gather for prime dims, max diff: {}", max_diff);
+    }
+
+    // ========================================================================
+    // Probabilistic rescaling tests
+    // ========================================================================
+
+    #[test]
+    fn test_lanczos_prob_produces_valid_output() {
+        // Probabilistic output should have valid values (no NaN/inf)
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let prob = rescale(&src, src_size, src_size, dst_size, dst_size,
+                           RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+
+        assert_eq!(prob.len(), dst_size * dst_size);
+        for (i, p) in prob.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos_prob_is_deterministic() {
+        // Same seed should produce identical results
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let v = ((x + y) % 2) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let prob1 = rescale(&src, src_size, src_size, dst_size, dst_size,
+                            RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+        let prob2 = rescale(&src, src_size, src_size, dst_size, dst_size,
+                            RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+
+        // Should be identical with same seed
+        for (p1, p2) in prob1.iter().zip(prob2.iter()) {
+            assert_eq!(p1, p2, "Probabilistic should be deterministic with same seed");
+        }
+    }
+
+    #[test]
+    fn test_lanczos_prob_differs_from_deterministic() {
+        // Probabilistic should produce different results than deterministic
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let deterministic = rescale(&src, src_size, src_size, dst_size, dst_size,
+                                    RescaleMethod::Lanczos3, ScaleMode::Independent);
+        let probabilistic = rescale(&src, src_size, src_size, dst_size, dst_size,
+                                    RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+
+        // Count how many pixels differ
+        let mut diff_count = 0;
+        for (d, p) in deterministic.iter().zip(probabilistic.iter()) {
+            if (d.r() - p.r()).abs() > 0.01 {
+                diff_count += 1;
+            }
+        }
+
+        eprintln!("Probabilistic differs from deterministic in {} of {} pixels",
+                  diff_count, dst_size * dst_size);
+        assert!(diff_count > 0, "Probabilistic should differ from deterministic");
+    }
+
+    #[test]
+    fn test_lanczos_prob_identity() {
+        // Same-size should return identical pixels
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(0.25, 0.25, 0.25, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.75, 0.75, 0.75, 1.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_sinc_prob_produces_valid_output() {
+        // Sinc probabilistic with small image (O(N²))
+        let src_size = 6;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let prob = rescale(&src, src_size, src_size, dst_size, dst_size,
+                           RescaleMethod::SincProb, ScaleMode::Independent);
+
+        assert_eq!(prob.len(), dst_size * dst_size);
+        for (i, p) in prob.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos_prob_preserves_gradient_direction() {
+        // A gradient should still be a gradient (though noisy) after probabilistic resample
+        let src_size = 16;
+        let dst_size = 8;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let v = x as f32 / (src_size - 1) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let prob = rescale(&src, src_size, src_size, dst_size, dst_size,
+                           RescaleMethod::Lanczos3Prob, ScaleMode::Independent);
+
+        // Left side should generally be darker than right side
+        let left_avg: f32 = (0..dst_size).map(|y| prob[y * dst_size].r()).sum::<f32>() / dst_size as f32;
+        let right_avg: f32 = (0..dst_size).map(|y| prob[y * dst_size + dst_size - 1].r()).sum::<f32>() / dst_size as f32;
+
+        eprintln!("Gradient test: left_avg={:.3}, right_avg={:.3}", left_avg, right_avg);
+        assert!(right_avg > left_avg, "Gradient direction should be preserved: left={}, right={}", left_avg, right_avg);
     }
 }

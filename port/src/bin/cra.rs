@@ -206,6 +206,10 @@ enum ScaleMethod {
     LanczosScatter,
     /// Sinc with scatter-based accumulation (experimental, SLOW)
     SincScatter,
+    /// Lanczos3 with probabilistic two-sample signed approach (experimental)
+    LanczosProb,
+    /// Sinc with probabilistic two-sample signed approach (experimental, SLOW)
+    SincProb,
 }
 
 impl ScaleMethod {
@@ -218,6 +222,8 @@ impl ScaleMethod {
             ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
             ScaleMethod::LanczosScatter => cra_wasm::rescale::RescaleMethod::Lanczos3Scatter,
             ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
+            ScaleMethod::LanczosProb => cra_wasm::rescale::RescaleMethod::Lanczos3Prob,
+            ScaleMethod::SincProb => cra_wasm::rescale::RescaleMethod::SincProb,
         }
     }
 }
@@ -841,6 +847,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
             cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
             cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
+            cra_wasm::rescale::RescaleMethod::Lanczos3Prob => "Lanczos3 Probabilistic",
+            cra_wasm::rescale::RescaleMethod::SincProb => "Sinc Probabilistic (full extent)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(
