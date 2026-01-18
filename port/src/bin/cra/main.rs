@@ -416,6 +416,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::EWACatmullRom => "EWA Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Jinc => "Jinc (full extent)",
             cra_wasm::rescale::RescaleMethod::StochasticJinc => "Stochastic Jinc",
+            cra_wasm::rescale::RescaleMethod::StochasticJincScatter => "Stochastic Jinc Scatter",
+            cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized => "Stochastic Jinc Scatter (normalized)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

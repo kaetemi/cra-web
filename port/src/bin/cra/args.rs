@@ -197,6 +197,8 @@ pub enum ScaleMethod {
     StochasticJinc,
     /// Stochastic Jinc Scatter: jinc with Gaussian sampling, scatter-based (experimental)
     StochasticJincScatter,
+    /// Stochastic Jinc Scatter Normalized: scatter with destination normalization
+    StochasticJincScatterNormalized,
 }
 
 impl ScaleMethod {
@@ -220,6 +222,7 @@ impl ScaleMethod {
             ScaleMethod::Jinc => cra_wasm::rescale::RescaleMethod::Jinc,
             ScaleMethod::StochasticJinc => cra_wasm::rescale::RescaleMethod::StochasticJinc,
             ScaleMethod::StochasticJincScatter => cra_wasm::rescale::RescaleMethod::StochasticJincScatter,
+            ScaleMethod::StochasticJincScatterNormalized => cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized,
         }
     }
 }

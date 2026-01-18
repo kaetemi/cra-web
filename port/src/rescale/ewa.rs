@@ -421,55 +421,46 @@ pub fn rescale_stochastic_jinc_pixels(
     dst
 }
 
-/// Stochastic Jinc scatter resampling - normalizes emission per source pixel
+/// Core stochastic Jinc scatter implementation
 ///
 /// Unlike the gather variant which normalizes intake per destination, this version
 /// normalizes emission per source pixel. Each source pixel distributes its value
-/// across destinations with weights summing to 1.0, ensuring energy conservation.
+/// across destinations with weights summing to emission_scale.
 ///
-/// Parameters:
-/// - Base radius: 5.0 (Lanczos5 equivalent)
-/// - Sample count: scales with destination/source area ratio for proper coverage
-/// - Sigma: radius × filter_scale (Gaussian matches kernel support)
-pub fn rescale_stochastic_jinc_scatter_pixels(
+/// If `normalize_destination` is true, a final pass normalizes by total weight
+/// received per destination pixel.
+fn rescale_stochastic_jinc_scatter_core(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    // Filter scale: expand kernel when downscaling
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
-    // Base sample count from Lanczos5: π × r²
     const BASE_RADIUS: f32 = 5.0;
     let scaled_radius = BASE_RADIUS * filter_scale;
     let base_samples = std::f32::consts::PI * scaled_radius * scaled_radius;
 
-    // Scale by area ratio to match gather's total sample count
-    // Upscaling: more samples per source (each covers more dest pixels)
-    // Downscaling: fewer samples per source (many sources per dest)
     let area_ratio = 1.0 / (scale_x * scale_y);
     let num_samples = (base_samples * area_ratio)
         .round()
         .clamp(64.0, 16384.0) as usize;
 
-    // Emission scale: also compensate for area ratio
     let emission_scale = area_ratio;
 
-    // Sigma for Gaussian sampling - matches first jinc zero (r ≈ 1.22)
     const JINC_FIRST_ZERO: f32 = 1.2197;
     let sigma = JINC_FIRST_ZERO * filter_scale;
 
-    // Center offsets for uniform scaling
     let mapped_src_width = dst_width as f32 * scale_x;
     let mapped_src_height = dst_height as f32 * scale_y;
     let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
@@ -478,58 +469,53 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
     let dst_w = dst_width as i32;
     let dst_h = dst_height as i32;
 
-    // Accumulator for destination pixels (no per-destination normalization)
-    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+    let mut dst_sum = vec![Pixel4::default(); dst_width * dst_height];
+    let mut dst_weight = if normalize_destination {
+        vec![0.0f32; dst_width * dst_height]
+    } else {
+        vec![]
+    };
 
     for src_y in 0..src_height {
         for src_x in 0..src_width {
             let src_pixel = src[src_y * src_width + src_x];
 
-            // Map source pixel center to destination coordinates
-            // Inverse of: src_pos = (dst + 0.5) * scale - 0.5 + offset
-            // => dst = (src_pos + 0.5 - offset) / scale - 0.5
             let dst_pos_x = (src_x as f32 + 0.5 - offset_x) / scale_x - 0.5;
             let dst_pos_y = (src_y as f32 + 0.5 - offset_y) / scale_y - 0.5;
 
-            // Collect samples and weights for this source pixel
             let mut samples: Vec<(usize, usize, f32)> = Vec::with_capacity(num_samples);
             let mut weight_sum = 0.0f32;
 
             for sample_idx in 0..num_samples {
-                // Generate Gaussian-distributed offset in source space
                 let (dx_src, dy_src) = gaussian_sample_2d(src_x, src_y, sample_idx, sigma);
 
-                // Compute radial distance in filter-scaled space (source space)
                 let r = ((dx_src / filter_scale_x).powi(2) + (dy_src / filter_scale_y).powi(2)).sqrt();
 
-                // Weight by jinc - always count towards weight_sum
                 let weight = jinc(r);
                 if weight.abs() > 1e-8 {
                     weight_sum += weight;
 
-                    // Convert offset to destination space
                     let dx_dst = dx_src / scale_x;
                     let dy_dst = dy_src / scale_y;
 
-                    // Map to destination pixel coordinates
                     let dx = (dst_pos_x + dx_dst).round() as i32;
                     let dy = (dst_pos_y + dy_dst).round() as i32;
 
-                    // Only emit if in bounds
                     if dx >= 0 && dx < dst_w && dy >= 0 && dy < dst_h {
                         samples.push((dx as usize, dy as usize, weight));
                     }
                 }
             }
 
-            // Normalize emission per source pixel, scaled by area ratio
-            // Each source emits emission_scale total (1.0 at 1:1, 4.0 at 2x upscale, 0.25 at 2x downscale)
             if weight_sum.abs() > 1e-8 {
                 let inv_weight_sum = emission_scale / weight_sum;
                 for (dx, dy, weight) in samples {
                     let normalized_weight = weight * inv_weight_sum;
                     let dst_idx = dy * dst_width + dx;
-                    dst[dst_idx] = dst[dst_idx] + src_pixel * normalized_weight;
+                    dst_sum[dst_idx] = dst_sum[dst_idx] + src_pixel * normalized_weight;
+                    if normalize_destination {
+                        dst_weight[dst_idx] += normalized_weight;
+                    }
                 }
             }
         }
@@ -539,18 +525,60 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
         }
     }
 
-    dst
+    if normalize_destination {
+        let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+        for i in 0..dst.len() {
+            if dst_weight[i].abs() > 1e-8 {
+                dst[i] = dst_sum[i] * (1.0 / dst_weight[i]);
+            }
+        }
+        dst
+    } else {
+        dst_sum
+    }
 }
 
-/// Alpha-aware stochastic Jinc scatter resampling
-/// RGB channels are weighted by alpha, emission normalized per source pixel
-pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
+/// Stochastic Jinc scatter resampling - normalizes emission per source pixel
+pub fn rescale_stochastic_jinc_scatter_pixels(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    rescale_stochastic_jinc_scatter_core(
+        src, src_width, src_height, dst_width, dst_height,
+        scale_mode, false, progress
+    )
+}
+
+/// Stochastic Jinc scatter resampling with destination normalization
+pub fn rescale_stochastic_jinc_scatter_normalized_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    rescale_stochastic_jinc_scatter_core(
+        src, src_width, src_height, dst_width, dst_height,
+        scale_mode, true, progress
+    )
+}
+
+/// Core alpha-aware stochastic Jinc scatter implementation
+fn rescale_stochastic_jinc_scatter_alpha_core(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -561,21 +589,17 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     let filter_scale_y = scale_y.max(1.0);
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
-    // Base sample count from Lanczos5: π × r²
     const BASE_RADIUS: f32 = 5.0;
     let scaled_radius = BASE_RADIUS * filter_scale;
     let base_samples = std::f32::consts::PI * scaled_radius * scaled_radius;
 
-    // Scale by area ratio to match gather's total sample count
     let area_ratio = 1.0 / (scale_x * scale_y);
     let num_samples = (base_samples * area_ratio)
         .round()
         .clamp(64.0, 16384.0) as usize;
 
-    // Emission scale: also compensate for area ratio
     let emission_scale = area_ratio;
 
-    // Sigma for Gaussian sampling - matches first jinc zero (r ≈ 1.22)
     const JINC_FIRST_ZERO: f32 = 1.2197;
     let sigma = JINC_FIRST_ZERO * filter_scale;
 
@@ -587,12 +611,16 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     let dst_w = dst_width as i32;
     let dst_h = dst_height as i32;
 
-    // Accumulators for alpha-aware blending
     let mut dst_r = vec![0.0f32; dst_width * dst_height];
     let mut dst_g = vec![0.0f32; dst_width * dst_height];
     let mut dst_b = vec![0.0f32; dst_width * dst_height];
     let mut dst_a = vec![0.0f32; dst_width * dst_height];
     let mut dst_alpha_weight = vec![0.0f32; dst_width * dst_height];
+    let mut dst_weight = if normalize_destination {
+        vec![0.0f32; dst_width * dst_height]
+    } else {
+        vec![]
+    };
 
     for src_y in 0..src_height {
         for src_x in 0..src_width {
@@ -602,37 +630,30 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
             let dst_pos_x = (src_x as f32 + 0.5 - offset_x) / scale_x - 0.5;
             let dst_pos_y = (src_y as f32 + 0.5 - offset_y) / scale_y - 0.5;
 
-            // Collect samples and weights
             let mut samples: Vec<(usize, usize, f32)> = Vec::with_capacity(num_samples);
             let mut weight_sum = 0.0f32;
 
             for sample_idx in 0..num_samples {
                 let (dx_src, dy_src) = gaussian_sample_2d(src_x, src_y, sample_idx, sigma);
 
-                // Compute radial distance in filter-scaled space (source space)
                 let r = ((dx_src / filter_scale_x).powi(2) + (dy_src / filter_scale_y).powi(2)).sqrt();
 
-                // Weight by jinc - always count towards weight_sum
                 let weight = jinc(r);
                 if weight.abs() > 1e-8 {
                     weight_sum += weight;
 
-                    // Convert offset to destination space
                     let dx_dst = dx_src / scale_x;
                     let dy_dst = dy_src / scale_y;
 
-                    // Map to destination pixel coordinates
                     let dx = (dst_pos_x + dx_dst).round() as i32;
                     let dy = (dst_pos_y + dy_dst).round() as i32;
 
-                    // Only emit if in bounds
                     if dx >= 0 && dx < dst_w && dy >= 0 && dy < dst_h {
                         samples.push((dx as usize, dy as usize, weight));
                     }
                 }
             }
 
-            // Normalize emission and scatter, scaled by area ratio
             if weight_sum.abs() > 1e-8 {
                 let inv_weight_sum = emission_scale / weight_sum;
                 for (dx, dy, weight) in samples {
@@ -645,6 +666,9 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
                     dst_b[dst_idx] += aw * p.b();
                     dst_a[dst_idx] += normalized_weight * alpha;
                     dst_alpha_weight[dst_idx] += aw;
+                    if normalize_destination {
+                        dst_weight[dst_idx] += normalized_weight;
+                    }
                 }
             }
         }
@@ -654,20 +678,68 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
         }
     }
 
-    // Finalize: divide RGB by alpha weight
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
     for i in 0..dst.len() {
-        let out_a = dst_a[i];
-        let (out_r, out_g, out_b) = if dst_alpha_weight[i].abs() > 1e-8 {
-            let inv_aw = 1.0 / dst_alpha_weight[i];
-            (dst_r[i] * inv_aw, dst_g[i] * inv_aw, dst_b[i] * inv_aw)
+        let (out_a, out_r, out_g, out_b) = if normalize_destination {
+            if dst_weight[i].abs() > 1e-8 {
+                let inv_w = 1.0 / dst_weight[i];
+                let a = dst_a[i] * inv_w;
+                let (r, g, b) = if dst_alpha_weight[i].abs() > 1e-8 {
+                    let inv_aw = 1.0 / dst_alpha_weight[i];
+                    (dst_r[i] * inv_aw, dst_g[i] * inv_aw, dst_b[i] * inv_aw)
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+                (a, r, g, b)
+            } else {
+                (0.0, 0.0, 0.0, 0.0)
+            }
         } else {
-            (0.0, 0.0, 0.0)
+            let a = dst_a[i];
+            let (r, g, b) = if dst_alpha_weight[i].abs() > 1e-8 {
+                let inv_aw = 1.0 / dst_alpha_weight[i];
+                (dst_r[i] * inv_aw, dst_g[i] * inv_aw, dst_b[i] * inv_aw)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+            (a, r, g, b)
         };
         dst[i] = Pixel4::new(out_r, out_g, out_b, out_a);
     }
 
     dst
+}
+
+/// Alpha-aware stochastic Jinc scatter resampling (no destination normalization)
+pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    rescale_stochastic_jinc_scatter_alpha_core(
+        src, src_width, src_height, dst_width, dst_height,
+        scale_mode, false, progress
+    )
+}
+
+/// Alpha-aware stochastic Jinc scatter resampling with destination normalization
+pub fn rescale_stochastic_jinc_scatter_normalized_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    rescale_stochastic_jinc_scatter_alpha_core(
+        src, src_width, src_height, dst_width, dst_height,
+        scale_mode, true, progress
+    )
 }
 
 /// Alpha-aware stochastic EWA Jinc resampling with adaptive sample count

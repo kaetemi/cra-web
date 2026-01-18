@@ -469,6 +469,7 @@
                     <option value="16">Jinc (2D sinc analog, research only, SLOW)</option>
                     <option value="17">Stochastic Jinc (gather, probabilistic)</option>
                     <option value="18">Stochastic Jinc Scatter (scatter, probabilistic)</option>
+                    <option value="19">Stochastic Jinc Scatter Normalized (scatter, normalized dest)</option>
                     <option value="5">Lanczos3 Scatter (experimental)</option>
                     <option value="6">Sinc Scatter (experimental, SLOW)</option>
                 </select>
@@ -736,7 +737,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 20: 'box' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box' };
 
             // Map dither mode values to CLI names
             const modeMap = {
