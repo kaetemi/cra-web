@@ -12,7 +12,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{lanczos2, lanczos3, ewa_lanczos, mitchell, catmull_rom};
+use super::kernels::{lanczos2, lanczos3, ewa_lanczos, mitchell, catmull_rom, jinc};
 
 /// Evaluate the EWA kernel at radial distance r
 #[inline]
@@ -27,11 +27,14 @@ fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
         // Cubic kernels applied radially
         RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => mitchell(r),
         RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => catmull_rom(r),
+        // Pure jinc (unwindowed, full extent)
+        RescaleMethod::Jinc => jinc(r),
         _ => 0.0,
     }
 }
 
 /// Get the kernel radius for EWA methods
+/// Returns 0.0 for full-extent methods (Jinc)
 #[inline]
 fn ewa_radius(method: RescaleMethod) -> f32 {
     match method {
@@ -39,6 +42,7 @@ fn ewa_radius(method: RescaleMethod) -> f32 {
         RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::Lanczos3 => 3.0,
         RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => 2.0,
         RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => 2.0,
+        RescaleMethod::Jinc => 0.0, // Full extent
         _ => 3.0,
     }
 }
@@ -68,7 +72,12 @@ pub fn rescale_ewa_pixels(
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     let base_radius = ewa_radius(method);
-    let radius = base_radius * filter_scale;
+    // For full extent methods (radius 0), use max dimension; otherwise scale the radius
+    let radius = if base_radius == 0.0 {
+        (src_width.max(src_height) as f32) * filter_scale
+    } else {
+        base_radius * filter_scale
+    };
 
     // Center offsets for uniform scaling
     let mapped_src_width = dst_width as f32 * scale_x;
@@ -163,7 +172,12 @@ pub fn rescale_ewa_alpha_pixels(
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     let base_radius = ewa_radius(method);
-    let radius = base_radius * filter_scale;
+    // For full extent methods (radius 0), use max dimension; otherwise scale the radius
+    let radius = if base_radius == 0.0 {
+        (src_width.max(src_height) as f32) * filter_scale
+    } else {
+        base_radius * filter_scale
+    };
 
     let mapped_src_width = dst_width as f32 * scale_x;
     let mapped_src_height = dst_height as f32 * scale_y;

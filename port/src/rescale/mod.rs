@@ -66,6 +66,10 @@ pub enum RescaleMethod {
     /// EWA (Elliptical Weighted Average) Catmull-Rom (B=0, C=0.5)
     /// 2D radial application of the Catmull-Rom cubic kernel
     EWACatmullRom,
+    /// Pure Jinc (unwindowed) - the ideal 2D radially symmetric lowpass filter
+    /// Uses J1(πr)/(πr) over full image extent via EWA sampling
+    /// WARNING: O(N²) - extremely slow for large images, severe ringing at edges
+    Jinc,
     /// Peaked Cosine windowed sinc - AVIR-style adaptive filter
     /// High quality with scale-dependent filter length and cutoff
     /// Uses: w(n) = cos(π*n/(2*L)) * (1 - (n/L)^α) window
@@ -106,6 +110,7 @@ impl RescaleMethod {
             "ewa-lanczos3" | "ewa_lanczos3" | "ewalanczos3" | "ewa-lanczos" | "ewa_lanczos" => Some(RescaleMethod::EWALanczos3),
             "ewa-mitchell" | "ewa_mitchell" | "ewamitchell" => Some(RescaleMethod::EWAMitchell),
             "ewa-catmull-rom" | "ewa_catmull_rom" | "ewacatmullrom" | "ewa-catrom" | "ewa_catrom" => Some(RescaleMethod::EWACatmullRom),
+            "jinc" => Some(RescaleMethod::Jinc),
             "peaked-cosine" | "peaked_cosine" | "peakedcosine" | "avir" => Some(RescaleMethod::PeakedCosine),
             "peaked-cosine-corrected" | "peaked_cosine_corrected" | "peakedcosinecorrected" | "avir-corrected" | "avir_corrected" => Some(RescaleMethod::PeakedCosineCorrected),
             _ => None,
@@ -120,7 +125,7 @@ impl RescaleMethod {
             RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => 2.0,
             RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
-            RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
+            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
         }
@@ -128,7 +133,7 @@ impl RescaleMethod {
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc)
     }
 
     /// Returns true if this is a scatter-based method
@@ -140,7 +145,8 @@ impl RescaleMethod {
     pub fn is_ewa(&self) -> bool {
         matches!(self, RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
                        RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
-                       RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom)
+                       RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
+                       RescaleMethod::Jinc)
     }
 
     /// Get the underlying kernel method for scatter/EWA variants
@@ -336,7 +342,8 @@ pub fn rescale_with_progress(
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
-        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom => {
+        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
+        RescaleMethod::Jinc => {
             ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::PeakedCosine => {
@@ -402,7 +409,8 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
-        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom => {
+        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
+        RescaleMethod::Jinc => {
             ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::PeakedCosine => {
