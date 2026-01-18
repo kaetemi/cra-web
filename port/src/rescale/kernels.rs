@@ -88,6 +88,58 @@ pub fn sinc(x: f32) -> f32 {
     }
 }
 
+/// Bessel function J1(x) - polynomial approximation (Numerical Recipes)
+/// Used for the jinc function which is the 2D analog of sinc.
+#[inline]
+pub fn bessel_j1(x: f32) -> f32 {
+    let ax = x.abs();
+    if ax < 8.0 {
+        let y = x * x;
+        let ans1 = x * (72362614232.0 + y * (-7895059235.0 + y * (242396853.1
+            + y * (-2972611.439 + y * (15704.48260 + y * (-30.16036606))))));
+        let ans2 = 144725228442.0 + y * (2300535178.0 + y * (18583304.74
+            + y * (99447.43394 + y * (376.9991397 + y))));
+        ans1 / ans2
+    } else {
+        let z = 8.0 / ax;
+        let y = z * z;
+        let xx = ax - 2.356194491;
+        let ans1 = 1.0 + y * (0.183105e-2 + y * (-0.3516396496e-4
+            + y * (0.2457520174e-5 + y * (-0.240337019e-6))));
+        let ans2 = 0.04687499995 + y * (-0.2002690873e-3
+            + y * (0.8449199096e-5 + y * (-0.88228987e-6 + y * 0.105787412e-6)));
+        let ans = (0.636619772 / ax).sqrt() * (xx.cos() * ans1 - z * xx.sin() * ans2);
+        if x < 0.0 { -ans } else { ans }
+    }
+}
+
+/// Jinc function: J1(π*x) / (π*x)
+/// The 2D radially symmetric analog of sinc - ideal lowpass for circular apertures.
+/// Used in proper EWA (Elliptical Weighted Average) resampling.
+#[inline]
+pub fn jinc(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        0.5  // limit as x -> 0
+    } else {
+        let pi_x = PI * x;
+        bessel_j1(pi_x) / pi_x
+    }
+}
+
+/// EWA Lanczos kernel: jinc windowed by jinc
+/// The proper 2D radially symmetric Lanczos kernel for EWA resampling.
+/// Uses jinc(r) * jinc(r/lobes) where jinc is the 2D analog of sinc.
+#[inline]
+pub fn ewa_lanczos(r: f32, lobes: f32) -> f32 {
+    if r >= lobes {
+        0.0
+    } else if r < 1e-8 {
+        1.0
+    } else {
+        jinc(r) * jinc(r / lobes)
+    }
+}
+
 /// Box filter (rectangular window) - point sampled version
 /// Returns 1.0 for |x| <= 0.5, 0.0 otherwise.
 /// Note: For proper area-averaged box filtering, use box_integrated instead.
@@ -145,8 +197,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         }
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
-        RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 => lanczos2(x),
-        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 => lanczos3(x),
+        RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => lanczos2(x),
+        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Box => box_filter(x),
         // PeakedCosine uses its own specialized precomputation with scale-dependent parameters

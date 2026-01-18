@@ -349,7 +349,7 @@ fn test_ewa_lanczos3_identity() {
 }
 
 #[test]
-fn test_ewa_lanczos2_identity() {
+fn test_ewa_sinc_lanczos2_identity() {
     let src = vec![
         Pixel4::new(0.0, 0.0, 0.0, 1.0),
         Pixel4::new(0.25, 0.25, 0.25, 1.0),
@@ -357,6 +357,30 @@ fn test_ewa_lanczos2_identity() {
         Pixel4::new(0.75, 0.75, 0.75, 1.0),
     ];
     let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWASincLanczos2, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_ewa_jinc_lanczos2_identity() {
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos2, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_ewa_jinc_lanczos3_identity() {
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWALanczos3, ScaleMode::Independent);
     assert_eq!(src, dst);
 }
 
