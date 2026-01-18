@@ -18,8 +18,8 @@ use crate::color::{
 use crate::color_distance::{
     is_lab_space, is_linear_rgb_space, is_ycbcr_space, perceptual_distance_sq,
 };
-use crate::dither::{dither_with_mode_bits};
-use crate::dither_common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+use super::basic::dither_with_mode_bits;
+use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
 // Quantization and LUT structures (same as dither_rgb.rs)

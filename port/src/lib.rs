@@ -20,13 +20,6 @@ pub mod correction;
 pub mod cra_lab;
 pub mod cra_rgb;
 pub mod dither;
-pub mod dither_rgb;
-pub mod dither_rgba;
-pub mod dither_lab;
-pub mod dither_luminosity;
-pub mod dither_common;
-pub mod dither_fp16;
-pub mod dither_bf16;
 mod histogram;
 pub mod output;
 pub mod pixel;
@@ -39,7 +32,7 @@ pub mod decode;
 pub mod sfi;
 
 use buffer::{BufferF32x4, BufferF32, BufferU8};
-use dither_common::{DitherMode, PerceptualSpace};
+use dither::common::{DitherMode, PerceptualSpace};
 use pixel::Pixel4;
 
 // ============================================================================
@@ -88,8 +81,8 @@ fn scale_mode_from_u8(mode: u8) -> rescale::ScaleMode {
     }
 }
 
-fn correction_method_from_u8(method: u8, luminosity_flag: bool) -> dither_common::ColorCorrectionMethod {
-    use dither_common::ColorCorrectionMethod;
+fn correction_method_from_u8(method: u8, luminosity_flag: bool) -> dither::common::ColorCorrectionMethod {
+    use dither::common::ColorCorrectionMethod;
     match method {
         0 => ColorCorrectionMethod::BasicLab { keep_luminosity: luminosity_flag },
         1 => ColorCorrectionMethod::BasicRgb,
@@ -102,8 +95,8 @@ fn correction_method_from_u8(method: u8, luminosity_flag: bool) -> dither_common
     }
 }
 
-fn histogram_mode_from_u8(mode: u8) -> dither_common::HistogramMode {
-    use dither_common::HistogramMode;
+fn histogram_mode_from_u8(mode: u8) -> dither::common::HistogramMode {
+    use dither::common::HistogramMode;
     match mode {
         0 => HistogramMode::Binned,
         2 => HistogramMode::MidpointAligned,
@@ -813,7 +806,7 @@ pub fn dither_rgb_wasm(
     space: u8,
     seed: u32,
 ) -> BufferU8 {
-    use dither_common::OutputTechnique;
+    use dither::common::OutputTechnique;
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
@@ -860,7 +853,7 @@ pub fn dither_gray_wasm(
 
     let result = if technique >= 2 {
         // Colorspace-aware dithering
-        dither_luminosity::colorspace_aware_dither_gray_with_mode(
+        dither::luminosity::colorspace_aware_dither_gray_with_mode(
             buf.as_slice(),
             width,
             height,
@@ -880,7 +873,7 @@ pub fn dither_gray_wasm(
         buf.as_slice().iter()
             .map(|&v| {
                 let level = ((v / 255.0) * max_level + 0.5) as u8;
-                dither_common::bit_replicate(level.min(max_level as u8), bits)
+                dither::common::bit_replicate(level.min(max_level as u8), bits)
             })
             .collect()
     };
@@ -906,7 +899,7 @@ pub fn dither_rgb_with_progress_wasm(
     seed: u32,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
-    use dither_common::OutputTechnique;
+    use dither::common::OutputTechnique;
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
@@ -967,7 +960,7 @@ pub fn dither_gray_with_progress_wasm(
 
     let result = if technique >= 2 {
         // Colorspace-aware dithering with progress
-        dither_luminosity::colorspace_aware_dither_gray_with_mode(
+        dither::luminosity::colorspace_aware_dither_gray_with_mode(
             buf.as_slice(),
             width,
             height,
@@ -987,7 +980,7 @@ pub fn dither_gray_with_progress_wasm(
         buf.as_slice().iter()
             .map(|&v| {
                 let level = ((v / 255.0) * max_level + 0.5) as u8;
-                dither_common::bit_replicate(level.min(max_level as u8), bits)
+                dither::common::bit_replicate(level.min(max_level as u8), bits)
             })
             .collect()
     };
@@ -1014,7 +1007,7 @@ pub fn dither_rgba_wasm(
     space: u8,
     seed: u32,
 ) -> BufferU8 {
-    use dither_common::OutputTechnique;
+    use dither::common::OutputTechnique;
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
@@ -1065,7 +1058,7 @@ pub fn dither_rgba_with_progress_wasm(
     seed: u32,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
-    use dither_common::OutputTechnique;
+    use dither::common::OutputTechnique;
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);

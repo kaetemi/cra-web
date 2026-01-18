@@ -8,10 +8,10 @@
 
 use crate::color::{interleave_rgb_u8, interleave_rgba_u8};
 use crate::dither::dither_with_mode_bits;
-use crate::dither_rgb::colorspace_aware_dither_rgb_channels;
-use crate::dither_rgba::colorspace_aware_dither_rgba_channels;
-use crate::dither_luminosity::colorspace_aware_dither_gray_with_mode;
-use crate::dither_common::OutputTechnique;
+use crate::dither::rgb::colorspace_aware_dither_rgb_channels;
+use crate::dither::rgba::colorspace_aware_dither_rgba_channels;
+use crate::dither::luminosity::colorspace_aware_dither_gray_with_mode;
+use crate::dither::common::OutputTechnique;
 use crate::pixel::{pixels_to_channels, pixels_to_channels_rgba, Pixel4};
 
 // ============================================================================
@@ -88,7 +88,7 @@ fn quantize_no_dither(value: f32, bits: u8) -> u8 {
     let max_level = (1u32 << bits) - 1;
     let scaled = (value / 255.0 * max_level as f32).round() as u8;
     // Bit-replicate to 8 bits
-    crate::dither_common::bit_replicate(scaled, bits)
+    crate::dither::common::bit_replicate(scaled, bits)
 }
 
 // ============================================================================

@@ -18,8 +18,8 @@ use cra_wasm::binary_format::{
     is_valid_stride, ColorFormat, StrideFill, RawImageMetadata,
 };
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
-use cra_wasm::dither_fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
-use cra_wasm::dither_bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
+use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
+use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
 use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
@@ -28,9 +28,9 @@ use cra_wasm::decode::{
     is_profile_srgb_verbose, load_image_from_path, load_image_from_path_auto, load_raw_image,
     transform_cicp_to_linear_srgb_pixels, transform_icc_to_linear_srgb_pixels,
 };
-use cra_wasm::dither_rgb::DitherMode as CSDitherMode;
-use cra_wasm::dither_luminosity::colorspace_aware_dither_gray_with_mode;
-use cra_wasm::dither_common::{
+use cra_wasm::dither::rgb::DitherMode as CSDitherMode;
+use cra_wasm::dither::luminosity::colorspace_aware_dither_gray_with_mode;
+use cra_wasm::dither::common::{
     ColorCorrectionMethod, DitherMode, HistogramMode as LibHistogramMode, OutputTechnique,
     PerceptualSpace,
 };

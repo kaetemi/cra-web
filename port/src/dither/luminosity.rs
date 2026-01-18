@@ -35,7 +35,7 @@ use crate::color::{
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use crate::colorspace_derived::f32 as cs;
-use crate::dither_common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
 /// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value

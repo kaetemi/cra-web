@@ -2,16 +2,16 @@
 /// Supports Floyd-Steinberg, Jarvis-Judice-Ninke, and Mixed algorithms.
 
 // Re-export color space aware dithering from dedicated module
-pub use crate::dither_rgb::{
+pub use super::rgb::{
     colorspace_aware_dither_rgb,
     colorspace_aware_dither_rgb_with_mode,
 };
 
 // Re-export common types for backwards compatibility
-pub use crate::dither_common::DitherMode;
+pub use super::common::DitherMode;
 
-// Import shared utilities from dither_common
-use crate::dither_common::{bit_replicate, wang_hash};
+// Import shared utilities from common
+use super::common::{bit_replicate, wang_hash};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.

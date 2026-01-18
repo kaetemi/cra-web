@@ -7,10 +7,10 @@ use crate::color::{
 };
 use crate::dither::{dither_with_mode, DitherMode};
 use crate::pixel::Pixel4;
-use crate::dither_lab::{
+use crate::dither::lab::{
     lab_space_dither_with_mode, LabQuantParams, LabQuantSpace,
 };
-use crate::dither_common::PerceptualSpace;
+use crate::dither::common::PerceptualSpace;
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{compute_ab_ranges, compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{

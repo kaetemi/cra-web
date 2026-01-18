@@ -28,7 +28,7 @@ pub use crate::color_distance::{
     lab_distance_cie76_sq, lab_distance_cie94_sq, lab_distance_ciede2000_sq,
 };
 #[allow(unused_imports)]
-pub use crate::dither_common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+pub use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 /// Perceptual quantization parameters for joint RGB dithering.
 /// Uses perceptual distance (Lab/OkLab) for candidate selection,

@@ -12,7 +12,7 @@ use crate::basic_oklab;
 use crate::basic_rgb;
 use crate::cra_lab;
 use crate::cra_rgb;
-use crate::dither_common::{ColorCorrectionMethod, DitherMode, HistogramMode, PerceptualSpace};
+use crate::dither::common::{ColorCorrectionMethod, DitherMode, HistogramMode, PerceptualSpace};
 use crate::pixel::Pixel4;
 use crate::tiled_lab;
 

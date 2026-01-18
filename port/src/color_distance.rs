@@ -8,7 +8,7 @@
 /// Also provides helper functions for determining which color space is in use.
 
 use crate::colorspace_derived::f32 as cs;
-use crate::dither_common::PerceptualSpace;
+use crate::dither::common::PerceptualSpace;
 
 // ============================================================================
 // CIELAB Distance Formulas

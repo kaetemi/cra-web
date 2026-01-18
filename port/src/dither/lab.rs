@@ -13,7 +13,7 @@ use crate::color::{
     lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, oklab_to_linear_rgb,
 };
 use crate::color_distance::perceptual_distance_sq;
-use crate::dither_common::{wang_hash, DitherMode, PerceptualSpace};
+use super::common::{wang_hash, DitherMode, PerceptualSpace};
 use crate::rotation::deg_to_rad;
 
 /// Color space for rotation and quantization operations
