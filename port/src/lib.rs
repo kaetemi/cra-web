@@ -11,7 +11,6 @@ use image::GenericImageView;
 pub mod basic_lab;
 pub mod basic_oklab;
 pub mod basic_rgb;
-pub mod binary_format;
 pub mod buffer;
 pub mod color;
 mod color_distance;
@@ -20,6 +19,7 @@ pub mod correction;
 pub mod cra_lab;
 pub mod cra_rgb;
 pub mod dither;
+pub mod format;
 mod histogram;
 pub mod output;
 pub mod pixel;
@@ -28,8 +28,10 @@ mod rotation;
 pub mod tiled_lab;
 mod tiling;
 
-pub mod decode;
-pub mod sfi;
+// Re-export format submodules at crate root for backwards compatibility
+pub use format::binary as binary_format;
+pub use format::decode;
+pub use format::sfi;
 
 use buffer::{BufferF32x4, BufferF32, BufferU8};
 use dither::common::{DitherMode, PerceptualSpace};

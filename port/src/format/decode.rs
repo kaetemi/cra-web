@@ -13,7 +13,7 @@ use moxcms::{CicpProfile as MoxcmsCicpProfile, CicpColorPrimaries as MoxcmsPrima
 use std::io::{BufRead, Cursor, Seek};
 use std::path::Path;
 
-use crate::sfi;
+use super::sfi;
 
 // ============================================================================
 // Image Loading
@@ -927,12 +927,12 @@ pub fn load_image_from_path_auto<P: AsRef<Path>>(path: P) -> Result<DecodedImage
 /// Raw files are always assumed to be sRGB. No color space conversion is applied.
 pub fn load_raw_image<P: AsRef<Path>>(
     path: P,
-    metadata: &crate::binary_format::RawImageMetadata,
+    metadata: &super::binary::RawImageMetadata,
 ) -> Result<DecodedImage, String> {
     let data = std::fs::read(path.as_ref())
         .map_err(|e| format!("Failed to read {}: {}", path.as_ref().display(), e))?;
 
-    let decoded = crate::binary_format::decode_raw_image(&data, metadata)?;
+    let decoded = super::binary::decode_raw_image(&data, metadata)?;
 
     // Convert RGBA u8 data to DynamicImage
     let img = image::RgbaImage::from_raw(
