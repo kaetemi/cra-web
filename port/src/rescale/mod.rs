@@ -53,6 +53,10 @@ pub enum RescaleMethod {
     /// High quality with scale-dependent filter length and cutoff
     /// Uses: w(n) = cos(π*n/(2*L)) * (1 - (n/L)^α) window
     PeakedCosine,
+    /// Peaked Cosine with frequency response correction filter
+    /// Measures cumulative frequency response and applies short FIR correction
+    /// to compensate for rolloff, providing flatter passband response
+    PeakedCosineCorrected,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -82,6 +86,7 @@ impl RescaleMethod {
             "ewa-lanczos2" | "ewa_lanczos2" | "ewalanczos2" => Some(RescaleMethod::EWALanczos2),
             "ewa-lanczos3" | "ewa_lanczos3" | "ewalanczos3" | "ewa-lanczos" | "ewa_lanczos" => Some(RescaleMethod::EWALanczos3),
             "peaked-cosine" | "peaked_cosine" | "peakedcosine" | "avir" => Some(RescaleMethod::PeakedCosine),
+            "peaked-cosine-corrected" | "peaked_cosine_corrected" | "peakedcosinecorrected" | "avir-corrected" | "avir_corrected" => Some(RescaleMethod::PeakedCosineCorrected),
             _ => None,
         }
     }
@@ -96,7 +101,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWALanczos3 => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
-            RescaleMethod::PeakedCosine => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
+            RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
         }
     }
 
@@ -128,7 +133,7 @@ impl RescaleMethod {
 
     /// Returns true if this method uses scale-dependent filter parameters
     pub fn is_scale_dependent(&self) -> bool {
-        matches!(self, RescaleMethod::PeakedCosine)
+        matches!(self, RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected)
     }
 }
 
@@ -310,6 +315,9 @@ pub fn rescale_with_progress(
         RescaleMethod::PeakedCosine => {
             separable::rescale_peaked_cosine_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
+        RescaleMethod::PeakedCosineCorrected => {
+            separable::rescale_peaked_cosine_corrected_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+        }
     }
 }
 
@@ -370,6 +378,9 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::PeakedCosine => {
             separable::rescale_peaked_cosine_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+        }
+        RescaleMethod::PeakedCosineCorrected => {
+            separable::rescale_peaked_cosine_corrected_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
@@ -1680,6 +1691,146 @@ mod tests {
             assert!(p.r() > 0.3 && p.r() < 0.7,
                 "Pixel {} should be ~0.5 (averaged checkerboard): {}", i, p.r());
         }
+    }
+
+    // PeakedCosineCorrected tests
+
+    #[test]
+    fn test_peaked_cosine_corrected_identity() {
+        // Same dimensions should return identical pixels
+        let src = vec![
+            Pixel4::new(0.1, 0.2, 0.3, 1.0),
+            Pixel4::new(0.4, 0.5, 0.6, 1.0),
+            Pixel4::new(0.7, 0.8, 0.9, 1.0),
+            Pixel4::new(0.2, 0.3, 0.4, 1.0),
+        ];
+
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), 4);
+        for (a, b) in src.iter().zip(dst.iter()) {
+            assert!((a.r() - b.r()).abs() < 0.001);
+            assert!((a.g() - b.g()).abs() < 0.001);
+            assert!((a.b() - b.b()).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn test_peaked_cosine_corrected_downscale() {
+        // Test downscale produces reasonable output
+        let src_size = 32;
+        let dst_size = 8;
+
+        let src: Vec<Pixel4> = (0..src_size * src_size)
+            .map(|i| {
+                let v = (i % 256) as f32 / 255.0;
+                Pixel4::new(v, v * 0.5, v * 0.25, 1.0)
+            })
+            .collect();
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        for (i, p) in dst.iter().enumerate() {
+            assert!(p.r().is_finite() && !p.r().is_nan(), "Pixel {} r should be valid", i);
+            assert!(p.g().is_finite() && !p.g().is_nan(), "Pixel {} g should be valid", i);
+            assert!(p.b().is_finite() && !p.b().is_nan(), "Pixel {} b should be valid", i);
+        }
+    }
+
+    #[test]
+    fn test_peaked_cosine_corrected_upscale() {
+        // Test upscale produces reasonable output
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0), Pixel4::new(1.0, 1.0, 1.0, 1.0),
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        ];
+
+        let dst = rescale(&src, 2, 2, 8, 8, RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), 64);
+
+        // Check corners roughly match source
+        let tl = dst[0];
+        let tr = dst[7];
+        assert!(tl.r() < 0.3, "Top-left should be dark");
+        assert!(tr.r() > 0.7, "Top-right should be bright");
+    }
+
+    #[test]
+    fn test_peaked_cosine_corrected_roundtrip() {
+        // 4x4 -> 8x8 -> 4x4 should be reasonably close
+        let src = vec![
+            Pixel4::new(0.2, 0.2, 0.2, 1.0), Pixel4::new(0.4, 0.4, 0.4, 1.0),
+            Pixel4::new(0.6, 0.6, 0.6, 1.0), Pixel4::new(0.8, 0.8, 0.8, 1.0),
+            Pixel4::new(0.3, 0.3, 0.3, 1.0), Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.7, 0.7, 0.7, 1.0), Pixel4::new(0.9, 0.9, 0.9, 1.0),
+            Pixel4::new(0.1, 0.1, 0.1, 1.0), Pixel4::new(0.3, 0.3, 0.3, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0), Pixel4::new(0.7, 0.7, 0.7, 1.0),
+            Pixel4::new(0.2, 0.2, 0.2, 1.0), Pixel4::new(0.4, 0.4, 0.4, 1.0),
+            Pixel4::new(0.6, 0.6, 0.6, 1.0), Pixel4::new(0.8, 0.8, 0.8, 1.0),
+        ];
+
+        let up = rescale(&src, 4, 4, 8, 8, RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+        let down = rescale(&up, 8, 8, 4, 4, RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        assert_eq!(down.len(), 16);
+
+        let mut max_err = 0.0f32;
+        for (a, b) in src.iter().zip(down.iter()) {
+            max_err = max_err.max((a.r() - b.r()).abs());
+        }
+
+        // Corrected version may have slightly different roundtrip characteristics
+        assert!(max_err < 0.3, "Round-trip error should be reasonable: {}", max_err);
+    }
+
+    #[test]
+    fn test_peaked_cosine_corrected_alpha_aware() {
+        // Test alpha-aware rescaling
+        let src = vec![
+            Pixel4::new(1.0, 0.0, 0.0, 1.0), Pixel4::new(0.0, 1.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 1.0, 0.0), Pixel4::new(1.0, 1.0, 0.0, 1.0),
+        ];
+
+        let dst = rescale_with_alpha(&src, 2, 2, 4, 4,
+                                     RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), 16);
+
+        // Center pixel should be influenced more by opaque pixels (corners)
+        let center = dst[5];
+        assert!(center.r().is_finite());
+    }
+
+    #[test]
+    fn test_peaked_cosine_corrected_vs_uncorrected() {
+        // Corrected version should differ from uncorrected
+        let src_size = 32;
+        let dst_size = 8;
+
+        let src: Vec<Pixel4> = (0..src_size * src_size)
+            .map(|i| {
+                let v = (i % 256) as f32 / 255.0;
+                Pixel4::new(v, v, v, 1.0)
+            })
+            .collect();
+
+        let uncorrected = rescale(&src, src_size, src_size, dst_size, dst_size,
+                                  RescaleMethod::PeakedCosine, ScaleMode::Independent);
+        let corrected = rescale(&src, src_size, src_size, dst_size, dst_size,
+                                RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
+
+        // They should be different (correction filter changes response)
+        let mut total_diff = 0.0f32;
+        for (a, b) in uncorrected.iter().zip(corrected.iter()) {
+            total_diff += (a.r() - b.r()).abs();
+        }
+
+        // There should be some difference (correction filter is applied)
+        assert!(total_diff > 0.01, "Corrected should differ from uncorrected: {}", total_diff);
     }
 
 }

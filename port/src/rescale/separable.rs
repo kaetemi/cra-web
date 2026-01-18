@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights, precompute_peaked_cosine_weights};
+use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights, precompute_peaked_cosine_weights, precompute_peaked_cosine_corrected_weights};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -391,6 +391,156 @@ pub fn rescale_peaked_cosine_alpha_pixels(
 
     let h_weights = precompute_peaked_cosine_weights(src_width, dst_width, scale_x);
     let v_weights = precompute_peaked_cosine_weights(src_height, dst_height, scale_y);
+
+    // Pass 1: Alpha-aware horizontal resample
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+    for y in 0..src_height {
+        let src_row = &src[y * src_width..(y + 1) * src_width];
+        let dst_row = resample_row_alpha_precomputed(src_row, &h_weights);
+        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
+
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Alpha-aware vertical resample
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+
+    for dst_y in 0..dst_height {
+        let kw = &v_weights[dst_y];
+        let dst_row_start = dst_y * dst_width;
+
+        if kw.weights.is_empty() {
+            let src_row_start = kw.fallback_idx * dst_width;
+            dst[dst_row_start..dst_row_start + dst_width]
+                .copy_from_slice(&temp[src_row_start..src_row_start + dst_width]);
+        } else {
+            for x in 0..dst_width {
+                let mut sum_r = 0.0f32;
+                let mut sum_g = 0.0f32;
+                let mut sum_b = 0.0f32;
+                let mut sum_a = 0.0f32;
+                let mut sum_alpha_weight = 0.0f32;
+                let mut sum_weight = 0.0f32;
+                let mut sum_r_unweighted = 0.0f32;
+                let mut sum_g_unweighted = 0.0f32;
+                let mut sum_b_unweighted = 0.0f32;
+
+                for (i, &weight) in kw.weights.iter().enumerate() {
+                    let src_y = kw.start_idx + i;
+                    let p = temp[src_y * dst_width + x];
+                    let alpha = p.a();
+                    let aw = weight * alpha;
+
+                    sum_r += aw * p.r();
+                    sum_g += aw * p.g();
+                    sum_b += aw * p.b();
+                    sum_a += weight * alpha;
+                    sum_alpha_weight += aw;
+                    sum_weight += weight;
+
+                    sum_r_unweighted += weight * p.r();
+                    sum_g_unweighted += weight * p.g();
+                    sum_b_unweighted += weight * p.b();
+                }
+
+                let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
+
+                let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
+                    let inv_aw = 1.0 / sum_alpha_weight;
+                    (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
+                } else if sum_weight.abs() > 1e-8 {
+                    let inv_w = 1.0 / sum_weight;
+                    (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+
+                dst[dst_row_start + x] = Pixel4::new(out_r, out_g, out_b, out_a);
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
+        }
+    }
+
+    dst
+}
+
+/// Peaked Cosine rescale with frequency response correction
+///
+/// This version measures the cumulative frequency response of the primary filter
+/// and applies a short FIR correction filter to flatten the passband.
+/// Results in less rolloff but potentially more ringing than uncorrected version.
+pub fn rescale_peaked_cosine_corrected_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    // Precompute corrected weights
+    let h_weights = precompute_peaked_cosine_corrected_weights(src_width, dst_width, scale_x);
+    let v_weights = precompute_peaked_cosine_corrected_weights(src_height, dst_height, scale_y);
+
+    // Pass 1: Horizontal resample
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+    for y in 0..src_height {
+        let src_row = &src[y * src_width..(y + 1) * src_width];
+        let dst_row = resample_row_pixel4_precomputed(src_row, &h_weights);
+        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
+
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Vertical resample
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+    let v_columns: Vec<Vec<Pixel4>> = (0..dst_width)
+        .map(|x| (0..src_height).map(|y| temp[y * dst_width + x]).collect())
+        .collect();
+
+    for x in 0..dst_width {
+        let column = &v_columns[x];
+        let resampled = resample_row_pixel4_precomputed(column, &v_weights);
+
+        for (dst_y, val) in resampled.into_iter().enumerate() {
+            dst[dst_y * dst_width + x] = val;
+        }
+    }
+
+    if let Some(cb) = progress {
+        cb(1.0);
+    }
+
+    dst
+}
+
+/// Alpha-aware Peaked Cosine rescale with frequency response correction
+pub fn rescale_peaked_cosine_corrected_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let h_weights = precompute_peaked_cosine_corrected_weights(src_width, dst_width, scale_x);
+    let v_weights = precompute_peaked_cosine_corrected_weights(src_height, dst_height, scale_y);
 
     // Pass 1: Alpha-aware horizontal resample
     let mut temp = vec![Pixel4::default(); dst_width * src_height];

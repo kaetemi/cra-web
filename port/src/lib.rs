@@ -77,6 +77,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         8 => rescale::RescaleMethod::EWALanczos2,
         9 => rescale::RescaleMethod::EWALanczos3,
         10 => rescale::RescaleMethod::PeakedCosine,
+        11 => rescale::RescaleMethod::PeakedCosineCorrected,
         20 => rescale::RescaleMethod::Box,
         _ => rescale::RescaleMethod::Bilinear,
     }

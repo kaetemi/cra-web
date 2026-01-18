@@ -150,7 +150,7 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Box => box_filter(x),
         // PeakedCosine uses its own specialized precomputation with scale-dependent parameters
-        RescaleMethod::PeakedCosine => sinc(x), // Fallback; actual implementation uses peaked_cosine_sinc
+        RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected => sinc(x), // Fallback; actual implementation uses peaked_cosine_sinc
     }
 }
 
@@ -401,6 +401,316 @@ pub fn precompute_peaked_cosine_weights(
             // Distance from destination position in source space
             let d = src_pos - si as f32;
             let weight = peaked_cosine_sinc(d, &params);
+            weights.push(weight);
+            weight_sum += weight;
+        }
+
+        // Normalize weights
+        if weight_sum.abs() > 1e-8 {
+            for w in &mut weights {
+                *w /= weight_sum;
+            }
+        }
+
+        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+
+        all_weights.push(KernelWeights {
+            start_idx: start,
+            weights,
+            fallback_idx: fallback,
+        });
+    }
+
+    all_weights
+}
+
+// ============================================================================
+// Peaked Cosine with Frequency Response Correction
+// ============================================================================
+
+/// Number of frequency bins for measuring response (AVIR uses 65)
+const CORRECTION_NUM_BINS: usize = 65;
+
+/// Correction filter length (AVIR uses 5.5-8 taps; 7 is the sweet spot)
+const CORRECTION_FILTER_LEN: usize = 7;
+
+/// Alpha for the correction filter window
+const CORRECTION_ALPHA: f32 = 0.98;
+
+/// Measure the frequency response of a filter at specified frequency bins
+///
+/// Returns array of magnitude responses from DC to the target bandwidth.
+/// The filter coefficients are centered (index 0 is the center tap).
+fn measure_frequency_response(
+    weights: &[f32],
+    num_bins: usize,
+    bandwidth: f32,
+) -> Vec<f32> {
+    let mut response = Vec::with_capacity(num_bins);
+    let half_len = weights.len() / 2;
+
+    for i in 0..num_bins {
+        let freq = (i as f32 / (num_bins - 1) as f32) * bandwidth * PI;
+
+        let mut re = 0.0f32;
+        let mut im = 0.0f32;
+
+        for (j, &w) in weights.iter().enumerate() {
+            let n = j as f32 - half_len as f32;
+            re += w * (freq * n).cos();
+            im += w * (freq * n).sin();
+        }
+
+        let magnitude = (re * re + im * im).sqrt();
+        response.push(magnitude);
+    }
+
+    response
+}
+
+/// Design a short FIR correction filter using least-squares to match target gains
+///
+/// Uses a simplified least-squares approach with Peaked Cosine windowing.
+/// The target gains should be the inverse of the measured frequency response
+/// (normalized to achieve flat passband).
+fn design_correction_filter(target_gains: &[f32]) -> Vec<f32> {
+    let num_bins = target_gains.len();
+    let half_len = CORRECTION_FILTER_LEN / 2;
+    let filter_len = 2 * half_len + 1;
+
+    // Build frequency points
+    let freqs: Vec<f32> = (0..num_bins)
+        .map(|i| (i as f32 / (num_bins - 1) as f32) * PI)
+        .collect();
+
+    // Build matrix: A[i][j] = cos(freq[i] * n[j]) where n = [-half_len, ..., half_len]
+    // Then solve A * coeffs = target_gains in least-squares sense
+
+    // Simple least-squares via normal equations: (A^T * A) * x = A^T * b
+    // For a symmetric filter, we only need to compute the cosine terms
+
+    let mut ata = vec![vec![0.0f32; filter_len]; filter_len];
+    let mut atb = vec![0.0f32; filter_len];
+
+    for (i, &freq) in freqs.iter().enumerate() {
+        // Compute row of A
+        let mut row = Vec::with_capacity(filter_len);
+        for j in 0..filter_len {
+            let n = j as f32 - half_len as f32;
+            row.push((freq * n).cos());
+        }
+
+        // Accumulate A^T * A
+        for j in 0..filter_len {
+            for k in 0..filter_len {
+                ata[j][k] += row[j] * row[k];
+            }
+        }
+
+        // Accumulate A^T * b
+        for j in 0..filter_len {
+            atb[j] += row[j] * target_gains[i];
+        }
+    }
+
+    // Solve using simple Gaussian elimination with partial pivoting
+    let mut coeffs = solve_linear_system(&mut ata, &mut atb);
+
+    // Enforce symmetry (the least-squares problem has redundant columns due to cos(-x)=cos(x),
+    // so the solver might return an asymmetric solution which causes phase shift)
+    for j in 0..half_len {
+        let avg = (coeffs[j] + coeffs[filter_len - 1 - j]) / 2.0;
+        coeffs[j] = avg;
+        coeffs[filter_len - 1 - j] = avg;
+    }
+
+    // Apply Peaked Cosine window
+    let window_l = half_len as f32 + 0.5;
+    let mut windowed_coeffs = Vec::with_capacity(filter_len);
+    for j in 0..filter_len {
+        let n = (j as f32 - half_len as f32).abs();
+        let window = peaked_cosine_window(n, window_l, CORRECTION_ALPHA);
+        windowed_coeffs.push(coeffs[j] * window);
+    }
+
+    // Normalize to sum to 1
+    let sum: f32 = windowed_coeffs.iter().sum();
+    if sum.abs() > 1e-8 {
+        for c in &mut windowed_coeffs {
+            *c /= sum;
+        }
+    }
+
+    windowed_coeffs
+}
+
+/// Solve linear system Ax = b using Gaussian elimination with partial pivoting
+fn solve_linear_system(a: &mut [Vec<f32>], b: &mut [f32]) -> Vec<f32> {
+    let n = b.len();
+
+    // Forward elimination with partial pivoting
+    for i in 0..n {
+        // Find pivot
+        let mut max_val = a[i][i].abs();
+        let mut max_row = i;
+        for k in (i + 1)..n {
+            if a[k][i].abs() > max_val {
+                max_val = a[k][i].abs();
+                max_row = k;
+            }
+        }
+
+        // Swap rows
+        if max_row != i {
+            a.swap(i, max_row);
+            b.swap(i, max_row);
+        }
+
+        // Check for singularity
+        if a[i][i].abs() < 1e-10 {
+            continue;
+        }
+
+        // Eliminate
+        for k in (i + 1)..n {
+            let factor = a[k][i] / a[i][i];
+            for j in i..n {
+                a[k][j] -= factor * a[i][j];
+            }
+            b[k] -= factor * b[i];
+        }
+    }
+
+    // Back substitution
+    let mut x = vec![0.0f32; n];
+    for i in (0..n).rev() {
+        if a[i][i].abs() < 1e-10 {
+            x[i] = 0.0;
+            continue;
+        }
+        x[i] = b[i];
+        for j in (i + 1)..n {
+            x[i] -= a[i][j] * x[j];
+        }
+        x[i] /= a[i][i];
+    }
+
+    x
+}
+
+/// Convolve two 1D kernels
+fn convolve_kernels(a: &[f32], b: &[f32]) -> Vec<f32> {
+    if a.is_empty() || b.is_empty() {
+        return Vec::new();
+    }
+
+    let result_len = a.len() + b.len() - 1;
+    let mut result = vec![0.0f32; result_len];
+
+    for (i, &av) in a.iter().enumerate() {
+        for (j, &bv) in b.iter().enumerate() {
+            result[i + j] += av * bv;
+        }
+    }
+
+    result
+}
+
+/// Precompute Peaked Cosine filter weights with frequency response correction
+///
+/// This builds the primary Peaked Cosine filter, measures its frequency response,
+/// designs a correction filter to flatten the passband, and convolves them together.
+pub fn precompute_peaked_cosine_corrected_weights(
+    src_len: usize,
+    dst_len: usize,
+    scale: f32,
+) -> Vec<KernelWeights> {
+    // Calculate filter parameters
+    let params = calculate_peaked_cosine_params(scale);
+    let primary_radius = params.half_length.ceil() as i32;
+
+    // Build the primary filter kernel (centered, for frequency analysis)
+    let primary_len = 2 * primary_radius as usize + 1;
+    let mut primary_kernel = Vec::with_capacity(primary_len);
+    for i in 0..primary_len {
+        let n = i as f32 - primary_radius as f32;
+        primary_kernel.push(peaked_cosine_sinc(n, &params));
+    }
+
+    // Normalize primary kernel
+    let primary_sum: f32 = primary_kernel.iter().sum();
+    if primary_sum.abs() > 1e-8 {
+        for w in &mut primary_kernel {
+            *w /= primary_sum;
+        }
+    }
+
+    // Measure frequency response
+    // Bandwidth is relative to Nyquist: for downscaling, bandwidth = 1/scale
+    let bandwidth = if scale > 1.0 { 1.0 / scale } else { 1.0 };
+    let response = measure_frequency_response(&primary_kernel, CORRECTION_NUM_BINS, bandwidth);
+
+    // Calculate target gains (inverse of measured response, clamped)
+    // This aims to flatten the passband
+    let mut target_gains = Vec::with_capacity(CORRECTION_NUM_BINS);
+    for r in &response {
+        // Clamp to avoid extreme correction
+        let inv = if *r > 0.1 { 1.0 / r } else { 10.0 };
+        // Smooth attenuation at band edges
+        target_gains.push(inv.min(2.0));
+    }
+
+    // Design correction filter
+    let correction_kernel = design_correction_filter(&target_gains);
+
+    // Convolve primary and correction kernels
+    let combined_kernel = convolve_kernels(&primary_kernel, &correction_kernel);
+    let combined_half_len = combined_kernel.len() / 2;
+
+    // Now precompute weights using the combined kernel
+    let mut all_weights = Vec::with_capacity(dst_len);
+
+    // Center offset for uniform scaling
+    let mapped_src_len = dst_len as f32 * scale;
+    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+
+    let combined_radius = combined_half_len as i32;
+
+    for dst_i in 0..dst_len {
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+        let center = src_pos.floor() as i32;
+
+        // Find the valid source index range
+        let start = (center - combined_radius).max(0) as usize;
+        let end = ((center + combined_radius) as usize).min(src_len - 1);
+
+        // Collect weights by sampling the combined kernel
+        let mut weights = Vec::with_capacity(end - start + 1);
+        let mut weight_sum = 0.0f32;
+
+        for si in start..=end {
+            let d = src_pos - si as f32;
+            // Sample the combined kernel (interpolating between taps)
+            let kernel_pos = d + combined_half_len as f32;
+
+            let weight = if kernel_pos < 0.0 || kernel_pos > combined_kernel.len() as f32 - 1.0 {
+                // Outside kernel support
+                0.0
+            } else {
+                let kernel_idx = kernel_pos.floor() as usize;
+                let frac = kernel_pos - kernel_idx as f32;
+
+                if kernel_idx >= combined_kernel.len() - 1 {
+                    // At the last index, can't interpolate right
+                    combined_kernel[kernel_idx]
+                } else {
+                    // Normal linear interpolation
+                    let w0 = combined_kernel[kernel_idx];
+                    let w1 = combined_kernel[kernel_idx + 1];
+                    w0 * (1.0 - frac) + w1 * frac
+                }
+            };
+
             weights.push(weight);
             weight_sum += weight;
         }
