@@ -335,6 +335,7 @@
                 <select id="interpolation">
                     <option value="1" selected>Lanczos3 (recommended)</option>
                     <option value="7">Lanczos2 (less ringing)</option>
+                    <option value="10">Peaked Cosine (AVIR-style, adaptive)</option>
                     <option value="9">EWA Lanczos3 (2D, better diagonals)</option>
                     <option value="8">EWA Lanczos2 (2D, less ringing)</option>
                     <option value="3">Catmull-Rom (sharp, low ringing)</option>
@@ -589,7 +590,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-lanczos2', 9: 'ewa-lanczos3', 20: 'box' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-lanczos2', 9: 'ewa-lanczos3', 10: 'peaked-cosine', 20: 'box' };
 
             // Map dither mode values to CLI names
             const modeMap = {

@@ -149,6 +149,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWALanczos3 => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Box => box_filter(x),
+        // PeakedCosine uses its own specialized precomputation with scale-dependent parameters
+        RescaleMethod::PeakedCosine => sinc(x), // Fallback; actual implementation uses peaked_cosine_sinc
     }
 }
 
@@ -256,6 +258,149 @@ pub fn precompute_box_weights(
 
         for si in start..=end {
             let weight = box_integrated(src_pos, si as f32, filter_scale);
+            weights.push(weight);
+            weight_sum += weight;
+        }
+
+        // Normalize weights
+        if weight_sum.abs() > 1e-8 {
+            for w in &mut weights {
+                *w /= weight_sum;
+            }
+        }
+
+        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
+
+        all_weights.push(KernelWeights {
+            start_idx: start,
+            weights,
+            fallback_idx: fallback,
+        });
+    }
+
+    all_weights
+}
+
+// ============================================================================
+// Peaked Cosine (AVIR-style) Windowed Sinc
+// ============================================================================
+
+/// AVIR-style Peaked Cosine window function parameters for lowpass filtering
+pub struct PeakedCosineParams {
+    /// Normalized cutoff frequency (0 to 1, where 1 = Nyquist)
+    pub cutoff: f32,
+    /// Filter half-length in samples
+    pub half_length: f32,
+    /// Alpha shape parameter for the window
+    pub alpha: f32,
+}
+
+/// Default AVIR lowpass filter parameters
+const AVIR_LPF_BASE_LEN: f32 = 7.56;
+const AVIR_LPF_CUTOFF_MULT: f32 = 0.79285;
+const AVIR_LPF_ALPHA: f32 = 4.76449;
+
+/// Default AVIR interpolation filter parameters (for upscaling)
+const AVIR_INT_LEN: f32 = 18.0;
+const AVIR_INT_CUTOFF: f32 = 0.7372;
+const AVIR_INT_ALPHA: f32 = 6.41341;
+
+/// Calculate Peaked Cosine parameters based on scale factor
+///
+/// For downscaling (scale > 1): uses lowpass filter parameters
+/// For upscaling (scale < 1): uses interpolation filter parameters
+pub fn calculate_peaked_cosine_params(scale: f32) -> PeakedCosineParams {
+    if scale > 1.0 {
+        // Downscaling: use lowpass filter
+        let cutoff = AVIR_LPF_CUTOFF_MULT / scale;
+        let half_length = (AVIR_LPF_BASE_LEN / 2.0) / cutoff;
+        PeakedCosineParams {
+            cutoff,
+            half_length,
+            alpha: AVIR_LPF_ALPHA,
+        }
+    } else {
+        // Upscaling: use interpolation filter
+        // For upscaling, the filter is applied at output rate
+        // Scale the half_length by the inverse scale factor
+        let half_length = (AVIR_INT_LEN / 2.0) * scale;
+        PeakedCosineParams {
+            cutoff: AVIR_INT_CUTOFF,
+            half_length: half_length.max(2.0), // Minimum reasonable filter size
+            alpha: AVIR_INT_ALPHA,
+        }
+    }
+}
+
+/// Peaked Cosine window function
+/// w(n) = cos(π * n / (2 * L)) * (1 - (n / L)^α)
+///
+/// Returns 0 if n >= L (outside window support)
+#[inline]
+pub fn peaked_cosine_window(n: f32, half_length: f32, alpha: f32) -> f32 {
+    if n.abs() >= half_length {
+        return 0.0;
+    }
+
+    let t = n / half_length;
+    let cos_term = (PI * n / (2.0 * half_length)).cos();
+    let shape_term = 1.0 - t.abs().powf(alpha);
+
+    cos_term * shape_term
+}
+
+/// Windowed sinc kernel with Peaked Cosine window
+/// h(n) = sinc(n * fc) * w(n)
+#[inline]
+pub fn peaked_cosine_sinc(n: f32, params: &PeakedCosineParams) -> f32 {
+    let sinc_val = if n.abs() < 1e-8 {
+        1.0
+    } else {
+        let x = PI * n * params.cutoff;
+        x.sin() / x
+    };
+
+    sinc_val * peaked_cosine_window(n, params.half_length, params.alpha)
+}
+
+/// Precompute Peaked Cosine filter weights for 1D resampling
+///
+/// Unlike fixed-kernel methods, the filter parameters depend on the scale factor,
+/// making this filter adaptive to the scaling operation.
+pub fn precompute_peaked_cosine_weights(
+    src_len: usize,
+    dst_len: usize,
+    scale: f32,
+) -> Vec<KernelWeights> {
+    let mut all_weights = Vec::with_capacity(dst_len);
+
+    // Calculate filter parameters based on scale
+    let params = calculate_peaked_cosine_params(scale);
+
+    // The filter radius in source pixels
+    let radius = params.half_length.ceil() as i32;
+
+    // Center offset for uniform scaling
+    let mapped_src_len = dst_len as f32 * scale;
+    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+
+    for dst_i in 0..dst_len {
+        // Map destination pixel center to source coordinates
+        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+        let center = src_pos.floor() as i32;
+
+        // Find the valid source index range
+        let start = (center - radius).max(0) as usize;
+        let end = ((center + radius) as usize).min(src_len - 1);
+
+        // Collect weights
+        let mut weights = Vec::with_capacity(end - start + 1);
+        let mut weight_sum = 0.0f32;
+
+        for si in start..=end {
+            // Distance from destination position in source space
+            let d = src_pos - si as f32;
+            let weight = peaked_cosine_sinc(d, &params);
             weights.push(weight);
             weight_sum += weight;
         }

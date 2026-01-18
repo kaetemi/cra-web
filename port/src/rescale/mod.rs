@@ -49,6 +49,10 @@ pub enum RescaleMethod {
     /// EWA (Elliptical Weighted Average) Lanczos3 - 2D radially symmetric filter
     /// Better edge quality than separable Lanczos3, especially for non-uniform scaling
     EWALanczos3,
+    /// Peaked Cosine windowed sinc - AVIR-style adaptive filter
+    /// High quality with scale-dependent filter length and cutoff
+    /// Uses: w(n) = cos(π*n/(2*L)) * (1 - (n/L)^α) window
+    PeakedCosine,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -77,11 +81,12 @@ impl RescaleMethod {
             "box" | "area" | "nearest" => Some(RescaleMethod::Box),
             "ewa-lanczos2" | "ewa_lanczos2" | "ewalanczos2" => Some(RescaleMethod::EWALanczos2),
             "ewa-lanczos3" | "ewa_lanczos3" | "ewalanczos3" | "ewa-lanczos" | "ewa_lanczos" => Some(RescaleMethod::EWALanczos3),
+            "peaked-cosine" | "peaked_cosine" | "peakedcosine" | "avir" => Some(RescaleMethod::PeakedCosine),
             _ => None,
         }
     }
 
-    /// Get the kernel radius for this method (0 = full image extent)
+    /// Get the kernel radius for this method (0 = full image extent or scale-dependent)
     pub fn base_radius(&self) -> f32 {
         match self {
             RescaleMethod::Bilinear => 1.0,
@@ -91,6 +96,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWALanczos3 => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::PeakedCosine => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
         }
     }
 
@@ -118,6 +124,11 @@ impl RescaleMethod {
             RescaleMethod::EWALanczos3 => RescaleMethod::Lanczos3,
             other => *other,
         }
+    }
+
+    /// Returns true if this method uses scale-dependent filter parameters
+    pub fn is_scale_dependent(&self) -> bool {
+        matches!(self, RescaleMethod::PeakedCosine)
     }
 }
 
@@ -296,6 +307,9 @@ pub fn rescale_with_progress(
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 => {
             ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
+        RescaleMethod::PeakedCosine => {
+            separable::rescale_peaked_cosine_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+        }
     }
 }
 
@@ -353,6 +367,9 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 => {
             ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
+        RescaleMethod::PeakedCosine => {
+            separable::rescale_peaked_cosine_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
@@ -1501,6 +1518,167 @@ mod tests {
         for (i, (p2, p3)) in l2_down.iter().zip(l3_down.iter()).enumerate() {
             assert!(p2.r().is_finite(), "Lanczos2 pixel {} should be finite", i);
             assert!(p3.r().is_finite(), "Lanczos3 pixel {} should be finite", i);
+        }
+    }
+
+    // ========================================================================
+    // Peaked Cosine (AVIR-style) rescaling tests
+    // ========================================================================
+
+    #[test]
+    fn test_peaked_cosine_identity() {
+        // Same-size should return identical pixels
+        let src = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(0.25, 0.25, 0.25, 1.0),
+            Pixel4::new(0.5, 0.5, 0.5, 1.0),
+            Pixel4::new(0.75, 0.75, 0.75, 1.0),
+        ];
+        let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::PeakedCosine, ScaleMode::Independent);
+        assert_eq!(src, dst);
+    }
+
+    #[test]
+    fn test_peaked_cosine_downscale() {
+        // 8x8 -> 4x4 downscale
+        let src_size = 8;
+        let dst_size = 4;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let r = x as f32 / (src_size - 1) as f32;
+                let g = y as f32 / (src_size - 1) as f32;
+                let b = 0.5;
+                src.push(Pixel4::new(r, g, b, 1.0));
+            }
+        }
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::PeakedCosine, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        // All values should be finite
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+
+        // Check gradient is preserved
+        assert!(dst[0].r() < 0.3, "Top-left should be dark: {}", dst[0].r());
+        let br = &dst[(dst_size - 1) * dst_size + (dst_size - 1)];
+        assert!(br.r() > 0.7, "Bottom-right should be bright: {}", br.r());
+    }
+
+    #[test]
+    fn test_peaked_cosine_upscale() {
+        // 4x4 -> 8x8 upscale
+        let src_size = 4;
+        let dst_size = 8;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                let v = ((x + y) % 2) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::PeakedCosine, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        // All values should be finite
+        for (i, p) in dst.iter().enumerate() {
+            for c in 0..4 {
+                assert!(p[c].is_finite(), "Pixel {} channel {} is not finite: {}", i, c, p[c]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_peaked_cosine_roundtrip() {
+        // Test 2x upscale then 2x downscale
+        let size = 8;
+        let mut src = Vec::with_capacity(size * size);
+        for y in 0..size {
+            for x in 0..size {
+                let r = x as f32 / (size - 1) as f32;
+                let g = y as f32 / (size - 1) as f32;
+                src.push(Pixel4::new(r, g, 0.5, 1.0));
+            }
+        }
+
+        let up = rescale(&src, size, size, size * 2, size * 2,
+                         RescaleMethod::PeakedCosine, ScaleMode::Independent);
+        let down = rescale(&up, size * 2, size * 2, size, size,
+                           RescaleMethod::PeakedCosine, ScaleMode::Independent);
+
+        // Should be reasonably close to original
+        let mut max_diff = 0.0f32;
+        for (orig, result) in src.iter().zip(down.iter()) {
+            for c in 0..3 {
+                let diff = (orig[c] - result[c]).abs();
+                if diff > max_diff {
+                    max_diff = diff;
+                }
+            }
+        }
+
+        eprintln!("Peaked Cosine 2x roundtrip max diff: {:.4}", max_diff);
+        assert!(max_diff < 0.2, "Roundtrip should preserve values, max diff: {}", max_diff);
+    }
+
+    #[test]
+    fn test_peaked_cosine_alpha_aware() {
+        // Test alpha-aware mode doesn't bleed transparent pixels
+        let src = vec![
+            Pixel4::new(1.0, 1.0, 1.0, 1.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+            Pixel4::new(0.0, 0.0, 0.0, 0.0), Pixel4::new(0.0, 0.0, 0.0, 0.0),
+        ];
+
+        let alpha_pc = rescale_with_alpha(&src, 2, 2, 4, 4,
+                                          RescaleMethod::PeakedCosine, ScaleMode::Independent);
+
+        // All values should be finite
+        for p in &alpha_pc {
+            assert!(p.r().is_finite(), "Alpha PC should produce finite values");
+        }
+
+        // The top-left pixel should be close to 1.0 (the only opaque pixel's value)
+        let alpha_tl = alpha_pc[0].r();
+        assert!((alpha_tl - 1.0).abs() < 0.05,
+            "Alpha-aware top-left should be ~1.0 (got {})", alpha_tl);
+    }
+
+    #[test]
+    fn test_peaked_cosine_extreme_downscale() {
+        // Test large downscale: 64x64 -> 8x8
+        let src_size = 64;
+        let dst_size = 8;
+
+        let mut src = Vec::with_capacity(src_size * src_size);
+        for y in 0..src_size {
+            for x in 0..src_size {
+                // Checkerboard pattern
+                let v = ((x + y) % 2) as f32;
+                src.push(Pixel4::new(v, v, v, 1.0));
+            }
+        }
+
+        let dst = rescale(&src, src_size, src_size, dst_size, dst_size,
+                          RescaleMethod::PeakedCosine, ScaleMode::Independent);
+
+        assert_eq!(dst.len(), dst_size * dst_size);
+
+        // Checkerboard should average to ~0.5
+        for (i, p) in dst.iter().enumerate() {
+            assert!(p.r().is_finite(), "Pixel {} should be finite", i);
+            assert!(p.r() > 0.3 && p.r() < 0.7,
+                "Pixel {} should be ~0.5 (averaged checkerboard): {}", i, p.r());
         }
     }
 
