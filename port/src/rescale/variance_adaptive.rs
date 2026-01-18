@@ -30,21 +30,23 @@ use super::{ScaleMode, calculate_scales};
 use super::kernels::{wang_hash, lanczos2, lanczos3, lanczos4, lanczos5, lanczos6, catmull_rom};
 
 // ============================================================================
-// Lanczos7 kernel for error scatter (wide, smooth, non-negative in support)
+// Lanczos7 window for error scatter (wide, smooth, non-negative in support)
 // ============================================================================
 
-/// Lanczos kernel with a=7
-/// Used for error scatter - wide and smooth window
+/// Lanczos7 window function: sinc(x/7) for |x| < 7
+/// This is just the window part, NOT the full Lanczos kernel (sinc(x) * sinc(x/7)).
+/// The window is smooth, wide, and non-negative within its support, making it
+/// ideal for error scatter where we don't want to introduce new artifacts.
 #[inline]
-fn lanczos7(x: f32) -> f32 {
+fn lanczos7_window(x: f32) -> f32 {
     if x.abs() < 1e-8 {
         1.0
     } else if x.abs() >= 7.0 {
         0.0
     } else {
-        let pi_x = PI * x;
-        let pi_x_7 = pi_x / 7.0;
-        (pi_x.sin() / pi_x) * (pi_x_7.sin() / pi_x_7)
+        // Just the window: sinc(x/7) = sin(pi*x/7) / (pi*x/7)
+        let pi_x_7 = PI * x / 7.0;
+        pi_x_7.sin() / pi_x_7
     }
 }
 
@@ -385,7 +387,8 @@ fn scatter_error(
             }
 
             // Lanczos7 window weight * destination variance
-            let base_weight = lanczos7(d).abs(); // Use abs to ensure non-negative
+            // Window is already non-negative within support, no abs needed
+            let base_weight = lanczos7_window(d);
             let var_weight = dst_var[di].max(0.001); // Minimum variance to avoid zero
             let weight = base_weight * var_weight;
             weights.push(weight);
