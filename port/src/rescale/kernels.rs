@@ -213,6 +213,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
         RescaleMethod::Lanczos24Mixed => lanczos4(x),
         RescaleMethod::Lanczos35Mixed => lanczos5(x),
+        // VarianceAdaptive doesn't use eval_kernel - it has its own adaptive kernel selection
+        RescaleMethod::VarianceAdaptive => lanczos3(x),
     }
 }
 

@@ -228,6 +228,8 @@ enum ScaleMethod {
     SincIntegrated,
     /// Box filter: nearest-neighbor for upscaling, proper area average for downscaling
     Box,
+    /// Variance-adaptive: Lanczos2-6 based on local variance, energy-conserving error scatter
+    VarianceAdaptive,
 }
 
 impl ScaleMethod {
@@ -251,6 +253,7 @@ impl ScaleMethod {
             ScaleMethod::Lanczos3Integrated => cra_wasm::rescale::RescaleMethod::Lanczos3Integrated,
             ScaleMethod::SincIntegrated => cra_wasm::rescale::RescaleMethod::SincIntegrated,
             ScaleMethod::Box => cra_wasm::rescale::RescaleMethod::Box,
+            ScaleMethod::VarianceAdaptive => cra_wasm::rescale::RescaleMethod::VarianceAdaptive,
         }
     }
 }

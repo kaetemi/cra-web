@@ -11,6 +11,7 @@ mod kernels;
 mod bilinear;
 mod separable;
 mod scatter;
+mod variance_adaptive;
 
 use crate::pixel::Pixel4;
 
@@ -60,6 +61,11 @@ pub enum RescaleMethod {
     /// - Upscaling: nearest-neighbor (dest pixel smaller than source, samples one pixel)
     /// - Downscaling: proper area average (dest pixel covers multiple sources, weighted by overlap)
     Box,
+    /// Variance-adaptive rescaling with energy-conserving error scatter.
+    /// - Low variance (smooth): Lanczos2 (gentle, minimal ringing)
+    /// - High variance (edges): Lanczos6 (sharp, ringing hidden by edge detail)
+    /// - Tracks energy conservation and scatters error to high-variance regions
+    VarianceAdaptive,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -95,6 +101,7 @@ impl RescaleMethod {
             "lanczos3-integrated" | "lanczos3_integrated" | "integrated" => Some(RescaleMethod::Lanczos3Integrated),
             "sinc-integrated" | "sinc_integrated" => Some(RescaleMethod::SincIntegrated),
             "box" | "area" | "nearest" => Some(RescaleMethod::Box),
+            "variance-adaptive" | "variance_adaptive" | "vadaptive" | "adaptive" => Some(RescaleMethod::VarianceAdaptive),
             _ => None,
         }
     }
@@ -117,6 +124,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
             RescaleMethod::Lanczos35Mixed => 5.0,  // 3+5 -> 5
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::VarianceAdaptive => 6.0,  // Uses Lanczos2-6 adaptively; max radius is 6
         }
     }
 
@@ -333,6 +341,9 @@ pub fn rescale_with_progress(
         RescaleMethod::LanczosMixedScatter => {
             scatter::rescale_mixed_scatter_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
         }
+        RescaleMethod::VarianceAdaptive => {
+            variance_adaptive::rescale_variance_adaptive(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+        }
     }
 }
 
@@ -398,6 +409,10 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::LanczosMixedScatter => {
             scatter::rescale_mixed_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
+        }
+        RescaleMethod::VarianceAdaptive => {
+            // For now, use the regular variance-adaptive (alpha-aware variant could be added later)
+            variance_adaptive::rescale_variance_adaptive(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
