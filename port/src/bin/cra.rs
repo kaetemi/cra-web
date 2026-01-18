@@ -199,37 +199,39 @@ enum ScaleMethod {
     CatmullRom,
     /// Lanczos2: good sharpness, less ringing than Lanczos3
     Lanczos2,
-    /// Lanczos3: good balance of sharpness and ringing (recommended)
-    #[default]
+    /// Lanczos3: good balance of sharpness and ringing
     Lanczos3,
-    /// Lanczos4: sharper than Lanczos3, more ringing
-    Lanczos4,
-    /// Lanczos5: very sharp, noticeable ringing
-    Lanczos5,
-    /// Lanczos6: extremely sharp, approaching sinc behavior
-    Lanczos6,
     /// Pure Sinc (non-windowed): theoretically ideal, full image extent (SLOW, research only)
     Sinc,
     /// Lanczos3 with scatter-based accumulation (experimental)
     Lanczos3Scatter,
     /// Sinc with scatter-based accumulation (experimental, SLOW)
     SincScatter,
-    /// Mixed Lanczos (experimental): randomly switches between Lanczos2/3 per source pixel
-    LanczosMixed,
-    /// Mixed Lanczos scatter (experimental): per-source kernel selection with scatter
-    LanczosMixedScatter,
-    /// Mixed Lanczos 2+4 (experimental): randomly switches between Lanczos2/4 per source pixel
-    Lanczos24Mixed,
-    /// Mixed Lanczos 3+5 (experimental): randomly switches between Lanczos3/5 per source pixel
-    Lanczos35Mixed,
-    /// Lanczos3 with integrated pixel area (more accurate weights for downscaling)
-    Lanczos3Integrated,
-    /// Sinc with integrated pixel area (more accurate, uses full image extent, SLOW)
-    SincIntegrated,
     /// Box filter: nearest-neighbor for upscaling, proper area average for downscaling
     Box,
-    /// Variance-adaptive: Lanczos2-6 based on local variance, energy-conserving error scatter
-    VarianceAdaptive,
+    /// EWA Sinc-Lanczos2: radial sinc-based 2D kernel (faster than jinc)
+    EwaSincLanczos2,
+    /// EWA Sinc-Lanczos3: radial sinc-based 2D kernel (faster than jinc)
+    EwaSincLanczos3,
+    /// EWA Lanczos2: proper jinc-based 2D kernel (best quality, slower)
+    EwaLanczos2,
+    /// EWA Lanczos3: proper jinc-based 2D kernel (best quality, recommended)
+    #[default]
+    EwaLanczos3,
+    /// EWA Mitchell: Mitchell-Netravali applied radially (soft, 2D)
+    EwaMitchell,
+    /// EWA Catmull-Rom: Catmull-Rom applied radially (sharp, 2D)
+    EwaCatmullRom,
+    /// Pure Jinc (unwindowed): 2D analog of sinc, full image extent (SLOW, research only)
+    Jinc,
+    /// Ginseng2: jinc-windowed sinc, separable (2 lobes)
+    Ginseng2,
+    /// Ginseng3: jinc-windowed sinc, separable (3 lobes)
+    Ginseng3,
+    /// Peaked Cosine: AVIR-style adaptive filter
+    PeakedCosine,
+    /// Peaked Cosine Corrected: flatter passband variant
+    PeakedCosineCorrected,
 }
 
 impl ScaleMethod {
@@ -240,20 +242,21 @@ impl ScaleMethod {
             ScaleMethod::CatmullRom => cra_wasm::rescale::RescaleMethod::CatmullRom,
             ScaleMethod::Lanczos2 => cra_wasm::rescale::RescaleMethod::Lanczos2,
             ScaleMethod::Lanczos3 => cra_wasm::rescale::RescaleMethod::Lanczos3,
-            ScaleMethod::Lanczos4 => cra_wasm::rescale::RescaleMethod::Lanczos4,
-            ScaleMethod::Lanczos5 => cra_wasm::rescale::RescaleMethod::Lanczos5,
-            ScaleMethod::Lanczos6 => cra_wasm::rescale::RescaleMethod::Lanczos6,
             ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
             ScaleMethod::Lanczos3Scatter => cra_wasm::rescale::RescaleMethod::Lanczos3Scatter,
             ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
-            ScaleMethod::LanczosMixed => cra_wasm::rescale::RescaleMethod::LanczosMixed,
-            ScaleMethod::LanczosMixedScatter => cra_wasm::rescale::RescaleMethod::LanczosMixedScatter,
-            ScaleMethod::Lanczos24Mixed => cra_wasm::rescale::RescaleMethod::Lanczos24Mixed,
-            ScaleMethod::Lanczos35Mixed => cra_wasm::rescale::RescaleMethod::Lanczos35Mixed,
-            ScaleMethod::Lanczos3Integrated => cra_wasm::rescale::RescaleMethod::Lanczos3Integrated,
-            ScaleMethod::SincIntegrated => cra_wasm::rescale::RescaleMethod::SincIntegrated,
             ScaleMethod::Box => cra_wasm::rescale::RescaleMethod::Box,
-            ScaleMethod::VarianceAdaptive => cra_wasm::rescale::RescaleMethod::VarianceAdaptive,
+            ScaleMethod::EwaSincLanczos2 => cra_wasm::rescale::RescaleMethod::EWASincLanczos2,
+            ScaleMethod::EwaSincLanczos3 => cra_wasm::rescale::RescaleMethod::EWASincLanczos3,
+            ScaleMethod::EwaLanczos2 => cra_wasm::rescale::RescaleMethod::EWALanczos2,
+            ScaleMethod::EwaLanczos3 => cra_wasm::rescale::RescaleMethod::EWALanczos3,
+            ScaleMethod::EwaMitchell => cra_wasm::rescale::RescaleMethod::EWAMitchell,
+            ScaleMethod::EwaCatmullRom => cra_wasm::rescale::RescaleMethod::EWACatmullRom,
+            ScaleMethod::Jinc => cra_wasm::rescale::RescaleMethod::Jinc,
+            ScaleMethod::Ginseng2 => cra_wasm::rescale::RescaleMethod::Ginseng2,
+            ScaleMethod::Ginseng3 => cra_wasm::rescale::RescaleMethod::Ginseng3,
+            ScaleMethod::PeakedCosine => cra_wasm::rescale::RescaleMethod::PeakedCosine,
+            ScaleMethod::PeakedCosineCorrected => cra_wasm::rescale::RescaleMethod::PeakedCosineCorrected,
         }
     }
 }
@@ -513,7 +516,7 @@ struct Args {
     height: Option<u32>,
 
     /// Scaling method for resize operations
-    #[arg(long, value_enum, default_value_t = ScaleMethod::Lanczos3)]
+    #[arg(long, value_enum, default_value_t = ScaleMethod::EwaLanczos3)]
     scale_method: ScaleMethod,
 
     /// Disable automatic uniform scaling detection
@@ -875,19 +878,21 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::CatmullRom => "Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Lanczos2 => "Lanczos2",
             cra_wasm::rescale::RescaleMethod::Lanczos3 => "Lanczos3",
-            cra_wasm::rescale::RescaleMethod::Lanczos4 => "Lanczos4",
-            cra_wasm::rescale::RescaleMethod::Lanczos5 => "Lanczos5",
-            cra_wasm::rescale::RescaleMethod::Lanczos6 => "Lanczos6",
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
             cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
             cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
-            cra_wasm::rescale::RescaleMethod::LanczosMixed => "Mixed Lanczos 2+3",
-            cra_wasm::rescale::RescaleMethod::LanczosMixedScatter => "Mixed Lanczos 2+3 Scatter",
-            cra_wasm::rescale::RescaleMethod::Lanczos24Mixed => "Mixed Lanczos 2+4",
-            cra_wasm::rescale::RescaleMethod::Lanczos35Mixed => "Mixed Lanczos 3+5",
-            cra_wasm::rescale::RescaleMethod::Lanczos3Integrated => "Lanczos3 Integrated",
-            cra_wasm::rescale::RescaleMethod::SincIntegrated => "Sinc Integrated (full extent)",
             cra_wasm::rescale::RescaleMethod::Box => "Box (area average)",
+            cra_wasm::rescale::RescaleMethod::EWASincLanczos2 => "EWA Sinc-Lanczos2",
+            cra_wasm::rescale::RescaleMethod::EWASincLanczos3 => "EWA Sinc-Lanczos3",
+            cra_wasm::rescale::RescaleMethod::EWALanczos2 => "EWA Lanczos2 (jinc)",
+            cra_wasm::rescale::RescaleMethod::EWALanczos3 => "EWA Lanczos3 (jinc)",
+            cra_wasm::rescale::RescaleMethod::EWAMitchell => "EWA Mitchell",
+            cra_wasm::rescale::RescaleMethod::EWACatmullRom => "EWA Catmull-Rom",
+            cra_wasm::rescale::RescaleMethod::Jinc => "Jinc (full extent)",
+            cra_wasm::rescale::RescaleMethod::Ginseng2 => "Ginseng2",
+            cra_wasm::rescale::RescaleMethod::Ginseng3 => "Ginseng3",
+            cra_wasm::rescale::RescaleMethod::PeakedCosine => "Peaked Cosine",
+            cra_wasm::rescale::RescaleMethod::PeakedCosineCorrected => "Peaked Cosine Corrected",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

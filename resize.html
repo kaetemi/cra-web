@@ -333,14 +333,14 @@
             <div class="option-row" style="margin-top: 20px;">
                 <label>Interpolation:</label>
                 <select id="interpolation">
-                    <option value="1" selected>Lanczos3 (recommended)</option>
-                    <option value="7">Lanczos2 (less ringing)</option>
-                    <option value="10">Peaked Cosine (AVIR-style, adaptive)</option>
-                    <option value="11">Peaked Cosine Corrected (flatter passband)</option>
+                    <option value="13" selected>EWA Lanczos3 (jinc-based, recommended)</option>
+                    <option value="12">EWA Lanczos2 (jinc-based, less ringing)</option>
+                    <option value="1">Lanczos3 (separable, faster)</option>
+                    <option value="7">Lanczos2 (separable, less ringing)</option>
                     <option value="18">Ginseng3 (jinc-windowed sinc)</option>
                     <option value="17">Ginseng2 (jinc-windowed, less ringing)</option>
-                    <option value="13">EWA Lanczos3 (jinc-based, best 2D quality)</option>
-                    <option value="12">EWA Lanczos2 (jinc-based, less ringing)</option>
+                    <option value="10">Peaked Cosine (AVIR-style, adaptive)</option>
+                    <option value="11">Peaked Cosine Corrected (flatter passband)</option>
                     <option value="9">EWA Sinc-Lanczos3 (radial sinc, faster)</option>
                     <option value="8">EWA Sinc-Lanczos2 (radial sinc, faster)</option>
                     <option value="3">Catmull-Rom (sharp, low ringing)</option>
@@ -632,8 +632,8 @@
                 cmd += ` --height ${lastOutputHeight}`;
             }
 
-            // Add scale method (only if not default lanczos)
-            if (interpolation !== 1) {
+            // Add scale method (only if not default ewa-lanczos3)
+            if (interpolation !== 13) {
                 cmd += ` --scale-method ${interpolationMap[interpolation]}`;
             }
 
