@@ -368,9 +368,48 @@
             display: inline-block;
             border-radius: 4px;
         }
+
+        .init-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255,255,255,0.95);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .init-overlay.hidden {
+            display: none;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body>
+    <div class="init-overlay" id="init-overlay">
+        <div class="spinner"></div>
+        <h2>Loading Linear RGB Resize...</h2>
+        <p>Initializing WASM module...</p>
+    </div>
+
     <h1>Linear RGB Resize</h1>
     <p class="subtitle">Proper image resizing in linear color space</p>
 
@@ -548,7 +587,9 @@
 
                 switch (type) {
                     case 'ready':
+                        console.log('[resize] Worker ready, inputFileBytes:', !!inputFileBytes);
                         workerReady = true;
+                        document.getElementById('init-overlay').classList.add('hidden');
                         updateProcessButtonState();
                         break;
 
@@ -562,6 +603,10 @@
 
                     case 'error':
                         handleResizeError(data.message);
+                        break;
+
+                    case 'png-encoded':
+                        handlePngEncoded(data);
                         break;
                 }
             };
@@ -817,7 +862,9 @@
 
         // Update process button state based on worker readiness and image loaded
         function updateProcessButtonState() {
-            document.getElementById('process-btn').disabled = !(workerReady && inputFileBytes);
+            const shouldEnable = workerReady && inputFileBytes;
+            console.log('[resize] updateProcessButtonState: workerReady=', workerReady, 'inputFileBytes=', !!inputFileBytes, 'shouldEnable=', shouldEnable);
+            document.getElementById('process-btn').disabled = !shouldEnable;
         }
 
         function calculateOutputDimensions() {
@@ -890,22 +937,33 @@
             });
         }
 
+        // Handle PNG encoding result from worker
+        function handlePngEncoded(data) {
+            const { pngBytes } = data;
+            const blob = new Blob([pngBytes], { type: 'image/png' });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement('a');
+            const format = lastHasAlpha ? 'RGBA8' : 'RGB8';
+            link.download = generateDownloadFilename(lastOutputWidth, lastOutputHeight, format, 'png');
+            link.href = url;
+            link.click();
+
+            // Clean up
+            URL.revokeObjectURL(url);
+        }
+
         function downloadResult() {
             if (!lastLinearResult) return;
 
-            const canvas = document.createElement('canvas');
-            canvas.width = lastOutputWidth;
-            canvas.height = lastOutputHeight;
-            const ctx = canvas.getContext('2d');
-
-            // lastLinearResult is RGBA from worker
-            const imageData = new ImageData(new Uint8ClampedArray(lastLinearResult), lastOutputWidth, lastOutputHeight);
-            ctx.putImageData(imageData, 0, 0);
-
-            const link = document.createElement('a');
-            link.download = generateDownloadFilename(lastOutputWidth, lastOutputHeight, 'RGB8', 'png');
-            link.href = canvas.toDataURL('image/png');
-            link.click();
+            // Send to worker for proper PNG encoding (RGB or RGBA based on input)
+            worker.postMessage({
+                type: 'encode-png',
+                rgbaData: lastLinearResult,
+                width: lastOutputWidth,
+                height: lastOutputHeight,
+                hasAlpha: lastHasAlpha
+            });
         }
 
         // Event handlers
@@ -915,12 +973,14 @@
 
         // Core file handling logic - called from both file input and drag-drop
         async function handleFile(file) {
+            console.log('[resize] handleFile called, file:', file?.name, 'workerReady:', workerReady);
             if (!file) return;
 
             try {
                 // Load file bytes for precise WASM decoding in worker
                 const fileBytes = await loadImageBytes(file);
                 inputFileBytes = fileBytes;
+                console.log('[resize] inputFileBytes set, size:', fileBytes.byteLength);
 
                 // Load preview image for UI (dimensions and display)
                 const { dataUrl, width, height } = await loadImagePreview(file);
@@ -981,6 +1041,7 @@
             e.preventDefault();
             e.currentTarget.style.borderColor = '';
             const file = e.dataTransfer.files[0];
+            console.log('[resize] drop event, file:', file?.name, 'type:', file?.type);
             if (file && (file.type.startsWith('image/') || file.name.endsWith('.safetensors') || !file.type)) {
                 handleFile(file);
             }

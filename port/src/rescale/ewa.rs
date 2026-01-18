@@ -427,9 +427,9 @@ pub fn rescale_stochastic_jinc_pixels(
 /// normalizes emission per source pixel. Each source pixel distributes its value
 /// across destinations with weights summing to 1.0, ensuring energy conservation.
 ///
-/// Parameters match the gather variant:
+/// Parameters:
 /// - Base radius: 5.0 (Lanczos5 equivalent)
-/// - Sample count: π × (radius × filter_scale)², clamped to [64, 4096]
+/// - Sample count: scales with destination/source area ratio for proper coverage
 /// - Sigma: radius × filter_scale (Gaussian matches kernel support)
 pub fn rescale_stochastic_jinc_scatter_pixels(
     src: &[Pixel4],
@@ -449,15 +449,25 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
     let filter_scale_y = scale_y.max(1.0);
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
-    // Match Lanczos5 sample count: π × r² where r = base_radius × filter_scale
+    // Base sample count from Lanczos5: π × r²
     const BASE_RADIUS: f32 = 5.0;
     let scaled_radius = BASE_RADIUS * filter_scale;
-    let num_samples = (std::f32::consts::PI * scaled_radius * scaled_radius)
-        .round()
-        .clamp(64.0, 4096.0) as usize;
+    let base_samples = std::f32::consts::PI * scaled_radius * scaled_radius;
 
-    // Sigma for Gaussian sampling - matches the kernel support radius
-    let sigma = scaled_radius;
+    // Scale by area ratio to match gather's total sample count
+    // Upscaling: more samples per source (each covers more dest pixels)
+    // Downscaling: fewer samples per source (many sources per dest)
+    let area_ratio = 1.0 / (scale_x * scale_y);
+    let num_samples = (base_samples * area_ratio)
+        .round()
+        .clamp(64.0, 16384.0) as usize;
+
+    // Emission scale: also compensate for area ratio
+    let emission_scale = area_ratio;
+
+    // Sigma for Gaussian sampling - matches first jinc zero (r ≈ 1.22)
+    const JINC_FIRST_ZERO: f32 = 1.2197;
+    let sigma = JINC_FIRST_ZERO * filter_scale;
 
     // Center offsets for uniform scaling
     let mapped_src_width = dst_width as f32 * scale_x;
@@ -468,7 +478,7 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
     let dst_w = dst_width as i32;
     let dst_h = dst_height as i32;
 
-    // Accumulator for destination pixels
+    // Accumulator for destination pixels (no per-destination normalization)
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     for src_y in 0..src_height {
@@ -489,34 +499,33 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
                 // Generate Gaussian-distributed offset in source space
                 let (dx_src, dy_src) = gaussian_sample_2d(src_x, src_y, sample_idx, sigma);
 
-                // Convert offset to destination space
-                let dx_dst = dx_src / scale_x;
-                let dy_dst = dy_src / scale_y;
-
-                // Map to destination pixel coordinates
-                let dx = (dst_pos_x + dx_dst).round() as i32;
-                let dy = (dst_pos_y + dy_dst).round() as i32;
-
-                // Bounds check
-                if dx < 0 || dx >= dst_w || dy < 0 || dy >= dst_h {
-                    continue;
-                }
-
                 // Compute radial distance in filter-scaled space (source space)
                 let r = ((dx_src / filter_scale_x).powi(2) + (dy_src / filter_scale_y).powi(2)).sqrt();
 
-                // Weight by jinc
+                // Weight by jinc - always count towards weight_sum
                 let weight = jinc(r);
-
                 if weight.abs() > 1e-8 {
-                    samples.push((dx as usize, dy as usize, weight));
                     weight_sum += weight;
+
+                    // Convert offset to destination space
+                    let dx_dst = dx_src / scale_x;
+                    let dy_dst = dy_src / scale_y;
+
+                    // Map to destination pixel coordinates
+                    let dx = (dst_pos_x + dx_dst).round() as i32;
+                    let dy = (dst_pos_y + dy_dst).round() as i32;
+
+                    // Only emit if in bounds
+                    if dx >= 0 && dx < dst_w && dy >= 0 && dy < dst_h {
+                        samples.push((dx as usize, dy as usize, weight));
+                    }
                 }
             }
 
-            // Normalize emission and scatter to destinations
+            // Normalize emission per source pixel, scaled by area ratio
+            // Each source emits emission_scale total (1.0 at 1:1, 4.0 at 2x upscale, 0.25 at 2x downscale)
             if weight_sum.abs() > 1e-8 {
-                let inv_weight_sum = 1.0 / weight_sum;
+                let inv_weight_sum = emission_scale / weight_sum;
                 for (dx, dy, weight) in samples {
                     let normalized_weight = weight * inv_weight_sum;
                     let dst_idx = dy * dst_width + dx;
@@ -552,13 +561,23 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     let filter_scale_y = scale_y.max(1.0);
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
+    // Base sample count from Lanczos5: π × r²
     const BASE_RADIUS: f32 = 5.0;
     let scaled_radius = BASE_RADIUS * filter_scale;
-    let num_samples = (std::f32::consts::PI * scaled_radius * scaled_radius)
-        .round()
-        .clamp(64.0, 4096.0) as usize;
+    let base_samples = std::f32::consts::PI * scaled_radius * scaled_radius;
 
-    let sigma = scaled_radius;
+    // Scale by area ratio to match gather's total sample count
+    let area_ratio = 1.0 / (scale_x * scale_y);
+    let num_samples = (base_samples * area_ratio)
+        .round()
+        .clamp(64.0, 16384.0) as usize;
+
+    // Emission scale: also compensate for area ratio
+    let emission_scale = area_ratio;
+
+    // Sigma for Gaussian sampling - matches first jinc zero (r ≈ 1.22)
+    const JINC_FIRST_ZERO: f32 = 1.2197;
+    let sigma = JINC_FIRST_ZERO * filter_scale;
 
     let mapped_src_width = dst_width as f32 * scale_x;
     let mapped_src_height = dst_height as f32 * scale_y;
@@ -590,28 +609,32 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
             for sample_idx in 0..num_samples {
                 let (dx_src, dy_src) = gaussian_sample_2d(src_x, src_y, sample_idx, sigma);
 
-                let dx_dst = dx_src / scale_x;
-                let dy_dst = dy_src / scale_y;
-
-                let dx = (dst_pos_x + dx_dst).round() as i32;
-                let dy = (dst_pos_y + dy_dst).round() as i32;
-
-                if dx < 0 || dx >= dst_w || dy < 0 || dy >= dst_h {
-                    continue;
-                }
-
+                // Compute radial distance in filter-scaled space (source space)
                 let r = ((dx_src / filter_scale_x).powi(2) + (dy_src / filter_scale_y).powi(2)).sqrt();
-                let weight = jinc(r);
 
+                // Weight by jinc - always count towards weight_sum
+                let weight = jinc(r);
                 if weight.abs() > 1e-8 {
-                    samples.push((dx as usize, dy as usize, weight));
                     weight_sum += weight;
+
+                    // Convert offset to destination space
+                    let dx_dst = dx_src / scale_x;
+                    let dy_dst = dy_src / scale_y;
+
+                    // Map to destination pixel coordinates
+                    let dx = (dst_pos_x + dx_dst).round() as i32;
+                    let dy = (dst_pos_y + dy_dst).round() as i32;
+
+                    // Only emit if in bounds
+                    if dx >= 0 && dx < dst_w && dy >= 0 && dy < dst_h {
+                        samples.push((dx as usize, dy as usize, weight));
+                    }
                 }
             }
 
-            // Normalize emission and scatter
+            // Normalize emission and scatter, scaled by area ratio
             if weight_sum.abs() > 1e-8 {
-                let inv_weight_sum = 1.0 / weight_sum;
+                let inv_weight_sum = emission_scale / weight_sum;
                 for (dx, dy, weight) in samples {
                     let normalized_weight = weight * inv_weight_sum;
                     let aw = normalized_weight * alpha;

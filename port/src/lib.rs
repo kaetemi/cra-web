@@ -1290,6 +1290,64 @@ pub fn encode_argb_row_aligned_stride_wasm(
 }
 
 // ============================================================================
+// PNG Encoding (returns bytes, not file)
+// ============================================================================
+
+/// Encode RGB u8 data to PNG bytes
+/// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
+/// Output: PNG file bytes
+#[wasm_bindgen]
+pub fn encode_png_rgb_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    use image::{ImageBuffer, Rgb};
+    use std::io::Cursor;
+
+    let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data)
+        .ok_or_else(|| JsValue::from_str("Failed to create RGB image buffer"))?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| JsValue::from_str(&format!("Failed to encode PNG: {}", e)))?;
+
+    Ok(bytes)
+}
+
+/// Encode RGBA u8 data to PNG bytes
+/// Input: Interleaved RGBA u8 data (RGBARGBA..., 4 bytes per pixel)
+/// Output: PNG file bytes
+#[wasm_bindgen]
+pub fn encode_png_rgba_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    use image::{ImageBuffer, Rgba};
+    use std::io::Cursor;
+
+    let img: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data)
+        .ok_or_else(|| JsValue::from_str("Failed to create RGBA image buffer"))?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| JsValue::from_str(&format!("Failed to encode PNG: {}", e)))?;
+
+    Ok(bytes)
+}
+
+/// Encode grayscale u8 data to PNG bytes
+/// Input: Grayscale u8 data (1 byte per pixel)
+/// Output: PNG file bytes
+#[wasm_bindgen]
+pub fn encode_png_gray_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    use image::{ImageBuffer, Luma};
+    use std::io::Cursor;
+
+    let img: ImageBuffer<Luma<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data)
+        .ok_or_else(|| JsValue::from_str("Failed to create grayscale image buffer"))?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| JsValue::from_str(&format!("Failed to encode PNG: {}", e)))?;
+
+    Ok(bytes)
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 

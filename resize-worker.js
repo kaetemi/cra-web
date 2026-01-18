@@ -452,6 +452,42 @@ function processResizePixels(params) {
     }
 }
 
+// Encode RGBA data to PNG (RGB or RGBA based on hasAlpha flag)
+function encodePng(params) {
+    if (!wasmReady) {
+        sendError(new Error('WASM not ready'));
+        return;
+    }
+
+    try {
+        const { rgbaData, width, height, hasAlpha } = params;
+
+        let pngBytes;
+        if (hasAlpha) {
+            // Encode as RGBA PNG
+            pngBytes = craWasm.encode_png_rgba_wasm(new Uint8Array(rgbaData), width, height);
+        } else {
+            // Extract RGB from RGBA and encode as RGB PNG
+            const pixelCount = width * height;
+            const rgbData = new Uint8Array(pixelCount * 3);
+            for (let i = 0; i < pixelCount; i++) {
+                rgbData[i * 3] = rgbaData[i * 4];
+                rgbData[i * 3 + 1] = rgbaData[i * 4 + 1];
+                rgbData[i * 3 + 2] = rgbaData[i * 4 + 2];
+            }
+            pngBytes = craWasm.encode_png_rgb_wasm(rgbData, width, height);
+        }
+
+        self.postMessage({
+            type: 'png-encoded',
+            pngBytes: pngBytes,
+            requestId: currentRequestId
+        });
+    } catch (error) {
+        sendError(error);
+    }
+}
+
 // Handle messages from main thread
 self.onmessage = function(e) {
     const { type, requestId, ...data } = e.data;
@@ -469,6 +505,9 @@ self.onmessage = function(e) {
             break;
         case 'resize-pixels':
             processResizePixels(data);
+            break;
+        case 'encode-png':
+            encodePng(data);
             break;
     }
 };
