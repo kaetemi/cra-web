@@ -70,6 +70,11 @@ pub enum RescaleMethod {
     /// Uses J1(πr)/(πr) over full image extent via EWA sampling
     /// WARNING: O(N²) - extremely slow for large images, severe ringing at edges
     Jinc,
+    /// Stochastic EWA Lanczos3 - probabilistic sampling with Gaussian selection
+    /// Uses importance sampling: pixels selected with probability proportional to Gaussian,
+    /// weighted by jinc to correct for sampling bias. Normalized for proper brightness.
+    /// Much faster than full Jinc while maintaining similar quality characteristics.
+    StochasticJinc,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -103,6 +108,7 @@ impl RescaleMethod {
             "ewa-mitchell" | "ewa_mitchell" | "ewamitchell" => Some(RescaleMethod::EWAMitchell),
             "ewa-catmull-rom" | "ewa_catmull_rom" | "ewacatmullrom" | "ewa-catrom" | "ewa_catrom" => Some(RescaleMethod::EWACatmullRom),
             "jinc" => Some(RescaleMethod::Jinc),
+            "stochastic-jinc" | "stochastic_jinc" | "stochasticjinc" | "stochastic" => Some(RescaleMethod::StochasticJinc),
             _ => None,
         }
     }
@@ -115,14 +121,14 @@ impl RescaleMethod {
             RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => 2.0,
             RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
-            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc => 0.0, // Special: uses full image extent
+            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
         }
     }
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc)
     }
 
     /// Returns true if this is a scatter-based method
@@ -135,7 +141,7 @@ impl RescaleMethod {
         matches!(self, RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
                        RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
                        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
-                       RescaleMethod::Jinc)
+                       RescaleMethod::Jinc | RescaleMethod::StochasticJinc)
     }
 
     /// Get the underlying kernel method for scatter/EWA variants
@@ -147,6 +153,7 @@ impl RescaleMethod {
             RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => RescaleMethod::Lanczos3,
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
+            RescaleMethod::StochasticJinc => RescaleMethod::Jinc,
             other => *other,
         }
     }
@@ -331,6 +338,9 @@ pub fn rescale_with_progress(
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
+        RescaleMethod::StochasticJinc => {
+            ewa::rescale_stochastic_jinc_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+        }
     }
 }
 
@@ -391,6 +401,9 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
+        RescaleMethod::StochasticJinc => {
+            ewa::rescale_stochastic_jinc_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
