@@ -385,6 +385,30 @@ fn test_ewa_jinc_lanczos3_identity() {
 }
 
 #[test]
+fn test_ewa_mitchell_identity() {
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWAMitchell, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_ewa_catmull_rom_identity() {
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::EWACatmullRom, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
 fn test_peaked_cosine_identity() {
     // Same-size should return identical pixels
     let src = vec![

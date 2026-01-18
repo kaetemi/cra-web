@@ -195,8 +195,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
             let x = x.abs();
             if x < 1.0 { 1.0 - x } else { 0.0 }
         }
-        RescaleMethod::Mitchell => mitchell(x),
-        RescaleMethod::CatmullRom => catmull_rom(x),
+        RescaleMethod::Mitchell | RescaleMethod::EWAMitchell => mitchell(x),
+        RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),

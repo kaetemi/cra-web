@@ -4,19 +4,17 @@
 //! Unlike separable 2-pass convolution, EWA uses a true 2D filter footprint which
 //! provides better quality for diagonal edges and non-uniform scaling.
 //!
-//! Two kernel types are available:
+//! Available kernel types:
 //! - **EWASincLanczos2/3**: Uses 1D sinc-Lanczos applied radially (sinc(r)*sinc(r/a)).
-//!   A common simplification but not mathematically optimal for 2D.
 //! - **EWALanczos2/3**: Uses proper jinc-based kernel (jinc(r)*jinc(r/a)).
-//!   Jinc (J1 Bessel) is the true 2D analog of sinc, optimal for circular apertures.
+//! - **EWAMitchell**: Mitchell-Netravali cubic (B=C=1/3) applied radially.
+//! - **EWACatmullRom**: Catmull-Rom cubic (B=0, C=0.5) applied radially.
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{lanczos2, lanczos3, ewa_lanczos};
+use super::kernels::{lanczos2, lanczos3, ewa_lanczos, mitchell, catmull_rom};
 
 /// Evaluate the EWA kernel at radial distance r
-/// - Sinc variants: use 1D sinc-Lanczos on radial distance
-/// - Jinc variants: use proper 2D jinc-windowed-jinc kernel
 #[inline]
 fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
     match method {
@@ -26,6 +24,9 @@ fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
         // Proper jinc-based EWA Lanczos (true 2D kernel)
         RescaleMethod::EWALanczos2 => ewa_lanczos(r, 2.0),
         RescaleMethod::EWALanczos3 => ewa_lanczos(r, 3.0),
+        // Cubic kernels applied radially
+        RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => mitchell(r),
+        RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => catmull_rom(r),
         _ => 0.0,
     }
 }
@@ -36,6 +37,8 @@ fn ewa_radius(method: RescaleMethod) -> f32 {
     match method {
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 | RescaleMethod::Lanczos2 => 2.0,
         RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::Lanczos3 => 3.0,
+        RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => 2.0,
+        RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => 2.0,
         _ => 3.0,
     }
 }
