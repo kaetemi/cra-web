@@ -26,6 +26,7 @@
 
 use std::f32::consts::PI;
 use crate::pixel::Pixel4;
+use crate::color::linear_rgb_to_oklab;
 use super::{ScaleMode, calculate_scales};
 use super::kernels::{wang_hash, lanczos2, lanczos3, lanczos4, lanczos5, lanczos6, catmull_rom};
 
@@ -54,9 +55,11 @@ fn lanczos7_window(x: f32) -> f32 {
 // Variance calculation
 // ============================================================================
 
-/// Calculate inbetween variance for a row of pixels
-/// Returns N-1 values for N pixels, representing |pixel[i+1] - pixel[i]|
-/// Uses perceptual luminance-weighted difference for color images
+/// Calculate inbetween variance for a row of pixels using OkLab distance
+/// Returns N-1 values for N pixels, representing perceptual distance between adjacent pixels.
+///
+/// Uses OkLab color space for perceptually uniform distance measurement.
+/// Normalized so that black-to-white edge ≈ 1.0 variance.
 fn calculate_inbetween_variance(row: &[Pixel4]) -> Vec<f32> {
     if row.len() < 2 {
         return vec![];
@@ -67,14 +70,20 @@ fn calculate_inbetween_variance(row: &[Pixel4]) -> Vec<f32> {
         let p1 = row[i];
         let p2 = row[i + 1];
 
-        // Use Euclidean distance in RGB space for color difference
-        // Weight by approximate perceptual importance (luminance weights)
-        let dr = p2.r() - p1.r();
-        let dg = p2.g() - p1.g();
-        let db = p2.b() - p1.b();
+        // Convert to OkLab for perceptually uniform distance
+        let (l1, a1, b1) = linear_rgb_to_oklab(p1.r(), p1.g(), p1.b());
+        let (l2, a2, b2) = linear_rgb_to_oklab(p2.r(), p2.g(), p2.b());
 
-        // Simple Euclidean distance (could use perceptual weights if needed)
-        let diff = (dr * dr + dg * dg + db * db).sqrt();
+        // Euclidean distance in OkLab space
+        let dl = l2 - l1;
+        let da = a2 - a1;
+        let db = b2 - b1;
+        let diff = (dl * dl + da * da + db * db).sqrt();
+
+        // Normalize: black (0,0,0) to white (1,1,1) in OkLab is distance 1.0
+        // (both have a=b=0, only L differs from 0 to 1)
+        // So OkLab distance is already normalized for luminance edges.
+        // Saturated color differences can exceed 1.0, which is fine - they're high variance.
         variances.push(diff);
     }
 
@@ -609,6 +618,17 @@ mod tests {
 
     #[test]
     fn test_inbetween_variance() {
+        // Test black to white edge - should give distance ≈ 1.0 in OkLab
+        let row_bw = vec![
+            Pixel4::new(0.0, 0.0, 0.0, 1.0),
+            Pixel4::new(1.0, 1.0, 1.0, 1.0),
+        ];
+        let var_bw = calculate_inbetween_variance(&row_bw);
+        assert_eq!(var_bw.len(), 1);
+        // Black (L=0) to white (L=1) in OkLab: distance = 1.0
+        assert!((var_bw[0] - 1.0).abs() < 0.01, "Black to white should be ~1.0, got {}", var_bw[0]);
+
+        // Test gray ramp - OkLab distances won't be equal since L is perceptual
         let row = vec![
             Pixel4::new(0.0, 0.0, 0.0, 1.0),
             Pixel4::new(0.5, 0.5, 0.5, 1.0),
@@ -616,9 +636,10 @@ mod tests {
         ];
         let var = calculate_inbetween_variance(&row);
         assert_eq!(var.len(), 2);
-        // Each step is 0.5 in RGB, so Euclidean distance is sqrt(3 * 0.25) ≈ 0.866
-        assert!((var[0] - 0.866).abs() < 0.01);
-        assert!((var[1] - 0.866).abs() < 0.01);
+        // Both steps should be positive and sum to ~1.0 (total black-to-white distance)
+        assert!(var[0] > 0.0 && var[0] < 1.0);
+        assert!(var[1] > 0.0 && var[1] < 1.0);
+        assert!((var[0] + var[1] - 1.0).abs() < 0.01, "Sum should be ~1.0, got {}", var[0] + var[1]);
     }
 
     #[test]
