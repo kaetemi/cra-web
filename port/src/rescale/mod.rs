@@ -1,8 +1,20 @@
-/// Image rescaling module with Bilinear, Mitchell, and Lanczos support
-///
-/// Operates in linear RGB space for correct color blending during interpolation.
+//! Image rescaling module with Bilinear, Mitchell, Lanczos, and Sinc support
+//!
+//! Operates in linear RGB space for correct color blending during interpolation.
+//!
+//! # Module Structure
+//! - `kernels`: Interpolation kernel functions and weight precomputation
+//! - `bilinear`: Bilinear interpolation implementation
+//! - `separable`: Separable 2-pass kernel rescaling (Mitchell, Lanczos, etc.)
 
-use std::f32::consts::PI;
+mod kernels;
+mod bilinear;
+mod separable;
+
+use crate::pixel::Pixel4;
+
+// Re-export kernel types for internal use
+pub use kernels::KernelWeights;
 
 /// Rescaling method
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -61,157 +73,12 @@ impl RescaleMethod {
     }
 }
 
-/// Mitchell-Netravali kernel with B=C=1/3
-/// This setting minimizes both blur and ringing artifacts.
-/// Support is [-2, 2], overshoot is typically <1%
-#[inline]
-fn mitchell(x: f32) -> f32 {
-    let x = x.abs();
-    if x >= 2.0 {
-        0.0
-    } else if x >= 1.0 {
-        // (-B - 6C)|x|³ + (6B + 30C)|x|² + (-12B - 48C)|x| + (8B + 24C)
-        // With B=C=1/3: -7/3 x³ + 12x² - 20x + 32/3, divided by 6
-        (-7.0/18.0) * x * x * x + 2.0 * x * x - (10.0/3.0) * x + 16.0/9.0
-    } else {
-        // (12 - 9B - 6C)|x|³ + (-18 + 12B + 6C)|x|² + (6 - 2B)
-        // With B=C=1/3: 7x³ - 12x² + 16/3, divided by 6
-        (7.0/6.0) * x * x * x - 2.0 * x * x + 8.0/9.0
-    }
-}
-
-/// Catmull-Rom spline kernel (B=0, C=0.5)
-/// Sharper than Mitchell, less ringing than Lanczos.
-/// This is an interpolating spline (passes through original sample points).
-/// Support is [-2, 2]
-#[inline]
-fn catmull_rom(x: f32) -> f32 {
-    let x = x.abs();
-    if x >= 2.0 {
-        0.0
-    } else if x >= 1.0 {
-        // (-B - 6C)|x|³ + (6B + 30C)|x|² + (-12B - 48C)|x| + (8B + 24C)
-        // With B=0, C=0.5: -3x³ + 15x² - 24x + 12, divided by 6
-        -0.5 * x * x * x + 2.5 * x * x - 4.0 * x + 2.0
-    } else {
-        // (12 - 9B - 6C)|x|³ + (-18 + 12B + 6C)|x|² + (6 - 2B)
-        // With B=0, C=0.5: 9x³ - 15x² + 6, divided by 6
-        1.5 * x * x * x - 2.5 * x * x + 1.0
-    }
-}
-
-/// Lanczos kernel with a=3
-#[inline]
-fn lanczos3(x: f32) -> f32 {
-    if x.abs() < 1e-8 {
-        1.0
-    } else if x.abs() >= 3.0 {
-        0.0
-    } else {
-        let pi_x = PI * x;
-        let pi_x_3 = pi_x / 3.0;
-        (pi_x.sin() / pi_x) * (pi_x_3.sin() / pi_x_3)
-    }
-}
-
-/// Pure sinc kernel (non-windowed)
-/// This is the theoretically ideal interpolation kernel for band-limited signals.
-/// Unlike Lanczos, it has no window function and extends to infinity (full image).
-/// WARNING: Causes severe Gibbs phenomenon (ringing) at sharp edges.
-#[inline]
-fn sinc(x: f32) -> f32 {
-    if x.abs() < 1e-8 {
-        1.0
-    } else {
-        let pi_x = PI * x;
-        pi_x.sin() / pi_x
-    }
-}
-
-/// Generic kernel evaluation
-#[inline]
-fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
-    match method {
-        RescaleMethod::Bilinear => {
-            let x = x.abs();
-            if x < 1.0 { 1.0 - x } else { 0.0 }
-        }
-        RescaleMethod::Mitchell => mitchell(x),
-        RescaleMethod::CatmullRom => catmull_rom(x),
-        RescaleMethod::Lanczos3 => lanczos3(x),
-        RescaleMethod::Sinc => sinc(x),
-    }
-}
-
-/// Precomputed kernel weights for a single output position
-/// Weights are normalized (sum to 1.0) and include source index range
-#[derive(Clone)]
-struct KernelWeights {
-    /// First source index to sample from
-    start_idx: usize,
-    /// Normalized weights for each source sample (length = end_idx - start_idx + 1)
-    weights: Vec<f32>,
-    /// Fallback source index (when no weights available, e.g., at edges)
-    fallback_idx: usize,
-}
-
-/// Precompute all kernel weights for 1D resampling
-/// Returns exact weights for each destination position
-fn precompute_kernel_weights(
-    src_len: usize,
-    dst_len: usize,
-    scale: f32,
-    filter_scale: f32,
-    radius: i32,
-    method: RescaleMethod,
-) -> Vec<KernelWeights> {
-    let mut all_weights = Vec::with_capacity(dst_len);
-
-    // Center offset: if scale doesn't match src_len/dst_len (uniform scaling),
-    // center the mapping so edges are equally cropped/extended
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
-
-    for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
-        let center = src_pos.floor() as i32;
-
-        // Find the valid source index range
-        let start = (center - radius).max(0) as usize;
-        let end = ((center + radius) as usize).min(src_len - 1);
-
-        // Collect ALL weights in the range (no skipping - maintains index correspondence)
-        let mut weights = Vec::with_capacity(end - start + 1);
-        let mut weight_sum = 0.0f32;
-
-        for si in start..=end {
-            let d = (src_pos - si as f32) / filter_scale;
-            let weight = eval_kernel(method, d);
-            weights.push(weight);
-            weight_sum += weight;
-        }
-
-        // Normalize weights (exact normalization)
-        if weight_sum.abs() > 1e-8 {
-            for w in &mut weights {
-                *w /= weight_sum;
-            }
-        }
-
-        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
-
-        all_weights.push(KernelWeights {
-            start_idx: start,
-            weights,
-            fallback_idx: fallback,
-        });
-    }
-
-    all_weights
-}
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
 /// Calculate scale factors based on scale mode
-fn calculate_scales(
+pub fn calculate_scales(
     src_width: usize,
     src_height: usize,
     dst_width: usize,
@@ -333,443 +200,8 @@ pub fn calculate_target_dimensions_exact(
 }
 
 // ============================================================================
-// SIMD-friendly Pixel4 rescaling
+// Public API
 // ============================================================================
-
-use crate::pixel::{Pixel4, lerp};
-
-/// Rescale Pixel4 array using bilinear interpolation
-/// Progress callback is optional - receives 0.0-1.0 after each row
-fn rescale_bilinear_pixels(
-    src: &[Pixel4],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) -> Vec<Pixel4> {
-    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
-
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    let max_x = (src_width - 1) as f32;
-    let max_y = (src_height - 1) as f32;
-
-    for dst_y in 0..dst_height {
-        for dst_x in 0..dst_width {
-            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
-            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
-
-            let x0 = src_x.floor() as usize;
-            let y0 = src_y.floor() as usize;
-            let x1 = (x0 + 1).min(src_width - 1);
-            let y1 = (y0 + 1).min(src_height - 1);
-            let fx = src_x - x0 as f32;
-            let fy = src_y - y0 as f32;
-
-            // Sample four corners
-            let p00 = src[y0 * src_width + x0];
-            let p10 = src[y0 * src_width + x1];
-            let p01 = src[y1 * src_width + x0];
-            let p11 = src[y1 * src_width + x1];
-
-            // Bilinear interpolation using SIMD-friendly lerp
-            let top = lerp(p00, p10, fx);
-            let bottom = lerp(p01, p11, fx);
-            dst[dst_y * dst_width + dst_x] = lerp(top, bottom, fy);
-        }
-        // Report progress after each row
-        if let Some(ref mut cb) = progress {
-            cb((dst_y + 1) as f32 / dst_height as f32);
-        }
-    }
-
-    dst
-}
-
-/// Alpha-aware bilinear interpolation helper
-/// Weights RGB by alpha, falls back to unweighted if total alpha ≈ 0
-#[inline]
-fn bilinear_alpha_aware(
-    p00: Pixel4, p10: Pixel4, p01: Pixel4, p11: Pixel4,
-    fx: f32, fy: f32,
-) -> Pixel4 {
-    // Bilinear weights for each corner
-    let w00 = (1.0 - fx) * (1.0 - fy);
-    let w10 = fx * (1.0 - fy);
-    let w01 = (1.0 - fx) * fy;
-    let w11 = fx * fy;
-
-    // Alpha values
-    let a00 = p00.a();
-    let a10 = p10.a();
-    let a01 = p01.a();
-    let a11 = p11.a();
-
-    // Alpha-weighted sum for RGB
-    let aw00 = w00 * a00;
-    let aw10 = w10 * a10;
-    let aw01 = w01 * a01;
-    let aw11 = w11 * a11;
-    let total_alpha_weight = aw00 + aw10 + aw01 + aw11;
-
-    // Interpolate alpha normally
-    let out_alpha = w00 * a00 + w10 * a10 + w01 * a01 + w11 * a11;
-
-    // RGB: use alpha-weighted interpolation, fall back to normal if all transparent
-    let (out_r, out_g, out_b) = if total_alpha_weight > 1e-8 {
-        let inv_aw = 1.0 / total_alpha_weight;
-        (
-            (aw00 * p00.r() + aw10 * p10.r() + aw01 * p01.r() + aw11 * p11.r()) * inv_aw,
-            (aw00 * p00.g() + aw10 * p10.g() + aw01 * p01.g() + aw11 * p11.g()) * inv_aw,
-            (aw00 * p00.b() + aw10 * p10.b() + aw01 * p01.b() + aw11 * p11.b()) * inv_aw,
-        )
-    } else {
-        // All pixels transparent: use unweighted interpolation to preserve RGB
-        (
-            w00 * p00.r() + w10 * p10.r() + w01 * p01.r() + w11 * p11.r(),
-            w00 * p00.g() + w10 * p10.g() + w01 * p01.g() + w11 * p11.g(),
-            w00 * p00.b() + w10 * p10.b() + w01 * p01.b() + w11 * p11.b(),
-        )
-    };
-
-    Pixel4::new(out_r, out_g, out_b, out_alpha)
-}
-
-/// Rescale Pixel4 array using alpha-aware bilinear interpolation
-/// RGB channels are weighted by alpha during interpolation to prevent
-/// transparent pixels from bleeding color into opaque regions.
-/// Fully transparent regions preserve their underlying RGB values.
-fn rescale_bilinear_alpha_pixels(
-    src: &[Pixel4],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) -> Vec<Pixel4> {
-    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
-
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    let max_x = (src_width - 1) as f32;
-    let max_y = (src_height - 1) as f32;
-
-    for dst_y in 0..dst_height {
-        for dst_x in 0..dst_width {
-            let src_x = ((dst_x as f32 + 0.5) * scale_x - 0.5).clamp(0.0, max_x);
-            let src_y = ((dst_y as f32 + 0.5) * scale_y - 0.5).clamp(0.0, max_y);
-
-            let x0 = src_x.floor() as usize;
-            let y0 = src_y.floor() as usize;
-            let x1 = (x0 + 1).min(src_width - 1);
-            let y1 = (y0 + 1).min(src_height - 1);
-            let fx = src_x - x0 as f32;
-            let fy = src_y - y0 as f32;
-
-            let p00 = src[y0 * src_width + x0];
-            let p10 = src[y0 * src_width + x1];
-            let p01 = src[y1 * src_width + x0];
-            let p11 = src[y1 * src_width + x1];
-
-            dst[dst_y * dst_width + dst_x] = bilinear_alpha_aware(p00, p10, p01, p11, fx, fy);
-        }
-        if let Some(ref mut cb) = progress {
-            cb((dst_y + 1) as f32 / dst_height as f32);
-        }
-    }
-
-    dst
-}
-
-/// Generic 1D resample for Pixel4 row using precomputed weights
-/// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
-#[inline]
-fn resample_row_pixel4_precomputed(
-    src: &[Pixel4],
-    kernel_weights: &[KernelWeights],
-) -> Vec<Pixel4> {
-    let dst_len = kernel_weights.len();
-    let mut dst = vec![Pixel4::default(); dst_len];
-
-    for (dst_i, kw) in kernel_weights.iter().enumerate() {
-        if kw.weights.is_empty() {
-            dst[dst_i] = src[kw.fallback_idx];
-        } else {
-            let mut sum = Pixel4::default();
-            for (i, &weight) in kw.weights.iter().enumerate() {
-                // SIMD-friendly: scalar multiply broadcasts weight to all 4 channels
-                sum = sum + src[kw.start_idx + i] * weight;
-            }
-            dst[dst_i] = sum;
-        }
-    }
-
-    dst
-}
-
-/// Alpha-aware 1D resample for Pixel4 row using precomputed weights
-/// RGB is weighted by alpha; alpha is interpolated normally.
-/// Falls back to unweighted RGB if all contributing pixels are transparent.
-#[inline]
-fn resample_row_alpha_precomputed(
-    src: &[Pixel4],
-    kernel_weights: &[KernelWeights],
-) -> Vec<Pixel4> {
-    let dst_len = kernel_weights.len();
-    let mut dst = vec![Pixel4::default(); dst_len];
-
-    for (dst_i, kw) in kernel_weights.iter().enumerate() {
-        if kw.weights.is_empty() {
-            dst[dst_i] = src[kw.fallback_idx];
-        } else {
-            let mut sum_r = 0.0f32;
-            let mut sum_g = 0.0f32;
-            let mut sum_b = 0.0f32;
-            let mut sum_a = 0.0f32;
-            let mut sum_alpha_weight = 0.0f32;
-            let mut sum_weight = 0.0f32;
-            // For fallback: unweighted RGB sum
-            let mut sum_r_unweighted = 0.0f32;
-            let mut sum_g_unweighted = 0.0f32;
-            let mut sum_b_unweighted = 0.0f32;
-
-            for (i, &weight) in kw.weights.iter().enumerate() {
-                let p = src[kw.start_idx + i];
-                let alpha = p.a();
-                let aw = weight * alpha;
-
-                sum_r += aw * p.r();
-                sum_g += aw * p.g();
-                sum_b += aw * p.b();
-                sum_a += weight * alpha;
-                sum_alpha_weight += aw;
-                sum_weight += weight;
-
-                sum_r_unweighted += weight * p.r();
-                sum_g_unweighted += weight * p.g();
-                sum_b_unweighted += weight * p.b();
-            }
-
-            // Normalize alpha (normal interpolation)
-            let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
-
-            // RGB: alpha-weighted or fallback to unweighted
-            let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
-                let inv_aw = 1.0 / sum_alpha_weight;
-                (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
-            } else if sum_weight.abs() > 1e-8 {
-                let inv_w = 1.0 / sum_weight;
-                (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
-            } else {
-                (0.0, 0.0, 0.0)
-            };
-
-            dst[dst_i] = Pixel4::new(out_r, out_g, out_b, out_a);
-        }
-    }
-
-    dst
-}
-
-/// Rescale Pixel4 array using separable kernel interpolation (2-pass)
-/// Uses precomputed kernel weights for efficiency
-/// Progress callback is optional - receives 0.0-1.0 after each row
-fn rescale_kernel_pixels(
-    src: &[Pixel4],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) -> Vec<Pixel4> {
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
-
-    // For Sinc, use full image extent; otherwise use kernel's base radius
-    let (radius_x, radius_y) = if method.is_full_extent() {
-        // Full extent: radius covers entire source dimension
-        (src_width as i32, src_height as i32)
-    } else {
-        let base_radius = method.base_radius();
-        (
-            (base_radius * filter_scale_x).ceil() as i32,
-            (base_radius * filter_scale_y).ceil() as i32,
-        )
-    };
-
-    // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
-    let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
-    let v_weights = precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
-
-    // Pass 1: Horizontal resample each row (src_width -> dst_width)
-    // Progress: 0% to 50%
-    let mut temp = vec![Pixel4::default(); dst_width * src_height];
-    for y in 0..src_height {
-        let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = resample_row_pixel4_precomputed(src_row, &h_weights);
-        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
-
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / src_height as f32 * 0.5);
-        }
-    }
-
-    // Pass 2: Vertical resample - process by output row for better cache locality
-    // Each output row reads from multiple input rows (determined by kernel weights)
-    // Progress: 50% to 100%
-    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
-
-    for dst_y in 0..dst_height {
-        let kw = &v_weights[dst_y];
-        let dst_row_start = dst_y * dst_width;
-
-        if kw.weights.is_empty() {
-            // Fallback: copy entire row
-            let src_row_start = kw.fallback_idx * dst_width;
-            dst[dst_row_start..dst_row_start + dst_width]
-                .copy_from_slice(&temp[src_row_start..src_row_start + dst_width]);
-        } else {
-            // Convolve: for each output pixel in this row, accumulate from source rows
-            for x in 0..dst_width {
-                let mut sum = Pixel4::default();
-                for (i, &weight) in kw.weights.iter().enumerate() {
-                    let src_y = kw.start_idx + i;
-                    sum = sum + temp[src_y * dst_width + x] * weight;
-                }
-                dst[dst_row_start + x] = sum;
-            }
-        }
-
-        if let Some(ref mut cb) = progress {
-            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
-        }
-    }
-
-    dst
-}
-
-/// Alpha-aware separable kernel rescale (2-pass)
-/// RGB channels are weighted by alpha to prevent transparent pixel color bleeding.
-fn rescale_kernel_alpha_pixels(
-    src: &[Pixel4],
-    src_width: usize,
-    src_height: usize,
-    dst_width: usize,
-    dst_height: usize,
-    method: RescaleMethod,
-    scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) -> Vec<Pixel4> {
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
-
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
-
-    // For Sinc, use full image extent; otherwise use kernel's base radius
-    let (radius_x, radius_y) = if method.is_full_extent() {
-        (src_width as i32, src_height as i32)
-    } else {
-        let base_radius = method.base_radius();
-        (
-            (base_radius * filter_scale_x).ceil() as i32,
-            (base_radius * filter_scale_y).ceil() as i32,
-        )
-    };
-
-    let h_weights = precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
-    let v_weights = precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
-
-    // Pass 1: Alpha-aware horizontal resample
-    let mut temp = vec![Pixel4::default(); dst_width * src_height];
-    for y in 0..src_height {
-        let src_row = &src[y * src_width..(y + 1) * src_width];
-        let dst_row = resample_row_alpha_precomputed(src_row, &h_weights);
-        temp[y * dst_width..(y + 1) * dst_width].copy_from_slice(&dst_row);
-
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / src_height as f32 * 0.5);
-        }
-    }
-
-    // Pass 2: Alpha-aware vertical resample
-    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
-
-    for dst_y in 0..dst_height {
-        let kw = &v_weights[dst_y];
-        let dst_row_start = dst_y * dst_width;
-
-        if kw.weights.is_empty() {
-            let src_row_start = kw.fallback_idx * dst_width;
-            dst[dst_row_start..dst_row_start + dst_width]
-                .copy_from_slice(&temp[src_row_start..src_row_start + dst_width]);
-        } else {
-            for x in 0..dst_width {
-                let mut sum_r = 0.0f32;
-                let mut sum_g = 0.0f32;
-                let mut sum_b = 0.0f32;
-                let mut sum_a = 0.0f32;
-                let mut sum_alpha_weight = 0.0f32;
-                let mut sum_weight = 0.0f32;
-                let mut sum_r_unweighted = 0.0f32;
-                let mut sum_g_unweighted = 0.0f32;
-                let mut sum_b_unweighted = 0.0f32;
-
-                for (i, &weight) in kw.weights.iter().enumerate() {
-                    let src_y = kw.start_idx + i;
-                    let p = temp[src_y * dst_width + x];
-                    let alpha = p.a();
-                    let aw = weight * alpha;
-
-                    sum_r += aw * p.r();
-                    sum_g += aw * p.g();
-                    sum_b += aw * p.b();
-                    sum_a += weight * alpha;
-                    sum_alpha_weight += aw;
-                    sum_weight += weight;
-
-                    sum_r_unweighted += weight * p.r();
-                    sum_g_unweighted += weight * p.g();
-                    sum_b_unweighted += weight * p.b();
-                }
-
-                let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
-
-                let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
-                    let inv_aw = 1.0 / sum_alpha_weight;
-                    (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
-                } else if sum_weight.abs() > 1e-8 {
-                    let inv_w = 1.0 / sum_weight;
-                    (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
-                } else {
-                    (0.0, 0.0, 0.0)
-                };
-
-                dst[dst_row_start + x] = Pixel4::new(out_r, out_g, out_b, out_a);
-            }
-        }
-
-        if let Some(ref mut cb) = progress {
-            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
-        }
-    }
-
-    dst
-}
 
 /// Rescale Pixel4 image (SIMD-friendly, linear space)
 pub fn rescale(
@@ -804,8 +236,10 @@ pub fn rescale_with_progress(
     }
 
     match method {
-        RescaleMethod::Bilinear => rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
+            separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
     }
 }
 
@@ -852,10 +286,16 @@ pub fn rescale_with_alpha_progress(
     }
 
     match method {
-        RescaleMethod::Bilinear => rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
-        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress),
+        RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Mitchell | RescaleMethod::CatmullRom | RescaleMethod::Lanczos3 | RescaleMethod::Sinc => {
+            separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+        }
     }
 }
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 #[cfg(test)]
 mod tests {
