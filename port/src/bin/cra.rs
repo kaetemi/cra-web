@@ -218,6 +218,10 @@ enum ScaleMethod {
     LanczosMixed,
     /// Mixed Lanczos scatter (experimental): per-source kernel selection with scatter
     LanczosMixedScatter,
+    /// Mixed Lanczos 2+4 (experimental): randomly switches between Lanczos2/4 per source pixel
+    Lanczos24Mixed,
+    /// Mixed Lanczos 3+5 (experimental): randomly switches between Lanczos3/5 per source pixel
+    Lanczos35Mixed,
 }
 
 impl ScaleMethod {
@@ -236,6 +240,8 @@ impl ScaleMethod {
             ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
             ScaleMethod::LanczosMixed => cra_wasm::rescale::RescaleMethod::LanczosMixed,
             ScaleMethod::LanczosMixedScatter => cra_wasm::rescale::RescaleMethod::LanczosMixedScatter,
+            ScaleMethod::Lanczos24Mixed => cra_wasm::rescale::RescaleMethod::Lanczos24Mixed,
+            ScaleMethod::Lanczos35Mixed => cra_wasm::rescale::RescaleMethod::Lanczos35Mixed,
         }
     }
 }
@@ -863,8 +869,10 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
             cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
             cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
-            cra_wasm::rescale::RescaleMethod::LanczosMixed => "Mixed Lanczos",
-            cra_wasm::rescale::RescaleMethod::LanczosMixedScatter => "Mixed Lanczos Scatter",
+            cra_wasm::rescale::RescaleMethod::LanczosMixed => "Mixed Lanczos 2+3",
+            cra_wasm::rescale::RescaleMethod::LanczosMixedScatter => "Mixed Lanczos 2+3 Scatter",
+            cra_wasm::rescale::RescaleMethod::Lanczos24Mixed => "Mixed Lanczos 2+4",
+            cra_wasm::rescale::RescaleMethod::Lanczos35Mixed => "Mixed Lanczos 3+5",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

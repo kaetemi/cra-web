@@ -161,18 +161,40 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Lanczos5 => lanczos5(x),
         RescaleMethod::Lanczos6 => lanczos6(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
-        // Mixed methods should not call eval_kernel directly - they use eval_kernel_mixed
+        // Mixed methods should not call eval_kernel directly - they use specialized eval functions
         RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
+        RescaleMethod::Lanczos24Mixed => lanczos4(x),
+        RescaleMethod::Lanczos35Mixed => lanczos5(x),
     }
 }
 
-/// Evaluate kernel for mixed mode, selecting Lanczos2 or Lanczos3 based on source pixel
+/// Evaluate kernel for mixed 2+3 mode, selecting Lanczos2 or Lanczos3 based on source pixel
 #[inline]
-pub fn eval_kernel_mixed(x: f32, use_lanczos3: bool) -> f32 {
-    if use_lanczos3 {
+pub fn eval_kernel_mixed(x: f32, use_larger: bool) -> f32 {
+    if use_larger {
         lanczos3(x)
     } else {
         lanczos2(x)
+    }
+}
+
+/// Evaluate kernel for mixed 2+4 mode, selecting Lanczos2 or Lanczos4 based on source pixel
+#[inline]
+pub fn eval_kernel_mixed_24(x: f32, use_larger: bool) -> f32 {
+    if use_larger {
+        lanczos4(x)
+    } else {
+        lanczos2(x)
+    }
+}
+
+/// Evaluate kernel for mixed 3+5 mode, selecting Lanczos3 or Lanczos5 based on source pixel
+#[inline]
+pub fn eval_kernel_mixed_35(x: f32, use_larger: bool) -> f32 {
+    if use_larger {
+        lanczos5(x)
+    } else {
+        lanczos3(x)
     }
 }
 
@@ -181,7 +203,7 @@ pub fn eval_kernel_mixed(x: f32, use_lanczos3: bool) -> f32 {
 pub fn select_kernel_for_source(src_x: usize, src_y: usize, seed: u32) -> bool {
     let hashed_seed = wang_hash(seed);
     let pixel_hash = wang_hash((src_x as u32) ^ ((src_y as u32) << 16) ^ hashed_seed);
-    // Use bit 0 to select kernel: true = Lanczos3, false = Lanczos2
+    // Use bit 0 to select kernel: true = larger kernel, false = smaller kernel
     (pixel_hash & 1) != 0
 }
 

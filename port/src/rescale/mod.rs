@@ -44,10 +44,14 @@ pub enum RescaleMethod {
     /// Sinc with scatter-based accumulation (experimental)
     /// WARNING: O(N²) - very slow for large images
     SincScatter,
-    /// Mixed Lanczos (gather): randomly switches between Lanczos2 and Lanczos3 per source pixel
+    /// Mixed Lanczos 2+3 (gather): randomly switches between Lanczos2 and Lanczos3 per source pixel
     LanczosMixed,
-    /// Mixed Lanczos (scatter): randomly switches between Lanczos2 and Lanczos3 per source pixel
+    /// Mixed Lanczos 2+3 (scatter): randomly switches between Lanczos2 and Lanczos3 per source pixel
     LanczosMixedScatter,
+    /// Mixed Lanczos 2+4: randomly switches between Lanczos2 and Lanczos4 per source pixel
+    Lanczos24Mixed,
+    /// Mixed Lanczos 3+5: randomly switches between Lanczos3 and Lanczos5 per source pixel
+    Lanczos35Mixed,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -76,14 +80,16 @@ impl RescaleMethod {
             "sinc" => Some(RescaleMethod::Sinc),
             "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
-            "lanczos-mixed" | "lanczos_mixed" | "mixed" => Some(RescaleMethod::LanczosMixed),
-            "lanczos-mixed-scatter" | "lanczos_mixed_scatter" | "mixed-scatter" => Some(RescaleMethod::LanczosMixedScatter),
+            "lanczos-mixed" | "lanczos_mixed" | "mixed" | "mixed23" => Some(RescaleMethod::LanczosMixed),
+            "lanczos-mixed-scatter" | "lanczos_mixed_scatter" | "mixed-scatter" | "mixed23-scatter" => Some(RescaleMethod::LanczosMixedScatter),
+            "mixed24" | "lanczos24-mixed" => Some(RescaleMethod::Lanczos24Mixed),
+            "mixed35" | "lanczos35-mixed" => Some(RescaleMethod::Lanczos35Mixed),
             _ => None,
         }
     }
 
     /// Get the kernel radius for this method (0 = full image extent)
-    /// For mixed methods, returns the larger radius (Lanczos3)
+    /// For mixed methods, returns the larger radius to ensure all weights are computed
     pub fn base_radius(&self) -> f32 {
         match self {
             RescaleMethod::Bilinear => 1.0,
@@ -95,8 +101,10 @@ impl RescaleMethod {
             RescaleMethod::Lanczos5 => 5.0,
             RescaleMethod::Lanczos6 => 6.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
-            // Mixed uses the larger radius (Lanczos3) to ensure all weights are computed
-            RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,
+            // Mixed uses the larger radius of the pair
+            RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,  // 2+3 -> 3
+            RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
+            RescaleMethod::Lanczos35Mixed => 5.0,  // 3+5 -> 5
         }
     }
 
@@ -114,7 +122,9 @@ impl RescaleMethod {
 
     /// Returns true if this is a mixed kernel method
     pub fn is_mixed(&self) -> bool {
-        matches!(self, RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter)
+        matches!(self,
+            RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter |
+            RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed)
     }
 
     /// Get the underlying kernel method for scatter variants
@@ -123,8 +133,6 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
             RescaleMethod::SincScatter => RescaleMethod::Sinc,
             // Mixed methods don't have a single kernel - they switch per-pixel
-            RescaleMethod::LanczosMixed => RescaleMethod::LanczosMixed,
-            RescaleMethod::LanczosMixedScatter => RescaleMethod::LanczosMixedScatter,
             other => *other,
         }
     }
@@ -304,8 +312,8 @@ pub fn rescale_with_progress(
         RescaleMethod::Sinc => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
-        RescaleMethod::LanczosMixed => {
-            separable::rescale_mixed_kernel_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
+        RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
+            separable::rescale_mixed_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, seed, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
@@ -370,8 +378,8 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Sinc => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
-        RescaleMethod::LanczosMixed => {
-            separable::rescale_mixed_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
+        RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
+            separable::rescale_mixed_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, seed, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)

@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights, eval_kernel_mixed, select_kernel_for_source};
+use super::kernels::{KernelWeights, precompute_kernel_weights, eval_kernel_mixed, eval_kernel_mixed_24, eval_kernel_mixed_35, select_kernel_for_source};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -296,13 +296,14 @@ pub fn rescale_kernel_alpha_pixels(
 
 /// Mixed kernel gather-based separable rescale (2-pass)
 /// Precomputes kernel selection for each source pixel and uses that during gathering.
-/// This produces results identical to mixed scatter.
+/// Supports multiple mixed modes: 2+3, 2+4, 3+5
 pub fn rescale_mixed_kernel_pixels(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    method: RescaleMethod,
     scale_mode: ScaleMode,
     seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
@@ -314,9 +315,18 @@ pub fn rescale_mixed_kernel_pixels(
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
 
-    // Use Lanczos3 radius to cover both kernels
-    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
-    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+    // Use the larger radius of the pair based on method
+    let base_radius = method.base_radius();
+    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
+    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
+
+    // Get the effective radii for the two kernels in this mix
+    let (small_radius, large_radius) = match method {
+        RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => (2.0, 3.0),
+        RescaleMethod::Lanczos24Mixed => (2.0, 4.0),
+        RescaleMethod::Lanczos35Mixed => (3.0, 5.0),
+        _ => (2.0, 3.0), // fallback
+    };
 
     // Center offset
     let mapped_src_len_x = dst_width as f32 * scale_x;
@@ -348,8 +358,8 @@ pub fn rescale_mixed_kernel_pixels(
             let mut weight_sum = 0.0f32;
 
             for src_x in start..=end {
-                let use_lanczos3 = kernel_choices[src_x];
-                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let use_larger = kernel_choices[src_x];
+                let effective_radius = if use_larger { large_radius } else { small_radius };
                 let d = (src_pos - src_x as f32) / filter_scale_x;
 
                 // Skip if outside this kernel's effective radius
@@ -357,7 +367,12 @@ pub fn rescale_mixed_kernel_pixels(
                     continue;
                 }
 
-                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let weight = match method {
+                    RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => eval_kernel_mixed(d, use_larger),
+                    RescaleMethod::Lanczos24Mixed => eval_kernel_mixed_24(d, use_larger),
+                    RescaleMethod::Lanczos35Mixed => eval_kernel_mixed_35(d, use_larger),
+                    _ => eval_kernel_mixed(d, use_larger),
+                };
                 sum = sum + src_row[src_x] * weight;
                 weight_sum += weight;
             }
@@ -401,15 +416,20 @@ pub fn rescale_mixed_kernel_pixels(
             let mut weight_sum = 0.0f32;
 
             for src_y in start..=end {
-                let use_lanczos3 = v_kernel_choices[src_y];
-                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let use_larger = v_kernel_choices[src_y];
+                let effective_radius = if use_larger { large_radius } else { small_radius };
                 let d = (src_pos - src_y as f32) / filter_scale_y;
 
                 if d.abs() > effective_radius {
                     continue;
                 }
 
-                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let weight = match method {
+                    RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => eval_kernel_mixed(d, use_larger),
+                    RescaleMethod::Lanczos24Mixed => eval_kernel_mixed_24(d, use_larger),
+                    RescaleMethod::Lanczos35Mixed => eval_kernel_mixed_35(d, use_larger),
+                    _ => eval_kernel_mixed(d, use_larger),
+                };
                 sum = sum + temp[src_y * dst_width + x] * weight;
                 weight_sum += weight;
             }
@@ -437,6 +457,7 @@ pub fn rescale_mixed_kernel_alpha_pixels(
     src_height: usize,
     dst_width: usize,
     dst_height: usize,
+    method: RescaleMethod,
     scale_mode: ScaleMode,
     seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
@@ -448,8 +469,18 @@ pub fn rescale_mixed_kernel_alpha_pixels(
     let filter_scale_x = scale_x.max(1.0);
     let filter_scale_y = scale_y.max(1.0);
 
-    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
-    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+    // Use the larger radius of the pair based on method
+    let base_radius = method.base_radius();
+    let radius_x = (base_radius * filter_scale_x).ceil() as i32;
+    let radius_y = (base_radius * filter_scale_y).ceil() as i32;
+
+    // Get the effective radii for the two kernels in this mix
+    let (small_radius, large_radius) = match method {
+        RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => (2.0, 3.0),
+        RescaleMethod::Lanczos24Mixed => (2.0, 4.0),
+        RescaleMethod::Lanczos35Mixed => (3.0, 5.0),
+        _ => (2.0, 3.0), // fallback
+    };
 
     let mapped_src_len_x = dst_width as f32 * scale_x;
     let offset_x = (src_width as f32 - mapped_src_len_x) / 2.0;
@@ -486,15 +517,20 @@ pub fn rescale_mixed_kernel_alpha_pixels(
             let mut sum_b_unweighted = 0.0f32;
 
             for src_x in start..=end {
-                let use_lanczos3 = kernel_choices[src_x];
-                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let use_larger = kernel_choices[src_x];
+                let effective_radius = if use_larger { large_radius } else { small_radius };
                 let d = (src_pos - src_x as f32) / filter_scale_x;
 
                 if d.abs() > effective_radius {
                     continue;
                 }
 
-                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let weight = match method {
+                    RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => eval_kernel_mixed(d, use_larger),
+                    RescaleMethod::Lanczos24Mixed => eval_kernel_mixed_24(d, use_larger),
+                    RescaleMethod::Lanczos35Mixed => eval_kernel_mixed_35(d, use_larger),
+                    _ => eval_kernel_mixed(d, use_larger),
+                };
                 let p = src_row[src_x];
                 let alpha = p.a();
                 let aw = weight * alpha;
@@ -561,15 +597,20 @@ pub fn rescale_mixed_kernel_alpha_pixels(
             let mut sum_b_unweighted = 0.0f32;
 
             for src_y in start..=end {
-                let use_lanczos3 = v_kernel_choices[src_y];
-                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let use_larger = v_kernel_choices[src_y];
+                let effective_radius = if use_larger { large_radius } else { small_radius };
                 let d = (src_pos - src_y as f32) / filter_scale_y;
 
                 if d.abs() > effective_radius {
                     continue;
                 }
 
-                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let weight = match method {
+                    RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => eval_kernel_mixed(d, use_larger),
+                    RescaleMethod::Lanczos24Mixed => eval_kernel_mixed_24(d, use_larger),
+                    RescaleMethod::Lanczos35Mixed => eval_kernel_mixed_35(d, use_larger),
+                    _ => eval_kernel_mixed(d, use_larger),
+                };
                 let p = temp[src_y * dst_width + x];
                 let alpha = p.a();
                 let aw = weight * alpha;
