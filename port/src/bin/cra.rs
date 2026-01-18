@@ -224,14 +224,6 @@ enum ScaleMethod {
     EwaCatmullRom,
     /// Pure Jinc (unwindowed): 2D analog of sinc, full image extent (SLOW, research only)
     Jinc,
-    /// Ginseng2: jinc-windowed sinc, separable (2 lobes)
-    Ginseng2,
-    /// Ginseng3: jinc-windowed sinc, separable (3 lobes)
-    Ginseng3,
-    /// Peaked Cosine: AVIR-style adaptive filter
-    PeakedCosine,
-    /// Peaked Cosine Corrected: flatter passband variant
-    PeakedCosineCorrected,
 }
 
 impl ScaleMethod {
@@ -253,10 +245,6 @@ impl ScaleMethod {
             ScaleMethod::EwaMitchell => cra_wasm::rescale::RescaleMethod::EWAMitchell,
             ScaleMethod::EwaCatmullRom => cra_wasm::rescale::RescaleMethod::EWACatmullRom,
             ScaleMethod::Jinc => cra_wasm::rescale::RescaleMethod::Jinc,
-            ScaleMethod::Ginseng2 => cra_wasm::rescale::RescaleMethod::Ginseng2,
-            ScaleMethod::Ginseng3 => cra_wasm::rescale::RescaleMethod::Ginseng3,
-            ScaleMethod::PeakedCosine => cra_wasm::rescale::RescaleMethod::PeakedCosine,
-            ScaleMethod::PeakedCosineCorrected => cra_wasm::rescale::RescaleMethod::PeakedCosineCorrected,
         }
     }
 }
@@ -889,10 +877,6 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::EWAMitchell => "EWA Mitchell",
             cra_wasm::rescale::RescaleMethod::EWACatmullRom => "EWA Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Jinc => "Jinc (full extent)",
-            cra_wasm::rescale::RescaleMethod::Ginseng2 => "Ginseng2",
-            cra_wasm::rescale::RescaleMethod::Ginseng3 => "Ginseng3",
-            cra_wasm::rescale::RescaleMethod::PeakedCosine => "Peaked Cosine",
-            cra_wasm::rescale::RescaleMethod::PeakedCosineCorrected => "Peaked Cosine Corrected",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         eprintln!(

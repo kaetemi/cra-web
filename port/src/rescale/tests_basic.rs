@@ -435,36 +435,3 @@ fn test_jinc_produces_nonzero_output() {
     let sum: f32 = dst.iter().map(|p| p.r() + p.g() + p.b()).sum();
     assert!(sum > 0.0, "Jinc output should not be all zeros");
 }
-
-#[test]
-fn test_peaked_cosine_identity() {
-    // Same-size should return identical pixels
-    let src = vec![
-        Pixel4::new(0.0, 0.0, 0.0, 1.0),
-        Pixel4::new(0.25, 0.25, 0.25, 1.0),
-        Pixel4::new(0.5, 0.5, 0.5, 1.0),
-        Pixel4::new(0.75, 0.75, 0.75, 1.0),
-    ];
-    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::PeakedCosine, ScaleMode::Independent);
-    assert_eq!(src, dst);
-}
-
-#[test]
-fn test_peaked_cosine_corrected_identity() {
-    // Same dimensions should return identical pixels
-    let src = vec![
-        Pixel4::new(0.1, 0.2, 0.3, 1.0),
-        Pixel4::new(0.4, 0.5, 0.6, 1.0),
-        Pixel4::new(0.7, 0.8, 0.9, 1.0),
-        Pixel4::new(0.2, 0.3, 0.4, 1.0),
-    ];
-
-    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::PeakedCosineCorrected, ScaleMode::Independent);
-
-    assert_eq!(dst.len(), 4);
-    for (a, b) in src.iter().zip(dst.iter()) {
-        assert!((a.r() - b.r()).abs() < 0.001);
-        assert!((a.g() - b.g()).abs() < 0.001);
-        assert!((a.b() - b.b()).abs() < 0.001);
-    }
-}

@@ -36,12 +36,6 @@ pub enum RescaleMethod {
     Lanczos2,
     /// Lanczos3 - good balance of sharpness and ringing
     Lanczos3,
-    /// Ginseng2 - Jinc-windowed Sinc with 2 lobes (sinc(x) * jinc(x/2))
-    /// Separable filter using jinc as window instead of sinc (cf. Lanczos)
-    Ginseng2,
-    /// Ginseng3 - Jinc-windowed Sinc with 3 lobes (sinc(x) * jinc(x/3))
-    /// Separable filter using jinc as window instead of sinc (cf. Lanczos)
-    Ginseng3,
     /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
     /// WARNING: O(N²) - very slow for large images, severe ringing at edges
     Sinc,
@@ -76,14 +70,6 @@ pub enum RescaleMethod {
     /// Uses J1(πr)/(πr) over full image extent via EWA sampling
     /// WARNING: O(N²) - extremely slow for large images, severe ringing at edges
     Jinc,
-    /// Peaked Cosine windowed sinc - AVIR-style adaptive filter
-    /// High quality with scale-dependent filter length and cutoff
-    /// Uses: w(n) = cos(π*n/(2*L)) * (1 - (n/L)^α) window
-    PeakedCosine,
-    /// Peaked Cosine with frequency response correction filter
-    /// Measures cumulative frequency response and applies short FIR correction
-    /// to compensate for rolloff, providing flatter passband response
-    PeakedCosineCorrected,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -106,8 +92,6 @@ impl RescaleMethod {
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos2" => Some(RescaleMethod::Lanczos2),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
-            "ginseng2" => Some(RescaleMethod::Ginseng2),
-            "ginseng" | "ginseng3" => Some(RescaleMethod::Ginseng3),
             "sinc" => Some(RescaleMethod::Sinc),
             "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
@@ -119,8 +103,6 @@ impl RescaleMethod {
             "ewa-mitchell" | "ewa_mitchell" | "ewamitchell" => Some(RescaleMethod::EWAMitchell),
             "ewa-catmull-rom" | "ewa_catmull_rom" | "ewacatmullrom" | "ewa-catrom" | "ewa_catrom" => Some(RescaleMethod::EWACatmullRom),
             "jinc" => Some(RescaleMethod::Jinc),
-            "peaked-cosine" | "peaked_cosine" | "peakedcosine" | "avir" => Some(RescaleMethod::PeakedCosine),
-            "peaked-cosine-corrected" | "peaked_cosine_corrected" | "peakedcosinecorrected" | "avir-corrected" | "avir_corrected" => Some(RescaleMethod::PeakedCosineCorrected),
             _ => None,
         }
     }
@@ -131,11 +113,10 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell | RescaleMethod::EWAMitchell => 2.0,
             RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => 2.0,
-            RescaleMethod::Lanczos2 | RescaleMethod::Ginseng2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Ginseng3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
+            RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
-            RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
         }
     }
 
@@ -170,10 +151,6 @@ impl RescaleMethod {
         }
     }
 
-    /// Returns true if this method uses scale-dependent filter parameters
-    pub fn is_scale_dependent(&self) -> bool {
-        matches!(self, RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected)
-    }
 }
 
 // ============================================================================
@@ -342,8 +319,7 @@ pub fn rescale_with_progress(
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
-        RescaleMethod::Sinc | RescaleMethod::Box |
-        RescaleMethod::Ginseng2 | RescaleMethod::Ginseng3 => {
+        RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
@@ -354,12 +330,6 @@ pub fn rescale_with_progress(
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::PeakedCosine => {
-            separable::rescale_peaked_cosine_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
-        }
-        RescaleMethod::PeakedCosineCorrected => {
-            separable::rescale_peaked_cosine_corrected_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
@@ -410,8 +380,7 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
-        RescaleMethod::Sinc | RescaleMethod::Box |
-        RescaleMethod::Ginseng2 | RescaleMethod::Ginseng3 => {
+        RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
@@ -422,12 +391,6 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::PeakedCosine => {
-            separable::rescale_peaked_cosine_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
-        }
-        RescaleMethod::PeakedCosineCorrected => {
-            separable::rescale_peaked_cosine_corrected_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
