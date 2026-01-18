@@ -118,6 +118,11 @@
             width: 100px;
         }
 
+        input[type="number"].secondary-dimension {
+            color: #999;
+            background: #f5f5f5;
+        }
+
         .size-inputs {
             display: flex;
             gap: 10px;
@@ -781,6 +786,7 @@
             const height = Math.round(width / aspectRatio);
             document.getElementById('target-height').value = height;
             updatingSize = false;
+            updateDimensionStyling();
         }
 
         function updateSizeFromHeight() {
@@ -791,6 +797,20 @@
             const width = Math.round(height * aspectRatio);
             document.getElementById('target-width').value = width;
             updatingSize = false;
+            updateDimensionStyling();
+        }
+
+        // Update visual styling to show which dimension is primary vs secondary
+        function updateDimensionStyling() {
+            const widthInput = document.getElementById('target-width');
+            const heightInput = document.getElementById('target-height');
+            if (primaryDimension === 'width') {
+                widthInput.classList.remove('secondary-dimension');
+                heightInput.classList.add('secondary-dimension');
+            } else {
+                heightInput.classList.remove('secondary-dimension');
+                widthInput.classList.add('secondary-dimension');
+            }
         }
 
         function calculateOutputDimensions() {
@@ -902,14 +922,18 @@
                 aspectRatio = width / height;
 
                 // Set initial target size (fit to 256 on longest side)
+                // For landscape/square, width is primary; for portrait, height is primary
                 const maxDim = 256;
                 if (aspectRatio >= 1) {
+                    primaryDimension = 'width';
                     document.getElementById('target-width').value = maxDim;
                     document.getElementById('target-height').value = Math.round(maxDim / aspectRatio);
                 } else {
+                    primaryDimension = 'height';
                     document.getElementById('target-height').value = maxDim;
                     document.getElementById('target-width').value = Math.round(maxDim * aspectRatio);
                 }
+                updateDimensionStyling();
 
                 const box = document.getElementById('upload-box');
                 box.classList.add('has-image');
