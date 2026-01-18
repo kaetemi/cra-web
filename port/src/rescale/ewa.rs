@@ -117,8 +117,8 @@ pub fn rescale_ewa_pixels(
                     // Compute 2D radial distance
                     let r = (dx * dx + dy2).sqrt();
 
-                    // Early out if outside kernel radius
-                    if r >= base_radius {
+                    // Early out if outside kernel radius (skip for full-extent methods where base_radius == 0)
+                    if base_radius > 0.0 && r >= base_radius {
                         continue;
                     }
 
@@ -218,7 +218,8 @@ pub fn rescale_ewa_alpha_pixels(
                     let dx = (sx as f32 - src_pos_x) / filter_scale_x;
                     let r = (dx * dx + dy2).sqrt();
 
-                    if r >= base_radius {
+                    // Early out if outside kernel radius (skip for full-extent methods where base_radius == 0)
+                    if base_radius > 0.0 && r >= base_radius {
                         continue;
                     }
 

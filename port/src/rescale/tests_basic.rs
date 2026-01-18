@@ -409,6 +409,34 @@ fn test_ewa_catmull_rom_identity() {
 }
 
 #[test]
+fn test_jinc_identity() {
+    // Full-extent Jinc: same-size should return identical pixels
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Jinc, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_jinc_produces_nonzero_output() {
+    // Ensure Jinc doesn't produce all-zero output when resizing
+    let src = vec![
+        Pixel4::new(1.0, 0.5, 0.25, 1.0),
+        Pixel4::new(0.5, 1.0, 0.5, 1.0),
+        Pixel4::new(0.25, 0.5, 1.0, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 3, 3, RescaleMethod::Jinc, ScaleMode::Independent);
+    // Check that output is non-zero
+    let sum: f32 = dst.iter().map(|p| p.r() + p.g() + p.b()).sum();
+    assert!(sum > 0.0, "Jinc output should not be all zeros");
+}
+
+#[test]
 fn test_peaked_cosine_identity() {
     // Same-size should return identical pixels
     let src = vec![
