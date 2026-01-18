@@ -13,7 +13,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::eval_kernel;
+use super::kernels::{eval_kernel, eval_kernel_mixed, select_kernel_for_source};
 
 /// Precomputed scatter weights for a single source position
 /// Maps one source pixel to the destination pixels it affects
@@ -364,6 +364,317 @@ fn scatter_row_alpha_pixel4(
         } else if weight_sums[i].abs() > 1e-8 {
             let inv_w = 1.0 / weight_sums[i];
             (rgb_unweighted[i][0] * inv_w, rgb_unweighted[i][1] * inv_w, rgb_unweighted[i][2] * inv_w)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+
+        dst[i] = Pixel4::new(out_r, out_g, out_b, out_a);
+    }
+
+    dst
+}
+
+// =============================================================================
+// Mixed kernel scatter implementation (Lanczos2/Lanczos3 per-source selection)
+// =============================================================================
+
+/// Mixed scatter-based separable kernel rescale (2-pass)
+/// Uses per-source-pixel kernel selection (Lanczos2 or Lanczos3) via Wang hash.
+pub fn rescale_mixed_scatter_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+
+    // Center offset for uniform scaling
+    let mapped_src_len_x = dst_width as f32 * scale_x;
+    let offset_x = (src_width as f32 - mapped_src_len_x) / 2.0;
+
+    let mapped_src_len_y = dst_height as f32 * scale_y;
+    let offset_y = (src_height as f32 - mapped_src_len_y) / 2.0;
+
+    let inv_scale_x = 1.0 / scale_x;
+    let inv_scale_y = 1.0 / scale_y;
+
+    // Pass 1: Horizontal mixed scatter (src_width -> dst_width)
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+    let mut h_weight_sums = vec![0.0f32; dst_width * src_height];
+
+    for src_y in 0..src_height {
+        let row_start = src_y * src_width;
+        let temp_row_start = src_y * dst_width;
+
+        for src_x in 0..src_width {
+            let pixel = src[row_start + src_x];
+
+            // Select kernel based on source pixel position
+            let use_lanczos3 = select_kernel_for_source(src_x, src_y, seed);
+            let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+
+            // Find affected destination range
+            let dst_center = (src_x as f32 - offset_x + 0.5) * inv_scale_x - 0.5;
+            let dst_radius = (effective_radius * filter_scale_x) * inv_scale_x;
+
+            let start = ((dst_center - dst_radius).floor() as i32).max(0) as usize;
+            let end = ((dst_center + dst_radius).ceil() as i32).min(dst_width as i32 - 1) as usize;
+
+            for dst_x in start..=end {
+                let src_pos = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+                let d = (src_x as f32 - src_pos) / filter_scale_x;
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+
+                if weight.abs() > 1e-10 {
+                    let idx = temp_row_start + dst_x;
+                    temp[idx] = temp[idx] + pixel * weight;
+                    h_weight_sums[idx] += weight;
+                }
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb((src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Normalize horizontal pass
+    for i in 0..temp.len() {
+        if h_weight_sums[i].abs() > 1e-8 {
+            temp[i] = temp[i] * (1.0 / h_weight_sums[i]);
+        }
+    }
+
+    // Pass 2: Vertical mixed scatter
+    // For vertical pass, we use a different seed component to vary the pattern
+    // The intermediate pixels are at (dst_x, src_y), so we use src_y for selection
+    let v_seed = seed ^ 0x9E3779B9; // Golden ratio bits for variation
+
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+    let mut v_weight_sums = vec![0.0f32; dst_width * dst_height];
+
+    for src_y in 0..src_height {
+        let temp_row_start = src_y * dst_width;
+
+        // Select kernel for this row (using src_y with varied seed)
+        // All pixels in this row use the same kernel for coherence
+        let use_lanczos3 = select_kernel_for_source(0, src_y, v_seed);
+        let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+
+        // Find affected destination range
+        let dst_center = (src_y as f32 - offset_y + 0.5) * inv_scale_y - 0.5;
+        let dst_radius = (effective_radius * filter_scale_y) * inv_scale_y;
+
+        let start = ((dst_center - dst_radius).floor() as i32).max(0) as usize;
+        let end = ((dst_center + dst_radius).ceil() as i32).min(dst_height as i32 - 1) as usize;
+
+        for dst_y in start..=end {
+            let src_pos = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+            let d = (src_y as f32 - src_pos) / filter_scale_y;
+            let weight = eval_kernel_mixed(d, use_lanczos3);
+
+            if weight.abs() > 1e-10 {
+                let dst_row_start = dst_y * dst_width;
+                for x in 0..dst_width {
+                    dst[dst_row_start + x] = dst[dst_row_start + x] + temp[temp_row_start + x] * weight;
+                    v_weight_sums[dst_row_start + x] += weight;
+                }
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Normalize vertical pass
+    for i in 0..dst.len() {
+        if v_weight_sums[i].abs() > 1e-8 {
+            dst[i] = dst[i] * (1.0 / v_weight_sums[i]);
+        }
+    }
+
+    dst
+}
+
+/// Alpha-aware mixed scatter-based separable kernel rescale (2-pass)
+pub fn rescale_mixed_scatter_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+
+    let mapped_src_len_x = dst_width as f32 * scale_x;
+    let offset_x = (src_width as f32 - mapped_src_len_x) / 2.0;
+
+    let mapped_src_len_y = dst_height as f32 * scale_y;
+    let offset_y = (src_height as f32 - mapped_src_len_y) / 2.0;
+
+    let inv_scale_x = 1.0 / scale_x;
+    let inv_scale_y = 1.0 / scale_y;
+
+    // Pass 1: Alpha-aware horizontal mixed scatter
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+    let mut h_rgb = vec![[0.0f32; 3]; dst_width * src_height];
+    let mut h_alpha = vec![0.0f32; dst_width * src_height];
+    let mut h_alpha_weight_sums = vec![0.0f32; dst_width * src_height];
+    let mut h_weight_sums = vec![0.0f32; dst_width * src_height];
+    let mut h_rgb_unweighted = vec![[0.0f32; 3]; dst_width * src_height];
+
+    for src_y in 0..src_height {
+        let row_start = src_y * src_width;
+        let temp_row_start = src_y * dst_width;
+
+        for src_x in 0..src_width {
+            let p = src[row_start + src_x];
+            let alpha = p.a();
+
+            let use_lanczos3 = select_kernel_for_source(src_x, src_y, seed);
+            let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+
+            let dst_center = (src_x as f32 - offset_x + 0.5) * inv_scale_x - 0.5;
+            let dst_radius = (effective_radius * filter_scale_x) * inv_scale_x;
+
+            let start = ((dst_center - dst_radius).floor() as i32).max(0) as usize;
+            let end = ((dst_center + dst_radius).ceil() as i32).min(dst_width as i32 - 1) as usize;
+
+            for dst_x in start..=end {
+                let src_pos = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+                let d = (src_x as f32 - src_pos) / filter_scale_x;
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+
+                if weight.abs() > 1e-10 {
+                    let idx = temp_row_start + dst_x;
+                    let aw = weight * alpha;
+
+                    h_rgb[idx][0] += aw * p.r();
+                    h_rgb[idx][1] += aw * p.g();
+                    h_rgb[idx][2] += aw * p.b();
+                    h_alpha[idx] += weight * alpha;
+                    h_alpha_weight_sums[idx] += aw;
+                    h_weight_sums[idx] += weight;
+
+                    h_rgb_unweighted[idx][0] += weight * p.r();
+                    h_rgb_unweighted[idx][1] += weight * p.g();
+                    h_rgb_unweighted[idx][2] += weight * p.b();
+                }
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb((src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Normalize horizontal pass into temp buffer
+    for i in 0..temp.len() {
+        let out_a = if h_weight_sums[i].abs() > 1e-8 {
+            h_alpha[i] / h_weight_sums[i]
+        } else {
+            0.0
+        };
+
+        let (out_r, out_g, out_b) = if h_alpha_weight_sums[i].abs() > 1e-8 {
+            let inv_aw = 1.0 / h_alpha_weight_sums[i];
+            (h_rgb[i][0] * inv_aw, h_rgb[i][1] * inv_aw, h_rgb[i][2] * inv_aw)
+        } else if h_weight_sums[i].abs() > 1e-8 {
+            let inv_w = 1.0 / h_weight_sums[i];
+            (h_rgb_unweighted[i][0] * inv_w, h_rgb_unweighted[i][1] * inv_w, h_rgb_unweighted[i][2] * inv_w)
+        } else {
+            (0.0, 0.0, 0.0)
+        };
+
+        temp[i] = Pixel4::new(out_r, out_g, out_b, out_a);
+    }
+
+    // Pass 2: Alpha-aware vertical mixed scatter
+    let v_seed = seed ^ 0x9E3779B9;
+
+    let mut dst_rgb = vec![[0.0f32; 3]; dst_width * dst_height];
+    let mut dst_alpha = vec![0.0f32; dst_width * dst_height];
+    let mut v_alpha_weight_sums = vec![0.0f32; dst_width * dst_height];
+    let mut v_weight_sums = vec![0.0f32; dst_width * dst_height];
+    let mut v_rgb_unweighted = vec![[0.0f32; 3]; dst_width * dst_height];
+
+    for src_y in 0..src_height {
+        let temp_row_start = src_y * dst_width;
+
+        let use_lanczos3 = select_kernel_for_source(0, src_y, v_seed);
+        let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+
+        let dst_center = (src_y as f32 - offset_y + 0.5) * inv_scale_y - 0.5;
+        let dst_radius = (effective_radius * filter_scale_y) * inv_scale_y;
+
+        let start = ((dst_center - dst_radius).floor() as i32).max(0) as usize;
+        let end = ((dst_center + dst_radius).ceil() as i32).min(dst_height as i32 - 1) as usize;
+
+        for dst_y in start..=end {
+            let src_pos = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+            let d = (src_y as f32 - src_pos) / filter_scale_y;
+            let weight = eval_kernel_mixed(d, use_lanczos3);
+
+            if weight.abs() > 1e-10 {
+                let dst_row_start = dst_y * dst_width;
+                for x in 0..dst_width {
+                    let p = temp[temp_row_start + x];
+                    let alpha = p.a();
+                    let aw = weight * alpha;
+                    let idx = dst_row_start + x;
+
+                    dst_rgb[idx][0] += aw * p.r();
+                    dst_rgb[idx][1] += aw * p.g();
+                    dst_rgb[idx][2] += aw * p.b();
+                    dst_alpha[idx] += weight * alpha;
+                    v_alpha_weight_sums[idx] += aw;
+                    v_weight_sums[idx] += weight;
+
+                    v_rgb_unweighted[idx][0] += weight * p.r();
+                    v_rgb_unweighted[idx][1] += weight * p.g();
+                    v_rgb_unweighted[idx][2] += weight * p.b();
+                }
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Final normalization
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+    for i in 0..dst.len() {
+        let out_a = if v_weight_sums[i].abs() > 1e-8 {
+            dst_alpha[i] / v_weight_sums[i]
+        } else {
+            0.0
+        };
+
+        let (out_r, out_g, out_b) = if v_alpha_weight_sums[i].abs() > 1e-8 {
+            let inv_aw = 1.0 / v_alpha_weight_sums[i];
+            (dst_rgb[i][0] * inv_aw, dst_rgb[i][1] * inv_aw, dst_rgb[i][2] * inv_aw)
+        } else if v_weight_sums[i].abs() > 1e-8 {
+            let inv_w = 1.0 / v_weight_sums[i];
+            (v_rgb_unweighted[i][0] * inv_w, v_rgb_unweighted[i][1] * inv_w, v_rgb_unweighted[i][2] * inv_w)
         } else {
             (0.0, 0.0, 0.0)
         };

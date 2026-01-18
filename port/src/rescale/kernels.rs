@@ -6,6 +6,18 @@
 use std::f32::consts::PI;
 use super::RescaleMethod;
 
+/// Wang hash for deterministic per-pixel randomization
+/// Same as used in mixed dithering for consistency
+#[inline]
+pub fn wang_hash(mut x: u32) -> u32 {
+    x = (x ^ 61) ^ (x >> 16);
+    x = x.wrapping_mul(9);
+    x = x ^ (x >> 4);
+    x = x.wrapping_mul(0x27d4eb2d);
+    x = x ^ (x >> 15);
+    x
+}
+
 /// Mitchell-Netravali kernel with B=C=1/3
 /// This setting minimizes both blur and ringing artifacts.
 /// Support is [-2, 2], overshoot is typically <1%
@@ -101,7 +113,28 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos2Scatter => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => lanczos3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
+        // Mixed methods should not call eval_kernel directly - they use eval_kernel_mixed
+        RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
     }
+}
+
+/// Evaluate kernel for mixed mode, selecting Lanczos2 or Lanczos3 based on source pixel
+#[inline]
+pub fn eval_kernel_mixed(x: f32, use_lanczos3: bool) -> f32 {
+    if use_lanczos3 {
+        lanczos3(x)
+    } else {
+        lanczos2(x)
+    }
+}
+
+/// Determine which kernel to use for a source pixel based on Wang hash
+#[inline]
+pub fn select_kernel_for_source(src_x: usize, src_y: usize, seed: u32) -> bool {
+    let hashed_seed = wang_hash(seed);
+    let pixel_hash = wang_hash((src_x as u32) ^ ((src_y as u32) << 16) ^ hashed_seed);
+    // Use bit 0 to select kernel: true = Lanczos3, false = Lanczos2
+    (pixel_hash & 1) != 0
 }
 
 /// Precomputed kernel weights for a single output position

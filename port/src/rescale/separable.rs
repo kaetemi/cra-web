@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights};
+use super::kernels::{KernelWeights, precompute_kernel_weights, eval_kernel_mixed, select_kernel_for_source};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -280,6 +280,325 @@ pub fn rescale_kernel_alpha_pixels(
 
                 dst[dst_row_start + x] = Pixel4::new(out_r, out_g, out_b, out_a);
             }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
+        }
+    }
+
+    dst
+}
+
+// =============================================================================
+// Mixed kernel gather implementation (Lanczos2/Lanczos3 per-source selection)
+// =============================================================================
+
+/// Mixed kernel gather-based separable rescale (2-pass)
+/// Precomputes kernel selection for each source pixel and uses that during gathering.
+/// This produces results identical to mixed scatter.
+pub fn rescale_mixed_kernel_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+
+    // Use Lanczos3 radius to cover both kernels
+    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
+    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+
+    // Center offset
+    let mapped_src_len_x = dst_width as f32 * scale_x;
+    let offset_x = (src_width as f32 - mapped_src_len_x) / 2.0;
+
+    let mapped_src_len_y = dst_height as f32 * scale_y;
+    let offset_y = (src_height as f32 - mapped_src_len_y) / 2.0;
+
+    // Pass 1: Mixed horizontal gather
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+
+    for src_y in 0..src_height {
+        let src_row = &src[src_y * src_width..(src_y + 1) * src_width];
+        let temp_row_start = src_y * dst_width;
+
+        // Precompute kernel selection for all source pixels in this row
+        let kernel_choices: Vec<bool> = (0..src_width)
+            .map(|src_x| select_kernel_for_source(src_x, src_y, seed))
+            .collect();
+
+        for dst_x in 0..dst_width {
+            let src_pos = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let center = src_pos.floor() as i32;
+
+            let start = (center - radius_x).max(0) as usize;
+            let end = ((center + radius_x) as usize).min(src_width - 1);
+
+            let mut sum = Pixel4::default();
+            let mut weight_sum = 0.0f32;
+
+            for src_x in start..=end {
+                let use_lanczos3 = kernel_choices[src_x];
+                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let d = (src_pos - src_x as f32) / filter_scale_x;
+
+                // Skip if outside this kernel's effective radius
+                if d.abs() > effective_radius {
+                    continue;
+                }
+
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+                sum = sum + src_row[src_x] * weight;
+                weight_sum += weight;
+            }
+
+            // Normalize
+            if weight_sum.abs() > 1e-8 {
+                temp[temp_row_start + dst_x] = sum * (1.0 / weight_sum);
+            } else {
+                let fallback = src_pos.round().clamp(0.0, (src_width - 1) as f32) as usize;
+                temp[temp_row_start + dst_x] = src_row[fallback];
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb((src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Mixed vertical gather
+    // Use different seed for vertical to vary pattern
+    let v_seed = seed ^ 0x9E3779B9;
+
+    // Precompute kernel selection for all source rows
+    let v_kernel_choices: Vec<bool> = (0..src_height)
+        .map(|src_y| select_kernel_for_source(0, src_y, v_seed))
+        .collect();
+
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+
+    for dst_y in 0..dst_height {
+        let src_pos = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let center = src_pos.floor() as i32;
+
+        let start = (center - radius_y).max(0) as usize;
+        let end = ((center + radius_y) as usize).min(src_height - 1);
+
+        let dst_row_start = dst_y * dst_width;
+
+        for x in 0..dst_width {
+            let mut sum = Pixel4::default();
+            let mut weight_sum = 0.0f32;
+
+            for src_y in start..=end {
+                let use_lanczos3 = v_kernel_choices[src_y];
+                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let d = (src_pos - src_y as f32) / filter_scale_y;
+
+                if d.abs() > effective_radius {
+                    continue;
+                }
+
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+                sum = sum + temp[src_y * dst_width + x] * weight;
+                weight_sum += weight;
+            }
+
+            if weight_sum.abs() > 1e-8 {
+                dst[dst_row_start + x] = sum * (1.0 / weight_sum);
+            } else {
+                let fallback = src_pos.round().clamp(0.0, (src_height - 1) as f32) as usize;
+                dst[dst_row_start + x] = temp[fallback * dst_width + x];
+            }
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb(0.5 + (dst_y + 1) as f32 / dst_height as f32 * 0.5);
+        }
+    }
+
+    dst
+}
+
+/// Alpha-aware mixed kernel gather-based separable rescale (2-pass)
+pub fn rescale_mixed_kernel_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    let (scale_x, scale_y) = calculate_scales(
+        src_width, src_height, dst_width, dst_height, scale_mode
+    );
+
+    let filter_scale_x = scale_x.max(1.0);
+    let filter_scale_y = scale_y.max(1.0);
+
+    let radius_x = (3.0 * filter_scale_x).ceil() as i32;
+    let radius_y = (3.0 * filter_scale_y).ceil() as i32;
+
+    let mapped_src_len_x = dst_width as f32 * scale_x;
+    let offset_x = (src_width as f32 - mapped_src_len_x) / 2.0;
+
+    let mapped_src_len_y = dst_height as f32 * scale_y;
+    let offset_y = (src_height as f32 - mapped_src_len_y) / 2.0;
+
+    // Pass 1: Alpha-aware mixed horizontal gather
+    let mut temp = vec![Pixel4::default(); dst_width * src_height];
+
+    for src_y in 0..src_height {
+        let src_row = &src[src_y * src_width..(src_y + 1) * src_width];
+        let temp_row_start = src_y * dst_width;
+
+        let kernel_choices: Vec<bool> = (0..src_width)
+            .map(|src_x| select_kernel_for_source(src_x, src_y, seed))
+            .collect();
+
+        for dst_x in 0..dst_width {
+            let src_pos = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let center = src_pos.floor() as i32;
+
+            let start = (center - radius_x).max(0) as usize;
+            let end = ((center + radius_x) as usize).min(src_width - 1);
+
+            let mut sum_r = 0.0f32;
+            let mut sum_g = 0.0f32;
+            let mut sum_b = 0.0f32;
+            let mut sum_a = 0.0f32;
+            let mut sum_alpha_weight = 0.0f32;
+            let mut sum_weight = 0.0f32;
+            let mut sum_r_unweighted = 0.0f32;
+            let mut sum_g_unweighted = 0.0f32;
+            let mut sum_b_unweighted = 0.0f32;
+
+            for src_x in start..=end {
+                let use_lanczos3 = kernel_choices[src_x];
+                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let d = (src_pos - src_x as f32) / filter_scale_x;
+
+                if d.abs() > effective_radius {
+                    continue;
+                }
+
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let p = src_row[src_x];
+                let alpha = p.a();
+                let aw = weight * alpha;
+
+                sum_r += aw * p.r();
+                sum_g += aw * p.g();
+                sum_b += aw * p.b();
+                sum_a += weight * alpha;
+                sum_alpha_weight += aw;
+                sum_weight += weight;
+
+                sum_r_unweighted += weight * p.r();
+                sum_g_unweighted += weight * p.g();
+                sum_b_unweighted += weight * p.b();
+            }
+
+            let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
+
+            let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
+                let inv_aw = 1.0 / sum_alpha_weight;
+                (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
+            } else if sum_weight.abs() > 1e-8 {
+                let inv_w = 1.0 / sum_weight;
+                (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+
+            temp[temp_row_start + dst_x] = Pixel4::new(out_r, out_g, out_b, out_a);
+        }
+
+        if let Some(ref mut cb) = progress {
+            cb((src_y + 1) as f32 / src_height as f32 * 0.5);
+        }
+    }
+
+    // Pass 2: Alpha-aware mixed vertical gather
+    let v_seed = seed ^ 0x9E3779B9;
+
+    let v_kernel_choices: Vec<bool> = (0..src_height)
+        .map(|src_y| select_kernel_for_source(0, src_y, v_seed))
+        .collect();
+
+    let mut dst = vec![Pixel4::default(); dst_width * dst_height];
+
+    for dst_y in 0..dst_height {
+        let src_pos = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let center = src_pos.floor() as i32;
+
+        let start = (center - radius_y).max(0) as usize;
+        let end = ((center + radius_y) as usize).min(src_height - 1);
+
+        let dst_row_start = dst_y * dst_width;
+
+        for x in 0..dst_width {
+            let mut sum_r = 0.0f32;
+            let mut sum_g = 0.0f32;
+            let mut sum_b = 0.0f32;
+            let mut sum_a = 0.0f32;
+            let mut sum_alpha_weight = 0.0f32;
+            let mut sum_weight = 0.0f32;
+            let mut sum_r_unweighted = 0.0f32;
+            let mut sum_g_unweighted = 0.0f32;
+            let mut sum_b_unweighted = 0.0f32;
+
+            for src_y in start..=end {
+                let use_lanczos3 = v_kernel_choices[src_y];
+                let effective_radius = if use_lanczos3 { 3.0 } else { 2.0 };
+                let d = (src_pos - src_y as f32) / filter_scale_y;
+
+                if d.abs() > effective_radius {
+                    continue;
+                }
+
+                let weight = eval_kernel_mixed(d, use_lanczos3);
+                let p = temp[src_y * dst_width + x];
+                let alpha = p.a();
+                let aw = weight * alpha;
+
+                sum_r += aw * p.r();
+                sum_g += aw * p.g();
+                sum_b += aw * p.b();
+                sum_a += weight * alpha;
+                sum_alpha_weight += aw;
+                sum_weight += weight;
+
+                sum_r_unweighted += weight * p.r();
+                sum_g_unweighted += weight * p.g();
+                sum_b_unweighted += weight * p.b();
+            }
+
+            let out_a = if sum_weight.abs() > 1e-8 { sum_a / sum_weight } else { 0.0 };
+
+            let (out_r, out_g, out_b) = if sum_alpha_weight.abs() > 1e-8 {
+                let inv_aw = 1.0 / sum_alpha_weight;
+                (sum_r * inv_aw, sum_g * inv_aw, sum_b * inv_aw)
+            } else if sum_weight.abs() > 1e-8 {
+                let inv_w = 1.0 / sum_weight;
+                (sum_r_unweighted * inv_w, sum_g_unweighted * inv_w, sum_b_unweighted * inv_w)
+            } else {
+                (0.0, 0.0, 0.0)
+            };
+
+            dst[dst_row_start + x] = Pixel4::new(out_r, out_g, out_b, out_a);
         }
 
         if let Some(ref mut cb) = progress {
