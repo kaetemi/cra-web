@@ -85,6 +85,8 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         18 => rescale::RescaleMethod::StochasticJincScatter,
         19 => rescale::RescaleMethod::StochasticJincScatterNormalized,
         20 => rescale::RescaleMethod::Box,
+        21 => rescale::RescaleMethod::EWALanczos3Sharp,
+        22 => rescale::RescaleMethod::EWALanczos4Sharpest,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

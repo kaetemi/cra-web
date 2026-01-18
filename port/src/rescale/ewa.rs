@@ -15,6 +15,26 @@ use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
 use super::kernels::{lanczos2, lanczos3, ewa_lanczos, mitchell, catmull_rom, jinc};
 
+/// Blur factors for sharpened EWA Lanczos variants (Nicolas Robidoux optimization)
+/// Smaller blur = sharper kernel (input is divided by blur before evaluation)
+const EWA_LANCZOS_SHARP_BLUR: f32 = 0.9812505837223707;
+const EWA_LANCZOS4_SHARPEST_BLUR: f32 = 0.8845120932605005;
+
+/// EWA Lanczos kernel with adjustable blur (sharpening) parameter
+/// blur < 1.0 sharpens the kernel by making it fall off faster
+#[inline]
+fn ewa_lanczos_blur(r: f32, lobes: f32, blur: f32) -> f32 {
+    // Divide input by blur to sharpen (blur < 1.0 makes effective r larger)
+    let r_scaled = r / blur;
+    if r_scaled >= lobes {
+        0.0
+    } else if r_scaled < 1e-8 {
+        1.0
+    } else {
+        jinc(r_scaled) * jinc(r_scaled / lobes)
+    }
+}
+
 /// Fast deterministic hash for stochastic sampling
 /// Returns a value in [0, 1)
 #[inline]
@@ -60,6 +80,9 @@ fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
         // Proper jinc-based EWA Lanczos (true 2D kernel)
         RescaleMethod::EWALanczos2 => ewa_lanczos(r, 2.0),
         RescaleMethod::EWALanczos3 => ewa_lanczos(r, 3.0),
+        // Sharpened jinc-based EWA Lanczos (Robidoux optimization)
+        RescaleMethod::EWALanczos3Sharp => ewa_lanczos_blur(r, 3.0, EWA_LANCZOS_SHARP_BLUR),
+        RescaleMethod::EWALanczos4Sharpest => ewa_lanczos_blur(r, 4.0, EWA_LANCZOS4_SHARPEST_BLUR),
         // Cubic kernels applied radially
         RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => mitchell(r),
         RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => catmull_rom(r),
@@ -71,11 +94,15 @@ fn eval_ewa_kernel(method: RescaleMethod, r: f32) -> f32 {
 
 /// Get the kernel radius for EWA methods
 /// Returns 0.0 for full-extent methods (Jinc)
+/// For sharpened variants, returns the actual support radius (lobes * blur)
 #[inline]
 fn ewa_radius(method: RescaleMethod) -> f32 {
     match method {
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 | RescaleMethod::Lanczos2 => 2.0,
         RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::Lanczos3 => 3.0,
+        // Sharpened variants: actual support = lobes * blur
+        RescaleMethod::EWALanczos3Sharp => 3.0 * EWA_LANCZOS_SHARP_BLUR,
+        RescaleMethod::EWALanczos4Sharpest => 4.0 * EWA_LANCZOS4_SHARPEST_BLUR,
         RescaleMethod::EWAMitchell | RescaleMethod::Mitchell => 2.0,
         RescaleMethod::EWACatmullRom | RescaleMethod::CatmullRom => 2.0,
         RescaleMethod::Jinc => 0.0, // Full extent

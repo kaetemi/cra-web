@@ -60,6 +60,14 @@ pub enum RescaleMethod {
     /// EWA (Elliptical Weighted Average) Lanczos3 with proper jinc-based kernel
     /// Uses jinc(r) * jinc(r/3) where jinc is the 2D analog of sinc (J1 Bessel)
     EWALanczos3,
+    /// EWA Lanczos3 Sharp (3-lobe, sharpened to minimize 1D step response error)
+    /// Uses blur=0.9812505837223707 (Robidoux optimization for ImageMagick)
+    /// Better preserves horizontal/vertical lines
+    EWALanczos3Sharp,
+    /// EWA Lanczos4 Sharpest (4-lobe, sharpened to minimize total impulse response error)
+    /// Uses blur=0.8845120932605005 (Robidoux optimization)
+    /// Very sharp but rings more. Best for preserving hash patterns.
+    EWALanczos4Sharpest,
     /// EWA (Elliptical Weighted Average) Mitchell-Netravali (B=C=1/3)
     /// 2D radial application of the Mitchell cubic kernel
     EWAMitchell,
@@ -113,6 +121,8 @@ impl RescaleMethod {
             "ewa-sinc-lanczos3" | "ewa_sinc_lanczos3" | "ewasinclanczos3" | "ewa-sinc-lanczos" | "ewa_sinc_lanczos" => Some(RescaleMethod::EWASincLanczos3),
             "ewa-lanczos2" | "ewa_lanczos2" | "ewalanczos2" => Some(RescaleMethod::EWALanczos2),
             "ewa-lanczos3" | "ewa_lanczos3" | "ewalanczos3" | "ewa-lanczos" | "ewa_lanczos" => Some(RescaleMethod::EWALanczos3),
+            "ewa-lanczos3-sharp" | "ewa_lanczos3_sharp" | "ewalanczos3sharp" | "ewa-lanczos-sharp" | "ewa_lanczos_sharp" | "lanczos3-sharp" | "lanczos3sharp" => Some(RescaleMethod::EWALanczos3Sharp),
+            "ewa-lanczos4-sharpest" | "ewa_lanczos4_sharpest" | "ewalanczos4sharpest" | "lanczos4-sharpest" | "lanczos4sharpest" => Some(RescaleMethod::EWALanczos4Sharpest),
             "ewa-mitchell" | "ewa_mitchell" | "ewamitchell" => Some(RescaleMethod::EWAMitchell),
             "ewa-catmull-rom" | "ewa_catmull_rom" | "ewacatmullrom" | "ewa-catrom" | "ewa_catrom" => Some(RescaleMethod::EWACatmullRom),
             "jinc" => Some(RescaleMethod::Jinc),
@@ -130,7 +140,8 @@ impl RescaleMethod {
             RescaleMethod::Mitchell | RescaleMethod::EWAMitchell => 2.0,
             RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => 2.0,
             RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
+            RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
         }
@@ -150,6 +161,7 @@ impl RescaleMethod {
     pub fn is_ewa(&self) -> bool {
         matches!(self, RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
                        RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
+                       RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest |
                        RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
                        RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized)
     }
@@ -161,6 +173,9 @@ impl RescaleMethod {
             RescaleMethod::SincScatter => RescaleMethod::Sinc,
             RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => RescaleMethod::Lanczos2,
             RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => RescaleMethod::Lanczos3,
+            // Sharpened variants are self-contained (blur-adjusted jinc)
+            RescaleMethod::EWALanczos3Sharp => RescaleMethod::EWALanczos3Sharp,
+            RescaleMethod::EWALanczos4Sharpest => RescaleMethod::EWALanczos4Sharpest,
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
@@ -344,6 +359,7 @@ pub fn rescale_with_progress(
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
+        RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest |
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
@@ -414,6 +430,7 @@ pub fn rescale_with_alpha_progress(
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
+        RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest |
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
             ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)

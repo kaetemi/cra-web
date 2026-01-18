@@ -187,6 +187,10 @@ pub enum ScaleMethod {
     /// EWA Lanczos3: proper jinc-based 2D kernel (best quality, recommended)
     #[default]
     EwaLanczos3,
+    /// EWA Lanczos3 Sharp: 3-lobe jinc sharpened to minimize 1D step response error (Robidoux)
+    EwaLanczos3Sharp,
+    /// EWA Lanczos4 Sharpest: 4-lobe jinc sharpened to minimize total impulse response error (Robidoux)
+    EwaLanczos4Sharpest,
     /// EWA Mitchell: Mitchell-Netravali applied radially (soft, 2D)
     EwaMitchell,
     /// EWA Catmull-Rom: Catmull-Rom applied radially (sharp, 2D)
@@ -217,6 +221,8 @@ impl ScaleMethod {
             ScaleMethod::EwaSincLanczos3 => cra_wasm::rescale::RescaleMethod::EWASincLanczos3,
             ScaleMethod::EwaLanczos2 => cra_wasm::rescale::RescaleMethod::EWALanczos2,
             ScaleMethod::EwaLanczos3 => cra_wasm::rescale::RescaleMethod::EWALanczos3,
+            ScaleMethod::EwaLanczos3Sharp => cra_wasm::rescale::RescaleMethod::EWALanczos3Sharp,
+            ScaleMethod::EwaLanczos4Sharpest => cra_wasm::rescale::RescaleMethod::EWALanczos4Sharpest,
             ScaleMethod::EwaMitchell => cra_wasm::rescale::RescaleMethod::EWAMitchell,
             ScaleMethod::EwaCatmullRom => cra_wasm::rescale::RescaleMethod::EWACatmullRom,
             ScaleMethod::Jinc => cra_wasm::rescale::RescaleMethod::Jinc,

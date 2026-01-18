@@ -412,6 +412,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::EWASincLanczos3 => "EWA Sinc-Lanczos3",
             cra_wasm::rescale::RescaleMethod::EWALanczos2 => "EWA Lanczos2 (jinc)",
             cra_wasm::rescale::RescaleMethod::EWALanczos3 => "EWA Lanczos3 (jinc)",
+            cra_wasm::rescale::RescaleMethod::EWALanczos3Sharp => "EWA Lanczos3 Sharp (Robidoux)",
+            cra_wasm::rescale::RescaleMethod::EWALanczos4Sharpest => "EWA Lanczos4 Sharpest (Robidoux)",
             cra_wasm::rescale::RescaleMethod::EWAMitchell => "EWA Mitchell",
             cra_wasm::rescale::RescaleMethod::EWACatmullRom => "EWA Catmull-Rom",
             cra_wasm::rescale::RescaleMethod::Jinc => "Jinc (full extent)",
