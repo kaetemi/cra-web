@@ -11,7 +11,6 @@ mod kernels;
 mod bilinear;
 mod separable;
 mod scatter;
-mod variance_adaptive;
 
 use crate::pixel::Pixel4;
 
@@ -31,12 +30,6 @@ pub enum RescaleMethod {
     Lanczos2,
     /// Lanczos3 - good balance of sharpness and ringing
     Lanczos3,
-    /// Lanczos4 - sharper than Lanczos3, more ringing
-    Lanczos4,
-    /// Lanczos5 - very sharp, noticeable ringing
-    Lanczos5,
-    /// Lanczos6 - extremely sharp, approaching sinc behavior
-    Lanczos6,
     /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
     /// WARNING: O(N²) - very slow for large images, severe ringing at edges
     Sinc,
@@ -45,27 +38,10 @@ pub enum RescaleMethod {
     /// Sinc with scatter-based accumulation (experimental)
     /// WARNING: O(N²) - very slow for large images
     SincScatter,
-    /// Mixed Lanczos 2+3 (gather): randomly switches between Lanczos2 and Lanczos3 per source pixel
-    LanczosMixed,
-    /// Mixed Lanczos 2+3 (scatter): randomly switches between Lanczos2 and Lanczos3 per source pixel
-    LanczosMixedScatter,
-    /// Mixed Lanczos 2+4: randomly switches between Lanczos2 and Lanczos4 per source pixel
-    Lanczos24Mixed,
-    /// Mixed Lanczos 3+5: randomly switches between Lanczos3 and Lanczos5 per source pixel
-    Lanczos35Mixed,
-    /// Lanczos3 with integrated pixel area (more accurate weights, especially for downscaling)
-    Lanczos3Integrated,
-    /// Sinc with integrated pixel area (more accurate weights, uses full image extent)
-    SincIntegrated,
     /// Box filter: true area integration computing exact overlap between dest and source pixels.
     /// - Upscaling: nearest-neighbor (dest pixel smaller than source, samples one pixel)
     /// - Downscaling: proper area average (dest pixel covers multiple sources, weighted by overlap)
     Box,
-    /// Variance-adaptive rescaling with energy-conserving error scatter.
-    /// - Low variance (smooth): Lanczos2 (gentle, minimal ringing)
-    /// - High variance (edges): Lanczos6 (sharp, ringing hidden by edge detail)
-    /// - Tracks energy conservation and scatters error to high-variance regions
-    VarianceAdaptive,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -88,63 +64,35 @@ impl RescaleMethod {
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos2" => Some(RescaleMethod::Lanczos2),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
-            "lanczos4" => Some(RescaleMethod::Lanczos4),
-            "lanczos5" => Some(RescaleMethod::Lanczos5),
-            "lanczos6" => Some(RescaleMethod::Lanczos6),
             "sinc" => Some(RescaleMethod::Sinc),
             "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
-            "lanczos-mixed" | "lanczos_mixed" | "mixed" | "mixed23" => Some(RescaleMethod::LanczosMixed),
-            "lanczos-mixed-scatter" | "lanczos_mixed_scatter" | "mixed-scatter" | "mixed23-scatter" => Some(RescaleMethod::LanczosMixedScatter),
-            "mixed24" | "lanczos24-mixed" => Some(RescaleMethod::Lanczos24Mixed),
-            "mixed35" | "lanczos35-mixed" => Some(RescaleMethod::Lanczos35Mixed),
-            "lanczos3-integrated" | "lanczos3_integrated" | "integrated" => Some(RescaleMethod::Lanczos3Integrated),
-            "sinc-integrated" | "sinc_integrated" => Some(RescaleMethod::SincIntegrated),
             "box" | "area" | "nearest" => Some(RescaleMethod::Box),
-            "variance-adaptive" | "variance_adaptive" | "vadaptive" | "adaptive" => Some(RescaleMethod::VarianceAdaptive),
             _ => None,
         }
     }
 
     /// Get the kernel radius for this method (0 = full image extent)
-    /// For mixed methods, returns the larger radius to ensure all weights are computed
     pub fn base_radius(&self) -> f32 {
         match self {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell => 2.0,
             RescaleMethod::CatmullRom => 2.0,
             RescaleMethod::Lanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::Lanczos3Integrated => 3.0,
-            RescaleMethod::Lanczos4 => 4.0,
-            RescaleMethod::Lanczos5 => 5.0,
-            RescaleMethod::Lanczos6 => 6.0,
-            RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated => 0.0, // Special: uses full image extent
-            // Mixed uses the larger radius of the pair
-            RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => 3.0,  // 2+3 -> 3
-            RescaleMethod::Lanczos24Mixed => 4.0,  // 2+4 -> 4
-            RescaleMethod::Lanczos35Mixed => 5.0,  // 3+5 -> 5
+            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => 3.0,
+            RescaleMethod::Sinc | RescaleMethod::SincScatter => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
-            RescaleMethod::VarianceAdaptive => 6.0,  // Uses Lanczos2-6 adaptively; max radius is 6
         }
     }
 
     /// Returns true if this method uses full image extent (O(N²))
     pub fn is_full_extent(&self) -> bool {
-        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated)
+        matches!(self, RescaleMethod::Sinc | RescaleMethod::SincScatter)
     }
 
     /// Returns true if this is a scatter-based method
     pub fn is_scatter(&self) -> bool {
-        matches!(self,
-            RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter |
-            RescaleMethod::LanczosMixedScatter)
-    }
-
-    /// Returns true if this is a mixed kernel method
-    pub fn is_mixed(&self) -> bool {
-        matches!(self,
-            RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter |
-            RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed)
+        matches!(self, RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter)
     }
 
     /// Get the underlying kernel method for scatter variants
@@ -152,7 +100,6 @@ impl RescaleMethod {
         match self {
             RescaleMethod::Lanczos3Scatter => RescaleMethod::Lanczos3,
             RescaleMethod::SincScatter => RescaleMethod::Sinc,
-            // Mixed methods don't have a single kernel - they switch per-pixel
             other => *other,
         }
     }
@@ -311,38 +258,24 @@ pub fn rescale_with_progress(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     if src_width == dst_width && src_height == dst_height {
-        if let Some(ref mut cb) = progress {
+        if let Some(cb) = progress {
             cb(1.0);
         }
         return src.to_vec();
     }
 
-    // Deterministic seed for mixed kernel methods
-    let seed = (src_width as u32).wrapping_mul(31) ^ (src_height as u32).wrapping_mul(17)
-        ^ (dst_width as u32).wrapping_mul(13) ^ (dst_height as u32).wrapping_mul(7);
-
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
-        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
-        RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc | RescaleMethod::SincIntegrated | RescaleMethod::Box => {
+        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
+        RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
-            separable::rescale_mixed_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, seed, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::LanczosMixedScatter => {
-            scatter::rescale_mixed_scatter_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
-        }
-        RescaleMethod::VarianceAdaptive => {
-            variance_adaptive::rescale_variance_adaptive(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
@@ -380,39 +313,24 @@ pub fn rescale_with_alpha_progress(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    mut progress: Option<&mut dyn FnMut(f32)>,
+    progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     if src_width == dst_width && src_height == dst_height {
-        if let Some(ref mut cb) = progress {
+        if let Some(cb) = progress {
             cb(1.0);
         }
         return src.to_vec();
     }
 
-    // Deterministic seed for mixed kernel methods
-    let seed = (src_width as u32).wrapping_mul(31) ^ (src_height as u32).wrapping_mul(17)
-        ^ (dst_width as u32).wrapping_mul(13) ^ (dst_height as u32).wrapping_mul(7);
-
     match method {
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
-        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Integrated |
-        RescaleMethod::Lanczos4 | RescaleMethod::Lanczos5 | RescaleMethod::Lanczos6 |
-        RescaleMethod::Sinc | RescaleMethod::SincIntegrated | RescaleMethod::Box => {
+        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
+        RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::LanczosMixed | RescaleMethod::Lanczos24Mixed | RescaleMethod::Lanczos35Mixed => {
-            separable::rescale_mixed_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, seed, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
-        }
-        RescaleMethod::LanczosMixedScatter => {
-            scatter::rescale_mixed_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, seed, progress)
-        }
-        RescaleMethod::VarianceAdaptive => {
-            // For now, use the regular variance-adaptive (alpha-aware variant could be added later)
-            variance_adaptive::rescale_variance_adaptive(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
         }
     }
 }
@@ -1381,72 +1299,4 @@ mod tests {
         assert!(max_diff < 1e-3, "Scatter should match gather for prime dims, max diff: {}", max_diff);
     }
 
-    #[test]
-    fn test_mixed_lanczos_scatter_matches_gather() {
-        // Mixed Lanczos scatter and gather should produce identical results
-        // since both use per-source-pixel kernel selection with same seed
-        let src_size = 8;
-        let dst_size = 4;
-
-        let mut src = Vec::with_capacity(src_size * src_size);
-        for y in 0..src_size {
-            for x in 0..src_size {
-                let r = x as f32 / (src_size - 1) as f32;
-                let g = y as f32 / (src_size - 1) as f32;
-                let b = 0.5;
-                src.push(Pixel4::new(r, g, b, 1.0));
-            }
-        }
-
-        let gather = rescale(&src, src_size, src_size, dst_size, dst_size,
-                             RescaleMethod::LanczosMixed, ScaleMode::Independent);
-        let scatter = rescale(&src, src_size, src_size, dst_size, dst_size,
-                              RescaleMethod::LanczosMixedScatter, ScaleMode::Independent);
-
-        let mut max_diff = 0.0f32;
-        for (g, s) in gather.iter().zip(scatter.iter()) {
-            for c in 0..4 {
-                let diff = (g[c] - s[c]).abs();
-                if diff > max_diff {
-                    max_diff = diff;
-                }
-            }
-        }
-
-        eprintln!("Mixed Lanczos scatter vs gather max diff: {:.6}", max_diff);
-        assert!(max_diff < 1e-4, "Mixed scatter should match gather, max diff: {}", max_diff);
-    }
-
-    #[test]
-    fn test_mixed_lanczos_differs_from_pure_lanczos() {
-        // Mixed Lanczos should produce different results than pure Lanczos3
-        // (due to random kernel selection per source)
-        let src_size = 8;
-        let dst_size = 4;
-
-        let mut src = Vec::with_capacity(src_size * src_size);
-        for y in 0..src_size {
-            for x in 0..src_size {
-                let r = x as f32 / (src_size - 1) as f32;
-                let g = y as f32 / (src_size - 1) as f32;
-                src.push(Pixel4::new(r, g, 0.5, 1.0));
-            }
-        }
-
-        let lanczos3 = rescale(&src, src_size, src_size, dst_size, dst_size,
-                               RescaleMethod::Lanczos3, ScaleMode::Independent);
-        let mixed = rescale(&src, src_size, src_size, dst_size, dst_size,
-                            RescaleMethod::LanczosMixed, ScaleMode::Independent);
-
-        let mut total_diff = 0.0f32;
-        for (l, m) in lanczos3.iter().zip(mixed.iter()) {
-            for c in 0..3 {
-                total_diff += (l[c] - m[c]).abs();
-            }
-        }
-
-        eprintln!("Mixed vs Lanczos3 total diff: {:.6}", total_diff);
-        // Should have some meaningful difference (not identical)
-        assert!(total_diff > 1e-4, "Mixed should differ from pure Lanczos3, total diff: {}", total_diff);
-    }
 }

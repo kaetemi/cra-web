@@ -6,18 +6,6 @@
 use std::f32::consts::PI;
 use super::RescaleMethod;
 
-/// Wang hash for deterministic per-pixel randomization
-/// Same as used in mixed dithering for consistency
-#[inline]
-pub fn wang_hash(mut x: u32) -> u32 {
-    x = (x ^ 61) ^ (x >> 16);
-    x = x.wrapping_mul(9);
-    x = x ^ (x >> 4);
-    x = x.wrapping_mul(0x27d4eb2d);
-    x = x ^ (x >> 15);
-    x
-}
-
 /// Mitchell-Netravali kernel with B=C=1/3
 /// This setting minimizes both blur and ringing artifacts.
 /// Support is [-2, 2], overshoot is typically <1%
@@ -83,51 +71,6 @@ pub fn lanczos3(x: f32) -> f32 {
         let pi_x = PI * x;
         let pi_x_3 = pi_x / 3.0;
         (pi_x.sin() / pi_x) * (pi_x_3.sin() / pi_x_3)
-    }
-}
-
-/// Lanczos kernel with a=4
-/// Sharper than Lanczos3, more ringing artifacts.
-#[inline]
-pub fn lanczos4(x: f32) -> f32 {
-    if x.abs() < 1e-8 {
-        1.0
-    } else if x.abs() >= 4.0 {
-        0.0
-    } else {
-        let pi_x = PI * x;
-        let pi_x_4 = pi_x / 4.0;
-        (pi_x.sin() / pi_x) * (pi_x_4.sin() / pi_x_4)
-    }
-}
-
-/// Lanczos kernel with a=5
-/// Very sharp, noticeable ringing on edges.
-#[inline]
-pub fn lanczos5(x: f32) -> f32 {
-    if x.abs() < 1e-8 {
-        1.0
-    } else if x.abs() >= 5.0 {
-        0.0
-    } else {
-        let pi_x = PI * x;
-        let pi_x_5 = pi_x / 5.0;
-        (pi_x.sin() / pi_x) * (pi_x_5.sin() / pi_x_5)
-    }
-}
-
-/// Lanczos kernel with a=6
-/// Extremely sharp, approaching sinc behavior. Significant ringing.
-#[inline]
-pub fn lanczos6(x: f32) -> f32 {
-    if x.abs() < 1e-8 {
-        1.0
-    } else if x.abs() >= 6.0 {
-        0.0
-    } else {
-        let pi_x = PI * x;
-        let pi_x_6 = pi_x / 6.0;
-        (pi_x.sin() / pi_x) * (pi_x_6.sin() / pi_x_6)
     }
 }
 
@@ -203,127 +146,10 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos2 => lanczos2(x),
-        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::Lanczos3Integrated => lanczos3(x),
-        RescaleMethod::Lanczos4 => lanczos4(x),
-        RescaleMethod::Lanczos5 => lanczos5(x),
-        RescaleMethod::Lanczos6 => lanczos6(x),
-        RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::SincIntegrated => sinc(x),
+        RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => lanczos3(x),
+        RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Box => box_filter(x),
-        // Mixed methods should not call eval_kernel directly - they use specialized eval functions
-        RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
-        RescaleMethod::Lanczos24Mixed => lanczos4(x),
-        RescaleMethod::Lanczos35Mixed => lanczos5(x),
-        // VarianceAdaptive doesn't use eval_kernel - it has its own adaptive kernel selection
-        RescaleMethod::VarianceAdaptive => lanczos3(x),
     }
-}
-
-/// Evaluate kernel for mixed 2+3 mode, selecting Lanczos2 or Lanczos3 based on source pixel
-#[inline]
-pub fn eval_kernel_mixed(x: f32, use_larger: bool) -> f32 {
-    if use_larger {
-        lanczos3(x)
-    } else {
-        lanczos2(x)
-    }
-}
-
-/// Evaluate kernel for mixed 2+4 mode, selecting Lanczos2 or Lanczos4 based on source pixel
-#[inline]
-pub fn eval_kernel_mixed_24(x: f32, use_larger: bool) -> f32 {
-    if use_larger {
-        lanczos4(x)
-    } else {
-        lanczos2(x)
-    }
-}
-
-/// Evaluate kernel for mixed 3+5 mode, selecting Lanczos3 or Lanczos5 based on source pixel
-#[inline]
-pub fn eval_kernel_mixed_35(x: f32, use_larger: bool) -> f32 {
-    if use_larger {
-        lanczos5(x)
-    } else {
-        lanczos3(x)
-    }
-}
-
-/// Determine which kernel to use for a source pixel based on Wang hash
-#[inline]
-pub fn select_kernel_for_source(src_x: usize, src_y: usize, seed: u32) -> bool {
-    let hashed_seed = wang_hash(seed);
-    let pixel_hash = wang_hash((src_x as u32) ^ ((src_y as u32) << 16) ^ hashed_seed);
-    // Use bit 0 to select kernel: true = larger kernel, false = smaller kernel
-    (pixel_hash & 1) != 0
-}
-
-/// Integrate Lanczos3 kernel over a pixel's area using 5-point Gaussian quadrature
-///
-/// For a source pixel at index `si` (spanning si-0.5 to si+0.5), computes:
-/// ∫[si-0.5 to si+0.5] lanczos3((src_pos - t) / filter_scale) dt
-///
-/// This is more accurate than point sampling, especially for downscaling
-/// where each destination pixel covers multiple source pixels.
-#[inline]
-pub fn lanczos3_integrated(src_pos: f32, si: f32, filter_scale: f32) -> f32 {
-    // 5-point Gauss-Legendre quadrature nodes and weights for [-1, 1]
-    // Transformed to [-0.5, 0.5] by multiplying nodes by 0.5 and weights by 0.5
-    const NODES: [f32; 5] = [
-        0.0,
-        -0.538469310105683 * 0.5,
-         0.538469310105683 * 0.5,
-        -0.906179845938664 * 0.5,
-         0.906179845938664 * 0.5,
-    ];
-    const WEIGHTS: [f32; 5] = [
-        0.568888888888889 * 0.5,
-        0.478628670499366 * 0.5,
-        0.478628670499366 * 0.5,
-        0.236926885056189 * 0.5,
-        0.236926885056189 * 0.5,
-    ];
-
-    let mut sum = 0.0f32;
-    for i in 0..5 {
-        // Sample point within the pixel: t = si + node
-        // Kernel argument: (src_pos - t) / filter_scale = (src_pos - si - node) / filter_scale
-        let d = (src_pos - si - NODES[i]) / filter_scale;
-        sum += WEIGHTS[i] * lanczos3(d);
-    }
-    sum
-}
-
-/// Integrate Sinc kernel over a pixel's area using 5-point Gaussian quadrature
-///
-/// For a source pixel at index `si` (spanning si-0.5 to si+0.5), computes:
-/// ∫[si-0.5 to si+0.5] sinc((src_pos - t) / filter_scale) dt
-///
-/// This is more accurate than point sampling for the pure sinc kernel.
-#[inline]
-pub fn sinc_integrated(src_pos: f32, si: f32, filter_scale: f32) -> f32 {
-    // 5-point Gauss-Legendre quadrature nodes and weights for [-1, 1]
-    // Transformed to [-0.5, 0.5] by multiplying nodes by 0.5 and weights by 0.5
-    const NODES: [f32; 5] = [
-        0.0,
-        -0.538469310105683 * 0.5,
-         0.538469310105683 * 0.5,
-        -0.906179845938664 * 0.5,
-         0.906179845938664 * 0.5,
-    ];
-    const WEIGHTS: [f32; 5] = [
-        0.568888888888889 * 0.5,
-        0.478628670499366 * 0.5,
-        0.478628670499366 * 0.5,
-        0.236926885056189 * 0.5,
-        0.236926885056189 * 0.5,
-    ];
-
-    let mut sum = 0.0f32;
-    for i in 0..5 {
-        let d = (src_pos - si - NODES[i]) / filter_scale;
-        sum += WEIGHTS[i] * sinc(d);
-    }
-    sum
 }
 
 /// Precomputed kernel weights for a single output position
@@ -393,59 +219,6 @@ pub fn precompute_kernel_weights(
     all_weights
 }
 
-/// Precompute integrated Lanczos3 kernel weights for 1D resampling
-/// Uses pixel area integration instead of point sampling for more accurate weights
-pub fn precompute_integrated_kernel_weights(
-    src_len: usize,
-    dst_len: usize,
-    scale: f32,
-    filter_scale: f32,
-    radius: i32,
-) -> Vec<KernelWeights> {
-    let mut all_weights = Vec::with_capacity(dst_len);
-
-    // Center offset: if scale doesn't match src_len/dst_len (uniform scaling),
-    // center the mapping so edges are equally cropped/extended
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
-
-    for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
-        let center = src_pos.floor() as i32;
-
-        // Find the valid source index range
-        let start = (center - radius).max(0) as usize;
-        let end = ((center + radius) as usize).min(src_len - 1);
-
-        // Collect integrated weights for each source pixel
-        let mut weights = Vec::with_capacity(end - start + 1);
-        let mut weight_sum = 0.0f32;
-
-        for si in start..=end {
-            let weight = lanczos3_integrated(src_pos, si as f32, filter_scale);
-            weights.push(weight);
-            weight_sum += weight;
-        }
-
-        // Normalize weights
-        if weight_sum.abs() > 1e-8 {
-            for w in &mut weights {
-                *w /= weight_sum;
-            }
-        }
-
-        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
-
-        all_weights.push(KernelWeights {
-            start_idx: start,
-            weights,
-            fallback_idx: fallback,
-        });
-    }
-
-    all_weights
-}
-
 /// Precompute box filter weights using true area integration.
 ///
 /// Unlike other kernels, box filter should receive the raw scale (src/dst) as filter_scale,
@@ -483,56 +256,6 @@ pub fn precompute_box_weights(
 
         for si in start..=end {
             let weight = box_integrated(src_pos, si as f32, filter_scale);
-            weights.push(weight);
-            weight_sum += weight;
-        }
-
-        // Normalize weights
-        if weight_sum.abs() > 1e-8 {
-            for w in &mut weights {
-                *w /= weight_sum;
-            }
-        }
-
-        let fallback = src_pos.round().clamp(0.0, (src_len - 1) as f32) as usize;
-
-        all_weights.push(KernelWeights {
-            start_idx: start,
-            weights,
-            fallback_idx: fallback,
-        });
-    }
-
-    all_weights
-}
-
-/// Precompute integrated Sinc kernel weights for 1D resampling (full extent)
-/// Uses pixel area integration instead of point sampling for more accurate weights
-pub fn precompute_integrated_sinc_weights(
-    src_len: usize,
-    dst_len: usize,
-    scale: f32,
-    filter_scale: f32,
-) -> Vec<KernelWeights> {
-    let mut all_weights = Vec::with_capacity(dst_len);
-
-    // Center offset
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
-
-    for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
-
-        // Sinc uses full extent - all source pixels
-        let start = 0;
-        let end = src_len - 1;
-
-        // Collect integrated weights for each source pixel
-        let mut weights = Vec::with_capacity(end - start + 1);
-        let mut weight_sum = 0.0f32;
-
-        for si in start..=end {
-            let weight = sinc_integrated(src_pos, si as f32, filter_scale);
             weights.push(weight);
             weight_sum += weight;
         }

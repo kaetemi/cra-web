@@ -335,23 +335,13 @@
                 <select id="interpolation">
                     <option value="1" selected>Lanczos3 (recommended)</option>
                     <option value="7">Lanczos2 (less ringing)</option>
-                    <option value="11">Lanczos4 (sharper)</option>
-                    <option value="13">Lanczos5 (very sharp)</option>
-                    <option value="15">Lanczos6 (extremely sharp)</option>
                     <option value="3">Catmull-Rom (sharp, low ringing)</option>
                     <option value="2">Mitchell (soft, minimal ringing)</option>
                     <option value="0">Bilinear (faster)</option>
                     <option value="20">Box (nearest up, area-average down)</option>
-                    <option value="21">Variance-Adaptive (experimental)</option>
                     <option value="4">Sinc (research only, SLOW)</option>
                     <option value="5">Lanczos3 Scatter (experimental)</option>
                     <option value="6">Sinc Scatter (experimental, SLOW)</option>
-                    <option value="9">Mixed Lanczos 2+3 (experimental)</option>
-                    <option value="10">Mixed Lanczos 2+3 Scatter (experimental)</option>
-                    <option value="16">Mixed Lanczos 2+4 (experimental)</option>
-                    <option value="17">Mixed Lanczos 3+5 (experimental)</option>
-                    <option value="18">Lanczos3 Integrated (experimental)</option>
-                    <option value="19">Sinc Integrated (experimental, SLOW)</option>
                 </select>
             </div>
 
@@ -597,7 +587,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'lanczos2-scatter' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 20: 'box' };
 
             // Map dither mode values to CLI names
             const modeMap = {
