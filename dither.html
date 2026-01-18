@@ -1695,12 +1695,12 @@
             uploadBox.style.background = '';
 
             const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) {
+            if (file && (file.type.startsWith('image/') || !file.type)) {
                 const input = document.getElementById('input-file');
                 const dt = new DataTransfer();
                 dt.items.add(file);
                 input.files = dt.files;
-                input.dispatchEvent(new Event('change'));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
 

@@ -548,7 +548,7 @@
                 switch (type) {
                     case 'ready':
                         workerReady = true;
-                        document.getElementById('process-btn').disabled = !inputFileBytes;
+                        updateProcessButtonState();
                         break;
 
                     case 'progress':
@@ -814,6 +814,11 @@
             }
         }
 
+        // Update process button state based on worker readiness and image loaded
+        function updateProcessButtonState() {
+            document.getElementById('process-btn').disabled = !(workerReady && inputFileBytes);
+        }
+
         function calculateOutputDimensions() {
             const width = parseInt(document.getElementById('target-width').value) || 256;
             const height = parseInt(document.getElementById('target-height').value) || 256;
@@ -951,7 +956,7 @@
                 // Re-attach event listener to new input element
                 document.getElementById('file-input').addEventListener('change', handleFileSelect);
 
-                document.getElementById('process-btn').disabled = !workerReady;
+                updateProcessButtonState();
                 document.getElementById('error-message').classList.remove('visible');
             } catch (err) {
                 document.getElementById('error-message').textContent = 'Failed to load image: ' + err.message;
@@ -975,12 +980,12 @@
             e.preventDefault();
             e.currentTarget.style.borderColor = '';
             const file = e.dataTransfer.files[0];
-            if (file && file.type.startsWith('image/')) {
+            if (file && (file.type.startsWith('image/') || file.name.endsWith('.safetensors') || !file.type)) {
                 const input = document.getElementById('file-input');
                 const dt = new DataTransfer();
                 dt.items.add(file);
                 input.files = dt.files;
-                input.dispatchEvent(new Event('change'));
+                input.dispatchEvent(new Event('change', { bubbles: true }));
             }
         });
 
