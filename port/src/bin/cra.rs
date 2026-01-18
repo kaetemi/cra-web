@@ -210,16 +210,8 @@ enum ScaleMethod {
     Lanczos6,
     /// Pure Sinc (non-windowed): theoretically ideal, full image extent (SLOW, research only)
     Sinc,
-    /// Lanczos2 with scatter-based accumulation (experimental)
-    Lanczos2Scatter,
     /// Lanczos3 with scatter-based accumulation (experimental)
     Lanczos3Scatter,
-    /// Lanczos4 with scatter-based accumulation (experimental)
-    Lanczos4Scatter,
-    /// Lanczos5 with scatter-based accumulation (experimental)
-    Lanczos5Scatter,
-    /// Lanczos6 with scatter-based accumulation (experimental)
-    Lanczos6Scatter,
     /// Sinc with scatter-based accumulation (experimental, SLOW)
     SincScatter,
     /// Mixed Lanczos (experimental): randomly switches between Lanczos2/3 per source pixel
@@ -240,11 +232,7 @@ impl ScaleMethod {
             ScaleMethod::Lanczos5 => cra_wasm::rescale::RescaleMethod::Lanczos5,
             ScaleMethod::Lanczos6 => cra_wasm::rescale::RescaleMethod::Lanczos6,
             ScaleMethod::Sinc => cra_wasm::rescale::RescaleMethod::Sinc,
-            ScaleMethod::Lanczos2Scatter => cra_wasm::rescale::RescaleMethod::Lanczos2Scatter,
             ScaleMethod::Lanczos3Scatter => cra_wasm::rescale::RescaleMethod::Lanczos3Scatter,
-            ScaleMethod::Lanczos4Scatter => cra_wasm::rescale::RescaleMethod::Lanczos4Scatter,
-            ScaleMethod::Lanczos5Scatter => cra_wasm::rescale::RescaleMethod::Lanczos5Scatter,
-            ScaleMethod::Lanczos6Scatter => cra_wasm::rescale::RescaleMethod::Lanczos6Scatter,
             ScaleMethod::SincScatter => cra_wasm::rescale::RescaleMethod::SincScatter,
             ScaleMethod::LanczosMixed => cra_wasm::rescale::RescaleMethod::LanczosMixed,
             ScaleMethod::LanczosMixedScatter => cra_wasm::rescale::RescaleMethod::LanczosMixedScatter,
@@ -873,11 +861,7 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::Lanczos5 => "Lanczos5",
             cra_wasm::rescale::RescaleMethod::Lanczos6 => "Lanczos6",
             cra_wasm::rescale::RescaleMethod::Sinc => "Sinc (full extent)",
-            cra_wasm::rescale::RescaleMethod::Lanczos2Scatter => "Lanczos2 Scatter",
             cra_wasm::rescale::RescaleMethod::Lanczos3Scatter => "Lanczos3 Scatter",
-            cra_wasm::rescale::RescaleMethod::Lanczos4Scatter => "Lanczos4 Scatter",
-            cra_wasm::rescale::RescaleMethod::Lanczos5Scatter => "Lanczos5 Scatter",
-            cra_wasm::rescale::RescaleMethod::Lanczos6Scatter => "Lanczos6 Scatter",
             cra_wasm::rescale::RescaleMethod::SincScatter => "Sinc Scatter (full extent)",
             cra_wasm::rescale::RescaleMethod::LanczosMixed => "Mixed Lanczos",
             cra_wasm::rescale::RescaleMethod::LanczosMixedScatter => "Mixed Lanczos Scatter",

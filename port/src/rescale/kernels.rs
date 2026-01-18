@@ -155,11 +155,11 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         }
         RescaleMethod::Mitchell => mitchell(x),
         RescaleMethod::CatmullRom => catmull_rom(x),
-        RescaleMethod::Lanczos2 | RescaleMethod::Lanczos2Scatter => lanczos2(x),
+        RescaleMethod::Lanczos2 => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter => lanczos3(x),
-        RescaleMethod::Lanczos4 | RescaleMethod::Lanczos4Scatter => lanczos4(x),
-        RescaleMethod::Lanczos5 | RescaleMethod::Lanczos5Scatter => lanczos5(x),
-        RescaleMethod::Lanczos6 | RescaleMethod::Lanczos6Scatter => lanczos6(x),
+        RescaleMethod::Lanczos4 => lanczos4(x),
+        RescaleMethod::Lanczos5 => lanczos5(x),
+        RescaleMethod::Lanczos6 => lanczos6(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         // Mixed methods should not call eval_kernel directly - they use eval_kernel_mixed
         RescaleMethod::LanczosMixed | RescaleMethod::LanczosMixedScatter => lanczos3(x),
