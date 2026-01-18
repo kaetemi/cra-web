@@ -36,6 +36,12 @@ pub enum RescaleMethod {
     Lanczos2,
     /// Lanczos3 - good balance of sharpness and ringing
     Lanczos3,
+    /// Ginseng2 - Jinc-windowed Sinc with 2 lobes (sinc(x) * jinc(x/2))
+    /// Separable filter using jinc as window instead of sinc (cf. Lanczos)
+    Ginseng2,
+    /// Ginseng3 - Jinc-windowed Sinc with 3 lobes (sinc(x) * jinc(x/3))
+    /// Separable filter using jinc as window instead of sinc (cf. Lanczos)
+    Ginseng3,
     /// Pure Sinc (non-windowed) - theoretically ideal, uses full image extent
     /// WARNING: O(N²) - very slow for large images, severe ringing at edges
     Sinc,
@@ -100,6 +106,8 @@ impl RescaleMethod {
             "catmull-rom" | "catmullrom" | "catrom" | "cubic" | "bicubic" => Some(RescaleMethod::CatmullRom),
             "lanczos2" => Some(RescaleMethod::Lanczos2),
             "lanczos" | "lanczos3" => Some(RescaleMethod::Lanczos3),
+            "ginseng2" => Some(RescaleMethod::Ginseng2),
+            "ginseng" | "ginseng3" => Some(RescaleMethod::Ginseng3),
             "sinc" => Some(RescaleMethod::Sinc),
             "lanczos3-scatter" | "lanczos_scatter" => Some(RescaleMethod::Lanczos3Scatter),
             "sinc-scatter" | "sinc_scatter" => Some(RescaleMethod::SincScatter),
@@ -123,8 +131,8 @@ impl RescaleMethod {
             RescaleMethod::Bilinear => 1.0,
             RescaleMethod::Mitchell | RescaleMethod::EWAMitchell => 2.0,
             RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => 2.0,
-            RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
-            RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
+            RescaleMethod::Lanczos2 | RescaleMethod::Ginseng2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => 2.0,
+            RescaleMethod::Lanczos3 | RescaleMethod::Ginseng3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => 3.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc => 0.0, // Special: uses full image extent
             RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::PeakedCosine | RescaleMethod::PeakedCosineCorrected => 0.0, // Scale-dependent; computed in precompute_peaked_cosine_weights
@@ -334,7 +342,8 @@ pub fn rescale_with_progress(
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
-        RescaleMethod::Sinc | RescaleMethod::Box => {
+        RescaleMethod::Sinc | RescaleMethod::Box |
+        RescaleMethod::Ginseng2 | RescaleMethod::Ginseng3 => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
@@ -401,7 +410,8 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
-        RescaleMethod::Sinc | RescaleMethod::Box => {
+        RescaleMethod::Sinc | RescaleMethod::Box |
+        RescaleMethod::Ginseng2 | RescaleMethod::Ginseng3 => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {

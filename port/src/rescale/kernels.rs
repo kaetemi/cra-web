@@ -74,6 +74,33 @@ pub fn lanczos3(x: f32) -> f32 {
     }
 }
 
+/// Ginseng kernel with a=2 (Jinc-windowed Sinc)
+/// Uses sinc(x) * jinc(x/2) - separable filter with jinc window
+/// Named "Ginseng" = "Jinc-sinc" (like how Lanczos = "sinc-sinc")
+#[inline]
+pub fn ginseng2(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 2.0 {
+        0.0
+    } else {
+        sinc(x) * jinc(x / 2.0)
+    }
+}
+
+/// Ginseng kernel with a=3 (Jinc-windowed Sinc)
+/// Uses sinc(x) * jinc(x/3) - separable filter with jinc window
+#[inline]
+pub fn ginseng3(x: f32) -> f32 {
+    if x.abs() < 1e-8 {
+        1.0
+    } else if x.abs() >= 3.0 {
+        0.0
+    } else {
+        sinc(x) * jinc(x / 3.0)
+    }
+}
+
 /// Pure sinc kernel (non-windowed)
 /// This is the theoretically ideal interpolation kernel for band-limited signals.
 /// Unlike Lanczos, it has no window function and extends to infinity (full image).
@@ -199,6 +226,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::CatmullRom | RescaleMethod::EWACatmullRom => catmull_rom(x),
         RescaleMethod::Lanczos2 | RescaleMethod::EWASincLanczos2 | RescaleMethod::EWALanczos2 => lanczos2(x),
         RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 => lanczos3(x),
+        RescaleMethod::Ginseng2 => ginseng2(x),
+        RescaleMethod::Ginseng3 => ginseng3(x),
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Jinc => jinc(x),  // 2D radial, but fallback for 1D context
         RescaleMethod::Box => box_filter(x),
