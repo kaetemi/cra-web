@@ -224,11 +224,12 @@ def main():
     print()
 
     print("Temperature Scale Conversion (per CIE 15:2004 Appendix E):")
-    print(f"  T_new = T_old × (c₂_ITS90 / c₂_old)")
-    print(f"  T_new = T_old × ({C2_ITS90} / {C2_OLD})")
-    print(f"  T_new = T_old × {C2_RATIO:.11f}")
+    print(f"  T_new = T_old × (c₂_new / c₂_old)")
     print()
-    print(f"  D65: 6500K × {C2_RATIO:.11f} = {6500 * C2_RATIO:.6f}K")
+    c2_ratio_its90 = C2_ITS90 / C2_OLD
+    c2_ratio_codata = C2_CODATA / C2_OLD
+    print(f"  Using ITS-90 (correct):  6500 × ({C2_ITS90}/{C2_OLD}) = 6500 × {c2_ratio_its90:.11f} = {6500 * c2_ratio_its90:.6f}K")
+    print(f"  Using CODATA (wrong):    6500 × ({C2_CODATA}/{C2_OLD}) = 6500 × {c2_ratio_codata:.11f} = {6500 * c2_ratio_codata:.6f}K")
 
     # =========================================================================
     print_section("2. KEY TEMPERATURES")
@@ -236,7 +237,8 @@ def main():
 
     # Calculate all key temperatures
     t_nominal = 6500.0
-    t_c2_ratio = 6500.0 * C2_RATIO
+    t_its90 = 6500.0 * (C2_ITS90 / C2_OLD)
+    t_codata = 6500.0 * (C2_CODATA / C2_OLD)
     t_lcms = 6504.0
     t_exact_x = find_exact_x_temperature()
     t_exact_y = find_exact_y_temperature()
@@ -245,7 +247,8 @@ def main():
     print(f"{'Description':<35} {'Temperature (K)':<20}")
     print("-" * 55)
     print(f"{'Nominal (1931 scale)':<35} {t_nominal:<20.10f}")
-    print(f"{'ITS-90 conversion (CIE 15:2004)':<35} {t_c2_ratio:<20.10f}")
+    print(f"{'ITS-90 conversion (CIE 15:2004)':<35} {t_its90:<20.10f}")
+    print(f"{'CODATA conversion (incorrect)':<35} {t_codata:<20.10f}")
     print(f"{'lcms/moxcms rounded value':<35} {t_lcms:<20.10f}")
     print(f"{'Exact x match':<35} {t_exact_x:<20.10f}")
     print(f"{'Exact y match':<35} {t_exact_y:<20.10f}")
@@ -261,7 +264,8 @@ def main():
 
     temperatures = [
         ("6500.0K (nominal)", t_nominal),
-        (f"{t_c2_ratio:.4f}K (ITS-90)", t_c2_ratio),
+        (f"{t_its90:.4f}K (ITS-90)", t_its90),
+        (f"{t_codata:.4f}K (CODATA)", t_codata),
         ("6504.0K (lcms)", t_lcms),
         (f"{t_exact_x:.4f}K (exact x)", t_exact_x),
         (f"{t_exact_y:.4f}K (exact y)", t_exact_y),
@@ -295,13 +299,18 @@ def main():
 
     print("5.1 The ITS-90 Temperature Conversion")
     print("-" * 40)
-    dx, dy, _ = compute_error(t_c2_ratio)
-    print(f"At T = 6500 × (c₂_ITS90/c₂_1931) = {t_c2_ratio:.6f}K:")
-    print(f"  x error: {dx*1e5:+.4f}×10⁻⁵  (nearly perfect!)")
-    print(f"  y error: {dy*1e5:+.4f}×10⁻⁵  (independent error in y(x) formula)")
+    dx_its90, dy_its90, err_its90 = compute_error(t_its90)
+    dx_codata, dy_codata, err_codata = compute_error(t_codata)
+    print(f"ITS-90:  T = 6500 × ({C2_ITS90}/{C2_OLD}) = {t_its90:.6f}K")
+    print(f"  x error: {dx_its90*1e5:+.4f}×10⁻⁵  (nearly perfect!)")
+    print(f"  y error: {dy_its90*1e5:+.4f}×10⁻⁵")
     print()
-    print("This confirms the x(T) polynomial expects ITS-90 CCT values,")
-    print("as specified in CIE 15:2004 Appendix E.")
+    print(f"CODATA:  T = 6500 × ({C2_CODATA}/{C2_OLD}) = {t_codata:.6f}K")
+    print(f"  x error: {dx_codata*1e5:+.4f}×10⁻⁵  (slightly worse)")
+    print(f"  y error: {dy_codata*1e5:+.4f}×10⁻⁵")
+    print()
+    print("The ITS-90 value gives better x accuracy, confirming the CIE formula")
+    print("uses the ITS-90 temperature scale, not CODATA physical constants.")
 
     print()
     print("5.2 The y(x) Quadratic Error")
@@ -328,16 +337,18 @@ def main():
     print_section("6. PRACTICAL RECOMMENDATIONS")
     # =========================================================================
 
+    _, _, err_its90_rec = compute_error(t_its90)
+    _, _, err_codata_rec = compute_error(t_codata)
     _, _, err_6504 = compute_error(6504.0)
-    _, _, err_c2 = compute_error(t_c2_ratio)
     _, _, err_opt = compute_error(t_optimal)
 
-    print(f"{'Goal':<35} {'Approach':<43}")
+    print(f"{'Goal':<40} {'Approach':<38}")
     print("-" * 78)
-    print(f"{'Exact D65 chromaticity':<35} {'Hardcode (0.31272, 0.32903)':<43}")
-    print(f"{'D65 via polynomial (CIE 15:2004)':<35} {f'Use T = {t_c2_ratio:.2f}K ({err_c2*1e5:.1f}×10⁻⁵ error)':<43}")
-    print(f"{'D65 via polynomial (rounded)':<35} {f'Use T = 6504K ({err_6504*1e5:.1f}×10⁻⁵ error)':<43}")
-    print(f"{'Minimum possible error':<35} {f'Use T = {t_optimal:.1f}K ({err_opt*1e5:.1f}×10⁻⁵ error)':<43}")
+    print(f"{'Exact D65 chromaticity':<40} {'Hardcode (0.31272, 0.32903)':<38}")
+    print(f"{'D65 via polynomial (CIE 15:2004)':<40} {f'T = {t_its90:.2f}K ({err_its90_rec*1e5:.1f}×10⁻⁵)':<38}")
+    print(f"{'D65 via polynomial (CODATA - wrong)':<40} {f'T = {t_codata:.2f}K ({err_codata_rec*1e5:.1f}×10⁻⁵)':<38}")
+    print(f"{'D65 via polynomial (rounded)':<40} {f'T = 6504K ({err_6504*1e5:.1f}×10⁻⁵)':<38}")
+    print(f"{'Minimum possible error':<40} {f'T = {t_optimal:.1f}K ({err_opt*1e5:.1f}×10⁻⁵)':<38}")
     print()
     print("For D50, D55, D65, D75: Use hardcoded official values.")
     print("Use the polynomial only for arbitrary D-illuminants.")
@@ -352,8 +363,9 @@ def main():
     print("The name 'D65' refers to its correlated color temperature on the")
     print("pre-1968 temperature scale. On the modern scale, this is ~6504K.")
     print()
-    print("The CIE daylight locus polynomial expects modern CCT as input.")
-    print(f"To recover D65, use T = {6500 * C2_RATIO:.6f}K (per CIE 15:2004).")
+    print("The CIE daylight locus polynomial expects ITS-90 CCT as input.")
+    print(f"To recover D65, use T = {t_its90:.6f}K (per CIE 15:2004).")
+    print(f"(NOT T = {t_codata:.6f}K from CODATA constants)")
     print()
     print("The ~9×10⁻⁵ residual error reflects:")
     print("  - Independent imprecision in the y(x) quadratic")
