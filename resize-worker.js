@@ -144,6 +144,7 @@ function processResize(params) {
                 8, 8, 8, 8,  // RGB at 8-bit, alpha at 8-bit
                 ditherTechnique,
                 ditherMode,
+                255,  // alpha_mode: use same as ditherMode
                 perceptualSpace,
                 0,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
@@ -303,6 +304,7 @@ function processSrgbResize(params) {
                 8, 8, 8, 8,  // RGB at 8-bit, alpha at 8-bit
                 ditherTechnique,
                 ditherMode,
+                255,  // alpha_mode: use same as ditherMode
                 perceptualSpace,
                 0,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
@@ -415,6 +417,7 @@ function processResizePixels(params) {
                 8, 8, 8, 8,  // RGB and alpha at 8-bit
                 2,  // ColorAware
                 4,  // Mixed
+                255,  // alpha_mode: use same as ditherMode
                 1,  // OKLab
                 0,  // seed
                 (progress) => sendProgress(90 + Math.round(progress * 10))

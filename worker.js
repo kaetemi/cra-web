@@ -386,6 +386,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             8, 8, 8, 8,  // RGBA8888
             ditherTechnique,
             outputDitherMode,
+            255,  // alpha_mode: use same as outputDitherMode
             outputDistanceSpace,
             0,  // seed
             (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
