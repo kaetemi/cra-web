@@ -63,6 +63,12 @@ impl BufferF32 {
     pub fn clone_buffer(&self) -> BufferF32 {
         BufferF32(self.0.clone())
     }
+
+    /// Create BufferF32 from a slice of f32 values
+    #[wasm_bindgen]
+    pub fn from_slice(data: Vec<f32>) -> BufferF32 {
+        BufferF32(data)
+    }
 }
 
 impl BufferF32 {
