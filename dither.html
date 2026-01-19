@@ -390,6 +390,11 @@
             font-size: 14px;
         }
 
+        .scale-options .size-inputs input[type="number"].secondary-dimension {
+            color: #999;
+            background: #f5f5f5;
+        }
+
         .scale-options .size-inputs span {
             color: #888;
         }
@@ -867,14 +872,27 @@
                 <div class="size-inputs" style="margin-top: 10px;">
                     <label for="scale-method">Method:</label>
                     <select id="scale-method">
-                        <option value="13" selected>EWA Lanczos3 (jinc-based, recommended)</option>
+                        <option value="13" selected>★ EWA Lanczos3 (jinc-based, recommended)</option>
                         <option value="12">EWA Lanczos2 (jinc-based, less ringing)</option>
+                        <option value="21">EWA Lanczos3 Sharp (Robidoux, preserves lines)</option>
+                        <option value="22">EWA Lanczos4 Sharpest (Robidoux, hash patterns)</option>
                         <option value="1">Lanczos3 (separable, faster)</option>
                         <option value="7">Lanczos2 (separable, less ringing)</option>
-                        <option value="3">Catmull-Rom (sharp, low ringing)</option>
+                        <option value="9">EWA Sinc-Lanczos3 (radial sinc, faster)</option>
+                        <option value="8">EWA Sinc-Lanczos2 (radial sinc, faster)</option>
+                        <option value="3">★ Catmull-Rom (sharp, low ringing)</option>
                         <option value="2">Mitchell (soft, minimal ringing)</option>
-                        <option value="0">Bilinear (fast)</option>
+                        <option value="15">EWA Catmull-Rom (2D, sharp)</option>
+                        <option value="14">EWA Mitchell (2D, soft)</option>
+                        <option value="0">★ Bilinear (faster)</option>
+                        <option value="20">★ Box (nearest up, area-average down)</option>
                         <option value="4">Sinc (research only, SLOW)</option>
+                        <option value="16">Jinc (2D sinc analog, research only, SLOW)</option>
+                        <option value="17">Stochastic Jinc (gather, probabilistic)</option>
+                        <option value="18">Stochastic Jinc Scatter (scatter, probabilistic)</option>
+                        <option value="19">Stochastic Jinc Scatter Normalized (scatter, normalized dest)</option>
+                        <option value="5">Lanczos3 Scatter (experimental)</option>
+                        <option value="6">Sinc Scatter (experimental, SLOW)</option>
                     </select>
                 </div>
                 <p class="scale-hint">Rescaling is performed in linear RGB space for correct color blending.</p>
@@ -1257,6 +1275,7 @@
             const height = Math.round(width / aspectRatio);
             document.getElementById('scale-height').value = height;
             updatingSize = false;
+            updateDimensionStyling();
         }
 
         function updateSizeFromHeight() {
@@ -1267,6 +1286,20 @@
             const width = Math.round(height * aspectRatio);
             document.getElementById('scale-width').value = width;
             updatingSize = false;
+            updateDimensionStyling();
+        }
+
+        // Update visual styling to show which dimension is primary vs secondary
+        function updateDimensionStyling() {
+            const widthInput = document.getElementById('scale-width');
+            const heightInput = document.getElementById('scale-height');
+            if (primaryDimension === 'width') {
+                widthInput.classList.remove('secondary-dimension');
+                heightInput.classList.add('secondary-dimension');
+            } else {
+                heightInput.classList.remove('secondary-dimension');
+                widthInput.classList.add('secondary-dimension');
+            }
         }
 
         // Process the image using background worker
@@ -1536,7 +1569,7 @@
             // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
                 const scaleMethod = parseInt(document.getElementById('scale-method').value) || 13;
-                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 7: 'lanczos2', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3' };
+                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest' };
                 if (primaryDimension === 'height') {
                     const height = parseInt(document.getElementById('scale-height').value);
                     cmd += ` --height ${height}`;
@@ -1679,12 +1712,15 @@
                 // Set initial scale values (default to 128 on longest edge)
                 const maxDim = 128;
                 if (aspectRatio >= 1) {
+                    primaryDimension = 'width';
                     document.getElementById('scale-width').value = maxDim;
                     document.getElementById('scale-height').value = Math.round(maxDim / aspectRatio);
                 } else {
+                    primaryDimension = 'height';
                     document.getElementById('scale-height').value = maxDim;
                     document.getElementById('scale-width').value = Math.round(maxDim * aspectRatio);
                 }
+                updateDimensionStyling();
 
                 updateProcessButton();
 
