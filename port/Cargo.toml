@@ -33,6 +33,19 @@ name = "cra"
 path = "src/bin/cra/main.rs"
 required-features = ["cli"]
 
+# =============================================================================
+# Release Profile - Optimized for Speed
+# =============================================================================
+# These settings prioritize runtime performance over compile time.
+#
+# Determinism note: opt-level=3 enables aggressive optimizations including
+# auto-vectorization and loop unrolling, which may reorder floating-point
+# operations. Combined with RUSTFLAGS (see build scripts), this produces
+# fast but non-deterministic builds across different CPUs/platforms.
+# =============================================================================
 [profile.release]
 opt-level = 3
 lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

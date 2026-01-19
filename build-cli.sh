@@ -14,8 +14,25 @@ if [ -f "$HOME/.cargo/env" ]; then
     source "$HOME/.cargo/env"
 fi
 
-# Enable SIMD optimizations for native targets
-# AVX2 provides significant speedup for image processing
+# =============================================================================
+# CLI Build Flags - Optimized for Speed (Non-Deterministic)
+# =============================================================================
+# These flags prioritize performance over cross-platform determinism.
+#
+# Determinism implications:
+#   - avx2: SIMD vectorization changes operation order vs scalar code.
+#   - fma: Fused multiply-add computes (a*b)+c in one operation with single
+#     rounding, giving different (more accurate) results than separate
+#     multiply then add with two roundings. This is the main source of
+#     cross-CPU non-determinism for basic arithmetic.
+#
+# Additional speed flags:
+#   - target-cpu=native: Use all features of the build machine's CPU.
+#     Note: Binaries may not run on older CPUs lacking these features.
+#
+# For a deterministic test build, use: RUSTFLAGS='-C target-feature=-fma'
+# and consider disabling SIMD entirely for bit-exact reproducibility.
+# =============================================================================
 export RUSTFLAGS='-C target-feature=+avx2,+fma'
 
 # Ensure build targets are installed

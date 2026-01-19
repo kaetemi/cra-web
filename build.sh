@@ -19,7 +19,22 @@ fi
 echo ""
 echo "[1/4] Building WASM modules..."
 
-# Enable SIMD for WASM builds
+# =============================================================================
+# WASM Build Flags - Optimized for Speed (Non-Deterministic)
+# =============================================================================
+# These flags prioritize performance over cross-platform determinism.
+#
+# Determinism implications:
+#   - simd128: WASM SIMD is IEEE 754 compliant but operation order in
+#     vectorized code may differ from scalar. Results are reproducible
+#     on the same browser/runtime but may differ from native builds.
+#
+# Not enabled (would further reduce determinism):
+#   - relaxed-simd: Allows non-deterministic NaN handling and FMA.
+#     Would improve performance but break reproducibility across browsers.
+#
+# For a deterministic test build, remove simd128 and use scalar operations.
+# =============================================================================
 export RUSTFLAGS='-C target-feature=+simd128'
 
 cd "$SCRIPT_DIR/dither"
