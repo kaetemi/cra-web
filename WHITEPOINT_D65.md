@@ -244,3 +244,22 @@ The ~9×10⁻⁵ residual error reflects independent imprecision in the y(x) qua
 ## References
 
 - CIE 15:2004, Colorimetry, 3rd Edition
+
+---
+
+## Appendix: Practical Reference for D65
+
+When working with D65 in modern systems:
+
+| Parameter | Value |
+|-----------|-------|
+| Old c₂ (pre-1968) | 0.01438 m·K |
+| New c₂ (CODATA) | 0.01438776877 m·K |
+| Conversion factor | 1.00054024826 |
+
+**D65 Temperature Conversion:**
+```
+6500K × (0.01438776877 / 0.01438) = 6503.5116136996K
+```
+
+When using CIE daylight locus formulas with modern CCT input, use **T = 6503.5116136996K** to compute D65.
