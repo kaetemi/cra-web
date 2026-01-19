@@ -65,7 +65,7 @@ The **daylight locus** is a separate curve through chromaticity space, derived f
 
 Judd, MacAdam, and Wyszecki (1964) analyzed 622 daylight samples and found their chromaticities followed a quadratic relationship:
 
-**The y(x) quadratic (Judd et al., 1964):**
+**The y(x) quadratic (Judd et al., 1964; CIE 15:2004 Equation 3.2):**
 ```
 y_D = -3.000x_D² + 2.870x_D - 0.275
 ```
@@ -76,12 +76,12 @@ This defines the shape of the daylight locus—all daylight chromaticities lie a
 
 The CIE later added a polynomial to compute x from temperature, enabling generation of arbitrary D-illuminants. As published in CIE 15:2004:
 
-**For 4000K ≤ T_cp ≤ 7000K:**
+**For 4000K ≤ T_cp ≤ 7000K (Equation 3.3):**
 ```
 x_D = -4.6070×10⁹/T³ + 2.9678×10⁶/T² + 0.09911×10³/T + 0.244063
 ```
 
-**For 7000K < T_cp ≤ 25000K:**
+**For 7000K < T_cp ≤ 25000K (Equation 3.4):**
 ```
 x_D = -2.0064×10⁹/T³ + 1.9018×10⁶/T² + 0.24748×10³/T + 0.237040
 ```
@@ -92,7 +92,7 @@ Where **T_cp is the correlated color temperature on the modern (post-1968) scale
 
 ## 5. The Critical Distinction: Tables vs. Polynomial
 
-CIE 15:2004 Note 4 states:
+CIE 15:2004 Note 4 (Section 3.1) states:
 
 > "The relative spectral power distributions of the D illuminants given in Table T.1 and in the CIE standard on illuminants for colorimetry (CIE, 1998c) were derived by the procedure given above with some intermediate rounding and **with some adjustments for changes in the International Temperature Scale**. Thus for historic reasons, the tabulated values are slightly different from the calculated values. For the time being **the tabulated values are the official data**."
 
@@ -114,12 +114,12 @@ To convert from old K to new K:
 ```
 T_new = T_old × (new_c₂ / old_c₂)
 T_new = T_old × (0.01438776877 / 0.01438)
-T_new = T_old × 1.00054025
+T_new = T_old × 1.00054024826
 ```
 
 For D65:
 ```
-T_new = 6500 × 1.00054025 = 6503.5116K
+T_new = 6500 × 1.00054024826 = 6503.5116136996K
 ```
 
 This is the temperature to input into the modern polynomial to recover D65's original chromaticity.
@@ -137,17 +137,17 @@ Testing the polynomial against official D65 coordinates (0.31272, 0.32903):
 | 6504.0K (lcms/moxcms) | −0.59 | +8.91 | 8.93 |
 | 6503.6330K (exact x match) | +0.00 | +9.50 | 9.50 |
 | 6509.5412K (exact y match) | −9.56 | +0.00 | 9.56 |
-| 6507.5680K (min. Euclidean) | −6.37 | +3.17 | 7.11 |
+| 6506.6680K (min. Euclidean) | −4.91 | +4.62 | 6.74 |
 
 ### Key Observations
 
 1. **The c₂ ratio (6503.5K) gives near-perfect x match** (error 0.2×10⁻⁵), confirming the x(T) polynomial expects modern CCT.
 
-2. **The y error persists** (~9.5×10⁻⁵) regardless of temperature choice. This is independent error in the y(x) quadratic.
+2. **The y error persists** (~9.7×10⁻⁵) regardless of temperature choice. This is independent error in the y(x) quadratic.
 
-3. **No temperature produces exact D65.** The temperatures for exact x match (6503.6K) and exact y match (6509.5K) differ by ~6K. The official D65 point does not lie exactly on the daylight locus curve.
+3. **No temperature produces exact D65.** The temperatures for exact x match (6503.6K) and exact y match (6509.5K) differ by ~5.9K. The official D65 point does not lie exactly on the daylight locus curve.
 
-4. **The mismatch is acknowledged by the CIE:** "These equations will give an illuminant whose correlated colour temperature is approximately equal to the nominal value, but not exactly so."
+4. **The mismatch is acknowledged by the CIE (Section 3.1):** "These equations will give an illuminant whose correlated colour temperature is approximately equal to the nominal value, but not exactly so."
 
 ---
 
@@ -172,21 +172,21 @@ Several factors contribute:
 | Description | Value (K) |
 |-------------|-----------|
 | Nominal (historical, old K) | 6500.0000000000 |
-| c₂ ratio conversion | 6503.5116260869 |
+| c₂ ratio conversion | 6503.5116136996 |
 | Exact x match | 6503.6330064413 |
 | Exact y match | 6509.5412401592 |
-| Optimal (min. Euclidean) | 6507.5680000000 |
+| Optimal (min. Euclidean) | 6506.6680000000 |
 | lcms/moxcms value | 6504.0000000000 |
 
 ### Chromaticity at Each Temperature
 
 | Temperature | x | y |
 |-------------|---|---|
-| 6500.0K | 0.3127788760 | 0.3291834788 |
-| 6503.5116K | 0.3127219664 | 0.3290969789 |
+| 6500.0K | 0.3127788762 | 0.3291834985 |
+| 6503.5116K | 0.3127219660 | 0.3291269584 |
 | 6503.6330K | 0.3127200000 | 0.3291250048 |
-| 6504.0K | 0.3127140573 | 0.3290910988 |
-| 6507.5680K | 0.3126563180 | 0.3290617131 |
+| 6504.0K | 0.3127140569 | 0.3191190991 |
+| 6506.6680K | 0.3126708751 | 0.3290761831 |
 | 6509.5412K | 0.3126244185 | 0.3290300000 |
 
 ### Radiation Constants
@@ -195,7 +195,7 @@ Several factors contribute:
 |-------------|-------|
 | Old c₂ (pre-1968) | 0.01438 m·K |
 | New c₂ (CODATA) | 0.01438776877 m·K |
-| Ratio (new/old) | 1.00054024965 |
+| Ratio (new/old) | 1.00054024826 |
 
 ### Official D65
 
@@ -215,7 +215,7 @@ Several factors contribute:
 | Exact D65 | Hardcode (0.31272, 0.32903) |
 | D65 via polynomial | Use T = 6504K (8.9×10⁻⁵ error) |
 | Theoretically correct T | Use T = 6503.5K (c₂ ratio, 9.7×10⁻⁵ error) |
-| Minimum error | Use T = 6507.6K (7.1×10⁻⁵ error) |
+| Minimum error | Use T = 6506.7K (6.7×10⁻⁵ error) |
 
 **Recommendation:** For D50, D55, D65, D75, use hardcoded official chromaticity values. Use the polynomial only for arbitrary D-illuminants at non-standard temperatures.
 
@@ -243,4 +243,4 @@ The ~9×10⁻⁵ residual error reflects independent imprecision in the y(x) qua
 
 ## References
 
-- CIE 15:2004, Colorimetry, 3rd Edition (Note 4 on temperature scale adjustments)
+- CIE 15:2004, Colorimetry, 3rd Edition

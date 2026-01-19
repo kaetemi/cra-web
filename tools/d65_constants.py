@@ -355,5 +355,125 @@ def main():
     print("All errors are in the 5th decimal place—far below perceptibility.")
 
 
+def analyze_y_error_nature():
+    """
+    Determine if the y error is an absolute offset or a scale factor
+    by examining multiple canonical D-illuminants.
+    """
+    print_section("8. Y ERROR ANALYSIS: OFFSET VS SCALE FACTOR")
+
+    # Canonical D-illuminants with their official CIE chromaticity coordinates
+    # and nominal temperatures (old K scale)
+    d_illuminants = [
+        ("D50", 5000, 0.34567, 0.35850),
+        ("D55", 5500, 0.33242, 0.34743),
+        ("D65", 6500, 0.31272, 0.32903),
+        ("D75", 7500, 0.29902, 0.31485),
+    ]
+
+    print("Comparing official chromaticity vs daylight locus polynomial")
+    print("for canonical D-illuminants:")
+    print()
+
+    print(f"{'Illum':<6} {'T_old':<7} {'T_new':<12} {'x_off':<10} {'x_poly':<10} {'y_off':<10} {'y_poly':<10}")
+    print("-" * 75)
+
+    results = []
+    for name, t_old, x_official, y_official in d_illuminants:
+        t_new = t_old * C2_RATIO
+        x_poly, y_poly = daylight_locus_chromaticity(t_new)
+
+        print(f"{name:<6} {t_old:<7} {t_new:<12.4f} {x_official:<10.5f} {x_poly:<10.5f} {y_official:<10.5f} {y_poly:<10.5f}")
+        results.append((name, t_old, x_official, y_official, x_poly, y_poly))
+
+    print()
+    print("Error analysis:")
+    print()
+    print(f"{'Illum':<6} {'Δx (×10⁻⁵)':<14} {'Δy (×10⁻⁵)':<14} {'Δy/y_off (×10⁻⁵)':<18} {'y_poly/y_off':<14}")
+    print("-" * 70)
+
+    for name, t_old, x_off, y_off, x_poly, y_poly in results:
+        dx = (x_poly - x_off) * 1e5
+        dy = (y_poly - y_off) * 1e5
+        dy_relative = ((y_poly - y_off) / y_off) * 1e5  # relative error in y
+        y_ratio = y_poly / y_off
+
+        print(f"{name:<6} {dx:>+13.2f} {dy:>+13.2f} {dy_relative:>+17.2f} {y_ratio:>13.8f}")
+
+    print()
+
+    # Also check: what if we find the exact-x temperature for each illuminant?
+    print("Finding exact-x match temperature for each illuminant:")
+    print()
+    print(f"{'Illum':<6} {'T_exact_x':<14} {'Δy at exact x (×10⁻⁵)':<22} {'Δy/y (×10⁻⁵)':<16}")
+    print("-" * 60)
+
+    y_errors_absolute = []
+    y_errors_relative = []
+
+    for name, t_old, x_off, y_off, _, _ in results:
+        # Find temperature where polynomial x matches official x
+        a, b = t_old * 0.9, t_old * 1.1
+        tol = 1e-12
+
+        while abs(b - a) > tol:
+            mid = (a + b) / 2
+            x_mid, _ = daylight_locus_chromaticity(mid)
+            if x_mid > x_off:
+                a = mid
+            else:
+                b = mid
+
+        t_exact_x = (a + b) / 2
+        x_at_t, y_at_t = daylight_locus_chromaticity(t_exact_x)
+
+        dy_abs = (y_at_t - y_off) * 1e5
+        dy_rel = ((y_at_t - y_off) / y_off) * 1e5
+
+        y_errors_absolute.append(dy_abs)
+        y_errors_relative.append(dy_rel)
+
+        print(f"{name:<6} {t_exact_x:<14.4f} {dy_abs:>+21.2f} {dy_rel:>+15.2f}")
+
+    print()
+    print("-" * 60)
+
+    # Calculate statistics
+    abs_mean = sum(y_errors_absolute) / len(y_errors_absolute)
+    abs_std = (sum((e - abs_mean)**2 for e in y_errors_absolute) / len(y_errors_absolute)) ** 0.5
+
+    rel_mean = sum(y_errors_relative) / len(y_errors_relative)
+    rel_std = (sum((e - rel_mean)**2 for e in y_errors_relative) / len(y_errors_relative)) ** 0.5
+
+    print()
+    print("Statistical analysis:")
+    print(f"  Absolute Δy errors: mean = {abs_mean:+.2f}×10⁻⁵, std = {abs_std:.2f}×10⁻⁵")
+    print(f"  Relative Δy/y errors: mean = {rel_mean:+.2f}×10⁻⁵, std = {rel_std:.2f}×10⁻⁵")
+    print()
+
+    if abs_std < rel_std:
+        print("CONCLUSION: The y error appears to be an ABSOLUTE OFFSET")
+        print(f"  (constant ~{abs_mean:+.1f}×10⁻⁵ regardless of y value)")
+    else:
+        print("CONCLUSION: The y error appears to be a SCALE FACTOR")
+        print(f"  (constant ~{rel_mean:+.1f}×10⁻⁵ relative to y value)")
+
+    print()
+
+    # Let's also check what the quadratic predicts vs actual
+    print("Checking the y(x) quadratic directly:")
+    print()
+    print("The formula is: y = -3x² + 2.87x - 0.275")
+    print()
+    print(f"{'Illum':<6} {'x_official':<12} {'y_official':<12} {'y_from_formula':<14} {'Δy (×10⁻⁵)':<14}")
+    print("-" * 60)
+
+    for name, t_old, x_off, y_off, _, _ in results:
+        y_formula = -3.0 * x_off**2 + 2.87 * x_off - 0.275
+        dy = (y_formula - y_off) * 1e5
+        print(f"{name:<6} {x_off:<12.5f} {y_off:<12.5f} {y_formula:<14.5f} {dy:>+13.2f}")
+
+
 if __name__ == "__main__":
     main()
+    analyze_y_error_nature()
