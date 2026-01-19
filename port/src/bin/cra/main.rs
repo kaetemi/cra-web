@@ -463,11 +463,12 @@ fn build_output_technique(
     colorspace_aware: bool,
     mode: CSDitherMode,
     space: PerceptualSpace,
+    alpha_mode: Option<CSDitherMode>,
 ) -> OutputTechnique {
     if colorspace_aware {
-        OutputTechnique::ColorspaceAware { mode, space }
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode }
     } else {
-        OutputTechnique::PerChannel { mode }
+        OutputTechnique::PerChannel { mode, alpha_mode }
     }
 }
 
@@ -503,6 +504,7 @@ fn dither_pixels(
     format: &cra_wasm::binary_format::ColorFormat,
     colorspace_aware: bool,
     dither_mode: CSDitherMode,
+    alpha_mode: Option<CSDitherMode>,
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
@@ -523,7 +525,7 @@ fn dither_pixels(
         let alpha: Vec<f32> = pixels.iter().map(|p| p.0[3] * 255.0).collect();
 
         // Step 4: Dither with alpha-aware error diffusion
-        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
+        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
         let interleaved = dither_output_la(
             &srgb_gray, &alpha, width, height, format.bits_r, format.bits_a,
             technique, seed, progress,
@@ -554,7 +556,7 @@ fn dither_pixels(
         denormalize_inplace_clamped(&mut linear_pixels);
 
         // Dither
-        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
+        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
         if has_alpha {
             // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
             let bits_a = format.bits_a;
@@ -593,6 +595,7 @@ fn dither_pixels_srgb_rgb(
     format: &cra_wasm::binary_format::ColorFormat,
     colorspace_aware: bool,
     dither_mode: CSDitherMode,
+    alpha_mode: Option<CSDitherMode>,
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
@@ -600,7 +603,7 @@ fn dither_pixels_srgb_rgb(
 ) -> DitherResult {
     debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
 
-    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
+    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
     if has_alpha {
         // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
         let bits_a = format.bits_a;
@@ -777,6 +780,9 @@ fn write_metadata(
             json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
         }
         json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
+        if let Some(alpha_dither) = args.output_alpha_dither {
+            json.push_str(&format!("  \"output_alpha_dither\": \"{:?}\",\n", alpha_dither));
+        }
         json.push_str(&format!("  \"output_colorspace\": \"{:?}\",\n", output_colorspace));
 
         // Raw-file-specific fields (only when raw output is present)
@@ -1052,6 +1058,7 @@ fn main() -> Result<(), String> {
         colorspace_aware_space: args.histogram_distance_space.to_perceptual_space(),
     };
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
+    let output_alpha_mode = args.output_alpha_dither.map(|m| m.to_cs_dither_mode());
 
     // Build the correction method (None if histogram is None)
     let correction_method = build_correction_method(
@@ -1200,6 +1207,9 @@ fn main() -> Result<(), String> {
             eprintln!("Histogram mode: {:?}", args.histogram_mode);
         }
         eprintln!("Output dither: {:?}", args.output_dither);
+        if let Some(alpha_dither) = args.output_alpha_dither {
+            eprintln!("Output alpha dither: {:?}", alpha_dither);
+        }
         eprintln!(
             "Output colorspace: {:?}{}",
             output_colorspace,
@@ -1388,6 +1398,7 @@ fn main() -> Result<(), String> {
                 &format,
                 !args.no_colorspace_aware_output,
                 output_dither_mode,
+                output_alpha_mode,
                 output_colorspace.to_perceptual_space(),
                 args.seed,
                 input_has_alpha,
@@ -1480,6 +1491,7 @@ fn main() -> Result<(), String> {
                 &format,
                 !args.no_colorspace_aware_output,
                 output_dither_mode,
+                output_alpha_mode,
                 output_colorspace.to_perceptual_space(),
                 args.seed,
                 input_has_alpha,

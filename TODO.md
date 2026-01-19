@@ -10,20 +10,15 @@
 
 ---
 
-- Alpha channel for luminosity-only output dithering
-- Separate control for alpha channel dithering (so we can dither alpha with None)
-
----
-
-- When the rendering pipeline is sRGB-only without colorspace-awareness, alpha channels tend to be interpreted as being in sRGB-space rather than linear space. Might need an option to correct for that, on both input and output, even though it's non-standard? Although technically, I think, it should appear the same regardless (when comparing ARGB8 vs ARGB1), with some minor bias in how the error is propagated...
-
----
-
 - An alternative way to handle the precision errors in colorspace specifications is to internally derive all the constants from first principles, so the rounded values conform to the spec, rather than exactly matching to the rounded values which are considered exact according to specification. The problem this solves is that currently we have multiple D65 whitepoints, as none of the specifications agree on the primary values used.
   - To handle ICC profiles correctly, we then need to have a mechanism to match color profiles to a most likely reference profile used. That is, the authoring display. In most case that means ICC color space -> PCS -> sRGB ICC using the ICC profile's transformations throughout, and then taking that transformation as ground reference for the image's true color.
   - In practice that means most ordinary color spaces map to sRGB, older Adobe RGB color spaces likely map to Apple RGB, and newer photographic colorspaces more likely map to Display P3.
 - Then we need an explicit option to tonemap out-of-gamut colors
 - Also need an explicit tonemapping filter option, basic support for going from HDR linear to tonemapped SDR
+
+---
+
+Currently binned histogram matching doesn't work correctly when the input file is not clamped within sRGB primaries, F32 should be fine
 
 ---
 

@@ -907,6 +907,7 @@ pub fn colorspace_aware_dither_rgba(
         bits_r, bits_g, bits_b, bits_a,
         space,
         DitherMode::Standard,
+        DitherMode::Standard,
         0,
         None,
     )
@@ -915,7 +916,7 @@ pub fn colorspace_aware_dither_rgba(
 /// Color space aware RGBA dithering with selectable algorithm and scanning mode.
 ///
 /// Process:
-/// 1. Alpha channel is dithered first using standard single-channel error diffusion
+/// 1. Alpha channel is dithered first using the specified alpha dithering mode
 /// 2. RGB channels are then dithered with alpha-aware error propagation:
 ///    - Error that couldn't be applied due to transparency is fully propagated
 ///    - Quantization error is weighted by pixel visibility (alpha)
@@ -933,7 +934,8 @@ pub fn colorspace_aware_dither_rgba(
 ///     width, height: Image dimensions
 ///     bits_r, bits_g, bits_b, bits_a: Bit depth for each channel (1-8)
 ///     space: Perceptual color space for RGB distance calculation
-///     mode: Dithering algorithm and scanning mode
+///     mode: Dithering algorithm and scanning mode for RGB channels
+///     alpha_mode: Dithering algorithm and scanning mode for alpha channel
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
 ///     progress: Optional callback called with progress (0.0 to 1.0)
 ///
@@ -952,14 +954,15 @@ pub fn colorspace_aware_dither_rgba_with_mode(
     bits_a: u8,
     space: PerceptualSpace,
     mode: DitherMode,
+    alpha_mode: DitherMode,
     seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
 
-    // Step 1: Dither alpha channel first using standard single-channel dithering
+    // Step 1: Dither alpha channel first using the specified alpha mode
     // Alpha is linear, so standard dithering is correct
-    let alpha_dithered = dither_with_mode_bits(a_channel, width, height, mode, seed.wrapping_add(3), bits_a, None);
+    let alpha_dithered = dither_with_mode_bits(a_channel, width, height, alpha_mode, seed.wrapping_add(3), bits_a, None);
 
     // Report alpha dithering complete (10% of total progress)
     if let Some(ref mut cb) = progress {
@@ -1090,7 +1093,8 @@ use crate::pixel::{pixels_to_channels_rgba, Pixel4};
 ///     width, height: image dimensions
 ///     bits_r, bits_g, bits_b, bits_a: output bit depth per channel (1-8)
 ///     space: perceptual color space for RGB distance calculation
-///     mode: dither algorithm and scan pattern
+///     mode: dither algorithm and scan pattern for RGB channels
+///     alpha_mode: dither algorithm and scan pattern for alpha channel
 ///     seed: random seed for mixed modes
 ///     progress: optional callback called with progress (0.0 to 1.0)
 ///
@@ -1106,6 +1110,7 @@ pub fn colorspace_aware_dither_rgba_channels(
     bits_a: u8,
     space: PerceptualSpace,
     mode: DitherMode,
+    alpha_mode: DitherMode,
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
@@ -1114,7 +1119,7 @@ pub fn colorspace_aware_dither_rgba_channels(
         &r, &g, &b, &a,
         width, height,
         bits_r, bits_g, bits_b, bits_a,
-        space, mode, seed, progress,
+        space, mode, alpha_mode, seed, progress,
     )
 }
 
@@ -1124,7 +1129,8 @@ pub fn colorspace_aware_dither_rgba_channels(
 ///     pixels: Pixel4 array with values in sRGB 0-255 range (including alpha)
 ///     width, height: image dimensions
 ///     space: perceptual color space for RGB distance calculation
-///     mode: dither algorithm and scan pattern
+///     mode: dither algorithm and scan pattern for RGB channels
+///     alpha_mode: dither algorithm and scan pattern for alpha channel
 ///     seed: random seed for mixed modes
 ///     progress: optional callback called with progress (0.0 to 1.0)
 ///
@@ -1136,6 +1142,7 @@ pub fn colorspace_aware_dither_rgba_interleaved(
     height: usize,
     space: PerceptualSpace,
     mode: DitherMode,
+    alpha_mode: DitherMode,
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
@@ -1144,7 +1151,7 @@ pub fn colorspace_aware_dither_rgba_interleaved(
         &r, &g, &b, &a,
         width, height,
         8, 8, 8, 8,
-        space, mode, seed, progress,
+        space, mode, alpha_mode, seed, progress,
     );
     interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
 }
@@ -1264,7 +1271,7 @@ mod tests {
 
         for mode in modes {
             let (r_out, g_out, b_out, a_out) = colorspace_aware_dither_rgba_with_mode(
-                &r, &g, &b, &a, 10, 10, 2, 2, 2, 2, PerceptualSpace::OkLab, mode, 42, None
+                &r, &g, &b, &a, 10, 10, 2, 2, 2, 2, PerceptualSpace::OkLab, mode, mode, 42, None
             );
 
             assert_eq!(r_out.len(), 100, "Mode {:?} produced wrong R length", mode);
@@ -1287,10 +1294,10 @@ mod tests {
         let a: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
 
         let result1 = colorspace_aware_dither_rgba_with_mode(
-            &r, &g, &b, &a, 10, 10, 5, 5, 5, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+            &r, &g, &b, &a, 10, 10, 5, 5, 5, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 42, None
         );
         let result2 = colorspace_aware_dither_rgba_with_mode(
-            &r, &g, &b, &a, 10, 10, 5, 5, 5, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+            &r, &g, &b, &a, 10, 10, 5, 5, 5, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 42, None
         );
 
         assert_eq!(result1.0, result2.0);

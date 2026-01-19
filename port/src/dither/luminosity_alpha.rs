@@ -619,6 +619,7 @@ pub fn colorspace_aware_dither_gray_alpha(
         bits_alpha,
         space,
         DitherMode::Standard,
+        DitherMode::Standard,
         0,
         None,
     )
@@ -627,7 +628,7 @@ pub fn colorspace_aware_dither_gray_alpha(
 /// Color space aware dithering for grayscale with alpha channel and selectable algorithm.
 ///
 /// Process:
-/// 1. Alpha channel is dithered first using standard single-channel error diffusion
+/// 1. Alpha channel is dithered first using the specified alpha dithering mode
 /// 2. Grayscale channel is then dithered with alpha-aware error propagation:
 ///    - Error that couldn't be applied due to transparency is fully propagated
 ///    - Quantization error is weighted by pixel visibility (alpha)
@@ -647,7 +648,8 @@ pub fn colorspace_aware_dither_gray_alpha(
 ///     bits_gray: Bit depth for grayscale channel (1-8)
 ///     bits_alpha: Bit depth for alpha channel (1-8)
 ///     space: Perceptual color space for distance calculation
-///     mode: Dithering algorithm and scanning mode
+///     mode: Dithering algorithm and scanning mode for grayscale channel
+///     alpha_mode: Dithering algorithm and scanning mode for alpha channel
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
 ///     progress: Optional callback called with progress (0.0 to 1.0)
 ///
@@ -662,14 +664,15 @@ pub fn colorspace_aware_dither_gray_alpha_with_mode(
     bits_alpha: u8,
     space: PerceptualSpace,
     mode: DitherMode,
+    alpha_mode: DitherMode,
     seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>) {
     let pixels = width * height;
 
-    // Step 1: Dither alpha channel first using standard single-channel dithering
+    // Step 1: Dither alpha channel first using the specified alpha mode
     // Alpha is linear, so standard dithering is correct
-    let alpha_dithered = dither_with_mode_bits(alpha_channel, width, height, mode, seed.wrapping_add(1), bits_alpha, None);
+    let alpha_dithered = dither_with_mode_bits(alpha_channel, width, height, alpha_mode, seed.wrapping_add(1), bits_alpha, None);
 
     // Report alpha dithering complete (10% of total progress)
     if let Some(ref mut cb) = progress {
@@ -843,7 +846,7 @@ mod tests {
 
         for mode in modes {
             let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha_with_mode(
-                &gray, &alpha, 10, 10, 2, 2, PerceptualSpace::OkLab, mode, 42, None
+                &gray, &alpha, 10, 10, 2, 2, PerceptualSpace::OkLab, mode, mode, 42, None
             );
 
             assert_eq!(gray_out.len(), 100, "Mode {:?} produced wrong gray length", mode);
@@ -864,10 +867,10 @@ mod tests {
         let alpha: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
 
         let result1 = colorspace_aware_dither_gray_alpha_with_mode(
-            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 42, None
         );
         let result2 = colorspace_aware_dither_gray_alpha_with_mode(
-            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 42, None
         );
 
         assert_eq!(result1.0, result2.0, "Gray should be deterministic");
@@ -880,10 +883,10 @@ mod tests {
         let alpha: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
 
         let result1 = colorspace_aware_dither_gray_alpha_with_mode(
-            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 42, None
         );
         let result2 = colorspace_aware_dither_gray_alpha_with_mode(
-            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 99, None
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, DitherMode::MixedStandard, 99, None
         );
 
         // At least one should differ

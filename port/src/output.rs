@@ -55,16 +55,17 @@ pub fn dither_output_rgb(
             let b_u8: Vec<u8> = b.iter().map(|v| quantize_no_dither(*v, bits_b)).collect();
             interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
         }
-        OutputTechnique::PerChannel { mode } => {
+        OutputTechnique::PerChannel { mode, .. } => {
             // Per-channel error diffusion in sRGB space
             // Note: progress callback is ignored for per-channel (not practical to report)
+            // Note: alpha_mode is ignored for RGB-only dithering
             let (r, g, b) = pixels_to_channels(srgb_pixels);
             let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
             let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
             interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space } => {
+        OutputTechnique::ColorspaceAware { mode, space, .. } => {
             // Joint RGB color-aware dithering with progress
             let (r, g, b) = colorspace_aware_dither_rgb_channels(
                 srgb_pixels,
@@ -156,18 +157,20 @@ pub fn dither_output_rgba(
             let a_u8: Vec<u8> = a.iter().map(|v| quantize_no_dither(*v, bits_a)).collect();
             interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
-        OutputTechnique::PerChannel { mode } => {
+        OutputTechnique::PerChannel { mode, alpha_mode } => {
             // Per-channel error diffusion in sRGB space
+            let effective_alpha_mode = alpha_mode.unwrap_or(mode);
             let (r, g, b, a) = pixels_to_channels_rgba(srgb_pixels);
             let r_u8 = dither_with_mode_bits(&r, width, height, mode, seed, bits_r, None);
             let g_u8 = dither_with_mode_bits(&g, width, height, mode, seed.wrapping_add(1), bits_g, None);
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
-            let a_u8 = dither_with_mode_bits(&a, width, height, mode, seed.wrapping_add(3), bits_a, None);
+            let a_u8 = dither_with_mode_bits(&a, width, height, effective_alpha_mode, seed.wrapping_add(3), bits_a, None);
             interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space } => {
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode } => {
             // Alpha-aware color-space dithering with progress
             // Uses alpha visibility weighting for RGB error propagation
+            let effective_alpha_mode = alpha_mode.unwrap_or(mode);
             let (r, g, b, a) = colorspace_aware_dither_rgba_channels(
                 srgb_pixels,
                 width,
@@ -178,6 +181,7 @@ pub fn dither_output_rgba(
                 bits_a,
                 space,
                 mode,
+                effective_alpha_mode,
                 seed,
                 progress,
             );
@@ -219,13 +223,15 @@ pub fn dither_output_luminosity(
             // Simple quantization without dithering - no progress needed
             gray_channel.iter().map(|v| quantize_no_dither(*v, bits)).collect()
         }
-        OutputTechnique::PerChannel { mode } => {
+        OutputTechnique::PerChannel { mode, .. } => {
             // Per-channel error diffusion in sRGB space (no linear/perceptual conversion)
             // Note: progress callback is ignored for per-channel
+            // Note: alpha_mode is ignored for grayscale-only dithering
             crate::dither::dither_with_mode_bits(gray_channel, width, height, mode, seed, bits, None)
         }
-        OutputTechnique::ColorspaceAware { mode, space } => {
+        OutputTechnique::ColorspaceAware { mode, space, .. } => {
             // Color-aware dithering for grayscale
+            // Note: alpha_mode is ignored for grayscale-only dithering
             colorspace_aware_dither_gray_with_mode(
                 gray_channel,
                 width,
@@ -298,15 +304,17 @@ pub fn dither_output_la(
             let a_u8: Vec<u8> = alpha_channel.iter().map(|v| quantize_no_dither(*v, bits_a)).collect();
             interleave_la_u8(&l_u8, &a_u8)
         }
-        OutputTechnique::PerChannel { mode } => {
+        OutputTechnique::PerChannel { mode, alpha_mode } => {
             // Per-channel error diffusion in sRGB space
+            let effective_alpha_mode = alpha_mode.unwrap_or(mode);
             let l_u8 = dither_with_mode_bits(gray_channel, width, height, mode, seed, bits_l, None);
-            let a_u8 = dither_with_mode_bits(alpha_channel, width, height, mode, seed.wrapping_add(1), bits_a, None);
+            let a_u8 = dither_with_mode_bits(alpha_channel, width, height, effective_alpha_mode, seed.wrapping_add(1), bits_a, None);
             interleave_la_u8(&l_u8, &a_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space } => {
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode } => {
             // Alpha-aware color-space dithering with progress
             // Uses alpha visibility weighting for luminosity error propagation
+            let effective_alpha_mode = alpha_mode.unwrap_or(mode);
             let (l, a) = colorspace_aware_dither_gray_alpha_with_mode(
                 gray_channel,
                 alpha_channel,
@@ -316,6 +324,7 @@ pub fn dither_output_la(
                 bits_a,
                 space,
                 mode,
+                effective_alpha_mode,
                 seed,
                 progress,
             );

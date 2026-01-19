@@ -831,10 +831,11 @@ pub fn dither_rgb_wasm(
 
     let output_technique = match technique {
         0 => OutputTechnique::None,
-        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        1 => OutputTechnique::PerChannel { mode: dither_mode, alpha_mode: None },
         _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
+            alpha_mode: None,
         },
     };
 
@@ -924,10 +925,11 @@ pub fn dither_rgb_with_progress_wasm(
 
     let output_technique = match technique {
         0 => OutputTechnique::None,
-        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        1 => OutputTechnique::PerChannel { mode: dither_mode, alpha_mode: None },
         _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
+            alpha_mode: None,
         },
     };
 
@@ -1010,6 +1012,7 @@ pub fn dither_gray_with_progress_wasm(
 /// Input: Two BufferF32 - one for grayscale (sRGB 0-255), one for alpha (0-255)
 /// Output: BufferU8 with interleaved LA u8 values (2 bytes per pixel: L, A)
 /// Uses alpha-aware error propagation: transparent pixels pass error through.
+/// alpha_mode: Separate dither mode for alpha channel (255 = use same as mode)
 /// Progress callback is called after each row with progress (0.0 to 1.0)
 #[wasm_bindgen]
 pub fn dither_la_with_progress_wasm(
@@ -1021,6 +1024,7 @@ pub fn dither_la_with_progress_wasm(
     bits_a: u8,
     technique: u8,
     mode: u8,
+    alpha_mode: u8,
     space: u8,
     seed: u32,
     progress_callback: &js_sys::Function,
@@ -1029,6 +1033,11 @@ pub fn dither_la_with_progress_wasm(
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
+    let alpha_dither_mode = if alpha_mode == 255 {
+        None
+    } else {
+        Some(dither_mode_from_u8(alpha_mode))
+    };
 
     let js_this = wasm_bindgen::JsValue::NULL;
     let callback = progress_callback.clone();
@@ -1038,10 +1047,11 @@ pub fn dither_la_with_progress_wasm(
 
     let output_technique = match technique {
         0 => OutputTechnique::None,
-        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        1 => OutputTechnique::PerChannel { mode: dither_mode, alpha_mode: alpha_dither_mode },
         _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
+            alpha_mode: alpha_dither_mode,
         },
     };
 
@@ -1065,6 +1075,7 @@ pub fn dither_la_with_progress_wasm(
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
 /// When bits_a > 0: Alpha channel is dithered with alpha-aware RGB error propagation.
 /// When bits_a == 0: Alpha is stripped and RGB-only dithering is used (output alpha = 255).
+/// alpha_mode: Separate dither mode for alpha channel (255 = use same as mode)
 #[wasm_bindgen]
 pub fn dither_rgba_wasm(
     buf: &BufferF32x4,
@@ -1076,6 +1087,7 @@ pub fn dither_rgba_wasm(
     bits_a: u8,
     technique: u8,
     mode: u8,
+    alpha_mode: u8,
     space: u8,
     seed: u32,
 ) -> BufferU8 {
@@ -1083,13 +1095,19 @@ pub fn dither_rgba_wasm(
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
+    let alpha_dither_mode = if alpha_mode == 255 {
+        None
+    } else {
+        Some(dither_mode_from_u8(alpha_mode))
+    };
 
     let output_technique = match technique {
         0 => OutputTechnique::None,
-        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        1 => OutputTechnique::PerChannel { mode: dither_mode, alpha_mode: alpha_dither_mode },
         _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
+            alpha_mode: alpha_dither_mode,
         },
     };
 
@@ -1114,6 +1132,7 @@ pub fn dither_rgba_wasm(
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
 /// When bits_a > 0: Alpha channel is dithered with alpha-aware RGB error propagation.
 /// When bits_a == 0: Alpha is stripped and RGB-only dithering is used (output alpha = 255).
+/// alpha_mode: Separate dither mode for alpha channel (255 = use same as mode)
 /// Progress callback is called after each row with progress (0.0 to 1.0)
 #[wasm_bindgen]
 pub fn dither_rgba_with_progress_wasm(
@@ -1126,6 +1145,7 @@ pub fn dither_rgba_with_progress_wasm(
     bits_a: u8,
     technique: u8,
     mode: u8,
+    alpha_mode: u8,
     space: u8,
     seed: u32,
     progress_callback: &js_sys::Function,
@@ -1134,13 +1154,19 @@ pub fn dither_rgba_with_progress_wasm(
 
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
+    let alpha_dither_mode = if alpha_mode == 255 {
+        None
+    } else {
+        Some(dither_mode_from_u8(alpha_mode))
+    };
 
     let output_technique = match technique {
         0 => OutputTechnique::None,
-        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        1 => OutputTechnique::PerChannel { mode: dither_mode, alpha_mode: alpha_dither_mode },
         _ => OutputTechnique::ColorspaceAware {
             mode: dither_mode,
             space: perceptual_space,
+            alpha_mode: alpha_dither_mode,
         },
     };
 

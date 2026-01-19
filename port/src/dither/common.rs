@@ -45,6 +45,8 @@ pub enum OutputTechnique {
     /// Fast and works well for most cases
     PerChannel {
         mode: DitherMode,
+        /// Optional separate mode for alpha channel (defaults to mode if None)
+        alpha_mode: Option<DitherMode>,
     },
     /// Colorspace-aware joint RGB dithering (default)
     /// Processes RGB channels together, selecting the quantized color that
@@ -52,6 +54,8 @@ pub enum OutputTechnique {
     ColorspaceAware {
         mode: DitherMode,
         space: PerceptualSpace,
+        /// Optional separate mode for alpha channel (defaults to mode if None)
+        alpha_mode: Option<DitherMode>,
     },
 }
 
@@ -60,6 +64,7 @@ impl Default for OutputTechnique {
         OutputTechnique::ColorspaceAware {
             mode: DitherMode::default(),
             space: PerceptualSpace::default(),
+            alpha_mode: None,
         }
     }
 }

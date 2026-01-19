@@ -422,6 +422,11 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     pub output_dither: DitherMethod,
 
+    /// Dithering method for alpha channel output quantization (defaults to same as --output-dither)
+    /// Only applies when output format includes alpha (ARGB, LA)
+    #[arg(long, value_enum)]
+    pub output_alpha_dither: Option<DitherMethod>,
+
     /// Dithering method for histogram processing (only used with --histogram-mode=binned)
     #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
     pub histogram_dither: DitherMethod,

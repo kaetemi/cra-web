@@ -791,6 +791,22 @@
                 </select>
             </div>
 
+            <div class="option-row hidden" id="alpha-dither-mode-row">
+                <label for="alpha-dither-mode">Alpha Dither Mode:</label>
+                <select id="alpha-dither-mode">
+                    <option value="255" selected>Same as Dither Mode</option>
+                    <option value="0">* Floyd-Steinberg (Standard)</option>
+                    <option value="1">Floyd-Steinberg (Serpentine)</option>
+                    <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
+                    <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
+                    <option value="4">* Mixed (Standard)</option>
+                    <option value="5">Mixed (Serpentine)</option>
+                    <option value="6">Mixed (Random Direction)</option>
+                    <option value="7">None (Nearest Only)</option>
+                </select>
+                <p class="alpha-dither-hint">Separate dither mode for alpha channel. Only applies when output has alpha (ARGB, LA).</p>
+            </div>
+
             <div class="seed-options visible" id="seed-options">
                 <label for="seed-input">Seed:</label>
                 <input type="number" id="seed-input" value="12345" min="0" max="4294967295">
@@ -1284,6 +1300,9 @@
             const bitsGray = parseInt(document.getElementById('bits-gray').value);
             const bitsGrayA = parseInt(document.getElementById('bits-gray-alpha').value) || 0;  // 0 = strip alpha for grayscale
 
+            // Get alpha mode (255 = same as mode)
+            const alphaMode = parseInt(document.getElementById('alpha-dither-mode').value);
+
             // Send to worker
             worker.postMessage({
                 type: 'dither',
@@ -1304,6 +1323,7 @@
                 bitsGray: bitsGray,
                 bitsGrayA: bitsGrayA,  // Grayscale alpha bit depth (0 = strip alpha for LA format)
                 mode: mode,
+                alphaMode: alphaMode,  // Separate alpha dither mode (255 = same as mode)
                 isPerceptual: isPerceptual,
                 perceptualSpace: perceptualSpace,
                 seed: seed
@@ -1464,6 +1484,15 @@
             // Add dither mode (only if not default mixed-standard)
             if (mode !== 4) {
                 cmd += ` --output-dither ${modeMap[mode]}`;
+            }
+
+            // Add alpha dither mode (only if not default "same as mode" = 255)
+            const alphaMode = parseInt(document.getElementById('alpha-dither-mode').value);
+            const hasAlphaOutput = isGrayscale
+                ? (inputHasAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
+                : (inputHasAlpha && parseInt(document.getElementById('bits-a').value) > 0);
+            if (hasAlphaOutput && alphaMode !== 255) {
+                cmd += ` --output-alpha-dither ${modeMap[alphaMode]}`;
             }
 
             // Add colorspace-aware output options
@@ -1630,11 +1659,21 @@
         }
 
         ['r', 'g', 'b', 'a', 'gray'].forEach(channel => {
-            document.getElementById(`bits-${channel}`).addEventListener('input', () => updateBitLabel(channel));
+            const handler = () => {
+                updateBitLabel(channel);
+                // Update alpha dither mode visibility when alpha bits change
+                if (channel === 'a') {
+                    updateAlphaControlVisibility();
+                }
+            };
+            document.getElementById(`bits-${channel}`).addEventListener('input', handler);
         });
 
         // Grayscale alpha slider
-        document.getElementById('bits-gray-alpha').addEventListener('input', () => updateBitLabel('gray-alpha'));
+        document.getElementById('bits-gray-alpha').addEventListener('input', () => {
+            updateBitLabel('gray-alpha');
+            updateAlphaControlVisibility();
+        });
 
         // Grayscale toggle
         function updateGrayscaleMode() {
@@ -1656,10 +1695,18 @@
             const alphaBox = document.getElementById('alpha-channel-box');
             const grayAlphaBox = document.getElementById('grayscale-alpha-box');
             const rgbOptions = document.getElementById('rgb-options');
+            const alphaDitherRow = document.getElementById('alpha-dither-mode-row');
 
             alphaBox.style.display = showRgbAlpha ? 'block' : 'none';
             grayAlphaBox.style.display = showGrayAlpha ? 'block' : 'none';
             rgbOptions.classList.toggle('has-alpha', showRgbAlpha);
+
+            // Show alpha dither mode when output will have alpha
+            // Check if alpha bits > 0 for the current mode (RGB or grayscale)
+            const hasAlphaOutput = isGrayscale
+                ? (showGrayAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
+                : (showRgbAlpha && parseInt(document.getElementById('bits-a').value) > 0);
+            alphaDitherRow.classList.toggle('hidden', !hasAlphaOutput);
         }
 
         // Color space aware toggle
