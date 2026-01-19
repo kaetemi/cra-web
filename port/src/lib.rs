@@ -541,6 +541,16 @@ pub fn rgb_to_grayscale_wasm(buf: &BufferF32x4) -> BufferF32 {
     BufferF32::new(gray)
 }
 
+/// Extract alpha channel from RGBA buffer
+/// Returns alpha values in 0-1 range (same as input)
+#[wasm_bindgen]
+pub fn extract_alpha_wasm(buf: &BufferF32x4) -> BufferF32 {
+    let alpha: Vec<f32> = buf.as_slice().iter()
+        .map(|p| p[3])
+        .collect();
+    BufferF32::new(alpha)
+}
+
 /// Convert linear grayscale to sRGB grayscale (gamma encode) in-place
 #[wasm_bindgen]
 pub fn gray_linear_to_srgb_wasm(buf: &mut BufferF32) {

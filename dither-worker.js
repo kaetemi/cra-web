@@ -184,14 +184,10 @@ function processDither(params) {
 
                 if (preserveGrayAlpha) {
                     // LA format: grayscale with alpha
-                    // Extract alpha channel from the buffer (buffer is still RGBA, we need the A component)
-                    const bufferSlice = buffer.as_slice ? buffer.as_slice() : buffer;
-                    const alphaChannel = new Float32Array(pixelCount);
-                    for (let i = 0; i < pixelCount; i++) {
-                        // Alpha is in 0-1 range, denormalize to 0-255
-                        alphaChannel[i] = bufferSlice[i * 4 + 3] * 255.0;
-                    }
-                    const alphaBuffer = craWasm.BufferF32.from_slice(alphaChannel);
+                    // Extract alpha channel using WASM function (buffer is opaque, can't access directly from JS)
+                    let alphaBuffer = craWasm.extract_alpha_wasm(buffer);
+                    // Denormalize alpha from 0-1 to 0-255 range (gray_denormalize works on any BufferF32)
+                    craWasm.gray_denormalize_wasm(alphaBuffer);
 
                     sendProgress(70, 'Dithering grayscale+alpha...');
                     const ditheredBuffer = craWasm.dither_la_with_progress_wasm(
