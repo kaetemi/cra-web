@@ -16,3 +16,8 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# wasm-opt feature flags (see port/Cargo.toml for detailed explanation)
+# Enables: SIMD, bulk-memory, nontrapping-float-to-int
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]

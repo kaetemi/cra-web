@@ -49,3 +49,20 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# =============================================================================
+# wasm-pack Configuration
+# =============================================================================
+# Configure wasm-opt to recognize WebAssembly features used by Rust.
+# Without these flags, wasm-opt fails to validate the WASM binary.
+#
+# Features enabled (all part of "WebAssembly 2.0", supported in modern browsers):
+#   --enable-simd: 128-bit vector operations (v128, i32x4, f32x4, etc.)
+#                  Required because we compile with RUSTFLAGS='-C target-feature=+simd128'
+#   --enable-bulk-memory: memory.copy/fill instructions for fast memcpy/memset
+#                         Used by Rust for slice ops, Vec initialization, etc.
+#   --enable-nontrapping-float-to-int: Saturating float-to-int (i32.trunc_sat_f32_u)
+#                                      Used by Rust's `as` casts for safe conversion
+# =============================================================================
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-simd", "--enable-bulk-memory", "--enable-nontrapping-float-to-int"]
