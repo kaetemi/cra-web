@@ -39,7 +39,7 @@ Available dither modes:
 
 ### Colorspace-Aware Dithering
 Joint RGB quantization using perceptual distance metrics to select the best candidate color, with error diffusion in linear RGB space. Unlike per-channel dithering, this processes all channels together to minimize perceived color error:
-- **Distance metric**: OKLab (default), CIELAB (CIE76/CIE94/CIEDE2000), or Y'CbCr
+- **Distance metric**: OKLab (default), CIELAB (CIE76/CIE94/CIEDE2000), Linear RGB, Y'CbCr, or sRGB
 - **Error accumulation**: Linear RGB (physically correct blending)
 - **Candidate search**: Evaluates nearby quantization levels jointly to find perceptually closest match
 
@@ -47,10 +47,11 @@ Joint RGB quantization using perceptual distance metrics to select the best cand
 Support for 1-8 bit output with proper bit replication (e.g., 3-bit value ABC becomes ABCABCAB in 8-bit output).
 
 ### Output Formats
-- **PNG**: Standard lossless image output (grayscale, RGB, or RGBA)
+- **PNG**: Standard lossless image output (grayscale, RGB, or RGBA); palettized for ≤8bpp formats
 - **RGB**: RGB332, RGB565, RGB8, etc. (4-24 bits per pixel)
 - **ARGB**: ARGB1555, ARGB4, ARGB8, etc. (with alpha channel)
 - **Grayscale**: L1, L2, L4, L8 (1-8 bits per pixel)
+- **Grayscale+Alpha**: LA1, LA2, LA4, LA8, LA48, etc. (luminosity with alpha)
 - **Safetensors**: FP32, FP16, BF16 floating-point tensor format
 - **Raw Binary**: Packed or row-aligned with configurable stride (1-128 bytes)
 
@@ -141,6 +142,7 @@ Input/Output:
   -r, --ref <PATH>                 Reference image path (for histogram matching)
       --ref-profile <MODE>         Reference color profile [default: auto]
   -o, --output <PATH>              Output PNG image path
+      --no-palettized-output       Disable palettized PNG for ≤8bpp formats
       --output-raw <PATH>          Output raw binary file
       --output-raw-r <PATH>        Output red channel only (raw binary)
       --output-raw-g <PATH>        Output green channel only (raw binary)
@@ -154,6 +156,7 @@ Format:
                                    RGB: RGB8, RGB332, RGB565, RGB888
                                    ARGB: ARGB8, ARGB4, ARGB1555, ARGB4444, ARGB8888
                                    Grayscale: L1, L2, L4, L8
+                                   Grayscale+Alpha: LA1, LA2, LA4, LA8, LA48
       --stride <N>                 Row stride alignment in bytes (power of 2, 1-128) [default: 1]
       --stride-fill <MODE>         How to fill stride padding [default: black]
                                    [values: black, repeat]
@@ -174,9 +177,10 @@ Dithering:
                                    [values: fs-standard, fs-serpentine, jjn-standard,
                                     jjn-serpentine, mixed-standard, mixed-serpentine,
                                     mixed-random, none]
-      --output-distance-space      Perceptual space for output dithering [default: oklab]
+      --output-alpha-dither <MODE> Alpha channel dithering method [default: same as --output-dither]
+      --output-distance-space      Perceptual space for output dithering [default: oklab for RGB, lab-cie94 for grayscale]
                                    [values: oklab, lab-cie76, lab-cie94, lab-ciede2000,
-                                    linear-rgb, ycbcr]
+                                    linear-rgb, y-cb-cr, srgb]
       --no-colorspace-aware-output Disable colorspace-aware dithering (use per-channel)
       --histogram-dither <MODE>    Dithering for histogram quantization [default: mixed-standard]
       --histogram-distance-space   Perceptual space for histogram dithering [default: oklab]
@@ -193,8 +197,21 @@ Safetensors Output:
 Resize:
       --width <W>                  Resize to width (preserves aspect ratio)
       --height <H>                 Resize to height (preserves aspect ratio)
-      --scale-method <METHOD>      Resize method [default: lanczos] [values: bilinear, lanczos]
+      --scale-method <METHOD>      Resize method [default: ewa-lanczos3]
+                                   Separable: bilinear, lanczos2, lanczos3, mitchell, catmull-rom, box
+                                   EWA (2D): ewa-lanczos2, ewa-lanczos3, ewa-lanczos3-sharp,
+                                             ewa-lanczos4-sharpest, ewa-sinc-lanczos2,
+                                             ewa-sinc-lanczos3, ewa-mitchell, ewa-catmull-rom
+                                   Research: sinc, jinc, lanczos3-scatter, sinc-scatter,
+                                             stochastic-jinc, stochastic-jinc-scatter,
+                                             stochastic-jinc-scatter-normalized
       --non-uniform                Disable automatic uniform scaling detection
+
+Tonemapping:
+      --input-tonemapping <MODE>   Apply before histogram matching [values: aces, aces-inverse]
+      --tonemapping <MODE>         Apply after processing [values: aces, aces-inverse]
+      --exposure <FACTOR>          Exposure adjustment (linear multiplier, before tonemapping)
+                                   Values > 1.0 brighten, < 1.0 darken (2.0 = +1 stop)
 
 General:
   -s, --seed <SEED>                Random seed for mixed dithering [default: 12345]
