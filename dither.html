@@ -1558,33 +1558,63 @@
             const stride = parseInt(document.getElementById('stride-select').value) || 1;
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
             const fillNames = ['Black', 'Repeat'];
-            const modeNames = ['fs-standard', 'fs-serpentine', 'jjn-standard', 'jjn-serpentine',
-                               'mixed-standard', 'mixed-serpentine', 'mixed-random', 'none'];
-            const spaceNames = ['lab-cie76', 'oklab', 'lab-cie94', 'lab-ciede2000', 'linear-rgb', 'ycbcr'];
+            const modeNames = ['FsStandard', 'FsSerpentine', 'JjnStandard', 'JjnSerpentine',
+                               'MixedStandard', 'MixedSerpentine', 'MixedRandom', 'None'];
+            const spaceNames = ['LabCie76', 'Oklab', 'LabCie94', 'LabCiede2000', 'LinearRgb', 'YCbCr'];
 
+            // Get input filename for name field (strip extension)
+            const inputFile = document.getElementById('file-input').files[0];
+            const name = inputFile ? inputFile.name.replace(/\.[^/.]+$/, '') : 'image';
+
+            // Calculate raw output size (matches CLI calculation)
+            const bitsPerPixel = format_total_bits_wasm(format);
+            const packedRowBits = lastDitherResult.width * bitsPerPixel;
+            const packedRowBytes = Math.ceil(packedRowBits / 8);
+            const rowStride = stride > 1 ? Math.ceil(packedRowBytes / stride) * stride : packedRowBytes;
+            const totalSize = rowStride * lastDitherResult.height;
+
+            // Build metadata object matching CLI format
+            // Order matches CLI: name, type, width, height, format fields, dither fields, raw fields, seed
             const metadata = {
-                format: format,
+                name: name,
+                type: 'bitmap',
                 width: lastDitherResult.width,
                 height: lastDitherResult.height,
-                is_grayscale: lastDitherResult.isGrayscale,
-                has_alpha: lastDitherResult.hasAlpha,
-                bits_per_pixel: format_total_bits_wasm(format),
-                bits_r: lastDitherResult.bitsR,
-                bits_g: lastDitherResult.bitsG,
-                bits_b: lastDitherResult.bitsB,
-                dither_method: modeNames[lastDitherResult.mode] || 'unknown',
-                colorspace: lastDitherResult.perceptualSpace !== null ?
-                    spaceNames[lastDitherResult.perceptualSpace] || 'unknown' : 'none',
-                seed: lastDitherResult.seed,
-                stride: stride,
-                stride_fill: fillNames[fill] || 'Black',
-                generated_at: new Date().toISOString()
+                format: format,
+                bits_per_pixel: bitsPerPixel
             };
 
-            // Add bits_a only when output has alpha
+            // Bit depth fields (grayscale uses bits_l, RGB uses bits_r/g/b)
+            if (lastDitherResult.isGrayscale) {
+                metadata.bits_l = lastDitherResult.bitsR;
+            } else {
+                metadata.bits_r = lastDitherResult.bitsR;
+                metadata.bits_g = lastDitherResult.bitsG;
+                metadata.bits_b = lastDitherResult.bitsB;
+            }
             if (lastDitherResult.hasAlpha) {
                 metadata.bits_a = lastDitherResult.bitsA;
             }
+
+            // Dither settings
+            metadata.output_dither = modeNames[lastDitherResult.mode] || 'Unknown';
+            if (lastDitherResult.hasAlpha && lastDitherResult.alphaMode !== undefined) {
+                metadata.output_alpha_dither = modeNames[lastDitherResult.alphaMode] || 'Unknown';
+            }
+            // CLI always outputs a colorspace (defaults to Oklab for RGB, LabCie94 for grayscale)
+            const defaultSpace = lastDitherResult.isGrayscale ? 'LabCie94' : 'Oklab';
+            metadata.output_colorspace = lastDitherResult.perceptualSpace !== null ?
+                (spaceNames[lastDitherResult.perceptualSpace] || defaultSpace) : defaultSpace;
+
+            // Raw output fields
+            metadata.stride_alignment = stride;
+            metadata.stride_fill = fillNames[fill] || 'Black';
+            metadata.compressed = 0;
+            metadata.stride = rowStride;
+            metadata.total_size = totalSize;
+
+            // Seed
+            metadata.seed = lastDitherResult.seed;
 
             return metadata;
         }
