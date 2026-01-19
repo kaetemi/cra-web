@@ -41,15 +41,38 @@ x = X / (X + Y + Z)
 y = Y / (X + Y + Z)
 ```
 
-For D65 using the tabulated SPD (Appendix A) and the CIE 1931 observer:
+### 1.2 Verification Against Official Values
 
-| Value | Result |
-|-------|--------|
-| X | 95.0433 |
-| Y | 100.0000 |
-| Z | 108.8801 |
-| x | 0.3127212427 |
-| y | 0.3290303382 |
+CIE 15:2004 Table T.3 specifies that the official chromaticity was computed using "5 nm intervals over the range 380 nm to 780 nm." We can verify this by deriving chromaticity from different source data and configurations.
+
+#### Source Data Used
+
+| Source | Data | Notes |
+|--------|------|-------|
+| CIE 15:2004 Table T.1 | D65 SPD (5nm, 300-830nm) | Historical tabulation with rounding |
+| ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | D65 SPD (1nm, 300-830nm) | Current authoritative SPD |
+| CIE 018:2019 Table 6 | CMF (1nm, 360-830nm) | Current authoritative CMFs |
+
+#### Derivation Results Comparison
+
+Using the authoritative 1nm source data (ISO 11664-2:2007 SPD + CIE 018:2019 CMF):
+
+| Configuration | X | Y | Z | x | y |
+|---------------|---|---|---|---|---|
+| **Official CIE 15:2004** | 95.04 | 100.00 | 108.88 | 0.31272 | 0.32903 |
+| 380-780nm @ 5nm | 95.0430 | 100.0000 | 108.8801 | 0.3127205252 | 0.3290306850 |
+| 380-780nm @ 1nm | 95.0423 | 100.0000 | 108.8610 | 0.3127385128 | 0.3290520326 |
+| 360-830nm @ 1nm (full) | 95.0471 | 100.0000 | 108.8829 | 0.3127268710 | 0.3290232066 |
+
+#### Error Analysis (×10⁻⁵ from official)
+
+| Configuration | Δx | Δy | Notes |
+|---------------|----|----|-------|
+| 380-780nm @ 5nm | +0.05 | +0.07 | **Matches official method** |
+| 380-780nm @ 1nm | +1.85 | +2.20 | Finer sampling introduces systematic shift |
+| 360-830nm @ 1nm | +0.69 | −0.68 | Extended range partially compensates |
+
+**Key Finding:** The 5nm sampling at 380-780nm reproduces the official chromaticity to within 0.07×10⁻⁵, confirming CIE 15:2004's statement about its derivation method. Using 1nm data introduces small systematic differences due to interpolation and integration effects.
 
 Rounded to 5 decimal places: **(0.31272, 0.32903)** ✓
 
@@ -359,6 +382,25 @@ Note: ~9.5×10⁻⁵ y error from quadratic approximation.
 | D65 | 0.31272 | 0.32903 |
 | D75 | 0.29902 | 0.31485 |
 
+### Derived D65 Chromaticity from Authoritative Source Data
+
+Using ISO 11664-2:2007 D65 SPD and CIE 018:2019 CMF:
+
+| Configuration | x | y | Δx (×10⁻⁵) | Δy (×10⁻⁵) |
+|---------------|---|---|------------|------------|
+| 380-780nm @ 5nm | 0.3127205252 | 0.3290306850 | +0.05 | +0.07 |
+| 380-780nm @ 1nm | 0.3127385128 | 0.3290520326 | +1.85 | +2.20 |
+| 360-830nm @ 1nm | 0.3127268710 | 0.3290232066 | +0.69 | −0.68 |
+
+### Derived D65 Tristimulus Values
+
+| Configuration | X | Y | Z |
+|---------------|---|---|---|
+| Official CIE 15:2004 | 95.04 | 100.00 | 108.88 |
+| 380-780nm @ 5nm | 95.0430 | 100.0000 | 108.8801 |
+| 380-780nm @ 1nm | 95.0423 | 100.0000 | 108.8610 |
+| 360-830nm @ 1nm | 95.0471 | 100.0000 | 108.8829 |
+
 ### M₁, M₂ Coefficients for Canonical Illuminants
 
 | Illuminant | M₁ | M₂ |
@@ -470,7 +512,7 @@ The authoritative definition of D65. Values are relative spectral power, normali
 | 455 | 117.410 | 620 | 87.6987 | | |
 | 460 | 117.812 | 625 | 85.4936 | | |
 
-**Note:** For rigorous calculations, use the 1nm tables from CIE S 005-1998 (531 values, 300–830nm at 6 significant figures). The 5nm table above is sufficient for most colorimetric work.
+**Note:** For rigorous calculations, use the 1nm tables from ISO 11664-2:2007 / CIE S 014-2:2006 (531 values, 300–830nm at 6 significant figures). The 5nm table above is sufficient for most colorimetric work.
 
 ---
 
@@ -574,8 +616,35 @@ This yields a chromaticity error of ~9.5×10⁻⁵ from the official (0.31272, 0
 
 ---
 
+## Appendix D: Source Data for Verification
+
+### D.1 Data Sources Used in This Document
+
+| Data | Source Document | Notes |
+|------|-----------------|-------|
+| D65 SPD (5nm) | CIE 15:2004 Table T.1 | Historical tabulation |
+| D65 SPD (1nm) | ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | Current authoritative SPD |
+| CMF 1931 2° | CIE 018:2019 Table 6 | Current authoritative CMFs |
+| Official chromaticity | CIE 15:2004 Table T.3 | (0.31272, 0.32903) |
+
+### D.2 Data Verification Spot Checks
+
+From ISO 11664-2:2007 D65 SPD and CIE 018:2019 CMF:
+
+| Wavelength | D65 SPD | Expected | CMF ȳ | Expected |
+|------------|---------|----------|-------|----------|
+| 450nm | 117.008 | 117.008 | — | — |
+| 555nm | 102.023 | — | 1.0000 | 1.0 |
+| 560nm | 100.000 | 100.000 | — | — |
+
+All spot checks confirm data integrity.
+
+---
+
 ## References
 
 - CIE 15:2004, Colorimetry, 3rd Edition
 - CIE S 005-1998 / ISO 10526:1999, CIE Standard Illuminants for Colorimetry
+- ISO 11664-2:2007 / CIE S 014-2:2006, Colorimetry — Part 2: CIE Standard Illuminants
+- CIE 018:2019, The Basis of Physical Photometry, 3rd Edition
 - Judd, D.B., MacAdam, D.L., Wyszecki, G., et al. (1964). "Spectral Distribution of Typical Daylight as a Function of Correlated Color Temperature." *J. Opt. Soc. Am.* 54, 1031-1040.
