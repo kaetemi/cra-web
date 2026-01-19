@@ -880,17 +880,8 @@
             </div>
 
             <div class="option-row">
-                <label for="input-tonemapping">Input Tonemapping:</label>
-                <select id="input-tonemapping">
-                    <option value="none" selected>None</option>
-                    <option value="aces">ACES (compress HDR→SDR)</option>
-                    <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
-                </select>
-            </div>
-
-            <div class="option-row">
-                <label for="output-tonemapping">Output Tonemapping:</label>
-                <select id="output-tonemapping">
+                <label for="tonemapping">Tonemapping:</label>
+                <select id="tonemapping">
                     <option value="none" selected>None</option>
                     <option value="aces">ACES (compress HDR→SDR)</option>
                     <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
@@ -1301,8 +1292,7 @@
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
-            const inputTonemapping = document.getElementById('input-tonemapping').value;
-            const outputTonemapping = document.getElementById('output-tonemapping').value;
+            const tonemapping = document.getElementById('tonemapping').value;
 
             // Determine target dimensions
             let processWidth = originalWidth;
@@ -1347,8 +1337,7 @@
                 isPerceptual: isPerceptual,
                 perceptualSpace: perceptualSpace,
                 seed: seed,
-                inputTonemapping: inputTonemapping,
-                outputTonemapping: outputTonemapping
+                tonemapping: tonemapping
             });
         }
 
@@ -1552,14 +1541,10 @@
                 }
             }
 
-            // Add tonemapping options
-            const inputTonemapping = document.getElementById('input-tonemapping').value;
-            const outputTonemapping = document.getElementById('output-tonemapping').value;
-            if (inputTonemapping !== 'none') {
-                cmd += ` --input-tonemapping ${inputTonemapping}`;
-            }
-            if (outputTonemapping !== 'none') {
-                cmd += ` --tonemapping ${outputTonemapping}`;
+            // Add tonemapping option
+            const tonemapping = document.getElementById('tonemapping').value;
+            if (tonemapping !== 'none') {
+                cmd += ` --tonemapping ${tonemapping}`;
             }
 
             return cmd;

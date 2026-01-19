@@ -70,8 +70,7 @@ function processDither(params) {
             isPerceptual,
             perceptualSpace,
             seed,
-            inputTonemapping = 'none',  // 'none', 'aces', 'aces-inverse'
-            outputTonemapping = 'none'  // 'none', 'aces', 'aces-inverse'
+            tonemapping = 'none'  // 'none', 'aces', 'aces-inverse'
         } = params;
 
         sendProgress(5, 'Loading image...');
@@ -95,7 +94,7 @@ function processDither(params) {
         // inputIsLinear counts as needing the linear path (already in linear, process there)
         // Premultiplied alpha also requires linear path (un-premultiply must happen in linear space)
         // Tonemapping requires linear path (operates on linear values)
-        const needsTonemapping = inputTonemapping !== 'none' || outputTonemapping !== 'none';
+        const needsTonemapping = tonemapping !== 'none';
         const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || loadedImage.is_cicp_needs_conversion || inputIsLinear || needsUnpremultiply || needsTonemapping;
 
         const pixelCount = processWidth * processHeight;
@@ -148,15 +147,6 @@ function processDither(params) {
                 craWasm.unpremultiply_alpha_wasm(buffer);
             }
 
-            // Step 1.6: Apply input tonemapping (before resize)
-            if (inputTonemapping === 'aces') {
-                sendProgress(27, 'Applying input tonemapping (ACES)...');
-                craWasm.tonemap_aces_wasm(buffer);
-            } else if (inputTonemapping === 'aces-inverse') {
-                sendProgress(27, 'Applying input tonemapping (ACES inverse)...');
-                craWasm.tonemap_aces_inverse_wasm(buffer);
-            }
-
             // Step 2: Rescale in linear space (if needed)
             // Use alpha-aware rescaling when image has alpha to prevent transparent pixels
             // from bleeding their color into opaque regions
@@ -179,12 +169,12 @@ function processDither(params) {
                 sendProgress(50, 'Converting to grayscale...');
                 let grayBuffer = craWasm.rgb_to_grayscale_wasm(buffer);
 
-                // Apply output tonemapping after grayscale conversion
-                if (outputTonemapping === 'aces') {
-                    sendProgress(55, 'Applying output tonemapping (ACES)...');
+                // Apply tonemapping after grayscale conversion
+                if (tonemapping === 'aces') {
+                    sendProgress(55, 'Applying tonemapping (ACES)...');
                     craWasm.gray_tonemap_aces_wasm(grayBuffer);
-                } else if (outputTonemapping === 'aces-inverse') {
-                    sendProgress(55, 'Applying output tonemapping (ACES inverse)...');
+                } else if (tonemapping === 'aces-inverse') {
+                    sendProgress(55, 'Applying tonemapping (ACES inverse)...');
                     craWasm.gray_tonemap_aces_inverse_wasm(grayBuffer);
                 }
 
@@ -244,12 +234,12 @@ function processDither(params) {
                     }
                 }
             } else {
-                // Apply output tonemapping before sRGB conversion (for RGB output)
-                if (outputTonemapping === 'aces') {
-                    sendProgress(45, 'Applying output tonemapping (ACES)...');
+                // Apply tonemapping before sRGB conversion (for RGB output)
+                if (tonemapping === 'aces') {
+                    sendProgress(45, 'Applying tonemapping (ACES)...');
                     craWasm.tonemap_aces_wasm(buffer);
-                } else if (outputTonemapping === 'aces-inverse') {
-                    sendProgress(45, 'Applying output tonemapping (ACES inverse)...');
+                } else if (tonemapping === 'aces-inverse') {
+                    sendProgress(45, 'Applying tonemapping (ACES inverse)...');
                     craWasm.tonemap_aces_inverse_wasm(buffer);
                 }
 
