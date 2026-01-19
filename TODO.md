@@ -29,6 +29,7 @@ This image file uses "0 alpha" to mean pure additive blending
 ---
 
 We could theoretically do Bayer dithering with linear/sRGB awareness, by plotting all the quantized sRGB values in linear space, and then interpolating the intermediate values in linear space (as the dithering affects linear light emission -- it does not align with the gamma function)
+Then when adding the matrix offset... add it linearly piecewise to these interpolated sections (normalize each section)
 
 ---
 
