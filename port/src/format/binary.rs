@@ -432,72 +432,6 @@ pub fn encode_argb_pixel(a: u8, r: u8, g: u8, b: u8, bits_a: u8, bits_r: u8, bit
     (a_val << a_shift) | (r_val << r_shift) | (g_val << g_shift) | b_val
 }
 
-/// Encode RGB666 data using 4-pixel-to-9-byte packing
-///
-/// This matches the reference implementation where 4 pixels (4 × 18 = 72 bits)
-/// are packed into 9 bytes as a continuous bit stream.
-///
-/// Each pixel is encoded as R6 G6 B6 (R in MSB, B in LSB = 18 bits)
-/// The 4 pixels are packed sequentially into the 72-bit block.
-///
-/// Args:
-///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
-pub fn encode_rgb666_packed(
-    rgb_data: &[u8],
-    width: usize,
-    height: usize,
-    fill: StrideFill,
-) -> Vec<u8> {
-    let total_pixels = width * height;
-    // Calculate output size: each group of 4 pixels -> 9 bytes
-    // Round up to handle partial groups at end of image
-    let num_groups = (total_pixels + 3) / 4;
-    let mut output = Vec::with_capacity(num_groups * 9);
-
-    // Get last pixel for repeat fill
-    let last_idx = total_pixels - 1;
-    let last_r = (rgb_data[last_idx * 3] >> 2) as u32;
-    let last_g = (rgb_data[last_idx * 3 + 1] >> 2) as u32;
-    let last_b = (rgb_data[last_idx * 3 + 2] >> 2) as u32;
-    let last_rgb6: u32 = last_b | (last_g << 6) | (last_r << 12);
-
-    let mut pixel_idx = 0;
-    while pixel_idx < total_pixels {
-        // Process 4 pixels at a time into a 9-byte block
-        let mut block = [0u8; 9];
-
-        for i in 0..4 {
-            let rgb6 = if pixel_idx + i >= total_pixels {
-                // Past end of image: use fill mode
-                match fill {
-                    StrideFill::Black => continue, // Leave as zeros
-                    StrideFill::Repeat => last_rgb6, // Use last pixel
-                }
-            } else {
-                let idx = pixel_idx + i;
-                let r = (rgb_data[idx * 3] >> 2) as u32; // 6 bits
-                let g = (rgb_data[idx * 3 + 1] >> 2) as u32; // 6 bits
-                let b = (rgb_data[idx * 3 + 2] >> 2) as u32; // 6 bits
-                b | (g << 6) | (r << 12)
-            };
-
-            // Pack as B6 | G6<<6 | R6<<12 = 18 bits total
-            let first_byte = i * 2;
-            let bit_offset = i * 2; // 0, 2, 4, 6
-            let rgb6_shifted: u32 = rgb6 << bit_offset;
-
-            block[first_byte] |= (rgb6_shifted & 0xFF) as u8;
-            block[first_byte + 1] = ((rgb6_shifted >> 8) & 0xFF) as u8;
-            block[first_byte + 2] |= ((rgb6_shifted >> 16) & 0xFF) as u8;
-        }
-
-        output.extend_from_slice(&block);
-        pixel_idx += 4;
-    }
-
-    output
-}
-
 /// Encode RGB666 data with row alignment and configurable stride
 ///
 /// Args:
@@ -596,82 +530,6 @@ pub fn encode_rgb666_row_aligned(
     height: usize,
 ) -> Vec<u8> {
     encode_rgb666_row_aligned_stride(rgb_data, width, height, 1, StrideFill::Black)
-}
-
-/// Write packed binary output for RGB data (continuous bit stream, no row padding)
-///
-/// Args:
-///     rgb_data: Interleaved RGB data (RGBRGB..., 3 bytes per pixel)
-///     width, height: Image dimensions
-///     bits_r, bits_g, bits_b: Output bit depth per channel
-///     fill: How to fill partial groups (only applies to RGB666's 4-pixel grouping)
-pub fn encode_rgb_packed(
-    rgb_data: &[u8],
-    width: usize,
-    height: usize,
-    bits_r: u8,
-    bits_g: u8,
-    bits_b: u8,
-    fill: StrideFill,
-) -> Vec<u8> {
-    // Special case: RGB666 uses 4-pixel-to-9-byte packing
-    if bits_r == 6 && bits_g == 6 && bits_b == 6 {
-        return encode_rgb666_packed(rgb_data, width, height, fill);
-    }
-
-    let total_bits = (bits_r + bits_g + bits_b) as usize;
-    let total_pixels = width * height;
-    let mut output = Vec::new();
-
-    if total_bits >= 8 {
-        // Byte-aligned or multi-byte pixels
-        let bytes_per_pixel = (total_bits + 7) / 8;
-        output.reserve(total_pixels * bytes_per_pixel);
-
-        for i in 0..total_pixels {
-            let r = rgb_data[i * 3];
-            let g = rgb_data[i * 3 + 1];
-            let b = rgb_data[i * 3 + 2];
-            let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
-            // Write little-endian (LSB first)
-            for byte_idx in 0..bytes_per_pixel {
-                output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
-            }
-        }
-    } else {
-        // Sub-byte pixels - pack multiple pixels per byte
-        let pixels_per_byte = 8 / total_bits;
-        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
-        output.reserve(total_bytes);
-
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for i in 0..total_pixels {
-            let r = rgb_data[i * 3];
-            let g = rgb_data[i * 3 + 1];
-            let b = rgb_data[i * 3 + 2];
-            let val = encode_rgb_pixel(r, g, b, bits_r, bits_g, bits_b);
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-
-    output
 }
 
 /// Write row-aligned binary output for RGB data with configurable stride
@@ -826,78 +684,6 @@ pub fn encode_rgb_row_aligned(
 // ARGB Encoding Functions (hardware ordering: A in MSB, R, G, B toward LSB)
 // ============================================================================
 
-/// Write packed binary output for ARGB data (continuous bit stream, no row padding)
-///
-/// Args:
-///     argb_data: Interleaved ARGB data (RGBARGBA..., 4 bytes per pixel, standard RGBA order in memory)
-///     width, height: Image dimensions
-///     bits_a, bits_r, bits_g, bits_b: Output bit depth per channel
-pub fn encode_argb_packed(
-    rgba_data: &[u8],
-    width: usize,
-    height: usize,
-    bits_a: u8,
-    bits_r: u8,
-    bits_g: u8,
-    bits_b: u8,
-) -> Vec<u8> {
-    let total_bits = (bits_a + bits_r + bits_g + bits_b) as usize;
-    let total_pixels = width * height;
-    let mut output = Vec::new();
-
-    if total_bits >= 8 {
-        // Byte-aligned or multi-byte pixels
-        let bytes_per_pixel = (total_bits + 7) / 8;
-        output.reserve(total_pixels * bytes_per_pixel);
-
-        for i in 0..total_pixels {
-            let r = rgba_data[i * 4];
-            let g = rgba_data[i * 4 + 1];
-            let b = rgba_data[i * 4 + 2];
-            let a = rgba_data[i * 4 + 3];
-            let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
-            // Write little-endian (LSB first)
-            for byte_idx in 0..bytes_per_pixel {
-                output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
-            }
-        }
-    } else {
-        // Sub-byte pixels - pack multiple pixels per byte
-        let pixels_per_byte = 8 / total_bits;
-        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
-        output.reserve(total_bytes);
-
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for i in 0..total_pixels {
-            let r = rgba_data[i * 4];
-            let g = rgba_data[i * 4 + 1];
-            let b = rgba_data[i * 4 + 2];
-            let a = rgba_data[i * 4 + 3];
-            let val = encode_argb_pixel(a, r, g, b, bits_a, bits_r, bits_g, bits_b);
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-
-    output
-}
-
 /// Write row-aligned binary output for ARGB data with configurable stride
 ///
 /// Args:
@@ -1044,56 +830,6 @@ pub fn encode_argb_row_aligned(
     encode_argb_row_aligned_stride(rgba_data, width, height, bits_a, bits_r, bits_g, bits_b, 1, StrideFill::Black)
 }
 
-/// Write packed binary output for grayscale data
-pub fn encode_gray_packed(
-    gray_data: &[u8],
-    width: usize,
-    height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    let total_bits = bits as usize;
-    let total_pixels = width * height;
-    let mut output = Vec::new();
-
-    if total_bits >= 8 {
-        // Byte-aligned pixels (L8)
-        output.reserve(total_pixels);
-        for i in 0..total_pixels {
-            output.push(gray_data[i]);
-        }
-    } else {
-        // Sub-byte pixels - pack multiple pixels per byte
-        let pixels_per_byte = 8 / total_bits;
-        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
-        output.reserve(total_bytes);
-
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for i in 0..total_pixels {
-            let val = encode_gray_pixel(gray_data[i], bits);
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-
-    output
-}
-
 /// Write row-aligned binary output for grayscale data with configurable stride
 ///
 /// stride: Row stride alignment in bytes (must be power of 2, 1-128)
@@ -1204,73 +940,6 @@ pub fn encode_gray_row_aligned(
 // LA (Luminosity+Alpha) Encoding Functions
 // Layout: Alpha in MSB, Luminosity in LSB
 // ============================================================================
-
-/// Write packed binary output for LA data (continuous bit stream, no row padding)
-///
-/// Args:
-///     la_data: Interleaved LA data (LALA..., 2 bytes per pixel, L first then A)
-///     width, height: Image dimensions
-///     bits_l: Output bit depth for luminosity channel
-///     bits_a: Output bit depth for alpha channel
-pub fn encode_la_packed(
-    la_data: &[u8],
-    width: usize,
-    height: usize,
-    bits_l: u8,
-    bits_a: u8,
-) -> Vec<u8> {
-    let total_bits = (bits_l + bits_a) as usize;
-    let total_pixels = width * height;
-    let mut output = Vec::new();
-
-    if total_bits >= 8 {
-        // Byte-aligned or multi-byte pixels
-        let bytes_per_pixel = (total_bits + 7) / 8;
-        output.reserve(total_pixels * bytes_per_pixel);
-
-        for i in 0..total_pixels {
-            let l = la_data[i * 2];
-            let a = la_data[i * 2 + 1];
-            let val = encode_la_pixel(l, a, bits_l, bits_a);
-            // Write little-endian (LSB first)
-            for byte_idx in 0..bytes_per_pixel {
-                output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
-            }
-        }
-    } else {
-        // Sub-byte pixels - pack multiple pixels per byte
-        let pixels_per_byte = 8 / total_bits;
-        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
-        output.reserve(total_bytes);
-
-        let mut current_byte: u8 = 0;
-        let mut bits_in_byte: usize = 0;
-
-        for i in 0..total_pixels {
-            let l = la_data[i * 2];
-            let a = la_data[i * 2 + 1];
-            let val = encode_la_pixel(l, a, bits_l, bits_a);
-
-            // Pack from MSB to LSB
-            let shift = 8 - bits_in_byte - total_bits;
-            current_byte |= (val as u8) << shift;
-            bits_in_byte += total_bits;
-
-            if bits_in_byte == 8 {
-                output.push(current_byte);
-                current_byte = 0;
-                bits_in_byte = 0;
-            }
-        }
-
-        // Flush remaining bits
-        if bits_in_byte > 0 {
-            output.push(current_byte);
-        }
-    }
-
-    output
-}
 
 /// Write row-aligned binary output for LA data with configurable stride
 ///
@@ -2341,41 +2010,7 @@ mod tests {
     }
 
     #[test]
-    fn test_rgb666_packing() {
-        // Test RGB666 packing with 4 pixels -> 9 bytes
-        // Create simple test data: 4 pixels (minimum for one complete block)
-        let r = vec![255, 0, 128, 64];
-        let g = vec![0, 255, 128, 192];
-        let b = vec![128, 64, 255, 0];
-        let rgb = interleave(&r, &g, &b);
-
-        let packed = encode_rgb666_packed(&rgb, 4, 1, StrideFill::Black);
-        assert_eq!(packed.len(), 9); // 4 pixels -> 9 bytes
-
-        // Test encode_rgb_packed automatically routes to RGB666
-        let packed2 = encode_rgb_packed(&rgb, 4, 1, 6, 6, 6, StrideFill::Black);
-        assert_eq!(packed2.len(), 9);
-        assert_eq!(packed, packed2);
-    }
-
-    #[test]
-    fn test_rgb666_size_calculation() {
-        // Test various image sizes for correct byte counts
-        // Formula: ceil(pixels / 4) * 9
-
-        // 64x64 = 4096 pixels -> 1024 groups -> 9216 bytes
-        let rgb: Vec<u8> = vec![128u8; 4096 * 3]; // 128 for all R, G, B
-        let packed = encode_rgb666_packed(&rgb, 64, 64, StrideFill::Black);
-        assert_eq!(packed.len(), 9216);
-
-        // 5 pixels -> 2 groups (1 full, 1 partial) -> 18 bytes
-        let rgb5: Vec<u8> = vec![128u8; 5 * 3];
-        let packed5 = encode_rgb666_packed(&rgb5, 5, 1, StrideFill::Black);
-        assert_eq!(packed5.len(), 18); // ceil(5/4) * 9 = 2 * 9 = 18
-    }
-
-    #[test]
-    fn test_rgb666_partial_group_fill() {
+    fn test_rgb666_row_aligned() {
         // Test that partial groups use fill mode correctly
         // 5 pixels wide, 1 row: last group has 1 real pixel + 3 padding pixels
 
@@ -2412,30 +2047,6 @@ mod tests {
     }
 
     #[test]
-    fn test_rgb666_packed_fill() {
-        // Test that packed version also supports fill mode
-        // 5 pixels total: last group has 1 real pixel + 3 padding pixels
-
-        // First 4 pixels are black (0,0,0), last pixel is bright red (252,0,0)
-        let mut rgb = vec![0u8; 5 * 3];
-        rgb[4 * 3] = 252; // Last pixel R = 252
-
-        let black_fill = encode_rgb666_packed(&rgb, 5, 1, StrideFill::Black);
-        let repeat_fill = encode_rgb666_packed(&rgb, 5, 1, StrideFill::Repeat);
-
-        assert_eq!(black_fill.len(), 18);
-        assert_eq!(repeat_fill.len(), 18);
-        assert_ne!(black_fill, repeat_fill);
-
-        // Also test through encode_rgb_packed routing
-        let black_via_rgb = encode_rgb_packed(&rgb, 5, 1, 6, 6, 6, StrideFill::Black);
-        let repeat_via_rgb = encode_rgb_packed(&rgb, 5, 1, 6, 6, 6, StrideFill::Repeat);
-
-        assert_eq!(black_fill, black_via_rgb);
-        assert_eq!(repeat_fill, repeat_via_rgb);
-    }
-
-    #[test]
     fn test_argb_pixel_encoding() {
         // Test ARGB1555: A[15] R[14:10] G[9:5] B[4:0]
         // A=255 (1 bit = 1), R=255 (5 bits = 31), G=255 (5 bits = 31), B=255 (5 bits = 31)
@@ -2461,28 +2072,28 @@ mod tests {
     }
 
     #[test]
-    fn test_argb_packed_encoding() {
-        // Test ARGB8888 packed encoding
+    fn test_argb_row_aligned_encoding() {
+        // Test ARGB8888 row-aligned encoding
         // Create 2 pixels of RGBA data (memory order: R, G, B, A)
         let rgba = vec![
             255, 0, 0, 128,     // Pixel 0: R=255, G=0, B=0, A=128
             0, 255, 0, 255,     // Pixel 1: R=0, G=255, B=0, A=255
         ];
 
-        let packed = encode_argb_packed(&rgba, 2, 1, 8, 8, 8, 8);
-        assert_eq!(packed.len(), 8); // 2 pixels * 4 bytes
+        let encoded = encode_argb_row_aligned_stride(&rgba, 2, 1, 8, 8, 8, 8, 1, StrideFill::Black);
+        assert_eq!(encoded.len(), 8); // 2 pixels * 4 bytes
 
         // Pixel 0: A=128, R=255, G=0, B=0 -> 0x80FF0000, little-endian: 00 00 FF 80
-        assert_eq!(packed[0], 0x00); // B LSB
-        assert_eq!(packed[1], 0x00); // G
-        assert_eq!(packed[2], 0xFF); // R
-        assert_eq!(packed[3], 0x80); // A MSB
+        assert_eq!(encoded[0], 0x00); // B LSB
+        assert_eq!(encoded[1], 0x00); // G
+        assert_eq!(encoded[2], 0xFF); // R
+        assert_eq!(encoded[3], 0x80); // A MSB
 
         // Pixel 1: A=255, R=0, G=255, B=0 -> 0xFF00FF00, little-endian: 00 FF 00 FF
-        assert_eq!(packed[4], 0x00); // B LSB
-        assert_eq!(packed[5], 0xFF); // G
-        assert_eq!(packed[6], 0x00); // R
-        assert_eq!(packed[7], 0xFF); // A MSB
+        assert_eq!(encoded[4], 0x00); // B LSB
+        assert_eq!(encoded[5], 0xFF); // G
+        assert_eq!(encoded[6], 0x00); // R
+        assert_eq!(encoded[7], 0xFF); // A MSB
     }
 
     // ============================================================================
@@ -2550,8 +2161,8 @@ mod tests {
             255, 255, 0,  // Yellow pixel
         ];
 
-        // Encode using our encoder to get proper format
-        let data = encode_rgb_packed(&rgb_test, 2, 2, 8, 8, 8, StrideFill::Black);
+        // Encode using our encoder to get proper format (row-aligned with stride=1 for byte alignment)
+        let data = encode_rgb_row_aligned_stride(&rgb_test, 2, 2, 8, 8, 8, 1, StrideFill::Black);
 
         let metadata = RawImageMetadata {
             format: "RGB888".to_string(),
@@ -2621,8 +2232,8 @@ mod tests {
             .flat_map(|((r, g), b)| vec![*r, *g, *b])
             .collect();
 
-        // Encode to RGB565
-        let encoded = encode_rgb_packed(&rgb, 4, 1, 5, 6, 5, StrideFill::Black);
+        // Encode to RGB565 (row-aligned with stride=1 for byte alignment)
+        let encoded = encode_rgb_row_aligned_stride(&rgb, 4, 1, 5, 6, 5, 1, StrideFill::Black);
 
         // Decode back
         let metadata = RawImageMetadata {

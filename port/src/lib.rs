@@ -1267,26 +1267,6 @@ pub fn format_is_grayscale_wasm(format: &str) -> bool {
     binary_format::format_is_grayscale(format)
 }
 
-/// Encode interleaved RGB data to packed binary format
-/// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
-#[wasm_bindgen]
-pub fn encode_rgb_packed_wasm(
-    rgb_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits_r: u8,
-    bits_g: u8,
-    bits_b: u8,
-    fill: u8,
-) -> Vec<u8> {
-    let fill_mode = if fill == 0 {
-        binary_format::StrideFill::Black
-    } else {
-        binary_format::StrideFill::Repeat
-    };
-    binary_format::encode_rgb_packed(&rgb_data, width, height, bits_r, bits_g, bits_b, fill_mode)
-}
-
 /// Encode interleaved RGB data to row-aligned binary format
 /// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]
@@ -1299,16 +1279,6 @@ pub fn encode_rgb_row_aligned_wasm(
     bits_b: u8,
 ) -> Vec<u8> {
     binary_format::encode_rgb_row_aligned(&rgb_data, width, height, bits_r, bits_g, bits_b)
-}
-
-#[wasm_bindgen]
-pub fn encode_gray_packed_wasm(
-    gray_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits: u8,
-) -> Vec<u8> {
-    binary_format::encode_gray_packed(&gray_data, width, height, bits)
 }
 
 #[wasm_bindgen]
@@ -1359,20 +1329,6 @@ pub fn encode_gray_row_aligned_stride_wasm(
     )
 }
 
-/// Encode interleaved LA data to packed binary format (no row padding)
-/// Input: Interleaved LA u8 data (LALA..., 2 bytes per pixel, L first then A)
-/// Output: Packed LA binary data with hardware ordering (A in MSB, L in LSB)
-#[wasm_bindgen]
-pub fn encode_la_packed_wasm(
-    la_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits_l: u8,
-    bits_a: u8,
-) -> Vec<u8> {
-    binary_format::encode_la_packed(&la_data, width, height, bits_l, bits_a)
-}
-
 /// Encode interleaved LA data to row-aligned binary format
 /// Input: Interleaved LA u8 data (LALA..., 2 bytes per pixel, L first then A)
 /// Output: Row-aligned LA binary data with hardware ordering (A in MSB, L in LSB)
@@ -1409,22 +1365,6 @@ pub fn encode_channel_row_aligned_stride_wasm(
     binary_format::encode_channel_from_interleaved_row_aligned_stride(
         &interleaved_data, width, height, num_channels as usize, channel as usize, bits, stride, binary_format::StrideFill::from_u8(fill)
     )
-}
-
-/// Encode interleaved RGBA data to packed ARGB binary format (no row padding)
-/// Input: Interleaved RGBA u8 data (RGBARGBA..., 4 bytes per pixel)
-/// Output: Packed ARGB binary data with hardware ordering (A in MSB, R, G, B toward LSB)
-#[wasm_bindgen]
-pub fn encode_argb_packed_wasm(
-    rgba_data: Vec<u8>,
-    width: usize,
-    height: usize,
-    bits_a: u8,
-    bits_r: u8,
-    bits_g: u8,
-    bits_b: u8,
-) -> Vec<u8> {
-    binary_format::encode_argb_packed(&rgba_data, width, height, bits_a, bits_r, bits_g, bits_b)
 }
 
 /// Encode interleaved RGBA data to row-aligned ARGB binary format
