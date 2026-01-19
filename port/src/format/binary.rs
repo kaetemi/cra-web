@@ -43,6 +43,59 @@ impl ColorFormat {
     pub fn parse(format: &str) -> Result<Self, String> {
         let format_upper = format.to_uppercase();
 
+        // Luminosity+Alpha formats: LA1, LA2, LA4, LA8 (shorthand for equal bits)
+        // or LA11, LA22, LA44, LA88 (explicit bits)
+        // Layout: Alpha in MSB, Luminosity in LSB
+        if format_upper.starts_with("LA") {
+            let bits_str = &format_upper[2..];
+
+            let (bits_l, bits_a): (u8, u8) = match bits_str.len() {
+                // Single digit: same bits for both channels (LA4 = LA44)
+                1 => {
+                    let bits: u8 = bits_str
+                        .parse()
+                        .map_err(|_| format!("Invalid bit count in '{}'", format))?;
+                    (bits, bits)
+                }
+                // Two digits: individual channel bits (LA44, LA88, etc.)
+                2 => {
+                    let l: u8 = bits_str[0..1]
+                        .parse()
+                        .map_err(|_| format!("Invalid luminosity bit count in '{}'", format))?;
+                    let a: u8 = bits_str[1..2]
+                        .parse()
+                        .map_err(|_| format!("Invalid alpha bit count in '{}'", format))?;
+                    (l, a)
+                }
+                _ => {
+                    return Err(format!(
+                        "Invalid LA format '{}': expected LA followed by 1 digit (e.g., LA4) or 2 digits (e.g., LA44)",
+                        format
+                    ));
+                }
+            };
+
+            if bits_l < 1 || bits_l > 8 {
+                return Err(format!("Luminosity bits must be 1-8, got {}", bits_l));
+            }
+            if bits_a < 1 || bits_a > 8 {
+                return Err(format!("Alpha bits must be 1-8, got {}", bits_a));
+            }
+
+            let total_bits = bits_l + bits_a;
+
+            return Ok(ColorFormat {
+                name: format_upper,
+                is_grayscale: true, // LA is still grayscale-based
+                has_alpha: true,
+                bits_a,
+                bits_r: bits_l, // Store luminosity bits in bits_r
+                bits_g: 0,
+                bits_b: 0,
+                total_bits,
+            });
+        }
+
         // Grayscale formats: L1, L2, L4, L8
         if format_upper.starts_with('L') {
             let bits_str = &format_upper[1..];
@@ -188,7 +241,7 @@ impl ColorFormat {
         }
 
         Err(format!(
-            "Unknown format '{}': expected ARGB#### (e.g., ARGB1555), RGB### (e.g., RGB565), or L# (e.g., L4)",
+            "Unknown format '{}': expected ARGB#### (e.g., ARGB1555), RGB### (e.g., RGB565), LA## (e.g., LA44), or L# (e.g., L4)",
             format
         ))
     }
@@ -240,9 +293,14 @@ impl ColorFormat {
         !self.is_grayscale && !self.has_alpha && self.bits_r == 6 && self.bits_g == 6 && self.bits_b == 6
     }
 
-    /// Check if this is an ARGB format (has alpha channel)
+    /// Check if this is an ARGB format (has alpha channel, RGB color)
     pub fn is_argb(&self) -> bool {
-        self.has_alpha
+        self.has_alpha && !self.is_grayscale
+    }
+
+    /// Check if this is an LA format (grayscale with alpha)
+    pub fn is_la(&self) -> bool {
+        self.is_grayscale && self.has_alpha
     }
 
     /// Get the number of bytes per pixel for binary output (rounded up)
@@ -313,6 +371,17 @@ pub fn encode_rgb_pixel(r: u8, g: u8, b: u8, bits_r: u8, bits_g: u8, bits_b: u8)
 #[inline]
 pub fn encode_gray_pixel(l: u8, bits: u8) -> u32 {
     (l >> (8 - bits)) as u32
+}
+
+/// Encode LA (luminosity+alpha) pixel to packed binary format
+/// Layout: Alpha in MSB, Luminosity in LSB (matching hardware ordering)
+/// Example LA44: A[7:4] L[3:0]
+/// Example LA88: A[15:8] L[7:0]
+#[inline]
+pub fn encode_la_pixel(l: u8, a: u8, bits_l: u8, bits_a: u8) -> u32 {
+    let l_val = (l >> (8 - bits_l)) as u32;
+    let a_val = (a >> (8 - bits_a)) as u32;
+    (a_val << bits_l) | l_val
 }
 
 /// Encode a single channel to packed binary format
@@ -1110,6 +1179,212 @@ pub fn encode_gray_row_aligned(
     encode_gray_row_aligned_stride(gray_data, width, height, bits, 1, StrideFill::Black)
 }
 
+// ============================================================================
+// LA (Luminosity+Alpha) Encoding Functions
+// Layout: Alpha in MSB, Luminosity in LSB
+// ============================================================================
+
+/// Write packed binary output for LA data (continuous bit stream, no row padding)
+///
+/// Args:
+///     la_data: Interleaved LA data (LALA..., 2 bytes per pixel, L first then A)
+///     width, height: Image dimensions
+///     bits_l: Output bit depth for luminosity channel
+///     bits_a: Output bit depth for alpha channel
+pub fn encode_la_packed(
+    la_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+) -> Vec<u8> {
+    let total_bits = (bits_l + bits_a) as usize;
+    let total_pixels = width * height;
+    let mut output = Vec::new();
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        let bytes_per_pixel = (total_bits + 7) / 8;
+        output.reserve(total_pixels * bytes_per_pixel);
+
+        for i in 0..total_pixels {
+            let l = la_data[i * 2];
+            let a = la_data[i * 2 + 1];
+            let val = encode_la_pixel(l, a, bits_l, bits_a);
+            // Write little-endian (LSB first)
+            for byte_idx in 0..bytes_per_pixel {
+                output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
+            }
+        }
+    } else {
+        // Sub-byte pixels - pack multiple pixels per byte
+        let pixels_per_byte = 8 / total_bits;
+        let total_bytes = (total_pixels + pixels_per_byte - 1) / pixels_per_byte;
+        output.reserve(total_bytes);
+
+        let mut current_byte: u8 = 0;
+        let mut bits_in_byte: usize = 0;
+
+        for i in 0..total_pixels {
+            let l = la_data[i * 2];
+            let a = la_data[i * 2 + 1];
+            let val = encode_la_pixel(l, a, bits_l, bits_a);
+
+            // Pack from MSB to LSB
+            let shift = 8 - bits_in_byte - total_bits;
+            current_byte |= (val as u8) << shift;
+            bits_in_byte += total_bits;
+
+            if bits_in_byte == 8 {
+                output.push(current_byte);
+                current_byte = 0;
+                bits_in_byte = 0;
+            }
+        }
+
+        // Flush remaining bits
+        if bits_in_byte > 0 {
+            output.push(current_byte);
+        }
+    }
+
+    output
+}
+
+/// Write row-aligned binary output for LA data with configurable stride
+///
+/// Args:
+///     la_data: Interleaved LA data (LALA..., 2 bytes per pixel)
+///     width, height: Image dimensions
+///     bits_l, bits_a: Output bit depth per channel
+///     stride: Row stride alignment in bytes (must be power of 2, 1-128)
+///     fill: How to fill padding bytes (Black = zeros, Repeat = repeat last pixel)
+pub fn encode_la_row_aligned_stride(
+    la_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+    stride: usize,
+    fill: StrideFill,
+) -> Vec<u8> {
+    let total_bits = (bits_l + bits_a) as usize;
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels
+        let bytes_per_pixel = (total_bits + 7) / 8;
+        let raw_bytes_per_row = width * bytes_per_pixel;
+        let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+        let padding = aligned_bytes_per_row - raw_bytes_per_row;
+        let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+        for y in 0..height {
+            // Get last pixel for repeat fill
+            let last_i = y * width + width - 1;
+            let last_l = la_data[last_i * 2];
+            let last_a = la_data[last_i * 2 + 1];
+            let last_val = encode_la_pixel(last_l, last_a, bits_l, bits_a);
+
+            for x in 0..width {
+                let i = y * width + x;
+                let l = la_data[i * 2];
+                let a = la_data[i * 2 + 1];
+                let val = encode_la_pixel(l, a, bits_l, bits_a);
+                // Write little-endian (LSB first)
+                for byte_idx in 0..bytes_per_pixel {
+                    output.push(((val >> (byte_idx * 8)) & 0xFF) as u8);
+                }
+            }
+            // Add padding bytes to align row to stride
+            match fill {
+                StrideFill::Black => {
+                    for _ in 0..padding {
+                        output.push(0);
+                    }
+                }
+                StrideFill::Repeat => {
+                    // Repeat the encoded last pixel bytes
+                    for i in 0..padding {
+                        let byte_idx = i % bytes_per_pixel;
+                        output.push(((last_val >> (byte_idx * 8)) & 0xFF) as u8);
+                    }
+                }
+            }
+        }
+        return output;
+    }
+
+    // Sub-byte pixels - pack each row separately with padding
+    let pixels_per_byte = 8 / total_bits;
+    let raw_bytes_per_row = (width + pixels_per_byte - 1) / pixels_per_byte;
+    let aligned_bytes_per_row = align_to_stride(raw_bytes_per_row, stride);
+    let padding = aligned_bytes_per_row - raw_bytes_per_row;
+    let mut output = Vec::with_capacity(aligned_bytes_per_row * height);
+
+    for y in 0..height {
+        let mut current_byte: u8 = 0;
+        let mut bits_in_byte: usize = 0;
+
+        // Get last pixel for repeat fill
+        let last_i = y * width + width - 1;
+        let last_l = la_data[last_i * 2];
+        let last_a = la_data[last_i * 2 + 1];
+        let last_val = encode_la_pixel(last_l, last_a, bits_l, bits_a) as u8;
+
+        for x in 0..width {
+            let i = y * width + x;
+            let l = la_data[i * 2];
+            let a = la_data[i * 2 + 1];
+            let val = encode_la_pixel(l, a, bits_l, bits_a);
+
+            // Pack from MSB to LSB
+            let shift = 8 - bits_in_byte - total_bits;
+            current_byte |= (val as u8) << shift;
+            bits_in_byte += total_bits;
+
+            if bits_in_byte == 8 {
+                output.push(current_byte);
+                current_byte = 0;
+                bits_in_byte = 0;
+            }
+        }
+
+        // Flush remaining bits at end of row
+        if bits_in_byte > 0 {
+            output.push(current_byte);
+        }
+
+        // Add padding bytes to align row to stride
+        match fill {
+            StrideFill::Black => {
+                for _ in 0..padding {
+                    output.push(0);
+                }
+            }
+            StrideFill::Repeat => {
+                // Fill with repeated last pixel value
+                for _ in 0..padding {
+                    output.push(last_val);
+                }
+            }
+        }
+    }
+
+    output
+}
+
+/// Write row-aligned binary output for LA data (each row padded to byte boundary)
+/// This is a convenience wrapper with stride=1 and black fill
+pub fn encode_la_row_aligned(
+    la_data: &[u8],
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+) -> Vec<u8> {
+    encode_la_row_aligned_stride(la_data, width, height, bits_l, bits_a, 1, StrideFill::Black)
+}
+
 /// Write row-aligned binary output for a single channel extracted from interleaved data
 /// interleaved_data: Interleaved pixel data (e.g., RGBRGB... or RGBARGBA...)
 /// num_channels: Number of channels in the interleaved data (3 for RGB, 4 for RGBA)
@@ -1384,6 +1659,23 @@ pub fn decode_gray_pixel(packed: u32, bits: u8) -> u8 {
     bit_replicate_to_u8(val, bits)
 }
 
+/// Decode an LA (luminosity+alpha) pixel from packed bits
+/// Layout: Alpha in MSB, Luminosity in LSB
+/// Returns (L, A) as u8 values (bit-replicated to 8 bits)
+#[inline]
+pub fn decode_la_pixel(packed: u32, bits_l: u8, bits_a: u8) -> (u8, u8) {
+    let l_mask = (1u32 << bits_l) - 1;
+    let a_mask = (1u32 << bits_a) - 1;
+
+    let l_val = packed & l_mask;
+    let a_val = (packed >> bits_l) & a_mask;
+
+    (
+        bit_replicate_to_u8(l_val, bits_l),
+        bit_replicate_to_u8(a_val, bits_a),
+    )
+}
+
 /// Result of decoding a raw image
 pub struct DecodedRawImage {
     /// Interleaved RGBA u8 data (always 4 bytes per pixel)
@@ -1454,7 +1746,17 @@ pub fn decode_raw_image(data: &[u8], metadata: &RawImageMetadata) -> Result<Deco
     }
 
     // Decode based on format type
-    if format.is_grayscale {
+    // Check LA before generic grayscale (LA is is_grayscale && has_alpha)
+    if format.is_la() {
+        decode_la_raw(data, width, height, row_stride, format.bits_r, format.bits_a, &mut pixels)?;
+        Ok(DecodedRawImage {
+            pixels,
+            width,
+            height,
+            has_alpha: true,
+            is_grayscale: true,
+        })
+    } else if format.is_grayscale {
         decode_gray_raw(data, width, height, row_stride, format.bits_r, &mut pixels)?;
         Ok(DecodedRawImage {
             pixels,
@@ -1584,6 +1886,64 @@ fn decode_rgb_raw(
                 output[out_idx + 1] = g;
                 output[out_idx + 2] = b;
                 output[out_idx + 3] = 255;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Decode LA raw data (grayscale + alpha)
+fn decode_la_raw(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    row_stride: usize,
+    bits_l: u8,
+    bits_a: u8,
+    output: &mut [u8],
+) -> Result<(), String> {
+    let total_bits = (bits_l + bits_a) as usize;
+    let bytes_per_pixel = (total_bits + 7) / 8;
+
+    if total_bits >= 8 {
+        // Byte-aligned or multi-byte pixels (LA44, LA88)
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let pixel_start = row_start + x * bytes_per_pixel;
+
+                // Read little-endian
+                let mut packed = 0u32;
+                for i in 0..bytes_per_pixel {
+                    packed |= (data[pixel_start + i] as u32) << (i * 8);
+                }
+
+                let (l, a) = decode_la_pixel(packed, bits_l, bits_a);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = l;
+                output[out_idx + 1] = l;
+                output[out_idx + 2] = l;
+                output[out_idx + 3] = a;
+            }
+        }
+    } else {
+        // Sub-byte pixels (LA11, LA22)
+        let pixels_per_byte = 8 / total_bits;
+        for y in 0..height {
+            let row_start = y * row_stride;
+            for x in 0..width {
+                let byte_idx = x / pixels_per_byte;
+                let bit_offset = (pixels_per_byte - 1 - (x % pixels_per_byte)) * total_bits;
+                let mask = (1u32 << total_bits) - 1;
+                let packed = ((data[row_start + byte_idx] >> bit_offset) as u32) & mask;
+
+                let (l, a) = decode_la_pixel(packed, bits_l, bits_a);
+                let out_idx = (y * width + x) * 4;
+                output[out_idx] = l;
+                output[out_idx + 1] = l;
+                output[out_idx + 2] = l;
+                output[out_idx + 3] = a;
             }
         }
     }
@@ -1787,6 +2147,125 @@ mod tests {
         assert_eq!(argb4444.bits_b, 4);
         assert_eq!(argb4444.total_bits, 16);
         assert!(argb4444.has_alpha);
+
+        // LA formats (Luminosity + Alpha)
+        // LA4 shorthand = LA44
+        let la4 = ColorFormat::parse("LA4").unwrap();
+        assert_eq!(la4.bits_r, 4); // luminosity stored in bits_r
+        assert_eq!(la4.bits_a, 4);
+        assert_eq!(la4.total_bits, 8);
+        assert!(la4.is_grayscale);
+        assert!(la4.has_alpha);
+        assert!(la4.is_la());
+        assert!(!la4.is_argb());
+        assert!(la4.supports_binary());
+
+        // LA8 shorthand = LA88
+        let la8 = ColorFormat::parse("LA8").unwrap();
+        assert_eq!(la8.bits_r, 8);
+        assert_eq!(la8.bits_a, 8);
+        assert_eq!(la8.total_bits, 16);
+        assert!(la8.is_la());
+        assert!(la8.supports_binary());
+
+        // Explicit LA44
+        let la44 = ColorFormat::parse("LA44").unwrap();
+        assert_eq!(la44.bits_r, 4);
+        assert_eq!(la44.bits_a, 4);
+        assert_eq!(la44.total_bits, 8);
+        assert!(la44.is_la());
+
+        // LA11 = 2 bits per pixel
+        let la1 = ColorFormat::parse("LA1").unwrap();
+        assert_eq!(la1.bits_r, 1);
+        assert_eq!(la1.bits_a, 1);
+        assert_eq!(la1.total_bits, 2);
+        assert!(la1.is_la());
+        assert!(la1.supports_binary()); // 2 bits is power-of-2
+
+        // LA22 = 4 bits per pixel
+        let la2 = ColorFormat::parse("LA2").unwrap();
+        assert_eq!(la2.bits_r, 2);
+        assert_eq!(la2.bits_a, 2);
+        assert_eq!(la2.total_bits, 4);
+        assert!(la2.is_la());
+        assert!(la2.supports_binary()); // 4 bits is power-of-2
+    }
+
+    #[test]
+    fn test_la_pixel_encoding() {
+        // Test LA encoding: Alpha in MSB, Luminosity in LSB
+        // LA44: L=255 (4 bits = 15), A=255 (4 bits = 15)
+        // Packed: 15 << 4 | 15 = 0xFF
+        let val = encode_la_pixel(255, 255, 4, 4);
+        assert_eq!(val, 0xFF);
+
+        // LA44: L=0, A=255
+        // Packed: 15 << 4 | 0 = 0xF0
+        let val = encode_la_pixel(0, 255, 4, 4);
+        assert_eq!(val, 0xF0);
+
+        // LA44: L=255, A=0
+        // Packed: 0 << 4 | 15 = 0x0F
+        let val = encode_la_pixel(255, 0, 4, 4);
+        assert_eq!(val, 0x0F);
+
+        // LA88: L=128, A=64
+        // L = 128 >> 0 = 128, A = 64 >> 0 = 64
+        // Packed: 64 << 8 | 128 = 0x4080
+        let val = encode_la_pixel(128, 64, 8, 8);
+        assert_eq!(val, 0x4080);
+
+        // LA11: L=255 (1 bit = 1), A=255 (1 bit = 1)
+        // Packed: 1 << 1 | 1 = 0b11 = 3
+        let val = encode_la_pixel(255, 255, 1, 1);
+        assert_eq!(val, 3);
+
+        // LA11: L=0, A=255
+        // Packed: 1 << 1 | 0 = 0b10 = 2
+        let val = encode_la_pixel(0, 255, 1, 1);
+        assert_eq!(val, 2);
+    }
+
+    #[test]
+    fn test_la_pixel_decoding() {
+        // Test LA decoding: Alpha in MSB, Luminosity in LSB
+        // LA44: 0xFF -> L=255, A=255
+        let (l, a) = decode_la_pixel(0xFF, 4, 4);
+        assert_eq!(l, 255); // 15 bit-replicated to 8 bits
+        assert_eq!(a, 255);
+
+        // LA44: 0xF0 -> L=0, A=255
+        let (l, a) = decode_la_pixel(0xF0, 4, 4);
+        assert_eq!(l, 0);
+        assert_eq!(a, 255);
+
+        // LA44: 0x0F -> L=255, A=0
+        let (l, a) = decode_la_pixel(0x0F, 4, 4);
+        assert_eq!(l, 255);
+        assert_eq!(a, 0);
+
+        // LA88: 0x4080 -> L=128, A=64
+        let (l, a) = decode_la_pixel(0x4080, 8, 8);
+        assert_eq!(l, 128);
+        assert_eq!(a, 64);
+    }
+
+    #[test]
+    fn test_la_encode_decode_roundtrip() {
+        // Test encode/decode roundtrip for LA44
+        let test_values = [(255, 255), (0, 0), (128, 128), (255, 0), (0, 255)];
+
+        for (l_in, a_in) in test_values {
+            let encoded = encode_la_pixel(l_in, a_in, 4, 4);
+            let (l_out, a_out) = decode_la_pixel(encoded, 4, 4);
+            // Values should match after bit-replication
+            // 4-bit quantization: 255 -> 15 -> 255, 128 -> 8 -> 136, etc.
+            let l_expected = bit_replicate_to_u8((l_in >> 4) as u32, 4);
+            let a_expected = bit_replicate_to_u8((a_in >> 4) as u32, 4);
+            assert_eq!(l_out, l_expected, "L mismatch for input {}", l_in);
+            assert_eq!(a_out, a_expected, "A mismatch for input {}", a_in);
+        }
     }
 
     #[test]

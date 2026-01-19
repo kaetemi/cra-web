@@ -17,7 +17,8 @@ use std::path::PathBuf;
 use cra_wasm::binary_format::{
     encode_argb_packed, encode_argb_row_aligned_stride,
     encode_channel_from_interleaved_row_aligned_stride, encode_gray_packed,
-    encode_gray_row_aligned_stride, encode_rgb_packed, encode_rgb_row_aligned_stride,
+    encode_gray_row_aligned_stride, encode_la_packed, encode_la_row_aligned_stride,
+    encode_rgb_packed, encode_rgb_row_aligned_stride,
     is_valid_stride, ColorFormat, StrideFill, RawImageMetadata,
 };
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
@@ -35,7 +36,7 @@ use cra_wasm::dither::rgb::DitherMode as CSDitherMode;
 use cra_wasm::dither::luminosity::colorspace_aware_dither_gray_with_mode;
 use cra_wasm::dither::common::{DitherMode, OutputTechnique, PerceptualSpace};
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
-use cra_wasm::output::{dither_output_rgb, dither_output_rgba};
+use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
 use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
 
 // ============================================================================
@@ -507,7 +508,29 @@ fn dither_pixels(
     has_alpha: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
-    if format.is_grayscale {
+    if format.is_la() {
+        // LA format: grayscale with alpha
+        // Step 1: Convert linear RGB to linear grayscale (luminance only)
+        let linear_gray = linear_pixels_to_grayscale(&pixels);
+
+        // Step 2: Convert linear to sRGB (gamma) and denormalize to 0-255
+        let srgb_gray: Vec<f32> = linear_gray
+            .iter()
+            .map(|&l| linear_to_srgb_single(l) * 255.0)
+            .collect();
+
+        // Step 3: Extract alpha channel (already in 0-1 range, denormalize to 0-255)
+        let alpha: Vec<f32> = pixels.iter().map(|p| p.0[3] * 255.0).collect();
+
+        // Step 4: Dither with alpha-aware error diffusion
+        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace);
+        let interleaved = dither_output_la(
+            &srgb_gray, &alpha, width, height, format.bits_r, format.bits_a,
+            technique, seed, progress,
+        );
+        DitherResult { interleaved, is_grayscale: true, has_alpha: true }
+    } else if format.is_grayscale {
+        // Pure grayscale format (no alpha)
         // Step 1: Convert linear RGB to linear grayscale (luminance only)
         let linear_gray = linear_pixels_to_grayscale(&pixels);
 
@@ -614,7 +637,19 @@ fn encode_binary(
     stride: usize,
     fill: StrideFill,
 ) -> Vec<u8> {
-    if result.is_grayscale {
+    if result.is_grayscale && result.has_alpha {
+        // LA format: grayscale with alpha (Alpha in MSB, Luminosity in LSB)
+        if row_aligned {
+            encode_la_row_aligned_stride(
+                &result.interleaved, width, height, format.bits_r, format.bits_a, stride, fill,
+            )
+        } else {
+            encode_la_packed(
+                &result.interleaved, width, height, format.bits_r, format.bits_a,
+            )
+        }
+    } else if result.is_grayscale {
+        // Pure grayscale format
         if row_aligned {
             encode_gray_row_aligned_stride(&result.interleaved, width, height, format.bits_r, stride, fill)
         } else {

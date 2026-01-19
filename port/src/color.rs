@@ -351,6 +351,19 @@ pub fn interleave_rgba_u8(r: &[u8], g: &[u8], b: &[u8], a: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Interleave two u8 channels into LA (Luminosity+Alpha) output
+pub fn interleave_la_u8(l: &[u8], a: &[u8]) -> Vec<u8> {
+    let pixels = l.len();
+    let mut out = vec![0u8; pixels * 2];
+
+    for i in 0..pixels {
+        out[i * 2] = l[i];
+        out[i * 2 + 1] = a[i];
+    }
+
+    out
+}
+
 // ============================================================================
 // Pixel scale operations
 // ============================================================================

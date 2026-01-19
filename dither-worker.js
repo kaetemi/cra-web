@@ -64,6 +64,7 @@ function processDither(params) {
             bitsB,
             bitsA = 8,  // Alpha bit depth: 0 to strip alpha, 1-8 to dither
             bitsGray,
+            bitsGrayA = 0,  // Grayscale alpha bit depth: 0 to strip alpha, 1-8 to dither (LA format)
             mode,
             isPerceptual,
             perceptualSpace,
@@ -99,6 +100,7 @@ function processDither(params) {
         let rgbInterleaved = null;
         let rgbaInterleaved = null;
         let grayChannel = null;
+        let laInterleaved = null;
 
         const technique = isPerceptual ? 2 : 1;
 
@@ -157,8 +159,8 @@ function processDither(params) {
             }
 
             if (isGrayscale) {
-                // Extract alpha before grayscale conversion (in 0-1 range, will be scaled to 0-255)
-                const bufferData = buffer.as_slice ? buffer.as_slice() : buffer;
+                // Check if we should preserve alpha (LA format)
+                const preserveGrayAlpha = hasAlpha && bitsGrayA > 0;
 
                 sendProgress(50, 'Converting to grayscale...');
                 let grayBuffer = craWasm.rgb_to_grayscale_wasm(buffer);
@@ -167,23 +169,56 @@ function processDither(params) {
                 craWasm.gray_linear_to_srgb_wasm(grayBuffer);
                 craWasm.gray_denormalize_wasm(grayBuffer);
 
-                sendProgress(70, 'Dithering grayscale...');
-                const ditheredBuffer = craWasm.dither_gray_with_progress_wasm(
-                    grayBuffer, currentWidth, currentHeight, bitsGray, technique, mode, perceptualSpace, seed,
-                    (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering grayscale...')
-                );
-                const grayDithered = ditheredBuffer.to_vec();
+                if (preserveGrayAlpha) {
+                    // LA format: grayscale with alpha
+                    // Extract alpha channel from the buffer (buffer is still RGBA, we need the A component)
+                    const bufferSlice = buffer.as_slice ? buffer.as_slice() : buffer;
+                    const alphaChannel = new Float32Array(pixelCount);
+                    for (let i = 0; i < pixelCount; i++) {
+                        // Alpha is in 0-1 range, denormalize to 0-255
+                        alphaChannel[i] = bufferSlice[i * 4 + 3] * 255.0;
+                    }
+                    const alphaBuffer = craWasm.BufferF32.from_slice(alphaChannel);
 
-                // Store for download
-                grayChannel = new Uint8Array(grayDithered);
+                    sendProgress(70, 'Dithering grayscale+alpha...');
+                    const ditheredBuffer = craWasm.dither_la_with_progress_wasm(
+                        grayBuffer, alphaBuffer, currentWidth, currentHeight, bitsGray, bitsGrayA, technique, mode, perceptualSpace, seed,
+                        (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering grayscale+alpha...')
+                    );
+                    const laDithered = ditheredBuffer.to_vec();
 
-                // Output as grayscale (R=G=B) - no alpha support for grayscale
-                for (let i = 0; i < pixelCount; i++) {
-                    const v = grayDithered[i];
-                    outputData[i * 4] = v;
-                    outputData[i * 4 + 1] = v;
-                    outputData[i * 4 + 2] = v;
-                    outputData[i * 4 + 3] = 255;
+                    // Store LA interleaved data for download (2 bytes per pixel: L, A)
+                    laInterleaved = new Uint8Array(laDithered);
+
+                    // Output as grayscale with alpha (R=G=B=L, A=A)
+                    for (let i = 0; i < pixelCount; i++) {
+                        const l = laDithered[i * 2];
+                        const a = laDithered[i * 2 + 1];
+                        outputData[i * 4] = l;
+                        outputData[i * 4 + 1] = l;
+                        outputData[i * 4 + 2] = l;
+                        outputData[i * 4 + 3] = a;
+                    }
+                } else {
+                    // Pure grayscale: no alpha
+                    sendProgress(70, 'Dithering grayscale...');
+                    const ditheredBuffer = craWasm.dither_gray_with_progress_wasm(
+                        grayBuffer, currentWidth, currentHeight, bitsGray, technique, mode, perceptualSpace, seed,
+                        (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering grayscale...')
+                    );
+                    const grayDithered = ditheredBuffer.to_vec();
+
+                    // Store for download
+                    grayChannel = new Uint8Array(grayDithered);
+
+                    // Output as grayscale (R=G=B) - no alpha
+                    for (let i = 0; i < pixelCount; i++) {
+                        const v = grayDithered[i];
+                        outputData[i * 4] = v;
+                        outputData[i * 4 + 1] = v;
+                        outputData[i * 4 + 2] = v;
+                        outputData[i * 4 + 3] = 255;
+                    }
                 }
             } else {
                 sendProgress(50, 'Converting to sRGB...');
@@ -308,8 +343,10 @@ function processDither(params) {
 
         sendProgress(100, 'Complete');
 
-        // Grayscale has no alpha support; RGB has alpha only when bitsA > 0
-        const outputHasAlpha = !isGrayscale && hasAlpha && bitsA > 0;
+        // Grayscale has alpha when LA format (bitsGrayA > 0); RGB has alpha only when bitsA > 0
+        const outputHasAlpha = isGrayscale
+            ? (hasAlpha && bitsGrayA > 0)  // LA format
+            : (hasAlpha && bitsA > 0);     // ARGB format
 
         // Send result back
         sendComplete({
@@ -320,12 +357,13 @@ function processDither(params) {
             bitsR: isGrayscale ? bitsGray : bitsR,
             bitsG: isGrayscale ? bitsGray : bitsG,
             bitsB: isGrayscale ? bitsGray : bitsB,
-            bitsA: isGrayscale ? 0 : (hasAlpha ? bitsA : 0),
+            bitsA: isGrayscale ? (hasAlpha ? bitsGrayA : 0) : (hasAlpha ? bitsA : 0),
             mode: mode,
             rgbInterleaved: rgbInterleaved,
             rgbaInterleaved: rgbaInterleaved,
             grayChannel: grayChannel,
-            hasAlpha: outputHasAlpha  // True only if input had alpha AND we preserved it (bitsA > 0)
+            laInterleaved: laInterleaved,
+            hasAlpha: outputHasAlpha  // True only if input had alpha AND we preserved it
         });
 
     } catch (error) {

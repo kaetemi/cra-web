@@ -1006,6 +1006,60 @@ pub fn dither_gray_with_progress_wasm(
     BufferU8::new(result)
 }
 
+/// Dither LA (Luminosity+Alpha) image with progress callback
+/// Input: Two BufferF32 - one for grayscale (sRGB 0-255), one for alpha (0-255)
+/// Output: BufferU8 with interleaved LA u8 values (2 bytes per pixel: L, A)
+/// Uses alpha-aware error propagation: transparent pixels pass error through.
+/// Progress callback is called after each row with progress (0.0 to 1.0)
+#[wasm_bindgen]
+pub fn dither_la_with_progress_wasm(
+    gray_buf: &BufferF32,
+    alpha_buf: &BufferF32,
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+    technique: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+    progress_callback: &js_sys::Function,
+) -> BufferU8 {
+    use dither::common::OutputTechnique;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let output_technique = match technique {
+        0 => OutputTechnique::None,
+        1 => OutputTechnique::PerChannel { mode: dither_mode },
+        _ => OutputTechnique::ColorspaceAware {
+            mode: dither_mode,
+            space: perceptual_space,
+        },
+    };
+
+    let result_u8 = output::dither_output_la(
+        gray_buf.as_slice(),
+        alpha_buf.as_slice(),
+        width,
+        height,
+        bits_l,
+        bits_a,
+        output_technique,
+        seed,
+        Some(&mut progress_fn),
+    );
+
+    BufferU8::new(result_u8)
+}
+
 /// Dither RGBA image and return quantized u8 RGBA data directly
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
@@ -1232,6 +1286,38 @@ pub fn encode_gray_row_aligned_stride_wasm(
 ) -> Vec<u8> {
     binary_format::encode_gray_row_aligned_stride(
         &gray_data, width, height, bits, stride, binary_format::StrideFill::from_u8(fill)
+    )
+}
+
+/// Encode interleaved LA data to packed binary format (no row padding)
+/// Input: Interleaved LA u8 data (LALA..., 2 bytes per pixel, L first then A)
+/// Output: Packed LA binary data with hardware ordering (A in MSB, L in LSB)
+#[wasm_bindgen]
+pub fn encode_la_packed_wasm(
+    la_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+) -> Vec<u8> {
+    binary_format::encode_la_packed(&la_data, width, height, bits_l, bits_a)
+}
+
+/// Encode interleaved LA data to row-aligned binary format
+/// Input: Interleaved LA u8 data (LALA..., 2 bytes per pixel, L first then A)
+/// Output: Row-aligned LA binary data with hardware ordering (A in MSB, L in LSB)
+#[wasm_bindgen]
+pub fn encode_la_row_aligned_stride_wasm(
+    la_data: Vec<u8>,
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+    stride: usize,
+    fill: u8,
+) -> Vec<u8> {
+    binary_format::encode_la_row_aligned_stride(
+        &la_data, width, height, bits_l, bits_a, stride, binary_format::StrideFill::from_u8(fill)
     )
 }
 

@@ -6,11 +6,12 @@
 /// The primary API is `dither_output_rgb` for RGB and `dither_output_luminosity`
 /// for grayscale.
 
-use crate::color::{interleave_rgb_u8, interleave_rgba_u8};
+use crate::color::{interleave_rgb_u8, interleave_rgba_u8, interleave_la_u8};
 use crate::dither::dither_with_mode_bits;
 use crate::dither::rgb::colorspace_aware_dither_rgb_channels;
 use crate::dither::rgba::colorspace_aware_dither_rgba_channels;
 use crate::dither::luminosity::colorspace_aware_dither_gray_with_mode;
+use crate::dither::luminosity_alpha::colorspace_aware_dither_gray_alpha_with_mode;
 use crate::dither::common::OutputTechnique;
 use crate::pixel::{pixels_to_channels, pixels_to_channels_rgba, Pixel4};
 
@@ -235,6 +236,90 @@ pub fn dither_output_luminosity(
                 seed,
                 progress,
             )
+        }
+    }
+}
+
+// ============================================================================
+// LA (Luminosity+Alpha) Output API
+// ============================================================================
+
+/// Dither sRGB 0-255 grayscale+alpha data to the specified bit depths.
+///
+/// When bits_a > 0: Both channels are dithered with alpha-aware error propagation:
+/// - Alpha is dithered first using standard single-channel dithering
+/// - Luminosity is dithered with error weighted by alpha visibility
+/// - Fully transparent pixels pass error to neighbors without absorbing it
+/// - Fully opaque pixels behave like standard grayscale dithering
+///
+/// When bits_a == 0: Alpha is stripped and grayscale-only dithering is used.
+///
+/// Args:
+///     gray_channel: Grayscale input as f32 in range [0, 255]
+///     alpha_channel: Alpha input as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_l: Output bit depth for luminosity (1-8)
+///     bits_a: Output bit depth for alpha (1-8), or 0 to strip alpha
+///     technique: Dithering technique selection
+///     seed: Random seed for mixed dithering modes
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
+///
+/// Returns:
+///     Interleaved LA u8 data (LALA..., 2 bytes per pixel)
+pub fn dither_output_la(
+    gray_channel: &[f32],
+    alpha_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_l: u8,
+    bits_a: u8,
+    technique: OutputTechnique,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    // When bits_a == 0, strip alpha and use grayscale-only dithering
+    // Returns L (1 byte/pixel), not LA
+    if bits_a == 0 {
+        return dither_output_luminosity(
+            gray_channel,
+            width,
+            height,
+            bits_l,
+            technique,
+            seed,
+            progress,
+        );
+    }
+
+    match technique {
+        OutputTechnique::None => {
+            // Simple quantization without dithering - no progress needed
+            let l_u8: Vec<u8> = gray_channel.iter().map(|v| quantize_no_dither(*v, bits_l)).collect();
+            let a_u8: Vec<u8> = alpha_channel.iter().map(|v| quantize_no_dither(*v, bits_a)).collect();
+            interleave_la_u8(&l_u8, &a_u8)
+        }
+        OutputTechnique::PerChannel { mode } => {
+            // Per-channel error diffusion in sRGB space
+            let l_u8 = dither_with_mode_bits(gray_channel, width, height, mode, seed, bits_l, None);
+            let a_u8 = dither_with_mode_bits(alpha_channel, width, height, mode, seed.wrapping_add(1), bits_a, None);
+            interleave_la_u8(&l_u8, &a_u8)
+        }
+        OutputTechnique::ColorspaceAware { mode, space } => {
+            // Alpha-aware color-space dithering with progress
+            // Uses alpha visibility weighting for luminosity error propagation
+            let (l, a) = colorspace_aware_dither_gray_alpha_with_mode(
+                gray_channel,
+                alpha_channel,
+                width,
+                height,
+                bits_l,
+                bits_a,
+                space,
+                mode,
+                seed,
+                progress,
+            );
+            interleave_la_u8(&l, &a)
         }
     }
 }
