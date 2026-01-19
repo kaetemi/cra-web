@@ -590,6 +590,39 @@ The CIE tables are authoritative for **compliance and discrete lookups**, but th
 
 All errors discussed are in the 5th decimal place (10⁻⁵), far below any perceptible threshold. The practical impact is limited to accumulated round-trip conversion errors in high-precision workflows.
 
+### Inter-Space Conversions
+
+When converting between color spaces that share the same nominal whitepoint (e.g., sRGB → Adobe RGB, both "D65"), use the **4-digit rounded values** specified by the actual standards:
+
+| Standard | Whitepoint | Source |
+|----------|------------|--------|
+| ITU-R BT.709 (sRGB basis) | (0.3127, 0.3290) | ITU-R BT.709-6, Table 1 |
+| Adobe RGB (1998) | (0.3127, 0.3290) | Adobe specification |
+| Display P3 | (0.3127, 0.3290) | Apple/DCI specification |
+| ITU-R BT.2020 | (0.3127, 0.3290) | ITU-R BT.2020-2, Table 4 |
+
+**Rationale:** These standards all specify D65 with 4-digit precision. Images encoded in these spaces are defined relative to the 4-digit whitepoint, not the CIE-exact value. Using the standard-specified values ensures:
+
+1. **Correct interpretation:** The image data was authored against the 4-digit whitepoint
+2. **Exact round-trips:** sRGB → Adobe RGB → sRGB preserves neutrals perfectly
+3. **Standard compliance:** Matches what other software expects
+
+**Always use the standard-specified whitepoints for image conversions:**
+
+| Conversion | Source Whitepoint | Destination Whitepoint |
+|------------|-------------------|------------------------|
+| sRGB → Adobe RGB | D65 (0.3127, 0.3290) | D65 (0.3127, 0.3290) |
+| sRGB → ProPhoto RGB | D65 (0.3127, 0.3290) | D50 (0.3457, 0.3585) |
+| Display P3 → BT.2020 | D65 (0.3127, 0.3290) | D65 (0.3127, 0.3290) |
+
+**When to use CIE-exact values (0.31272, 0.32903):**
+
+- Colorimetric calculations and color science research
+- Measuring physical light sources against the D65 illuminant
+- Spectral rendering and physically-based simulation
+
+The CIE-exact values represent the theoretical illuminant; the 4-digit values represent the whitepoints that actual image standards define and that images are encoded against.
+
 ---
 
 ## 16. Summary
