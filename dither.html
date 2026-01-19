@@ -1471,7 +1471,9 @@
                 const bitsGrayA = parseInt(document.getElementById('bits-gray-alpha').value) || 0;
                 // Use LA format when input has alpha and alpha bits > 0
                 if (inputHasAlpha && bitsGrayA > 0) {
-                    cmd += ` --format LA${bitsGray}${bitsGrayA}`;
+                    // Use shorthand (LA4) when bits are equal, otherwise full form (LA48)
+                    const formatSuffix = (bitsGray === bitsGrayA) ? bitsGray : `${bitsGray}${bitsGrayA}`;
+                    cmd += ` --format LA${formatSuffix}`;
                 } else {
                     cmd += ` --format L${bitsGray}`;
                 }
