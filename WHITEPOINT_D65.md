@@ -116,7 +116,136 @@ The name "D65" is a historical artifact referring to the old CCT.
 
 ---
 
-## 3. Daylight vs. Blackbody
+## 3. The Root Data: Two Independent Measurement Campaigns
+
+The entire CIE colorimetric system for daylight rests on two independent sets of empirical measurements:
+
+### 3.1 Color Matching Experiments (1920s–1930s)
+
+The CIE 1931 2° standard observer color matching functions (CMFs) originate from experiments by W.D. Wright (1928–29) and J. Guild (1931). In these experiments, human observers adjusted mixtures of three primary lights to match monochromatic test lights across the visible spectrum.
+
+The original data was:
+- Measured at 5–10nm intervals
+- Recorded with ~3 significant figures
+- Based on different primary wavelengths than the final CIE system
+
+The published CMFs underwent extensive processing:
+1. **Transformation** from experimental primaries to theoretical CIE RGB, then to XYZ
+2. **Smoothing** to remove measurement noise
+3. **Interpolation** to generate 1nm tables from sparser measurements
+
+The 5nm CMF values (CIE 15:2004 Table T.2) are closer to "authoritative" than 1nm tables, which contain interpolated precision beyond the original measurements.
+
+### 3.2 Daylight Spectral Measurements (1960s)
+
+By 1964, three research groups had independently measured the spectral power distribution of natural daylight:
+
+| Researcher(s) | Location | Samples |
+|---------------|----------|---------|
+| H.W. Budde | National Research Council of Canada, Ottawa | 99 |
+| H.R. Condit & F. Grum | Eastman Kodak Company, Rochester, NY | 249 |
+| S.T. Henderson & D. Hodgkiss | Thorn Electrical Industries, Enfield, UK | 274 |
+| **Total** | | **622** |
+
+These measurements were:
+- Spectral power distributions of skylight and sunlight-plus-skylight
+- Recorded at **10nm intervals** from **330–700nm**
+- The raw empirical data underlying all D-series illuminants
+
+### 3.3 The Two Roots
+
+| Root | What Was Measured | When | Leads To |
+|------|-------------------|------|----------|
+| Color matching experiments | Human perception | 1920s–30s | CMF (x̄, ȳ, z̄) |
+| Daylight spectral measurements | Physical light (spectroradiometer) | 1960s | Basis functions (S₀, S₁, S₂) → D-illuminants |
+
+Everything else in the CIE daylight system is **derived** from these two independent measurement campaigns—one characterizing human vision, the other characterizing physical daylight.
+
+---
+
+## 4. How D65 Was Constructed
+
+D65 is not a direct measurement of any particular sky. It is a **synthetic illuminant**—a mathematical idealization of "average daylight" constructed through the following process.
+
+### 4.1 The 1964 Analysis
+
+Judd, MacAdam, Wyszecki, and colleagues analyzed the 622 daylight samples and made two key discoveries:
+
+**Discovery 1: The Daylight Locus**
+
+The chromaticity coordinates of the 622 samples clustered around a simple quadratic curve:
+
+```
+y = -3.000x² + 2.870x - 0.275
+```
+
+This curve, slightly offset from (greener than) the Planckian blackbody locus, became known as the **daylight locus**.
+
+**Discovery 2: Principal Component Analysis**
+
+Characteristic vector analysis (PCA) revealed that the 622 SPDs could be approximated using only three basis functions:
+
+```
+S(λ) = S₀(λ) + M₁·S₁(λ) + M₂·S₂(λ)
+```
+
+Where:
+- **S₀(λ)** = mean of all 622 SPD samples
+- **S₁(λ)** = first principal component (yellow-blue variation)
+- **S₂(λ)** = second principal component (pink-green variation)
+
+These basis functions capture nearly all the variance in natural daylight spectra using just two free parameters (M₁, M₂).
+
+### 4.2 The D65 Derivation Chain
+
+With the analysis complete, D65 was constructed as follows:
+
+```
+Step 1: Choose temperature
+        T = 6500K (1931 scale) — representing "average daylight"
+              ↓
+Step 2: Compute chromaticity on daylight locus
+        x from temperature (tabulated by Judd et al.)
+        y from quadratic: y = -3.000x² + 2.870x - 0.275
+              ↓
+Step 3: Compute M coefficients from chromaticity
+        M₁, M₂ from (x, y) using Equation 3.6
+              ↓
+Step 4: Reconstruct SPD from basis functions
+        S(λ) = S₀(λ) + M₁·S₁(λ) + M₂·S₂(λ)
+        (This gives 330–700nm at 10nm)
+              ↓
+Step 5: Extend wavelength range
+        UV (300–330nm) and IR (700–830nm) added using
+        Moon's spectral absorbance data of Earth's atmosphere
+              ↓
+Step 6: Interpolate to 5nm
+        Linear interpolation from 10nm to 5nm
+              ↓
+Step 7: Tabulate and freeze
+        The resulting SPD becomes the authoritative D65 definition
+```
+
+### 4.3 Why D65 Cannot Be Exactly Reproduced
+
+The tabulated D65 SPD is a **frozen artifact** of the 1964 computation. Attempting to reproduce it using the published formulas yields small differences (~0.2 units) because:
+
+1. **Original PCA** was performed on 622 measurements at 10nm
+2. **Basis functions** were tabulated with limited precision
+3. **M coefficient formulas** are fitted approximations, not exact inversions
+4. **Intermediate rounding** occurred before final tabulation
+5. **UV/IR extension** used separate atmospheric data spliced in
+6. **10nm → 5nm interpolation** was applied as a final step
+
+The tabulated SPD is now authoritative precisely *because* you cannot perfectly reconstruct it from the component formulas. CIE 15:2004 Note 4 explicitly acknowledges these historical rounding differences.
+
+### 4.4 The 1nm Tables
+
+The authoritative 1nm D65 tables (ISO 11664-2:2007) are themselves interpolations from the 5nm data—they add apparent precision without adding real information from the original measurements.
+
+---
+
+## 5. Daylight vs. Blackbody
 
 A common misconception is that D65 represents a 6500K blackbody. It does not.
 
@@ -129,27 +258,27 @@ A common misconception is that D65 represents a 6500K blackbody. It does not.
 
 The D65 chromaticity lies above the Planckian locus in the y-direction. This represents the physical difference between actual daylight and idealized blackbody radiation.
 
-The **daylight locus** is a separate curve through chromaticity space, derived empirically from 622 measurements of real daylight (Judd, MacAdam, Wyszecki et al., 1964), that runs roughly parallel to but offset from the Planckian locus.
+The **daylight locus** is a separate curve through chromaticity space, derived empirically from the 622 measurements of real daylight, that runs roughly parallel to but offset from the Planckian locus.
 
 ---
 
-## 4. The Daylight Locus Formulas
+## 6. The Daylight Locus Formulas
 
-### 4.1 Origin
+### 6.1 Origin
 
-Judd, MacAdam, and Wyszecki (1964) analyzed 622 daylight samples and found their chromaticities followed a quadratic relationship.
+As described in Section 4, Judd, MacAdam, and Wyszecki (1964) derived these formulas from analysis of 622 daylight samples.
 
-### 4.2 The y(x) Quadratic (CIE 15:2004 Equation 3.2)
+### 6.2 The y(x) Quadratic (CIE 15:2004 Equation 3.2)
 
 ```
 y_D = -3.000x_D² + 2.870x_D - 0.275
 ```
 
-This defines the shape of the daylight locus—all daylight chromaticities lie approximately on this curve.
+This defines the shape of the daylight locus—all daylight chromaticities lie approximately on this curve. It was a best-fit curve through the 622 measured chromaticities.
 
-### 4.3 The x(T) Polynomial
+### 6.3 The x(T) Polynomial
 
-The CIE later added a polynomial to compute x from temperature, enabling generation of arbitrary D-illuminants. As published in CIE 15:2004:
+The original 1964 paper tabulated chromaticity coordinates for specific temperatures (5500K, 6500K, 7500K, etc.). The CIE later added a polynomial to compute x from temperature, enabling generation of arbitrary D-illuminants. As published in CIE 15:2004:
 
 **For 4000K ≤ T_cp ≤ 7000K (Equation 3.3):**
 ```
@@ -163,7 +292,7 @@ x_D = -2.0064×10⁹/T³ + 1.9018×10⁶/T² + 0.24748×10³/T + 0.237040
 
 Where **T_cp is the correlated color temperature on the ITS-90 scale**.
 
-### 4.4 The SPD Reconstruction Formula (CIE 15:2004 Equation 3.5)
+### 6.4 The SPD Reconstruction Formula (CIE 15:2004 Equation 3.5)
 
 Once chromaticity (x_D, y_D) is determined, the relative spectral power distribution is computed from three basis functions:
 
@@ -185,7 +314,7 @@ M₁ = -0.2907
 M₂ = -0.6687
 ```
 
-### 4.5 Verification: Reconstructed SPD vs. Tabulated D65
+### 6.5 Verification: Reconstructed SPD vs. Tabulated D65
 
 Using M₁ = -0.2907, M₂ = -0.6687 to reconstruct the D65 SPD:
 
@@ -208,7 +337,7 @@ The small differences are due to rounding in the tabulated values, which CIE 15:
 
 ---
 
-## 5. The Critical Distinction: Tables vs. Polynomial
+## 7. The Critical Distinction: Tables vs. Polynomial
 
 CIE 15:2004 Note 4 (Section 3.1) states:
 
@@ -225,7 +354,7 @@ The tables are frozen historical artifacts computed with the 1931 temperature sc
 
 ---
 
-## 6. Converting Between Temperature Scales
+## 8. Converting Between Temperature Scales
 
 Per CIE 15:2004 Appendix E, to convert from the 1931 scale to ITS-90:
 
@@ -244,25 +373,25 @@ This is the temperature to input into the modern polynomial to recover D65's ori
 
 ---
 
-## 7. Empirical Proof: ITS-90 vs. CODATA
+## 9. Empirical Proof: ITS-90 vs. CODATA
 
 One might ask: why use the ITS-90 defined constant (0.014388) rather than the more accurate CODATA physical measurement (0.01438776877)? We can test this empirically.
 
-### 7.1 Two Candidate Conversions
+### 9.1 Two Candidate Conversions
 
 | Method | c₂ value | Conversion | Result |
 |--------|----------|------------|--------|
 | ITS-90 | 0.014388 m·K | 6500 × (0.014388/0.01438) | 6503.616134K |
 | CODATA | 0.01438776877 m·K | 6500 × (0.01438776877/0.01438) | 6503.511614K |
 
-### 7.2 Error Comparison
+### 9.2 Error Comparison
 
 | Temperature | Δx (×10⁻⁵) | Δy (×10⁻⁵) | Euclidean (×10⁻⁵) |
 |-------------|------------|------------|-------------------|
 | 6503.6161K (ITS-90) | **+0.03** | +9.53 | 9.53 |
 | 6503.5116K (CODATA) | +0.20 | +9.70 | 9.70 |
 
-### 7.3 Conclusion
+### 9.3 Conclusion
 
 The ITS-90 conversion gives nearly perfect x accuracy (error 0.03×10⁻⁵), while CODATA gives slightly worse x accuracy (error 0.20×10⁻⁵). This proves:
 
@@ -274,7 +403,7 @@ This is consistent with CIE 15:2004 Appendix E, which explicitly specifies ITS-9
 
 ---
 
-## 8. Experimental Verification
+## 10. Experimental Verification
 
 Testing the polynomial against official D65 coordinates (0.31272, 0.32903):
 
@@ -300,7 +429,7 @@ Testing the polynomial against official D65 coordinates (0.31272, 0.32903):
 
 ---
 
-## 9. The y(x) Quadratic Error
+## 11. The y(x) Quadratic Error
 
 The ~9.5×10⁻⁵ y error is **not** a temperature scale issue—it's inherent in the y(x) quadratic formula itself. This can be verified by plugging the official x values directly into the formula:
 
@@ -317,7 +446,7 @@ The y(x) quadratic was a best-fit curve through the 622 daylight measurements. T
 
 ---
 
-## 10. Why the Canonical Illuminants Don't Lie on the Polynomial Curve
+## 12. Why the Canonical Illuminants Don't Lie on the Polynomial Curve
 
 Several factors contribute:
 
@@ -331,7 +460,7 @@ Several factors contribute:
 
 ---
 
-## 11. The Complete Derivation Chain
+## 13. The Complete Derivation Chain
 
 The D65 chromaticity can be derived through multiple paths:
 
@@ -364,7 +493,7 @@ Note: ~9.5×10⁻⁵ y error from quadratic approximation.
 
 ---
 
-## 12. High-Precision Reference Values
+## 14. High-Precision Reference Values
 
 ### Radiation Constants (CIE 15:2004 Appendix E)
 
@@ -433,7 +562,7 @@ Using ISO 11664-2:2007 D65 SPD and CIE 018:2019 CMF:
 
 ---
 
-## 13. Practical Recommendations
+## 15. Practical Recommendations
 
 ### For Software Implementations
 
@@ -463,7 +592,7 @@ All errors discussed are in the 5th decimal place (10⁻⁵), far below any perc
 
 ---
 
-## 14. Summary
+## 16. Summary
 
 | Item | Temperature Scale | Notes |
 |------|------------------|-------|
@@ -475,7 +604,7 @@ All errors discussed are in the 5th decimal place (10⁻⁵), far below any perc
 
 The polynomial expects ITS-90 CCT as input. D65 was defined as 6500K on the 1931 scale. To recover D65 from the polynomial, convert: 6500 × (0.014388/0.01438) = 6503.616134K.
 
-The empirical test in Section 7 confirms this: using ITS-90 gives x error of 0.03×10⁻⁵, while using CODATA gives x error of 0.20×10⁻⁵. The polynomial was calibrated for ITS-90, not physical constants.
+The empirical test in Section 9 confirms this: using ITS-90 gives x error of 0.03×10⁻⁵, while using CODATA gives x error of 0.20×10⁻⁵. The polynomial was calibrated for ITS-90, not physical constants.
 
 The ~9.5×10⁻⁵ residual y error is inherent in the y(x) quadratic formula—it affects all canonical illuminants equally and reflects the fact that the quadratic was never constrained to pass through them exactly.
 
@@ -523,13 +652,21 @@ The authoritative definition of D65. Values are relative spectral power, normali
 | 455 | 117.410 | 620 | 87.6987 | | |
 | 460 | 117.812 | 625 | 85.4936 | | |
 
-**Note:** The 5nm table above is reproduced from CIE 15:2004 Table T.1, which is in the public domain and contains some historical rounding. For rigorous calculations, use the authoritative 1nm tables from ISO 11664-2:2007 / CIE S 014-2:2006 (531 values, 300–830nm at 6 significant figures). All high-precision derivations in this document were computed using the authoritative 1nm source data.
+**Note:** The 5nm table above is reproduced from CIE 15:2004 Table T.1, which is in the public domain and contains some historical rounding. This table was derived by linear interpolation from 10nm data originally measured at 330–700nm, with UV/IR extensions from Moon's atmospheric data. For rigorous calculations, use the authoritative 1nm tables from ISO 11664-2:2007 / CIE S 014-2:2006 (531 values, 300–830nm at 6 significant figures). All high-precision derivations in this document were computed using the authoritative 1nm source data.
 
 ---
 
 ## Appendix B: Daylight Basis Functions S₀, S₁, S₂
 
-These basis functions, derived from principal component analysis of 622 daylight measurements, allow reconstruction of any daylight illuminant SPD.
+These basis functions were derived from principal component analysis of 622 daylight measurements (Judd et al., 1964). They allow reconstruction of any daylight illuminant SPD.
+
+### Origin
+
+- **S₀(λ)**: The mean SPD of all 622 daylight samples
+- **S₁(λ)**: First principal component (captures yellow-blue variation with color temperature)
+- **S₂(λ)**: Second principal component (captures pink-green variation)
+
+The original measurements were at 10nm intervals from 330–700nm. The basis functions were extended to 300–330nm and 700–830nm using Moon's spectral absorbance data of Earth's atmosphere, then interpolated to 5nm.
 
 ### Table B.1: Daylight Basis Functions (5nm intervals, 300–830nm)
 
@@ -602,7 +739,7 @@ To compute any daylight illuminant at correlated color temperature T:
 3. Compute M₁ and M₂ from (x_D, y_D) using Equation 3.6
 4. Compute S(λ) = S₀(λ) + M₁·S₁(λ) + M₂·S₂(λ)
 
-**Note:** The 5nm basis functions above are reproduced from CIE 15:2004 Tables T.2 and T.3, which are in the public domain. Linear interpolation should be used if values at wavelengths other than those tabulated are needed. For highest accuracy, use the Lagrange-interpolated 1nm tables from CIE 15:2004 Appendix C.
+**Note:** The characteristic vectors S₁ and S₂ both have a zero at 560nm, since all relative SPDs were normalized to 100 at this wavelength before PCA. The 5nm basis functions above are reproduced from CIE 15:2004 Tables T.2 and T.3, which are in the public domain. Linear interpolation should be used if values at wavelengths other than those tabulated are needed. For highest accuracy, use the Lagrange-interpolated 1nm tables from CIE 15:2004 Appendix C.
 
 ---
 
@@ -654,6 +791,21 @@ All spot checks confirm data integrity.
 
 ---
 
+## Appendix E: Historical Timeline
+
+| Year | Event |
+|------|-------|
+| 1928–31 | Wright and Guild conduct color matching experiments → CIE 1931 2° observer CMFs |
+| 1931 | CIE establishes illuminants A, B, C; defines c₂ = 0.01438 m·K |
+| 1960s | Budde, Condit & Grum, Henderson & Hodgkiss measure 622 daylight SPDs |
+| 1964 | Judd, MacAdam, Wyszecki publish PCA analysis; derive S₀, S₁, S₂ basis functions and daylight locus |
+| 1967 | CIE formally adopts D-series illuminants; D65 defined at 6500K (1931 scale) |
+| 1968 | Planck's law constants revised; D65's CCT shifts to ~6504K on new scale |
+| 1990 | ITS-90 temperature scale adopted; c₂ = 0.014388 m·K |
+| 2004 | CIE 15:2004 publishes current polynomial formulas (expecting ITS-90 input) |
+
+---
+
 ## References
 
 - CIE 15:2004, Colorimetry, 3rd Edition
@@ -661,3 +813,5 @@ All spot checks confirm data integrity.
 - ISO 11664-2:2007 / CIE S 014-2:2006, Colorimetry — Part 2: CIE Standard Illuminants
 - CIE 018:2019, The Basis of Physical Photometry, 3rd Edition
 - Judd, D.B., MacAdam, D.L., Wyszecki, G., et al. (1964). "Spectral Distribution of Typical Daylight as a Function of Correlated Color Temperature." *J. Opt. Soc. Am.* 54, 1031-1040.
+- Condit, H.R. and Grum, F. (1964). "Spectral Energy Distribution of Daylight." *J. Opt. Soc. Am.* 54, 937-944.
+- Henderson, S.T. and Hodgkiss, D. (1963). "The Spectral Energy Distribution of Daylight." *British Journal of Applied Physics* 14, 125-131.
