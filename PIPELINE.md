@@ -84,6 +84,7 @@ Used when any of these conditions apply:
 - Grayscale output selected
 - Non-sRGB color space detected (via CICP or ICC profile)
 - Premultiplied alpha needs un-premultiplying (EXR by default)
+- Tonemapping requested (`--tonemapping` or `--output-tonemapping`)
 
 This path converts to linear RGB (0–1 float), performs all processing, then converts back to sRGB.
 
@@ -95,6 +96,7 @@ Used when all of these are true:
 - RGB output (not grayscale)
 - Standard sRGB input (CICP indicates sRGB, or no CICP and no non-sRGB ICC profile)
 - No premultiplied alpha to un-premultiply
+- No tonemapping requested
 
 This path converts directly to sRGB float (0–255 range) without gamma decode, avoiding unnecessary round-trips through linear space.
 
@@ -115,7 +117,7 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Resize → Color Correct → Grayscale → sRGB Encode → Dither
+CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Tonemap (opt) → Grayscale → sRGB Encode → Dither
 ```
 
 ### 3.0 Un-premultiply Alpha
@@ -148,7 +150,25 @@ Color correction matches the input image's color distribution to a reference ima
 
 See [Section 4: Color Correction Methods](#4-color-correction-methods) for algorithm details.
 
-### 3.3 Grayscale Conversion
+### 3.3 Tonemapping
+
+Tonemapping adjusts the dynamic range of images using the ACES (Academy Color Encoding System) filmic curve. Two tonemapping options are available:
+
+**`--input-tonemapping`**: Applied immediately after loading/un-premultiplying, **before** resize and histogram matching. Use this to adjust dynamic range early in the pipeline.
+
+**`--tonemapping`**: Applied after grayscale conversion (for grayscale/LA outputs) or before sRGB encoding (for RGB outputs). Both `aces` and `aces-inverse` are applied at the same point in the pipeline:
+- `aces`: Compresses dynamic range (HDR → SDR)
+- `aces-inverse`: Expands dynamic range (SDR → HDR approximation)
+
+**ACES Tonemapping Curve**:
+```
+forward(x) = (x × (2.51x + 0.03)) / (x × (2.43x + 0.59) + 0.14)
+inverse(y) = (-0.03 + 0.59y + √(4 × 0.14y × (2.51 - 2.43y) + (0.03 - 0.59y)²)) / (2 × (2.51 - 2.43y))
+```
+
+The forward curve maps HDR values to the [0, 1] SDR range with a characteristic film-like shoulder rolloff. The inverse approximates the reverse mapping.
+
+### 3.4 Grayscale Conversion
 
 If grayscale output is requested, luminance is extracted using Rec.709 coefficients:
 
@@ -158,7 +178,7 @@ Y = 0.2126 R + 0.7152 G + 0.0722 B
 
 This is done in linear space where the coefficients are physically meaningful (they represent the eye's sensitivity to each primary).
 
-### 3.4 sRGB Encode
+### 3.5 sRGB Encode
 
 After linear processing, values are converted back to sRGB using the standard transfer function:
 
@@ -322,13 +342,22 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    │
               ┌────────────────────┼────────────────────┐
               │                    │                    │
-         [Resize?]          [Color Correct?]     [Grayscale?]
+       [Input Tonemap?]       [Resize?]         [Color Correct?]
               │                    │                    │
               ▼                    ▼                    ▼
-        Lanczos/Bilinear    CRA Histogram          Luminance
-        (linear space)       Matching           (Y = Rec.709)
+          ACES forward      Lanczos/Bilinear     CRA Histogram
+           or inverse       (linear space)         Matching
               │                    │                    │
               └────────────────────┼────────────────────┘
+                                   │
+                                   ▼
+                            [Grayscale?]
+                                   │
+                                   ▼
+                         Luminance (Y = Rec.709)
+                                   │
+                                   ▼
+                            [Tonemap?]
                                    │
                                    ▼
                          sRGB Encode (gamma)

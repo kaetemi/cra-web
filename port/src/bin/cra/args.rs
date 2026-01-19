@@ -233,6 +233,14 @@ impl ScaleMethod {
     }
 }
 
+#[derive(Debug, Clone, Copy, ValueEnum, PartialEq)]
+pub enum Tonemapping {
+    /// ACES filmic tonemapping (forward: HDR to SDR)
+    Aces,
+    /// ACES inverse tonemapping (reverse: SDR to HDR approximation)
+    AcesInverse,
+}
+
 /// Build ColorCorrectionMethod from CLI arguments
 pub fn build_correction_method(
     histogram: Histogram,
@@ -470,6 +478,14 @@ pub struct Args {
     /// Scaling method for resize operations
     #[arg(long, value_enum, default_value_t = ScaleMethod::EwaLanczos3)]
     pub scale_method: ScaleMethod,
+
+    /// Input tonemapping: applied before histogram matching (color correction)
+    #[arg(long, value_enum)]
+    pub input_tonemapping: Option<Tonemapping>,
+
+    /// Output tonemapping: applied before grayscale (aces-inverse) or after grayscale (aces)
+    #[arg(long, value_enum)]
+    pub tonemapping: Option<Tonemapping>,
 
     /// Disable automatic uniform scaling detection
     ///

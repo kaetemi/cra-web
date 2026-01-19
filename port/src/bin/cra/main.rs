@@ -24,7 +24,7 @@ use cra_wasm::binary_format::{
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
 use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
-use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single};
+use cra_wasm::color::{linear_pixels_to_grayscale, linear_to_srgb_single, srgb_to_linear_single, tonemap_aces_single, tonemap_aces_inverse_single, tonemap_aces_inplace, tonemap_aces_inverse_inplace};
 use cra_wasm::correction::{color_correct, HistogramOptions};
 use cra_wasm::decode::{
     can_use_cicp, cicp_description, image_to_f32_normalized_rgba, image_to_f32_srgb_255_pixels_rgba,
@@ -508,12 +508,20 @@ fn dither_pixels(
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
+    tonemapping: Option<Tonemapping>,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     if format.is_la() {
         // LA format: grayscale with alpha
         // Step 1: Convert linear RGB to linear grayscale (luminance only)
         let linear_gray = linear_pixels_to_grayscale(&pixels);
+
+        // Apply tonemapping after grayscale conversion
+        let linear_gray = match tonemapping {
+            Some(Tonemapping::Aces) => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
+            Some(Tonemapping::AcesInverse) => linear_gray.iter().map(|&l| tonemap_aces_inverse_single(l)).collect(),
+            None => linear_gray,
+        };
 
         // Step 2: Convert linear to sRGB (gamma) and denormalize to 0-255
         let srgb_gray: Vec<f32> = linear_gray
@@ -536,6 +544,13 @@ fn dither_pixels(
         // Step 1: Convert linear RGB to linear grayscale (luminance only)
         let linear_gray = linear_pixels_to_grayscale(&pixels);
 
+        // Apply tonemapping after grayscale conversion
+        let linear_gray = match tonemapping {
+            Some(Tonemapping::Aces) => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
+            Some(Tonemapping::AcesInverse) => linear_gray.iter().map(|&l| tonemap_aces_inverse_single(l)).collect(),
+            None => linear_gray,
+        };
+
         // Step 2: Convert linear to sRGB (gamma)
         // Step 3: Denormalize to 0-255
         let srgb_gray: Vec<f32> = linear_gray
@@ -550,6 +565,14 @@ fn dither_pixels(
         DitherResult { interleaved, is_grayscale: true, has_alpha: false }
     } else {
         let mut linear_pixels = pixels;
+
+        // For RGB output, apply tonemapping before sRGB conversion
+        // aces-inverse expands dynamic range, aces compresses it
+        match tonemapping {
+            Some(Tonemapping::Aces) => tonemap_aces_inplace(&mut linear_pixels),
+            Some(Tonemapping::AcesInverse) => tonemap_aces_inverse_inplace(&mut linear_pixels),
+            None => {}
+        }
 
         // Convert linear RGB to sRGB 0-255 (alpha already in correct range)
         linear_to_srgb_inplace(&mut linear_pixels);
@@ -1255,8 +1278,9 @@ fn main() -> Result<(), String> {
         }
     };
 
+    let needs_tonemapping = args.tonemapping.is_some() || args.input_tonemapping.is_some();
     let needs_linear = needs_reference || needs_resize || is_grayscale_format
-        || needs_profile_processing || needs_unpremultiply;
+        || needs_profile_processing || needs_unpremultiply || needs_tonemapping;
 
     // Track effective safetensors settings for metadata
     let mut safetensors_meta: Option<SafetensorsMetadata> = None;
@@ -1269,6 +1293,18 @@ fn main() -> Result<(), String> {
         }
 
         let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
+
+        // Apply input tonemapping before resize (if specified)
+        let input_pixels = if let Some(tm) = args.input_tonemapping {
+            let mut p = input_pixels;
+            match tm {
+                Tonemapping::Aces => tonemap_aces_inplace(&mut p),
+                Tonemapping::AcesInverse => tonemap_aces_inverse_inplace(&mut p),
+            }
+            p
+        } else {
+            input_pixels
+        };
 
         // Histogram processing doesn't support alpha yet - discard alpha when using reference
         let input_has_alpha = if needs_reference && original_has_alpha {
@@ -1402,6 +1438,7 @@ fn main() -> Result<(), String> {
                 output_colorspace.to_perceptual_space(),
                 args.seed,
                 input_has_alpha,
+                args.tonemapping,
                 if args.progress { Some(&mut dither_progress) } else { None },
             );
             if args.progress {

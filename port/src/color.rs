@@ -92,6 +92,64 @@ pub fn linear_pixels_to_grayscale(pixels: &[Pixel4]) -> Vec<f32> {
     gray
 }
 
+// ============================================================================
+// ACES Tonemapping
+// ============================================================================
+
+// ACES filmic tonemapping coefficients
+const ACES_A: f32 = 2.51;
+const ACES_B: f32 = 0.03;
+const ACES_C: f32 = 2.43;
+const ACES_D: f32 = 0.59;
+const ACES_E: f32 = 0.14;
+
+/// Apply ACES filmic tonemapping to a single linear value.
+/// Maps HDR values to SDR range [0, 1].
+#[inline]
+pub fn tonemap_aces_single(value: f32) -> f32 {
+    let v = value.max(0.0);
+    let result = (v * (ACES_A * v + ACES_B)) / (v * (ACES_C * v + ACES_D) + ACES_E);
+    result.min(1.0)
+}
+
+/// Apply inverse ACES tonemapping to a single value.
+/// Maps SDR values back to HDR range (approximate inverse).
+/// Uses the quadratic formula solution for the ACES curve.
+#[inline]
+pub fn tonemap_aces_inverse_single(y: f32) -> f32 {
+    let y = y.clamp(0.0, 1.0);
+    // Avoid division by zero when y approaches a/c
+    let denom = 2.0 * (ACES_A - ACES_C * y);
+    if denom.abs() < 1e-6 {
+        return y;
+    }
+    let discriminant = 4.0 * ACES_E * y * (ACES_A - ACES_C * y) + (ACES_B - ACES_D * y).powi(2);
+    if discriminant < 0.0 {
+        return y;
+    }
+    let numerator = -ACES_B + ACES_D * y + discriminant.sqrt();
+    (numerator / denom).max(0.0)
+}
+
+/// Apply ACES tonemapping to linear RGB pixels in-place.
+/// Operates on each RGB channel independently.
+pub fn tonemap_aces_inplace(pixels: &mut [Pixel4]) {
+    for p in pixels.iter_mut() {
+        p[0] = tonemap_aces_single(p[0]);
+        p[1] = tonemap_aces_single(p[1]);
+        p[2] = tonemap_aces_single(p[2]);
+    }
+}
+
+/// Apply inverse ACES tonemapping to linear RGB pixels in-place.
+/// Operates on each RGB channel independently.
+pub fn tonemap_aces_inverse_inplace(pixels: &mut [Pixel4]) {
+    for p in pixels.iter_mut() {
+        p[0] = tonemap_aces_inverse_single(p[0]);
+        p[1] = tonemap_aces_inverse_single(p[1]);
+        p[2] = tonemap_aces_inverse_single(p[2]);
+    }
+}
 
 /// Lab f(t) function - attempt to linearize cube root near zero.
 ///
