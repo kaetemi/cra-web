@@ -74,3 +74,5 @@ output_*.png
 # OS
 Thumbs.db
 .DS_Store
+tools/cie_standard_illuminants_a_d65_spd.csv
+tools/CIE_xyz_1931_2deg.csv
