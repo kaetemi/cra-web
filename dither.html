@@ -879,6 +879,24 @@
                 <p class="scale-hint">Rescaling is performed in linear RGB space for correct color blending.</p>
             </div>
 
+            <div class="option-row">
+                <label for="input-tonemapping">Input Tonemapping:</label>
+                <select id="input-tonemapping">
+                    <option value="none" selected>None</option>
+                    <option value="aces">ACES (compress HDR→SDR)</option>
+                    <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
+                </select>
+            </div>
+
+            <div class="option-row">
+                <label for="output-tonemapping">Output Tonemapping:</label>
+                <select id="output-tonemapping">
+                    <option value="none" selected>None</option>
+                    <option value="aces">ACES (compress HDR→SDR)</option>
+                    <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
+                </select>
+            </div>
+
             <div class="toggle-row">
                 <span>Upscale for viewing:</span>
                 <label class="toggle-switch">
@@ -1283,6 +1301,8 @@
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
+            const inputTonemapping = document.getElementById('input-tonemapping').value;
+            const outputTonemapping = document.getElementById('output-tonemapping').value;
 
             // Determine target dimensions
             let processWidth = originalWidth;
@@ -1326,7 +1346,9 @@
                 alphaMode: alphaMode,  // Separate alpha dither mode (255 = same as mode)
                 isPerceptual: isPerceptual,
                 perceptualSpace: perceptualSpace,
-                seed: seed
+                seed: seed,
+                inputTonemapping: inputTonemapping,
+                outputTonemapping: outputTonemapping
             });
         }
 
@@ -1528,6 +1550,16 @@
                 if (scaleMethod !== 13) {
                     cmd += ` --scale-method ${scaleMethodMap[scaleMethod]}`;
                 }
+            }
+
+            // Add tonemapping options
+            const inputTonemapping = document.getElementById('input-tonemapping').value;
+            const outputTonemapping = document.getElementById('output-tonemapping').value;
+            if (inputTonemapping !== 'none') {
+                cmd += ` --input-tonemapping ${inputTonemapping}`;
+            }
+            if (outputTonemapping !== 'none') {
+                cmd += ` --tonemapping ${outputTonemapping}`;
             }
 
             return cmd;

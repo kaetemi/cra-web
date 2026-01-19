@@ -558,6 +558,40 @@ pub fn gray_denormalize_wasm(buf: &mut BufferF32) {
 }
 
 // ============================================================================
+// Tonemapping
+// ============================================================================
+
+/// Apply ACES tonemapping to linear RGB buffer in-place
+/// Compresses HDR values to SDR range [0, 1]
+#[wasm_bindgen]
+pub fn tonemap_aces_wasm(buf: &mut BufferF32x4) {
+    color::tonemap_aces_inplace(buf.as_mut_slice());
+}
+
+/// Apply inverse ACES tonemapping to linear RGB buffer in-place
+/// Expands SDR values to approximate HDR range
+#[wasm_bindgen]
+pub fn tonemap_aces_inverse_wasm(buf: &mut BufferF32x4) {
+    color::tonemap_aces_inverse_inplace(buf.as_mut_slice());
+}
+
+/// Apply ACES tonemapping to grayscale buffer in-place
+#[wasm_bindgen]
+pub fn gray_tonemap_aces_wasm(buf: &mut BufferF32) {
+    for v in buf.as_mut_slice().iter_mut() {
+        *v = color::tonemap_aces_single(*v);
+    }
+}
+
+/// Apply inverse ACES tonemapping to grayscale buffer in-place
+#[wasm_bindgen]
+pub fn gray_tonemap_aces_inverse_wasm(buf: &mut BufferF32) {
+    for v in buf.as_mut_slice().iter_mut() {
+        *v = color::tonemap_aces_inverse_single(*v);
+    }
+}
+
+// ============================================================================
 // Color Correction
 // ============================================================================
 
