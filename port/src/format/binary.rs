@@ -273,20 +273,44 @@ impl ColorFormat {
     }
 
     /// Create a format directly from bit depths including alpha
+    ///
+    /// Handles LA formats: when bits_g == 0 && bits_b == 0 && bits_a > 0,
+    /// creates an LA format with bits_r as luminosity bits.
     pub fn from_bits_rgba(bits_a: u8, bits_r: u8, bits_g: u8, bits_b: u8) -> Self {
-        let is_grayscale = bits_g == 0 && bits_b == 0 && bits_a == 0;
         let has_alpha = bits_a > 0;
+        // LA format: grayscale with alpha (bits_g and bits_b are 0, but bits_a > 0)
+        let is_la = bits_g == 0 && bits_b == 0 && has_alpha;
+        let is_grayscale = bits_g == 0 && bits_b == 0; // Both L and LA are grayscale-based
+
         let total_bits = if is_grayscale {
-            bits_r
+            bits_r + bits_a // For L formats, bits_a is 0; for LA, it's the alpha bits
         } else {
             bits_a + bits_r + bits_g + bits_b
         };
-        let name = if is_grayscale {
+
+        let name = if is_la {
+            // LA format: use shorthand when bits are equal
+            if bits_r == bits_a {
+                format!("LA{}", bits_r)
+            } else {
+                format!("LA{}{}", bits_r, bits_a)
+            }
+        } else if is_grayscale {
             format!("L{}", bits_r)
         } else if has_alpha {
-            format!("ARGB{}{}{}{}", bits_a, bits_r, bits_g, bits_b)
+            // ARGB format: use shorthand when all bits are equal
+            if bits_a == bits_r && bits_r == bits_g && bits_g == bits_b {
+                format!("ARGB{}", bits_a)
+            } else {
+                format!("ARGB{}{}{}{}", bits_a, bits_r, bits_g, bits_b)
+            }
         } else {
-            format!("RGB{}{}{}", bits_r, bits_g, bits_b)
+            // RGB format: use shorthand when all bits are equal
+            if bits_r == bits_g && bits_g == bits_b {
+                format!("RGB{}", bits_r)
+            } else {
+                format!("RGB{}{}{}", bits_r, bits_g, bits_b)
+            }
         };
 
         ColorFormat {
@@ -2122,6 +2146,60 @@ mod tests {
         assert_eq!(la2.total_bits, 4);
         assert!(la2.is_la());
         assert!(la2.supports_binary()); // 4 bits is power-of-2
+    }
+
+    #[test]
+    fn test_from_bits_rgba() {
+        // Test that from_bits_rgba correctly handles different format types
+
+        // RGB format
+        let rgb565 = ColorFormat::from_bits_rgba(0, 5, 6, 5);
+        assert_eq!(rgb565.name, "RGB565");
+        assert!(!rgb565.is_grayscale);
+        assert!(!rgb565.has_alpha);
+        assert!(!rgb565.is_la());
+
+        // RGB shorthand (equal bits)
+        let rgb8 = ColorFormat::from_bits_rgba(0, 8, 8, 8);
+        assert_eq!(rgb8.name, "RGB8");
+
+        // ARGB format
+        let argb1555 = ColorFormat::from_bits_rgba(1, 5, 5, 5);
+        assert_eq!(argb1555.name, "ARGB1555");
+        assert!(!argb1555.is_grayscale);
+        assert!(argb1555.has_alpha);
+        assert!(argb1555.is_argb());
+        assert!(!argb1555.is_la());
+
+        // ARGB shorthand (equal bits)
+        let argb8 = ColorFormat::from_bits_rgba(8, 8, 8, 8);
+        assert_eq!(argb8.name, "ARGB8");
+
+        // L format (grayscale, no alpha)
+        let l4 = ColorFormat::from_bits_rgba(0, 4, 0, 0);
+        assert_eq!(l4.name, "L4");
+        assert!(l4.is_grayscale);
+        assert!(!l4.has_alpha);
+        assert!(!l4.is_la());
+
+        // LA format (grayscale with alpha) - this was the bug!
+        let la44 = ColorFormat::from_bits_rgba(4, 4, 0, 0);
+        assert_eq!(la44.name, "LA4"); // shorthand since bits are equal
+        assert!(la44.is_grayscale);
+        assert!(la44.has_alpha);
+        assert!(la44.is_la());
+        assert!(!la44.is_argb());
+        assert_eq!(la44.bits_r, 4); // luminosity
+        assert_eq!(la44.bits_a, 4); // alpha
+        assert_eq!(la44.total_bits, 8);
+
+        // LA format with different bits
+        let la48 = ColorFormat::from_bits_rgba(8, 4, 0, 0);
+        assert_eq!(la48.name, "LA48");
+        assert!(la48.is_grayscale);
+        assert!(la48.has_alpha);
+        assert!(la48.is_la());
+        assert_eq!(la48.total_bits, 12);
     }
 
     #[test]
