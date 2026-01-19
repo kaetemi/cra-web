@@ -743,7 +743,7 @@ fn write_metadata(
         if let Some(alpha_dither) = args.output_alpha_dither {
             json.push_str(&format!("  \"output_alpha_dither\": \"{:?}\",\n", alpha_dither));
         }
-        json.push_str(&format!("  \"output_colorspace\": \"{:?}\",\n", output_colorspace));
+        json.push_str(&format!("  \"output_distance_space\": \"{:?}\",\n", output_colorspace));
 
         // Raw-file-specific fields (only when raw output is present)
         if args.output_raw.is_some() {
@@ -1272,7 +1272,7 @@ fn main() -> Result<(), String> {
             eprintln!("Output alpha dither: {:?}", alpha_dither);
         }
         eprintln!(
-            "Output colorspace: {:?}{}",
+            "Output distance space: {:?}{}",
             output_colorspace,
             if args.output_distance_space.is_none() { " (default)" } else { "" }
         );

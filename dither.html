@@ -1601,9 +1601,9 @@
             if (lastDitherResult.hasAlpha && lastDitherResult.alphaMode !== undefined) {
                 metadata.output_alpha_dither = modeNames[lastDitherResult.alphaMode] || 'Unknown';
             }
-            // CLI always outputs a colorspace (defaults to Oklab for RGB, LabCie94 for grayscale)
+            // Perceptual space for dithering distance metric (defaults to Oklab for RGB, LabCie94 for grayscale)
             const defaultSpace = lastDitherResult.isGrayscale ? 'LabCie94' : 'Oklab';
-            metadata.output_colorspace = lastDitherResult.perceptualSpace !== null ?
+            metadata.output_distance_space = lastDitherResult.perceptualSpace !== null ?
                 (spaceNames[lastDitherResult.perceptualSpace] || defaultSpace) : defaultSpace;
 
             // Raw output fields
