@@ -560,6 +560,28 @@ Using ISO 11664-2:2007 D65 SPD and CIE 018:2019 CMF:
 | 6503.6330K (exact x) | 0.3127200000 | 0.3291250048 |
 | 6504.0K (rounded) | 0.3127140569 | 0.3291190991 |
 
+### Temperature Derived from RGB→XYZ Matrices
+
+The white point implied by an RGB→XYZ matrix is the XYZ when R=G=B=1 (row sums). This can be converted to chromaticity and then to a corresponding temperature via the daylight locus polynomial.
+
+| Matrix Source | x | y | T (ITS-90) | T (1931) |
+|---------------|---|---|------------|----------|
+| sRGB (IEC 61966-2-1) | 0.3127159072 | 0.3290014805 | 6503.8857K | 6500.2695K |
+| BT.709 + CIE D65 | 0.3127200000 | 0.3290300000 | 6503.6330K | 6500.0169K |
+| BT.709 + 4-digit D65 | 0.3127000000 | 0.3290000000 | 6504.8682K | 6501.2514K |
+
+**Notes:**
+
+1. The **sRGB matrix** (IEC 61966-2-1) uses rounded coefficients that imply a white point at **6500.27K (1931 scale)**—approximately 0.27K warmer than nominal D65.
+
+2. **BT.709 + CIE D65** derives the matrix from exact BT.709 primaries and CIE D65 (0.31272, 0.32903). The resulting temperature (6500.02K) is essentially the nominal 6500K.
+
+3. **BT.709 + 4-digit D65** uses the rounded (0.3127, 0.3290) white point, yielding 6501.25K—about 1.25K warmer than nominal.
+
+4. The y-coordinates from matrices differ from polynomial-derived y by ~10×10⁻⁵ (the known quadratic approximation error).
+
+See `tools/derive_k_from_matrix.py` for the derivation script.
+
 ---
 
 ## 15. Practical Recommendations
