@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 default = []
 # CLI enables additional image formats beyond the WASM-compatible ones
-cli = ["dep:clap", "image/tiff", "image/bmp", "image/ico", "image/hdr", "image/exr", "image/pnm", "image/qoi", "image/tga", "image/ff"]
+cli = ["dep:clap", "image/tiff", "image/bmp", "image/ico", "image/hdr", "image/pnm", "image/qoi", "image/tga", "image/ff"]
 
 [dependencies]
 wasm-bindgen = "0.2"
@@ -18,7 +18,7 @@ js-sys = "0.3"
 
 # Image decoding and ICC support (used by both WASM and CLI)
 # Base formats for WASM (pure Rust decoders)
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "exr"] }
 moxcms = "0.7"
 
 # PNG crate for palettized PNG output (direct PLTE/tRNS chunk control)
