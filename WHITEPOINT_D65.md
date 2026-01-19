@@ -4,6 +4,17 @@
 
 D65 is the CIE standard daylight illuminant representing average noon daylight. While commonly associated with "6500K," the relationship between D65 and color temperature involves two different temperature scales: the 1931 scale on which D65 was originally defined, and the modern ITS-90 scale used in current CIE formulas. This document explains the precision issues, historical changes, and the derivation relationships between them.
 
+| Variant | x | y | Origin |
+|---------|---|---|--------|
+| **CIE Official (5 dp)** | 0.31272 | 0.32903 | CIE 15:2004 Table T.3 |
+| **380-780nm @ 5nm** | 0.3127205252 | 0.3290306850 | Integration per Table T.3 method (81 points) |
+| **380-780nm @ 1nm** | 0.3127385128 | 0.3290520326 | 1nm interpolated SPD (401 points) |
+| **360-830nm @ 1nm** | 0.3127268710 | 0.3290232066 | Full range 1nm data (471 points) |
+| **sRGB matrix-implied** | 0.3127159072 | 0.3290014805 | Row sums of IEC 61966-2-1 matrix |
+| **4-digit (specs)** | 0.3127 | 0.3290 | ITU-R BT.709, Adobe RGB (1998) |
+| **Polynomial at 6503.62K (ITS-90)** | 0.312720273260 | 0.329125276333 | CIE daylight polynomial with temperature conversion |
+| **Reconstructed via M₁,M₂** | 0.3127089233 | 0.3289234905 | Basis function reconstruction |
+
 ---
 
 ## 1. The Authoritative Definition
