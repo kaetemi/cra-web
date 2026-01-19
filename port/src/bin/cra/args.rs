@@ -351,11 +351,11 @@ pub struct Args {
     #[arg(long)]
     pub output_raw: Option<PathBuf>,
 
-    /// Output palettized PNG file path (optional)
-    /// Only available for formats with ≤8 bits per pixel (L1-L8, LA1-LA4, RGB332, ARGB1111, etc.)
-    /// The palette contains bit-replicated colors for each possible packed value.
+    /// Disable palettized PNG output for formats with ≤8 bits per pixel
+    /// By default, PNG output uses indexed color (palette) when the format supports it,
+    /// which produces smaller files. Use this flag to force regular RGB/grayscale PNG output.
     #[arg(long)]
-    pub output_palettized: Option<PathBuf>,
+    pub no_palettized_output: bool,
 
     /// Output raw binary for red channel only (optional) - respects --stride
     #[arg(long)]

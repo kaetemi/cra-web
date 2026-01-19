@@ -9,7 +9,7 @@ mod args;
 
 use args::*;
 use clap::Parser;
-use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, Luma, Rgb, Rgba};
+use image::{ColorType, DynamicImage, GenericImageView, ImageBuffer, Luma, LumaA, Rgb, Rgba};
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
@@ -638,6 +638,17 @@ fn save_png_grayscale(path: &PathBuf, data: &[u8], width: u32, height: u32) -> R
     Ok(())
 }
 
+fn save_png_grayscale_alpha(path: &PathBuf, data: &[u8], width: u32, height: u32) -> Result<(), String> {
+    let img: ImageBuffer<LumaA<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, data.to_vec())
+            .ok_or_else(|| "Failed to create grayscale+alpha image buffer".to_string())?;
+
+    img.save(path)
+        .map_err(|e| format!("Failed to save {}: {}", path.display(), e))?;
+
+    Ok(())
+}
+
 fn save_png_rgb(path: &PathBuf, data: &[u8], width: u32, height: u32) -> Result<(), String> {
     let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
         ImageBuffer::from_raw(width, height, data.to_vec())
@@ -686,6 +697,7 @@ fn write_metadata(
     outputs: &[(String, PathBuf, usize)],
     safetensors_meta: Option<&SafetensorsMetadata>,
     has_integer_output: bool,
+    png_palettized: bool,
 ) -> Result<(), String> {
     // Get name from output filename (without extension)
     // Prefer raw output path, then first output, then input, then fallback to "image"
@@ -724,6 +736,11 @@ fn write_metadata(
             json.push_str(&format!("  \"output_alpha_dither\": \"{:?}\",\n", alpha_dither));
         }
         json.push_str(&format!("  \"output_distance_space\": \"{:?}\",\n", output_colorspace));
+
+        // PNG-specific fields (only when PNG output is present)
+        if args.output.is_some() {
+            json.push_str(&format!("  \"png_palettized\": {},\n", png_palettized));
+        }
 
         // Raw-file-specific fields (only when raw output is present)
         if args.output_raw.is_some() {
@@ -1114,10 +1131,9 @@ fn main() -> Result<(), String> {
         || args.output_raw_g.is_some()
         || args.output_raw_b.is_some()
         || args.output_raw_a.is_some();
-    // Integer output = PNG, raw binary, palettized PNG, or channel outputs (requires dithering)
+    // Integer output = PNG, raw binary, or channel outputs (requires dithering)
     let has_integer_output = args.output.is_some()
         || args.output_raw.is_some()
-        || args.output_palettized.is_some()
         || has_channel_output;
     if !has_integer_output
         && args.output_meta.is_none()
@@ -1219,14 +1235,6 @@ fn main() -> Result<(), String> {
     if args.output_raw.is_some() && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
-            format.name, format.total_bits
-        ));
-    }
-
-    // Check palettized PNG compatibility
-    if args.output_palettized.is_some() && !supports_palettized_png(&format) {
-        return Err(format!(
-            "Format {} ({} bits) does not support palettized PNG output. Palettized PNG requires ≤8 bits per pixel.",
             format.name, format.total_bits
         ));
     }
@@ -1624,12 +1632,34 @@ fn main() -> Result<(), String> {
         };
 
         // Write PNG output
+        // Use palettized PNG by default for formats ≤8 bits (smaller files)
         if let Some(ref png_path) = args.output {
+            let use_palettized = supports_palettized_png(&format) && !args.no_palettized_output;
+
             if args.verbose {
-                eprintln!("Writing PNG: {}", png_path.display());
+                if use_palettized {
+                    eprintln!("Writing PNG (palettized): {}", png_path.display());
+                } else {
+                    eprintln!("Writing PNG: {}", png_path.display());
+                }
             }
 
-            if format.is_grayscale {
+            if use_palettized {
+                // Use palettized PNG for smaller file size
+                let png_data = encode_palettized_png(
+                    &dither_result.interleaved,
+                    width_usize,
+                    height_usize,
+                    &format,
+                )?;
+                let mut file = File::create(png_path)
+                    .map_err(|e| format!("Failed to create {}: {}", png_path.display(), e))?;
+                file.write_all(&png_data)
+                    .map_err(|e| format!("Failed to write {}: {}", png_path.display(), e))?;
+            } else if format.is_grayscale && format.has_alpha {
+                // LA format - grayscale with alpha
+                save_png_grayscale_alpha(png_path, &dither_result.interleaved, width, height)?;
+            } else if format.is_grayscale {
                 save_png_grayscale(png_path, &dither_result.interleaved, width, height)?;
             } else if dither_result.has_alpha {
                 save_png_rgba(png_path, &dither_result.interleaved, width, height)?;
@@ -1666,27 +1696,6 @@ fn main() -> Result<(), String> {
                 .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
             outputs.push(("binary".to_string(), bin_path.clone(), bin_data.len()));
-        }
-
-        // Write palettized PNG output
-        if let Some(ref pal_path) = args.output_palettized {
-            if args.verbose {
-                eprintln!("Writing palettized PNG: {}", pal_path.display());
-            }
-
-            let png_data = encode_palettized_png(
-                &dither_result.interleaved,
-                width_usize,
-                height_usize,
-                &format,
-            )?;
-
-            let mut file = File::create(pal_path)
-                .map_err(|e| format!("Failed to create {}: {}", pal_path.display(), e))?;
-            file.write_all(&png_data)
-                .map_err(|e| format!("Failed to write {}: {}", pal_path.display(), e))?;
-
-            outputs.push(("palettized_png".to_string(), pal_path.clone(), png_data.len()));
         }
 
         // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
@@ -1763,6 +1772,10 @@ fn main() -> Result<(), String> {
         if args.verbose {
             eprintln!("Writing metadata: {}", meta_path.display());
         }
+        // Determine if PNG output used palettized encoding
+        let png_palettized = args.output.is_some()
+            && supports_palettized_png(&format)
+            && !args.no_palettized_output;
         write_metadata(
             meta_path,
             &args,
@@ -1774,6 +1787,7 @@ fn main() -> Result<(), String> {
             &outputs,
             safetensors_meta.as_ref(),
             has_integer_output,
+            png_palettized,
         )?;
     }
 

@@ -1453,6 +1453,24 @@ pub fn encode_png_gray_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Ve
     Ok(bytes)
 }
 
+/// Encode grayscale+alpha u8 data to PNG bytes
+/// Input: Interleaved LA u8 data (LALA..., 2 bytes per pixel)
+/// Output: PNG file bytes
+#[wasm_bindgen]
+pub fn encode_png_gray_alpha_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Vec<u8>, JsValue> {
+    use image::{ImageBuffer, LumaA};
+    use std::io::Cursor;
+
+    let img: ImageBuffer<LumaA<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, data)
+        .ok_or_else(|| JsValue::from_str("Failed to create grayscale+alpha image buffer"))?;
+
+    let mut bytes: Vec<u8> = Vec::new();
+    img.write_to(&mut Cursor::new(&mut bytes), image::ImageFormat::Png)
+        .map_err(|e| JsValue::from_str(&format!("Failed to encode PNG: {}", e)))?;
+
+    Ok(bytes)
+}
+
 /// Encode interleaved u8 data to palettized PNG bytes
 /// Input: Interleaved u8 data (format depends on color format type)
 ///   - Grayscale (L): 1 byte per pixel

@@ -986,9 +986,8 @@
         <div class="download-section">
             <h4>Downloads</h4>
             <div class="download-row">
-                <a class="download-btn" id="download-btn" download="dithered.png">PNG Image</a>
+                <button class="download-btn" id="download-btn" disabled>PNG Image</button>
                 <button class="download-btn secondary" id="download-raw-btn" disabled>Raw Binary</button>
-                <button class="download-btn secondary" id="download-palettized-btn" disabled>Palettized PNG</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
             </div>
             <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - raw download available</p>
@@ -1023,7 +1022,11 @@
             encode_gray_row_aligned_stride_wasm,
             encode_la_row_aligned_stride_wasm,
             encode_channel_row_aligned_stride_wasm,
-            encode_palettized_png_wasm
+            encode_palettized_png_wasm,
+            encode_png_rgb_wasm,
+            encode_png_rgba_wasm,
+            encode_png_gray_wasm,
+            encode_png_gray_alpha_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Worker for background processing
@@ -1101,14 +1104,10 @@
             const outputUrl = canvas.toDataURL('image/png');
             document.getElementById('compare-input').src = document.getElementById('input-preview').src;
             document.getElementById('compare-output').src = outputUrl;
+
+            // Enable the PNG download button (click handler will generate the actual PNG)
             const downloadBtn = document.getElementById('download-btn');
-            downloadBtn.href = outputUrl;
-            // Update PNG filename with format
-            const format = result.isGrayscale
-                ? (result.hasAlpha ? `LA${result.bitsR}${result.bitsA}` : `L${result.bitsR}`)
-                : (result.hasAlpha ? `ARGB${result.bitsA || 8}${result.bitsR}${result.bitsG}${result.bitsB}` :
-                `RGB${result.bitsR}${result.bitsG}${result.bitsB}`);
-            downloadBtn.download = generateDownloadFilename(processWidth, processHeight, format, 'png');
+            downloadBtn.disabled = false;
 
             // Store dither result for binary downloads
             lastDitherResult = {
@@ -1391,10 +1390,6 @@
 
             // Enable/disable raw download buttons
             document.getElementById('download-raw-btn').disabled = !supportsBinary;
-
-            // Enable/disable palettized PNG button (requires ≤8 bits per pixel)
-            const supportsPalettized = format_supports_palettized_wasm(format);
-            document.getElementById('download-palettized-btn').disabled = !supportsPalettized;
 
             // Per-channel downloads
             const channelDownloads = document.getElementById('channel-downloads');
@@ -1934,55 +1929,84 @@
             downloadBlob(blob, filename);
         });
 
-        // Palettized PNG download handler
-        document.getElementById('download-palettized-btn').addEventListener('click', () => {
+        // PNG download handler - uses palettized encoding by default when format supports it
+        document.getElementById('download-btn').addEventListener('click', () => {
             if (!lastDitherResult) return;
 
             const format = getFormatString();
+            const supportsPalettized = format_supports_palettized_wasm(format);
             let pngData;
 
             try {
-                if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
-                    // LA format
-                    pngData = encode_palettized_png_wasm(
-                        lastDitherResult.laInterleaved,
-                        format,
-                        lastDitherResult.width,
-                        lastDitherResult.height
-                    );
-                } else if (lastDitherResult.isGrayscale) {
-                    // L format
-                    pngData = encode_palettized_png_wasm(
-                        lastDitherResult.grayChannel,
-                        format,
-                        lastDitherResult.width,
-                        lastDitherResult.height
-                    );
-                } else if (lastDitherResult.hasAlpha) {
-                    // ARGB format - use RGBA interleaved data
-                    pngData = encode_palettized_png_wasm(
-                        lastDitherResult.rgbaInterleaved,
-                        format,
-                        lastDitherResult.width,
-                        lastDitherResult.height
-                    );
+                if (supportsPalettized) {
+                    // Use palettized PNG for smaller file size (format ≤8 bits)
+                    if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                        pngData = encode_palettized_png_wasm(
+                            lastDitherResult.laInterleaved,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.isGrayscale) {
+                        pngData = encode_palettized_png_wasm(
+                            lastDitherResult.grayChannel,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.hasAlpha) {
+                        pngData = encode_palettized_png_wasm(
+                            lastDitherResult.rgbaInterleaved,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else {
+                        const rgbData = getRgbInterleaved();
+                        pngData = encode_palettized_png_wasm(
+                            rgbData,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    }
                 } else {
-                    // RGB format
-                    const rgbData = getRgbInterleaved();
-                    pngData = encode_palettized_png_wasm(
-                        rgbData,
-                        format,
-                        lastDitherResult.width,
-                        lastDitherResult.height
-                    );
+                    // Use regular PNG encoding for larger formats
+                    if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                        // LA format - grayscale with alpha
+                        pngData = encode_png_gray_alpha_wasm(
+                            lastDitherResult.laInterleaved,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.isGrayscale) {
+                        pngData = encode_png_gray_wasm(
+                            lastDitherResult.grayChannel,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.hasAlpha) {
+                        pngData = encode_png_rgba_wasm(
+                            lastDitherResult.rgbaInterleaved,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else {
+                        const rgbData = getRgbInterleaved();
+                        pngData = encode_png_rgb_wasm(
+                            rgbData,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    }
                 }
 
                 const blob = new Blob([pngData], { type: 'image/png' });
-                const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format + '_pal', 'png');
+                const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'png');
                 downloadBlob(blob, filename);
             } catch (e) {
-                console.error('Failed to generate palettized PNG:', e);
-                alert('Failed to generate palettized PNG: ' + e.message);
+                console.error('Failed to generate PNG:', e);
+                alert('Failed to generate PNG: ' + e.message);
             }
         });
 
