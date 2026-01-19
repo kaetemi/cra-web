@@ -2,13 +2,13 @@
 
 ## Executive Summary
 
-D65 is the CIE standard daylight illuminant representing average noon daylight. While commonly associated with "6500K," the relationship between D65 and color temperature involves two different temperature scales: the pre-1968 scale on which D65 was originally defined, and the modern scale used in current CIE formulas. This document explains the precision issues, historical changes, and the derivation relationships between them.
+D65 is the CIE standard daylight illuminant representing average noon daylight. While commonly associated with "6500K," the relationship between D65 and color temperature involves two different temperature scales: the 1931 scale on which D65 was originally defined, and the modern ITS-90 scale used in current CIE formulas. This document explains the precision issues, historical changes, and the derivation relationships between them.
 
 ---
 
 ## 1. The Authoritative Definition
 
-D65 is defined by the CIE as a **tabulated spectral power distribution (SPD)**—a table of relative spectral radiance values from 300–830nm, published with 6 significant figures.
+D65 is defined by the CIE as a **tabulated spectral power distribution (SPD)**—a table of relative spectral radiance values from 300–830nm, published with 6 significant figures in CIE S 005-1998 and CIE 15:2004.
 
 From this SPD, the chromaticity coordinates are derived by integration against the CIE 1931 2° standard observer color matching functions:
 ```
@@ -22,21 +22,23 @@ These coordinates are published to 5 decimal places. **The SPD is the primary de
 
 ## 2. The Two Temperature Scales
 
-In 1968, the International Practical Temperature Scale updated the second radiation constant in Planck's law:
+The second radiation constant (c₂) in Planck's law has changed over time. CIE 15:2004 Appendix E specifies that colorimetric calculations should use the value from the International Temperature Scale of 1990 (ITS-90):
 
-| Constant | Value | Era |
-|----------|-------|-----|
-| Old c₂ | 0.01438 m·K | Pre-1968 |
-| New c₂ | 0.01438776877 m·K | Post-1968 (CODATA) |
+| Constant | Value | Source |
+|----------|-------|--------|
+| Old c₂ | 0.01438 m·K | 1931 CIE definition |
+| New c₂ | 0.014388 m·K | ITS-90 (CIE 15:2004 standard) |
 
-This change affects how **Correlated Color Temperature (CCT)** is calculated. CCT is defined as the temperature of the blackbody (on the Planckian locus) whose chromaticity is nearest to the light source. When c₂ changed, the Planckian locus shifted slightly, changing all CCT values.
+Note: The CODATA physical measurement (0.01438776877 m·K) is **not** used by CIE colorimetry. The ITS-90 value is a defined constant for temperature scale interoperability.
+
+This change affects how **Correlated Color Temperature (CCT)** is calculated. When c₂ changed, the Planckian locus shifted slightly, changing all CCT values.
 
 **The D65 chromaticity did not change**—it is defined by its SPD. But the CCT assigned to that chromaticity changed:
 
 | Description | Temperature |
 |-------------|-------------|
-| D65's old CCT (pre-1968) | 6500K |
-| D65's new CCT (post-1968) | ~6504K |
+| D65's old CCT (1931 scale) | 6500K |
+| D65's new CCT (ITS-90 scale) | ~6504K |
 
 The name "D65" is a historical artifact referring to the old CCT.
 
@@ -53,9 +55,9 @@ A common misconception is that D65 represents a 6500K blackbody. It does not.
 - Atmospheric absorption bands
 - Aerosol and cloud scattering
 
-The D65 chromaticity lies above the Planckian locus in the y-direction by approximately Δy ≈ +0.005. This represents the physical difference between actual daylight and idealized blackbody radiation.
+The D65 chromaticity lies above the Planckian locus in the y-direction. This represents the physical difference between actual daylight and idealized blackbody radiation.
 
-The **daylight locus** is a separate curve through chromaticity space, derived from measurements of real daylight, that runs roughly parallel to but offset from the Planckian locus.
+The **daylight locus** is a separate curve through chromaticity space, derived empirically from 622 measurements of real daylight (Judd, MacAdam, Wyszecki et al., 1964), that runs roughly parallel to but offset from the Planckian locus.
 
 ---
 
@@ -65,7 +67,7 @@ The **daylight locus** is a separate curve through chromaticity space, derived f
 
 Judd, MacAdam, and Wyszecki (1964) analyzed 622 daylight samples and found their chromaticities followed a quadratic relationship:
 
-**The y(x) quadratic (Judd et al., 1964; CIE 15:2004 Equation 3.2):**
+**The y(x) quadratic (CIE 15:2004 Equation 3.2):**
 ```
 y_D = -3.000x_D² + 2.870x_D - 0.275
 ```
@@ -86,7 +88,7 @@ x_D = -4.6070×10⁹/T³ + 2.9678×10⁶/T² + 0.09911×10³/T + 0.244063
 x_D = -2.0064×10⁹/T³ + 1.9018×10⁶/T² + 0.24748×10³/T + 0.237040
 ```
 
-Where **T_cp is the correlated color temperature on the modern (post-1968) scale**.
+Where **T_cp is the correlated color temperature on the ITS-90 scale**.
 
 ---
 
@@ -100,26 +102,26 @@ This reveals the key distinction:
 
 | Component | Temperature Scale | Status |
 |-----------|------------------|--------|
-| Tabulated D65 values (SPD, chromaticity) | Old K (pre-1968) | **Authoritative** |
-| x(T) polynomial in CIE 15:2004 | New K (post-1968) | Computational tool |
+| Tabulated D65 values (SPD, chromaticity) | 1931 scale | **Authoritative** |
+| x(T) polynomial in CIE 15:2004 | ITS-90 scale | Computational tool |
 
-The tables are frozen historical artifacts computed with old K = 6500. The polynomial was adjusted to use modern CCT. This is why there's a mismatch.
+The tables are frozen historical artifacts computed with the 1931 temperature scale. The polynomial expects modern ITS-90 CCT values. This is why there's a mismatch when using nominal temperatures.
 
 ---
 
 ## 6. Converting Between Temperature Scales
 
-To convert from old K to new K:
+Per CIE 15:2004 Appendix E, to convert from the 1931 scale to ITS-90:
 
 ```
-T_new = T_old × (new_c₂ / old_c₂)
-T_new = T_old × (0.01438776877 / 0.01438)
-T_new = T_old × 1.00054024826
+T_new = T_old × (c₂_ITS90 / c₂_1931)
+T_new = T_old × (0.014388 / 0.01438)
+T_new = T_old × 1.00055632823
 ```
 
 For D65:
 ```
-T_new = 6500 × 1.00054024826 = 6503.5116136996K
+T_new = 6500 × 1.00055632823 = 6503.616134K
 ```
 
 This is the temperature to input into the modern polynomial to recover D65's original chromaticity.
@@ -132,18 +134,18 @@ Testing the polynomial against official D65 coordinates (0.31272, 0.32903):
 
 | Temperature | Δx (×10⁻⁵) | Δy (×10⁻⁵) | Euclidean (×10⁻⁵) |
 |-------------|------------|------------|-------------------|
-| 6500.0K (nominal old) | +5.89 | +15.35 | 16.44 |
-| 6503.5116K (c₂ ratio) | +0.20 | +9.70 | 9.70 |
-| 6504.0K (lcms/moxcms) | −0.59 | +8.91 | 8.93 |
+| 6500.0K (nominal 1931) | +5.89 | +15.35 | 16.44 |
+| 6503.6161K (ITS-90) | +0.03 | +9.53 | 9.53 |
+| 6504.0K (common rounded) | −0.59 | +8.91 | 8.93 |
 | 6503.6330K (exact x match) | +0.00 | +9.50 | 9.50 |
 | 6509.5412K (exact y match) | −9.56 | +0.00 | 9.56 |
 | 6506.6680K (min. Euclidean) | −4.91 | +4.62 | 6.74 |
 
 ### Key Observations
 
-1. **The c₂ ratio (6503.5K) gives near-perfect x match** (error 0.2×10⁻⁵), confirming the x(T) polynomial expects modern CCT.
+1. **The ITS-90 conversion (6503.62K) gives near-perfect x match** (error 0.03×10⁻⁵), confirming the x(T) polynomial expects ITS-90 CCT as specified in CIE 15:2004.
 
-2. **The y error persists** (~9.7×10⁻⁵) regardless of temperature choice. This is independent error in the y(x) quadratic.
+2. **The y error persists** (~9.5×10⁻⁵) regardless of temperature choice. This is inherent error in the y(x) quadratic itself.
 
 3. **No temperature produces exact D65.** The temperatures for exact x match (6503.6K) and exact y match (6509.5K) differ by ~5.9K. The official D65 point does not lie exactly on the daylight locus curve.
 
@@ -151,115 +153,144 @@ Testing the polynomial against official D65 coordinates (0.31272, 0.32903):
 
 ---
 
-## 8. Why D65 Doesn't Lie on the Polynomial Curve
+## 8. The y(x) Quadratic Error
+
+The ~9.5×10⁻⁵ y error is **not** a temperature scale issue—it's inherent in the y(x) quadratic formula itself. This can be verified by plugging the official x values directly into the formula:
+
+| Illuminant | x (official) | y (official) | y (from formula) | Δy (×10⁻⁵) |
+|------------|--------------|--------------|------------------|------------|
+| D50 | 0.34567 | 0.35850 | 0.35861 | +10.97 |
+| D55 | 0.33242 | 0.34743 | 0.34754 | +10.62 |
+| D65 | 0.31272 | 0.32903 | 0.32913 | +9.50 |
+| D75 | 0.29902 | 0.31485 | 0.31495 | +9.85 |
+
+**Mean absolute y error: ~10.2×10⁻⁵**
+
+The y(x) quadratic was a best-fit curve through the 622 daylight measurements. The canonical illuminants (D50, D55, D65, D75) were computed separately using the S₀, S₁, S₂ basis functions with intermediate rounding. The quadratic was never constrained to pass exactly through these points.
+
+---
+
+## 9. Why the Canonical Illuminants Don't Lie on the Polynomial Curve
 
 Several factors contribute:
 
-1. **Intermediate rounding:** The original D65 computation involved rounding steps not captured by the polynomial.
+1. **Independent derivation:** The canonical illuminants were computed using the S₀, S₁, S₂ basis functions (CIE 15:2004 Equation 3.5), while the y(x) quadratic was fit separately to the original 622 measurements.
 
-2. **Temperature scale adjustments:** The polynomial was adjusted for the new temperature scale, but the tables were frozen.
+2. **Intermediate rounding:** The original computations involved rounding steps not captured by the polynomial.
 
-3. **Independent approximations:** The x(T) polynomial and y(x) quadratic were fit separately; neither was constrained to pass through canonical illuminants.
+3. **Temperature scale adjustments:** The polynomial was adjusted for ITS-90, but the tables were frozen.
 
-4. **Historical layering:** D65's SPD predates the polynomial; the polynomial is a later interpolation tool.
+4. **Historical layering:** The tabulated SPDs predate the polynomial formalization; the polynomial is a later interpolation tool.
 
 ---
 
-## 9. High-Precision Reference Values
+## 10. High-Precision Reference Values
 
-### Temperatures
-
-| Description | Value (K) |
-|-------------|-----------|
-| Nominal (historical, old K) | 6500.0000000000 |
-| c₂ ratio conversion | 6503.5116136996 |
-| Exact x match | 6503.6330064413 |
-| Exact y match | 6509.5412401592 |
-| Optimal (min. Euclidean) | 6506.6680000000 |
-| lcms/moxcms value | 6504.0000000000 |
-
-### Chromaticity at Each Temperature
-
-| Temperature | x | y |
-|-------------|---|---|
-| 6500.0K | 0.3127788762 | 0.3291834985 |
-| 6503.5116K | 0.3127219660 | 0.3291269584 |
-| 6503.6330K | 0.3127200000 | 0.3291250048 |
-| 6504.0K | 0.3127140569 | 0.3191190991 |
-| 6506.6680K | 0.3126708751 | 0.3290761831 |
-| 6509.5412K | 0.3126244185 | 0.3290300000 |
-
-### Radiation Constants
+### Radiation Constants (CIE 15:2004 Appendix E)
 
 | Description | Value |
 |-------------|-------|
-| Old c₂ (pre-1968) | 0.01438 m·K |
-| New c₂ (CODATA) | 0.01438776877 m·K |
-| Ratio (new/old) | 1.00054024826 |
+| Old c₂ (1931) | 0.01438 m·K |
+| New c₂ (ITS-90) | 0.014388 m·K |
+| Ratio (ITS-90/1931) | 1.00055632823 |
 
-### Official D65
+### Temperature Conversions
 
-| Coordinate | Value |
-|------------|-------|
-| x | 0.31272 |
-| y | 0.32903 |
+| Illuminant | Nominal (1931) | ITS-90 CCT |
+|------------|----------------|------------|
+| D50 | 5000K | 5002.7816K |
+| D55 | 5500K | 5503.0598K |
+| D65 | 6500K | 6503.6161K |
+| D75 | 7500K | 7504.1725K |
+
+### Official Chromaticity Coordinates (CIE 15:2004 Table T.3)
+
+| Illuminant | x | y |
+|------------|-------|-------|
+| D50 | 0.34567 | 0.35850 |
+| D55 | 0.33242 | 0.34743 |
+| D65 | 0.31272 | 0.32903 |
+| D75 | 0.29902 | 0.31485 |
+
+### Chromaticity at Key Temperatures (D65)
+
+| Temperature | x | y |
+|-------------|------------|------------|
+| 6500.0K (nominal) | 0.3127788762 | 0.3291834985 |
+| 6503.6161K (ITS-90) | 0.3127202733 | 0.3291252763 |
+| 6503.6330K (exact x) | 0.3127200000 | 0.3291250048 |
+| 6504.0K (rounded) | 0.3127140569 | 0.3191190991 |
 
 ---
 
-## 10. Practical Recommendations
+## 11. Practical Recommendations
 
 ### For Software Implementations
 
 | Goal | Approach |
 |------|----------|
 | Exact D65 | Hardcode (0.31272, 0.32903) |
-| D65 via polynomial | Use T = 6504K (8.9×10⁻⁵ error) |
-| Theoretically correct T | Use T = 6503.5K (c₂ ratio, 9.7×10⁻⁵ error) |
+| D65 via polynomial (CIE-correct) | Use T = 6503.62K (9.5×10⁻⁵ error) |
+| D65 via polynomial (rounded) | Use T = 6504K (8.9×10⁻⁵ error) |
 | Minimum error | Use T = 6506.7K (6.7×10⁻⁵ error) |
 
 **Recommendation:** For D50, D55, D65, D75, use hardcoded official chromaticity values. Use the polynomial only for arbitrary D-illuminants at non-standard temperatures.
 
+### Why Use the Polynomial?
+
+The CIE tables are authoritative for **compliance and discrete lookups**, but the moment you need:
+
+- Continuous interpolation
+- Derivatives / gradients
+- Optimization
+- Smooth color space transformations
+
+...you **must** use the polynomial. And if you're using the polynomial, you need the correct input temperature (ITS-90 scale).
+
 ### Perceptibility
 
-All errors discussed are in the 5th decimal place (10⁻⁵), far below any perceptible threshold. The practical impact is limited to accumulated round-trip conversion errors.
+All errors discussed are in the 5th decimal place (10⁻⁵), far below any perceptible threshold. The practical impact is limited to accumulated round-trip conversion errors in high-precision workflows.
 
 ---
 
-## 11. Summary
+## 12. Summary
 
 | Item | Temperature Scale | Notes |
 |------|------------------|-------|
-| D65 name ("65") | Old K | Historical artifact |
-| D65 tabulated SPD | Old K | Authoritative definition |
+| D65 name ("65") | 1931 scale | Historical artifact |
+| D65 tabulated SPD | 1931 scale | Authoritative definition |
 | D65 chromaticity | Derived from SPD | (0.31272, 0.32903) |
-| x(T) polynomial | New K | Input modern CCT |
-| Input for D65 | ~6504K (new K) | Because 6500 old K ≈ 6504 new K |
+| x(T) polynomial | ITS-90 | Input modern CCT |
+| Input for D65 | 6503.62K (ITS-90) | Because 6500K (1931) = 6503.62K (ITS-90) |
 
-The polynomial expects modern CCT as input. D65 was defined as 6500K on the old scale. To recover D65 from the polynomial, convert: 6500 × (new_c₂/old_c₂) ≈ 6503.5K, or use the commonly rounded value 6504K.
+The polynomial expects ITS-90 CCT as input. D65 was defined as 6500K on the 1931 scale. To recover D65 from the polynomial, convert: 6500 × (0.014388/0.01438) = 6503.616134K.
 
-The ~9×10⁻⁵ residual error reflects independent imprecision in the y(x) quadratic and historical rounding in the original D65 computation—not a temperature scale issue.
+The ~9.5×10⁻⁵ residual y error is inherent in the y(x) quadratic formula—it affects all canonical illuminants equally and reflects the fact that the quadratic was never constrained to pass through them exactly.
+
+---
+
+## Appendix: D65 Quick Reference for Continuous Computation
+
+The CIE tabulated values are authoritative for compliance, but cannot be continuously interpolated. For any application requiring continuous mathematics (derivatives, optimization, smooth interpolation), use the CIE daylight locus polynomial with the following temperature:
+
+**D65 Modern CCT (per CIE 15:2004 Appendix E):**
+```
+T = 6500K × (0.014388 / 0.01438) = 6503.616134K
+```
+
+| Constant | Value |
+|----------|-------|
+| Old c₂ (1931) | 0.01438 m·K |
+| New c₂ (ITS-90) | 0.014388 m·K |
+| Conversion factor | 1.00055632823 |
+| D65 modern CCT | 6503.616134K |
+
+This yields a chromaticity error of ~9.5×10⁻⁵ from the official (0.31272, 0.32903)—an irreducible artifact of the y(x) quadratic approximation, not the temperature conversion.
 
 ---
 
 ## References
 
 - CIE 15:2004, Colorimetry, 3rd Edition
-
----
-
-## Appendix: Practical Reference for D65
-
-When working with D65 in modern systems:
-
-| Parameter | Value |
-|-----------|-------|
-| Old c₂ (pre-1968) | 0.01438 m·K |
-| New c₂ (CODATA) | 0.01438776877 m·K |
-| Conversion factor | 1.00054024826 |
-
-**D65 Temperature Conversion:**
-```
-6500K × (0.01438776877 / 0.01438) = 6503.5116136996K
-```
-
-When using CIE daylight locus formulas with modern CCT input, use **T = 6503.5116136996K** to compute D65.
+- CIE S 005-1998 / ISO 10526:1999, CIE Standard Illuminants for Colorimetry
+- Judd, D.B., MacAdam, D.L., Wyszecki, G., et al. (1964). "Spectral Distribution of Typical Daylight as a Function of Correlated Color Temperature." *J. Opt. Soc. Am.* 54, 1031-1040.

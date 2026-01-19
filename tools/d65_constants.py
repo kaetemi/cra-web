@@ -23,12 +23,17 @@ import math
 CIE_D65_X = 0.31272
 CIE_D65_Y = 0.32903
 
-# Second radiation constant (Planck's law)
-C2_OLD = 0.01438        # m·K (pre-1968)
-C2_NEW = 0.01438776877  # m·K (post-1968, CODATA)
+# Second radiation constant (c₂) in Planck's law
+# See CIE 15:2004 Appendix E for authoritative values
+C2_OLD = 0.01438     # m·K (1931 definition, used when D-illuminants were defined)
+C2_ITS90 = 0.014388  # m·K (ITS-90, International Temperature Scale 1990)
+C2_CODATA = 0.01438776877  # m·K (CODATA physical measurement - NOT used by CIE)
+
+# The CIE standard (CIE 15:2004) specifies ITS-90, not CODATA
+C2_NEW = C2_ITS90
 
 # Derived values
-C2_RATIO = C2_NEW / C2_OLD  # ≈ 1.00054025
+C2_RATIO = C2_NEW / C2_OLD  # = 1.00055632...
 
 
 # =============================================================================
@@ -212,14 +217,18 @@ def main():
     print()
 
     print("Second Radiation Constant (c₂) in Planck's Law:")
-    print(f"  Old c₂ (pre-1968):  {C2_OLD} m·K")
-    print(f"  New c₂ (CODATA):    {C2_NEW} m·K")
-    print(f"  Ratio (new/old):    {C2_RATIO:.11f}")
+    print(f"  Old c₂ (1931):      {C2_OLD} m·K")
+    print(f"  New c₂ (ITS-90):    {C2_ITS90} m·K  ← CIE 15:2004 standard")
+    print(f"  CODATA (physical):  {C2_CODATA} m·K  (not used by CIE)")
+    print(f"  Ratio (ITS-90/old): {C2_RATIO:.11f}")
     print()
 
-    print("Temperature Scale Conversion:")
+    print("Temperature Scale Conversion (per CIE 15:2004 Appendix E):")
+    print(f"  T_new = T_old × (c₂_ITS90 / c₂_old)")
+    print(f"  T_new = T_old × ({C2_ITS90} / {C2_OLD})")
     print(f"  T_new = T_old × {C2_RATIO:.11f}")
-    print(f"  6500K (old) → {6500 * C2_RATIO:.10f}K (new)")
+    print()
+    print(f"  D65: 6500K × {C2_RATIO:.11f} = {6500 * C2_RATIO:.6f}K")
 
     # =========================================================================
     print_section("2. KEY TEMPERATURES")
@@ -235,9 +244,9 @@ def main():
 
     print(f"{'Description':<35} {'Temperature (K)':<20}")
     print("-" * 55)
-    print(f"{'Nominal (historical, old K)':<35} {t_nominal:<20.10f}")
-    print(f"{'c₂ ratio conversion':<35} {t_c2_ratio:<20.10f}")
-    print(f"{'lcms/moxcms value':<35} {t_lcms:<20.10f}")
+    print(f"{'Nominal (1931 scale)':<35} {t_nominal:<20.10f}")
+    print(f"{'ITS-90 conversion (CIE 15:2004)':<35} {t_c2_ratio:<20.10f}")
+    print(f"{'lcms/moxcms rounded value':<35} {t_lcms:<20.10f}")
     print(f"{'Exact x match':<35} {t_exact_x:<20.10f}")
     print(f"{'Exact y match':<35} {t_exact_y:<20.10f}")
     print(f"{'Optimal (min Euclidean)':<35} {t_optimal:<20.10f}")
@@ -252,7 +261,7 @@ def main():
 
     temperatures = [
         ("6500.0K (nominal)", t_nominal),
-        ("6503.5116K (c₂ ratio)", t_c2_ratio),
+        (f"{t_c2_ratio:.4f}K (ITS-90)", t_c2_ratio),
         ("6504.0K (lcms)", t_lcms),
         (f"{t_exact_x:.4f}K (exact x)", t_exact_x),
         (f"{t_exact_y:.4f}K (exact y)", t_exact_y),
@@ -284,15 +293,15 @@ def main():
     print_section("5. KEY INSIGHTS")
     # =========================================================================
 
-    print("5.1 The c₂ Ratio Correction")
+    print("5.1 The ITS-90 Temperature Conversion")
     print("-" * 40)
     dx, dy, _ = compute_error(t_c2_ratio)
-    print(f"At T = 6500 × (new_c₂/old_c₂) = {t_c2_ratio:.4f}K:")
+    print(f"At T = 6500 × (c₂_ITS90/c₂_1931) = {t_c2_ratio:.6f}K:")
     print(f"  x error: {dx*1e5:+.4f}×10⁻⁵  (nearly perfect!)")
     print(f"  y error: {dy*1e5:+.4f}×10⁻⁵  (independent error in y(x) formula)")
     print()
-    print("This confirms the x(T) polynomial was calibrated with old c₂,")
-    print("and expects modern CCT as input.")
+    print("This confirms the x(T) polynomial expects ITS-90 CCT values,")
+    print("as specified in CIE 15:2004 Appendix E.")
 
     print()
     print("5.2 The y(x) Quadratic Error")
@@ -326,8 +335,8 @@ def main():
     print(f"{'Goal':<35} {'Approach':<43}")
     print("-" * 78)
     print(f"{'Exact D65 chromaticity':<35} {'Hardcode (0.31272, 0.32903)':<43}")
-    print(f"{'D65 via polynomial (standard)':<35} {f'Use T = 6504K ({err_6504*1e5:.1f}×10⁻⁵ error)':<43}")
-    print(f"{'D65 via polynomial (precise)':<35} {f'Use T = 6503.5K ({err_c2*1e5:.1f}×10⁻⁵ error)':<43}")
+    print(f"{'D65 via polynomial (CIE 15:2004)':<35} {f'Use T = {t_c2_ratio:.2f}K ({err_c2*1e5:.1f}×10⁻⁵ error)':<43}")
+    print(f"{'D65 via polynomial (rounded)':<35} {f'Use T = 6504K ({err_6504*1e5:.1f}×10⁻⁵ error)':<43}")
     print(f"{'Minimum possible error':<35} {f'Use T = {t_optimal:.1f}K ({err_opt*1e5:.1f}×10⁻⁵ error)':<43}")
     print()
     print("For D50, D55, D65, D75: Use hardcoded official values.")
@@ -344,7 +353,7 @@ def main():
     print("pre-1968 temperature scale. On the modern scale, this is ~6504K.")
     print()
     print("The CIE daylight locus polynomial expects modern CCT as input.")
-    print("To recover D65, use T ≈ 6504K (or precisely 6503.5116K).")
+    print(f"To recover D65, use T = {6500 * C2_RATIO:.6f}K (per CIE 15:2004).")
     print()
     print("The ~9×10⁻⁵ residual error reflects:")
     print("  - Independent imprecision in the y(x) quadratic")
