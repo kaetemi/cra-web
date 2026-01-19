@@ -495,9 +495,9 @@ struct DitherResult {
     has_alpha: bool,
 }
 
-/// Dither linear RGB pixels to the target format
+/// Dither linear RGB pixels to the target RGB format (grayscale handled separately in main)
 #[allow(clippy::too_many_arguments)]
-fn dither_pixels(
+fn dither_pixels_rgb(
     pixels: Vec<Pixel4>,
     width: usize,
     height: usize,
@@ -508,102 +508,39 @@ fn dither_pixels(
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
-    tonemapping: Option<Tonemapping>,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
-    if format.is_la() {
-        // LA format: grayscale with alpha
-        // Step 1: Convert linear RGB to linear grayscale (luminance only)
-        let linear_gray = linear_pixels_to_grayscale(&pixels);
+    let mut linear_pixels = pixels;
 
-        // Apply tonemapping after grayscale conversion
-        let linear_gray = match tonemapping {
-            Some(Tonemapping::Aces) => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
-            Some(Tonemapping::AcesInverse) => linear_gray.iter().map(|&l| tonemap_aces_inverse_single(l)).collect(),
-            None => linear_gray,
-        };
+    // Convert linear RGB to sRGB 0-255 (alpha already in correct range)
+    linear_to_srgb_inplace(&mut linear_pixels);
+    denormalize_inplace_clamped(&mut linear_pixels);
 
-        // Step 2: Convert linear to sRGB (gamma) and denormalize to 0-255
-        let srgb_gray: Vec<f32> = linear_gray
-            .iter()
-            .map(|&l| linear_to_srgb_single(l) * 255.0)
-            .collect();
-
-        // Step 3: Extract alpha channel (already in 0-1 range, denormalize to 0-255)
-        let alpha: Vec<f32> = pixels.iter().map(|p| p.0[3] * 255.0).collect();
-
-        // Step 4: Dither with alpha-aware error diffusion
-        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
-        let interleaved = dither_output_la(
-            &srgb_gray, &alpha, width, height, format.bits_r, format.bits_a,
-            technique, seed, progress,
+    // Dither
+    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
+    if has_alpha {
+        // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
+        let bits_a = format.bits_a;
+        let interleaved = dither_output_rgba(
+            &linear_pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b, bits_a,
+            technique,
+            seed,
+            progress,
         );
-        DitherResult { interleaved, is_grayscale: true, has_alpha: true }
-    } else if format.is_grayscale {
-        // Pure grayscale format (no alpha)
-        // Step 1: Convert linear RGB to linear grayscale (luminance only)
-        let linear_gray = linear_pixels_to_grayscale(&pixels);
-
-        // Apply tonemapping after grayscale conversion
-        let linear_gray = match tonemapping {
-            Some(Tonemapping::Aces) => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
-            Some(Tonemapping::AcesInverse) => linear_gray.iter().map(|&l| tonemap_aces_inverse_single(l)).collect(),
-            None => linear_gray,
-        };
-
-        // Step 2: Convert linear to sRGB (gamma)
-        // Step 3: Denormalize to 0-255
-        let srgb_gray: Vec<f32> = linear_gray
-            .iter()
-            .map(|&l| linear_to_srgb_single(l) * 255.0)
-            .collect();
-
-        // Step 4: Dither grayscale (alpha not supported for grayscale output)
-        let interleaved = dither_grayscale(
-            &srgb_gray, width, height, format.bits_r, colorspace, dither_mode, seed, progress,
-        );
-        DitherResult { interleaved, is_grayscale: true, has_alpha: false }
+        // Output has alpha only if format supports it (bits_a > 0)
+        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
     } else {
-        let mut linear_pixels = pixels;
-
-        // For RGB output, apply tonemapping before sRGB conversion
-        // aces-inverse expands dynamic range, aces compresses it
-        match tonemapping {
-            Some(Tonemapping::Aces) => tonemap_aces_inplace(&mut linear_pixels),
-            Some(Tonemapping::AcesInverse) => tonemap_aces_inverse_inplace(&mut linear_pixels),
-            None => {}
-        }
-
-        // Convert linear RGB to sRGB 0-255 (alpha already in correct range)
-        linear_to_srgb_inplace(&mut linear_pixels);
-        denormalize_inplace_clamped(&mut linear_pixels);
-
-        // Dither
-        let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
-        if has_alpha {
-            // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
-            let bits_a = format.bits_a;
-            let interleaved = dither_output_rgba(
-                &linear_pixels,
-                width, height,
-                format.bits_r, format.bits_g, format.bits_b, bits_a,
-                technique,
-                seed,
-                progress,
-            );
-            // Output has alpha only if format supports it (bits_a > 0)
-            DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
-        } else {
-            let interleaved = dither_output_rgb(
-                &linear_pixels,
-                width, height,
-                format.bits_r, format.bits_g, format.bits_b,
-                technique,
-                seed,
-                progress,
-            );
-            DitherResult { interleaved, is_grayscale: false, has_alpha: false }
-        }
+        let interleaved = dither_output_rgb(
+            &linear_pixels,
+            width, height,
+            format.bits_r, format.bits_g, format.bits_b,
+            technique,
+            seed,
+            progress,
+        );
+        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
     }
 }
 
@@ -891,6 +828,107 @@ struct SafetensorsDitherOptions {
     dither_mode: DitherMode,
     perceptual_space: PerceptualSpace,
     seed: u32,
+}
+
+/// Prepare and write safetensors output with common metadata handling
+/// Returns the SafetensorsMetadata for later use
+#[allow(clippy::too_many_arguments)]
+fn prepare_and_write_safetensors(
+    sfi_path: &PathBuf,
+    output_pixels: &[Pixel4],
+    width: u32,
+    height: u32,
+    include_alpha: bool,
+    args: &Args,
+    default_transfer: SfiTransfer,
+) -> Result<SafetensorsMetadata, String> {
+    let transfer = match args.safetensors_transfer {
+        SafetensorsTransfer::Auto => default_transfer,
+        SafetensorsTransfer::Linear => SfiTransfer::Linear,
+        SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
+    };
+    let (dither, distance_space) = if matches!(args.safetensors_format, SafetensorsFormat::Fp32) {
+        (None, None)
+    } else {
+        (Some(args.safetensors_dither), Some(args.safetensors_distance_space))
+    };
+    let meta = SafetensorsMetadata {
+        format: args.safetensors_format,
+        transfer,
+        has_alpha: include_alpha,
+        dither,
+        distance_space,
+    };
+    let dither_opts = SafetensorsDitherOptions {
+        dither_mode: args.safetensors_dither.to_dither_mode(),
+        perceptual_space: args.safetensors_distance_space.to_perceptual_space(),
+        seed: args.seed,
+    };
+    write_safetensors_output(
+        sfi_path,
+        output_pixels,
+        width,
+        height,
+        include_alpha,
+        transfer,
+        args.safetensors_format,
+        Some(&dither_opts),
+        args.verbose,
+    )?;
+    Ok(meta)
+}
+
+/// Convert linear RGB pixels to safetensors output format (with optional sRGB conversion)
+fn pixels_to_safetensors_format(pixels: &[Pixel4], transfer: SfiTransfer) -> Vec<Pixel4> {
+    if transfer == SfiTransfer::Srgb {
+        pixels.iter()
+            .map(|p| Pixel4::new(
+                linear_to_srgb_single(p[0]),
+                linear_to_srgb_single(p[1]),
+                linear_to_srgb_single(p[2]),
+                p[3],
+            ))
+            .collect()
+    } else {
+        pixels.to_vec()
+    }
+}
+
+/// Convert linear grayscale to Pixel4 format (R=G=B=L) for safetensors
+fn grayscale_to_safetensors_format(gray: &[f32], alpha: Option<&[f32]>, transfer: SfiTransfer) -> Vec<Pixel4> {
+    let alpha_iter = alpha.map(|a| a.iter()).into_iter().flatten().chain(std::iter::repeat(&1.0f32));
+    if transfer == SfiTransfer::Srgb {
+        gray.iter().zip(alpha_iter)
+            .map(|(&l, &a)| {
+                let srgb_l = linear_to_srgb_single(l);
+                Pixel4::new(srgb_l, srgb_l, srgb_l, a)
+            })
+            .collect()
+    } else {
+        gray.iter().zip(alpha_iter)
+            .map(|(&l, &a)| Pixel4::new(l, l, l, a))
+            .collect()
+    }
+}
+
+/// Convert sRGB 0-255 pixels to safetensors format (normalized 0-1)
+fn srgb255_to_safetensors_format(pixels: &[Pixel4], transfer: SfiTransfer) -> Vec<Pixel4> {
+    if transfer == SfiTransfer::Linear {
+        // sRGB 0-255 → normalize → sRGB → linear
+        pixels.iter()
+            .map(|p| Pixel4::new(
+                srgb_to_linear_single(p[0] / 255.0),
+                srgb_to_linear_single(p[1] / 255.0),
+                srgb_to_linear_single(p[2] / 255.0),
+                p[3] / 255.0,
+            ))
+            .collect()
+    } else {
+        // sRGB 0-255 → normalize (stays sRGB)
+        pixels.iter()
+            .map(|p| Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0))
+            .collect()
+    }
 }
 
 /// Write safetensors output file (linear or sRGB FP32/FP16/BF16)
@@ -1368,85 +1406,131 @@ fn main() -> Result<(), String> {
             input_pixels
         };
 
-        // Write safetensors output (linear path) - before dithering
-        // Data is linear 0-1, auto resolves to linear transfer
-        if let Some(ref sfi_path) = args.output_safetensors {
-            let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
-            let transfer = match args.safetensors_transfer {
-                SafetensorsTransfer::Auto => SfiTransfer::Linear,
-                SafetensorsTransfer::Linear => SfiTransfer::Linear,
-                SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
-            };
-            // Record effective settings for metadata
-            // Dither settings only apply to FP16/BF16 (FP32 has enough precision)
-            let (dither, distance_space) = if matches!(args.safetensors_format, SafetensorsFormat::Fp32) {
-                (None, None)
-            } else {
-                (Some(args.safetensors_dither), Some(args.safetensors_distance_space))
-            };
-            safetensors_meta = Some(SafetensorsMetadata {
-                format: args.safetensors_format,
-                transfer,
-                has_alpha: include_alpha,
-                dither,
-                distance_space,
-            });
-            // Convert to target transfer (write function doesn't convert)
-            let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Srgb {
-                // Linear → sRGB conversion
-                pixels_to_dither.iter()
-                    .map(|p| Pixel4::new(
-                        linear_to_srgb_single(p[0]),
-                        linear_to_srgb_single(p[1]),
-                        linear_to_srgb_single(p[2]),
-                        p[3],
-                    ))
-                    .collect()
-            } else {
-                pixels_to_dither.clone()
-            };
-            // Create dither options for FP16/BF16 (FP32 ignores these)
-            let dither_opts = SafetensorsDitherOptions {
-                dither_mode: args.safetensors_dither.to_dither_mode(),
-                perceptual_space: args.safetensors_distance_space.to_perceptual_space(),
-                seed: args.seed,
-            };
-            write_safetensors_output(
-                sfi_path,
-                &output_pixels,
-                width,
-                height,
-                include_alpha,
-                transfer,
-                args.safetensors_format,
-                Some(&dither_opts),
-                args.verbose,
-            )?;
-        }
+        // Process differently based on output format (grayscale vs RGB)
+        let result = if is_grayscale_format {
+            // GRAYSCALE PATH: Convert to grayscale, then tonemapping, then safetensors, then dither
 
-        // Only perform dithering if integer output is needed
-        let result = if has_integer_output {
-            let mut dither_progress = |p: f32| print_progress("Dither", p);
-            let result = dither_pixels(
-                pixels_to_dither,
-                width_usize,
-                height_usize,
-                &format,
-                !args.no_colorspace_aware_output,
-                output_dither_mode,
-                output_alpha_mode,
-                output_colorspace.to_perceptual_space(),
-                args.seed,
-                input_has_alpha,
-                args.tonemapping,
-                if args.progress { Some(&mut dither_progress) } else { None },
-            );
-            if args.progress {
-                clear_progress();
+            // Step 1: Convert linear RGB to linear grayscale
+            let linear_gray = linear_pixels_to_grayscale(&pixels_to_dither);
+
+            // Step 2: Extract alpha if needed (before we lose access to pixels_to_dither)
+            let alpha: Option<Vec<f32>> = if input_has_alpha && format.bits_a > 0 {
+                Some(pixels_to_dither.iter().map(|p| p[3]).collect())
+            } else {
+                None
+            };
+
+            // Step 3: Apply tonemapping to grayscale
+            let linear_gray = if let Some(tm) = args.tonemapping {
+                match tm {
+                    Tonemapping::Aces => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
+                    Tonemapping::AcesInverse => linear_gray.iter().map(|&l| tonemap_aces_inverse_single(l)).collect(),
+                }
+            } else {
+                linear_gray
+            };
+
+            // Step 4: Write safetensors output (grayscale as R=G=B=L)
+            if let Some(ref sfi_path) = args.output_safetensors {
+                let include_alpha = !args.safetensors_no_alpha && alpha.is_some();
+                let transfer = match args.safetensors_transfer {
+                    SafetensorsTransfer::Auto => SfiTransfer::Linear,
+                    SafetensorsTransfer::Linear => SfiTransfer::Linear,
+                    SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
+                };
+                let output_pixels = grayscale_to_safetensors_format(&linear_gray, alpha.as_deref(), transfer);
+                safetensors_meta = Some(prepare_and_write_safetensors(
+                    sfi_path, &output_pixels, width, height, include_alpha, &args, SfiTransfer::Linear,
+                )?);
             }
-            Some(result)
+
+            // Step 5: Dither grayscale
+            if has_integer_output {
+                let mut dither_progress = |p: f32| print_progress("Dither", p);
+
+                // Convert linear to sRGB and denormalize to 0-255
+                let srgb_gray: Vec<f32> = linear_gray.iter()
+                    .map(|&l| linear_to_srgb_single(l) * 255.0)
+                    .collect();
+
+                let result = if let Some(ref alpha) = alpha {
+                    // LA format: grayscale with alpha
+                    let alpha_255: Vec<f32> = alpha.iter().map(|&a| a * 255.0).collect();
+                    let technique = build_output_technique(!args.no_colorspace_aware_output, output_dither_mode, output_colorspace.to_perceptual_space(), output_alpha_mode);
+                    let interleaved = dither_output_la(
+                        &srgb_gray, &alpha_255, width_usize, height_usize, format.bits_r, format.bits_a,
+                        technique, args.seed, if args.progress { Some(&mut dither_progress) } else { None },
+                    );
+                    DitherResult { interleaved, is_grayscale: true, has_alpha: true }
+                } else {
+                    // Pure grayscale
+                    let interleaved = dither_grayscale(
+                        &srgb_gray, width_usize, height_usize, format.bits_r,
+                        output_colorspace.to_perceptual_space(), output_dither_mode, args.seed,
+                        if args.progress { Some(&mut dither_progress) } else { None },
+                    );
+                    DitherResult { interleaved, is_grayscale: true, has_alpha: false }
+                };
+
+                if args.progress {
+                    clear_progress();
+                }
+                Some(result)
+            } else {
+                None
+            }
         } else {
-            None
+            // RGB PATH: Tonemapping, then safetensors, then dither
+
+            // Step 1: Apply tonemapping to RGB
+            let pixels_to_dither = if let Some(tm) = args.tonemapping {
+                let mut p = pixels_to_dither;
+                match tm {
+                    Tonemapping::Aces => tonemap_aces_inplace(&mut p),
+                    Tonemapping::AcesInverse => tonemap_aces_inverse_inplace(&mut p),
+                }
+                p
+            } else {
+                pixels_to_dither
+            };
+
+            // Step 2: Write safetensors output
+            if let Some(ref sfi_path) = args.output_safetensors {
+                let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
+                let transfer = match args.safetensors_transfer {
+                    SafetensorsTransfer::Auto => SfiTransfer::Linear,
+                    SafetensorsTransfer::Linear => SfiTransfer::Linear,
+                    SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
+                };
+                let output_pixels = pixels_to_safetensors_format(&pixels_to_dither, transfer);
+                safetensors_meta = Some(prepare_and_write_safetensors(
+                    sfi_path, &output_pixels, width, height, include_alpha, &args, SfiTransfer::Linear,
+                )?);
+            }
+
+            // Step 3: Dither RGB
+            if has_integer_output {
+                let mut dither_progress = |p: f32| print_progress("Dither", p);
+                let result = dither_pixels_rgb(
+                    pixels_to_dither,
+                    width_usize,
+                    height_usize,
+                    &format,
+                    !args.no_colorspace_aware_output,
+                    output_dither_mode,
+                    output_alpha_mode,
+                    output_colorspace.to_perceptual_space(),
+                    args.seed,
+                    input_has_alpha,
+                    if args.progress { Some(&mut dither_progress) } else { None },
+                );
+                if args.progress {
+                    clear_progress();
+                }
+                Some(result)
+            } else {
+                None
+            }
         };
 
         (result, width, height)
@@ -1468,54 +1552,10 @@ fn main() -> Result<(), String> {
                 SafetensorsTransfer::Linear => SfiTransfer::Linear,
                 SafetensorsTransfer::Srgb => SfiTransfer::Srgb,
             };
-            // Record effective settings for metadata
-            // Dither settings only apply to FP16/BF16 (FP32 has enough precision)
-            let (dither, distance_space) = if matches!(args.safetensors_format, SafetensorsFormat::Fp32) {
-                (None, None)
-            } else {
-                (Some(args.safetensors_dither), Some(args.safetensors_distance_space))
-            };
-            safetensors_meta = Some(SafetensorsMetadata {
-                format: args.safetensors_format,
-                transfer,
-                has_alpha: include_alpha,
-                dither,
-                distance_space,
-            });
-            // Normalize 0-255 to 0-1 and convert to target transfer
-            let output_pixels: Vec<Pixel4> = if transfer == SfiTransfer::Linear {
-                // sRGB 0-255 → normalize → sRGB → linear
-                input_pixels.iter()
-                    .map(|p| Pixel4::new(
-                        srgb_to_linear_single(p[0] / 255.0),
-                        srgb_to_linear_single(p[1] / 255.0),
-                        srgb_to_linear_single(p[2] / 255.0),
-                        p[3] / 255.0,
-                    ))
-                    .collect()
-            } else {
-                // sRGB 0-255 → normalize (stays sRGB)
-                input_pixels.iter()
-                    .map(|p| Pixel4::new(p[0] / 255.0, p[1] / 255.0, p[2] / 255.0, p[3] / 255.0))
-                    .collect()
-            };
-            // Create dither options for FP16/BF16 (FP32 ignores these)
-            let dither_opts = SafetensorsDitherOptions {
-                dither_mode: args.safetensors_dither.to_dither_mode(),
-                perceptual_space: args.safetensors_distance_space.to_perceptual_space(),
-                seed: args.seed,
-            };
-            write_safetensors_output(
-                sfi_path,
-                &output_pixels,
-                width,
-                height,
-                include_alpha,
-                transfer,
-                args.safetensors_format,
-                Some(&dither_opts),
-                args.verbose,
-            )?;
+            let output_pixels = srgb255_to_safetensors_format(&input_pixels, transfer);
+            safetensors_meta = Some(prepare_and_write_safetensors(
+                sfi_path, &output_pixels, width, height, include_alpha, &args, SfiTransfer::Srgb,
+            )?);
         }
 
         // Only perform dithering if integer output is needed

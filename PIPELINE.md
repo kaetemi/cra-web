@@ -117,7 +117,7 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Tonemap (opt) → Grayscale → sRGB Encode → Dither
+CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Grayscale (opt) → Tonemap (opt) → Safetensors (opt) → sRGB Encode → Dither
 ```
 
 ### 3.0 Un-premultiply Alpha
@@ -156,9 +156,12 @@ Tonemapping adjusts the dynamic range of images using the ACES (Academy Color En
 
 **`--input-tonemapping`**: Applied immediately after loading/un-premultiplying, **before** resize and histogram matching. Use this to adjust dynamic range early in the pipeline.
 
-**`--tonemapping`**: Applied after grayscale conversion (for grayscale/LA outputs) or before sRGB encoding (for RGB outputs). Both `aces` and `aces-inverse` are applied at the same point in the pipeline:
+**`--tonemapping`**: Applied after grayscale conversion (if grayscale output) or to RGB (if RGB output), **before** safetensors output and dithering. Both variants are applied at the same point:
 - `aces`: Compresses dynamic range (HDR → SDR)
 - `aces-inverse`: Expands dynamic range (SDR → HDR approximation)
+
+For grayscale output, the pipeline is: RGB → Grayscale → Tonemapping → Safetensors → Dither
+For RGB output, the pipeline is: RGB → Tonemapping → Safetensors → Dither
 
 **ACES Tonemapping Curve**:
 ```
@@ -358,6 +361,9 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    │
                                    ▼
                             [Tonemap?]
+                                   │
+                                   ▼
+                          [Safetensors?]
                                    │
                                    ▼
                          sRGB Encode (gamma)
