@@ -8,7 +8,7 @@ D65 is the CIE standard daylight illuminant representing average noon daylight. 
 
 ## 1. The Authoritative Definition
 
-D65 is defined by the CIE as a **tabulated spectral power distribution (SPD)**—a table of relative spectral radiance values from 300–830nm, published with 6 significant figures in CIE S 005-1998 and CIE 15:2004. The complete SPD is provided in Appendix A.
+D65 is defined by the CIE as a **tabulated spectral power distribution (SPD)**—a table of relative spectral radiance values from 300–830nm, published with 6 significant figures in CIE S 005-1998 and ISO 11664-2:2007. A commonly-referenced 5nm version is provided in Appendix A for reference; the authoritative 1nm tables from the ISO standards should be used for high-precision work.
 
 From this SPD, the chromaticity coordinates are derived by integration against the CIE 1931 2° standard observer color matching functions:
 ```
@@ -43,15 +43,15 @@ y = Y / (X + Y + Z)
 
 ### 1.2 Verification Against Official Values
 
-CIE 15:2004 Table T.3 specifies that the official chromaticity was computed using "5 nm intervals over the range 380 nm to 780 nm." We can verify this by deriving chromaticity from different source data and configurations.
+CIE 15:2004 Table T.3 specifies that the official chromaticity was computed using "5 nm intervals over the range 380 nm to 780 nm." We can verify this by deriving chromaticity from the authoritative 1nm source data using different sampling configurations.
 
 #### Source Data Used
 
 | Source | Data | Notes |
 |--------|------|-------|
-| CIE 15:2004 Table T.1 | D65 SPD (5nm, 300-830nm) | Historical tabulation with rounding |
-| ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | D65 SPD (1nm, 300-830nm) | Current authoritative SPD |
-| CIE 018:2019 Table 6 | CMF (1nm, 360-830nm) | Current authoritative CMFs |
+| CIE 15:2004 Table T.1 | D65 SPD (5nm, 300-830nm) | Public domain, with historical rounding |
+| ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | D65 SPD (1nm, 300-830nm) | **Authoritative SPD** (used for derivations) |
+| CIE 018:2019 Table 6 | CMF (1nm, 360-830nm) | **Authoritative CMFs** (used for derivations) |
 
 #### Derivation Results Comparison
 
@@ -512,7 +512,7 @@ The authoritative definition of D65. Values are relative spectral power, normali
 | 455 | 117.410 | 620 | 87.6987 | | |
 | 460 | 117.812 | 625 | 85.4936 | | |
 
-**Note:** For rigorous calculations, use the 1nm tables from ISO 11664-2:2007 / CIE S 014-2:2006 (531 values, 300–830nm at 6 significant figures). The 5nm table above is sufficient for most colorimetric work.
+**Note:** The 5nm table above is reproduced from CIE 15:2004 Table T.1, which is in the public domain and contains some historical rounding. For rigorous calculations, use the authoritative 1nm tables from ISO 11664-2:2007 / CIE S 014-2:2006 (531 values, 300–830nm at 6 significant figures). All high-precision derivations in this document were computed using the authoritative 1nm source data.
 
 ---
 
@@ -591,7 +591,7 @@ To compute any daylight illuminant at correlated color temperature T:
 3. Compute M₁ and M₂ from (x_D, y_D) using Equation 3.6
 4. Compute S(λ) = S₀(λ) + M₁·S₁(λ) + M₂·S₂(λ)
 
-**Note:** Linear interpolation should be used if values at wavelengths other than those tabulated are needed. For highest accuracy, use the Lagrange-interpolated 1nm tables from CIE 15:2004 Appendix C.
+**Note:** The 5nm basis functions above are reproduced from CIE 15:2004 Tables T.2 and T.3, which are in the public domain. Linear interpolation should be used if values at wavelengths other than those tabulated are needed. For highest accuracy, use the Lagrange-interpolated 1nm tables from CIE 15:2004 Appendix C.
 
 ---
 
@@ -622,10 +622,12 @@ This yields a chromaticity error of ~9.5×10⁻⁵ from the official (0.31272, 0
 
 | Data | Source Document | Notes |
 |------|-----------------|-------|
-| D65 SPD (5nm) | CIE 15:2004 Table T.1 | Historical tabulation |
-| D65 SPD (1nm) | ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | Current authoritative SPD |
-| CMF 1931 2° | CIE 018:2019 Table 6 | Current authoritative CMFs |
+| D65 SPD (5nm) | CIE 15:2004 Table T.1 | Public domain (included in Appendices A & B) |
+| D65 SPD (1nm) | ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 | **Authoritative** (used for all derivations) |
+| CMF 1931 2° (1nm) | CIE 018:2019 Table 6 | **Authoritative** (used for all derivations) |
 | Official chromaticity | CIE 15:2004 Table T.3 | (0.31272, 0.32903) |
+
+**Important:** The 5nm tables included in Appendices A and B are from CIE 15:2004 (public domain) and contain some historical rounding. All high-precision calculations in this document were performed using the authoritative 1nm tables from the ISO/CIE standards cited above.
 
 ### D.2 Data Verification Spot Checks
 
