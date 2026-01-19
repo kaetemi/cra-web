@@ -737,9 +737,9 @@ fn write_metadata(
         }
         json.push_str(&format!("  \"output_distance_space\": \"{:?}\",\n", output_colorspace));
 
-        // PNG-specific fields (only when PNG output is present)
+        // Palettized output (only when PNG output is present)
         if args.output.is_some() {
-            json.push_str(&format!("  \"png_palettized\": {},\n", png_palettized));
+            json.push_str(&format!("  \"output_palettized\": {},\n", png_palettized));
         }
 
         // Raw-file-specific fields (only when raw output is present)
