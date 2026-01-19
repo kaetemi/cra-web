@@ -1251,6 +1251,13 @@ pub fn format_supports_binary_wasm(format: &str) -> bool {
 }
 
 #[wasm_bindgen]
+pub fn format_supports_palettized_wasm(format: &str) -> bool {
+    binary_format::ColorFormat::parse(format)
+        .map(|f| binary_format::supports_palettized_png(&f))
+        .unwrap_or(false)
+}
+
+#[wasm_bindgen]
 pub fn format_is_rgb666_wasm(format: &str) -> bool {
     binary_format::ColorFormat::parse(format)
         .map(|f| f.is_rgb666())
@@ -1444,6 +1451,33 @@ pub fn encode_png_gray_wasm(data: Vec<u8>, width: u32, height: u32) -> Result<Ve
         .map_err(|e| JsValue::from_str(&format!("Failed to encode PNG: {}", e)))?;
 
     Ok(bytes)
+}
+
+/// Encode interleaved u8 data to palettized PNG bytes
+/// Input: Interleaved u8 data (format depends on color format type)
+///   - Grayscale (L): 1 byte per pixel
+///   - Grayscale+Alpha (LA): 2 bytes per pixel (L, A)
+///   - RGB: 3 bytes per pixel (R, G, B)
+///   - RGBA/ARGB: 4 bytes per pixel (R, G, B, A)
+/// Output: PNG file bytes with palette containing bit-replicated colors
+/// Only works for formats with ≤8 bits per pixel
+#[wasm_bindgen]
+pub fn encode_palettized_png_wasm(
+    interleaved_data: Vec<u8>,
+    format: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let color_format = binary_format::ColorFormat::parse(format)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    binary_format::encode_palettized_png(
+        &interleaved_data,
+        width as usize,
+        height as usize,
+        &color_format,
+    )
+    .map_err(|e| JsValue::from_str(&e))
 }
 
 // ============================================================================

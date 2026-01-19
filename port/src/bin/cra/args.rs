@@ -351,6 +351,12 @@ pub struct Args {
     #[arg(long)]
     pub output_raw: Option<PathBuf>,
 
+    /// Output palettized PNG file path (optional)
+    /// Only available for formats with ≤8 bits per pixel (L1-L8, LA1-LA4, RGB332, ARGB1111, etc.)
+    /// The palette contains bit-replicated colors for each possible packed value.
+    #[arg(long)]
+    pub output_palettized: Option<PathBuf>,
+
     /// Output raw binary for red channel only (optional) - respects --stride
     #[arg(long)]
     pub output_raw_r: Option<PathBuf>,

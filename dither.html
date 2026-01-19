@@ -988,6 +988,7 @@
             <div class="download-row">
                 <a class="download-btn" id="download-btn" download="dithered.png">PNG Image</a>
                 <button class="download-btn secondary" id="download-raw-btn" disabled>Raw Binary</button>
+                <button class="download-btn secondary" id="download-palettized-btn" disabled>Palettized PNG</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
             </div>
             <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - raw download available</p>
@@ -1015,12 +1016,14 @@
         import init, {
             decode_metadata_with_icc_check_wasm,
             format_supports_binary_wasm,
+            format_supports_palettized_wasm,
             format_total_bits_wasm,
             encode_rgb_row_aligned_stride_wasm,
             encode_argb_row_aligned_stride_wasm,
             encode_gray_row_aligned_stride_wasm,
             encode_la_row_aligned_stride_wasm,
-            encode_channel_row_aligned_stride_wasm
+            encode_channel_row_aligned_stride_wasm,
+            encode_palettized_png_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Worker for background processing
@@ -1388,6 +1391,10 @@
 
             // Enable/disable raw download buttons
             document.getElementById('download-raw-btn').disabled = !supportsBinary;
+
+            // Enable/disable palettized PNG button (requires ≤8 bits per pixel)
+            const supportsPalettized = format_supports_palettized_wasm(format);
+            document.getElementById('download-palettized-btn').disabled = !supportsPalettized;
 
             // Per-channel downloads
             const channelDownloads = document.getElementById('channel-downloads');
@@ -1925,6 +1932,58 @@
             const blob = new Blob([json], { type: 'application/json' });
             const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'json');
             downloadBlob(blob, filename);
+        });
+
+        // Palettized PNG download handler
+        document.getElementById('download-palettized-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            let pngData;
+
+            try {
+                if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                    // LA format
+                    pngData = encode_palettized_png_wasm(
+                        lastDitherResult.laInterleaved,
+                        format,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                } else if (lastDitherResult.isGrayscale) {
+                    // L format
+                    pngData = encode_palettized_png_wasm(
+                        lastDitherResult.grayChannel,
+                        format,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                } else if (lastDitherResult.hasAlpha) {
+                    // ARGB format - use RGBA interleaved data
+                    pngData = encode_palettized_png_wasm(
+                        lastDitherResult.rgbaInterleaved,
+                        format,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                } else {
+                    // RGB format
+                    const rgbData = getRgbInterleaved();
+                    pngData = encode_palettized_png_wasm(
+                        rgbData,
+                        format,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                }
+
+                const blob = new Blob([pngData], { type: 'image/png' });
+                const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format + '_pal', 'png');
+                downloadBlob(blob, filename);
+            } catch (e) {
+                console.error('Failed to generate palettized PNG:', e);
+                alert('Failed to generate palettized PNG: ' + e.message);
+            }
         });
 
         // Per-channel download handler helper - respects stride setting

@@ -18,8 +18,8 @@ use cra_wasm::binary_format::{
     encode_argb_row_aligned_stride,
     encode_channel_from_interleaved_row_aligned_stride,
     encode_gray_row_aligned_stride, encode_la_row_aligned_stride,
-    encode_rgb_row_aligned_stride,
-    is_valid_stride, ColorFormat, StrideFill, RawImageMetadata,
+    encode_palettized_png, encode_rgb_row_aligned_stride,
+    is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
@@ -1114,9 +1114,10 @@ fn main() -> Result<(), String> {
         || args.output_raw_g.is_some()
         || args.output_raw_b.is_some()
         || args.output_raw_a.is_some();
-    // Integer output = PNG, raw binary, or channel outputs (requires dithering)
+    // Integer output = PNG, raw binary, palettized PNG, or channel outputs (requires dithering)
     let has_integer_output = args.output.is_some()
         || args.output_raw.is_some()
+        || args.output_palettized.is_some()
         || has_channel_output;
     if !has_integer_output
         && args.output_meta.is_none()
@@ -1218,6 +1219,14 @@ fn main() -> Result<(), String> {
     if args.output_raw.is_some() && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
+            format.name, format.total_bits
+        ));
+    }
+
+    // Check palettized PNG compatibility
+    if args.output_palettized.is_some() && !supports_palettized_png(&format) {
+        return Err(format!(
+            "Format {} ({} bits) does not support palettized PNG output. Palettized PNG requires ≤8 bits per pixel.",
             format.name, format.total_bits
         ));
     }
@@ -1657,6 +1666,27 @@ fn main() -> Result<(), String> {
                 .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
             outputs.push(("binary".to_string(), bin_path.clone(), bin_data.len()));
+        }
+
+        // Write palettized PNG output
+        if let Some(ref pal_path) = args.output_palettized {
+            if args.verbose {
+                eprintln!("Writing palettized PNG: {}", pal_path.display());
+            }
+
+            let png_data = encode_palettized_png(
+                &dither_result.interleaved,
+                width_usize,
+                height_usize,
+                &format,
+            )?;
+
+            let mut file = File::create(pal_path)
+                .map_err(|e| format!("Failed to create {}: {}", pal_path.display(), e))?;
+            file.write_all(&png_data)
+                .map_err(|e| format!("Failed to write {}: {}", pal_path.display(), e))?;
+
+            outputs.push(("palettized_png".to_string(), pal_path.clone(), png_data.len()));
         }
 
         // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
