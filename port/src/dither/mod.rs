@@ -8,6 +8,7 @@
 //! - `basic`: Basic single-channel and naive RGB dithering
 //! - `lab`: LAB colorspace dithering
 //! - `luminosity`: Grayscale/luminosity colorspace-aware dithering
+//! - `luminosity_alpha`: Grayscale with alpha colorspace-aware dithering
 //! - `rgb`: Colorspace-aware RGB dithering
 //! - `rgba`: Colorspace-aware RGBA dithering
 //! - `fp16`: FP16 (half-precision float) dithering
@@ -17,6 +18,7 @@ pub mod common;
 pub mod basic;
 pub mod lab;
 pub mod luminosity;
+pub mod luminosity_alpha;
 pub mod rgb;
 pub mod rgba;
 pub mod fp16;
@@ -57,6 +59,12 @@ pub use lab::{
 pub use luminosity::{
     colorspace_aware_dither_gray,
     colorspace_aware_dither_gray_with_mode,
+};
+
+// Re-export luminosity+alpha dithering
+pub use luminosity_alpha::{
+    colorspace_aware_dither_gray_alpha,
+    colorspace_aware_dither_gray_alpha_with_mode,
 };
 
 // Re-export RGB dithering

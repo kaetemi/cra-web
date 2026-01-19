@@ -1,0 +1,951 @@
+/// Color space aware dithering for grayscale images with alpha channel.
+///
+/// Extends grayscale luminosity dithering to handle alpha channel with proper error propagation:
+/// - Alpha channel is dithered first using standard single-channel dithering
+/// - Luminosity channel is then dithered with alpha-aware error diffusion:
+///   - Error that couldn't be applied due to transparency is fully propagated
+///   - Quantization error is weighted by pixel visibility (alpha)
+///
+/// This ensures that:
+/// - Fully transparent pixels pass their accumulated error to neighbors
+/// - Partially transparent pixels proportionally absorb/propagate error
+/// - The visual result of compositing is properly optimized
+///
+/// ## Mathematical Optimization for Grayscale
+///
+/// For neutral grays (R=G=B), the CIELAB a* and b* components are always 0.
+/// This means ALL CIELAB distance formulas collapse to simple lightness difference:
+///
+/// - **CIE76**: ΔE² = ΔL² + Δa² + Δb² = ΔL² (since Δa=Δb=0)
+/// - **CIE94**: Chroma C=√(a²+b²)=0, so all chroma/hue terms vanish → ΔL²
+/// - **CIEDE2000**: Chroma terms vanish. The SL lightness weighting factor varies
+///   with average lightness, but for adjacent quantization levels the difference
+///   is negligible, so candidate ordering is unchanged.
+
+use crate::color::{
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
+};
+use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
+use crate::colorspace_derived::f32 as cs;
+use super::basic::dither_with_mode_bits;
+use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+
+// ============================================================================
+// Optimized Grayscale Distance (same as luminosity.rs)
+// ============================================================================
+
+/// Convert linear luminosity to Y'CbCr Y' component for grayscale.
+/// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
+/// since KR + KG + KB = 1, so Y' = KR*v + KG*v + KB*v = v.
+/// Preserves sign for out-of-gamut values during error diffusion.
+#[inline]
+fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
+    if lin_gray >= 0.0 {
+        linear_to_srgb_single(lin_gray)
+    } else {
+        -linear_to_srgb_single(-lin_gray)
+    }
+}
+
+/// For grayscale with CIE76/CIE94/OKLab, distance reduces to simple ΔL²
+/// because a* = b* = 0 for neutral grays.
+#[inline]
+fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
+    let dl = l1 - l2;
+    dl * dl
+}
+
+/// CIEDE2000 lightness distance for grayscale.
+/// Unlike CIE76/CIE94, CIEDE2000 uses a lightness weighting factor SL
+/// that depends on the average lightness of the two colors.
+#[inline]
+fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
+    let dl = l1 - l2;
+    let l_bar = (l1 + l2) / 2.0;
+    let l_bar_minus_mid = l_bar - cs::CIEDE2000_SL_L_MIDPOINT;
+    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
+    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_mid_sq) / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
+    let dl_term = dl / sl;
+    dl_term * dl_term
+}
+
+/// Compute grayscale perceptual distance based on the selected space/metric
+#[inline]
+fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) -> f32 {
+    match space {
+        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
+        PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
+        PerceptualSpace::OkLab | PerceptualSpace::LinearRGB | PerceptualSpace::YCbCr => {
+            lightness_distance_sq(l1, l2)
+        }
+    }
+}
+
+// ============================================================================
+// Quantization parameters
+// ============================================================================
+
+struct GrayQuantParams {
+    num_levels: usize,
+    level_values: Vec<u8>,
+    lut_floor_level: [u8; 256],
+    lut_ceil_level: [u8; 256],
+}
+
+impl GrayQuantParams {
+    fn new(bits: u8) -> Self {
+        debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
+        let num_levels = 1usize << bits;
+        let max_idx = num_levels - 1;
+        let shift = 8 - bits;
+
+        let level_values: Vec<u8> = (0..num_levels)
+            .map(|l| bit_replicate(l as u8, bits))
+            .collect();
+
+        let mut lut_floor_level = [0u8; 256];
+        let mut lut_ceil_level = [0u8; 256];
+
+        for v in 0..256u16 {
+            let trunc_idx = (v as u8 >> shift) as usize;
+            let trunc_val = level_values[trunc_idx];
+
+            let (floor_idx, ceil_idx) = if trunc_val == v as u8 {
+                (trunc_idx, trunc_idx)
+            } else if trunc_val < v as u8 {
+                let ceil = if trunc_idx < max_idx { trunc_idx + 1 } else { trunc_idx };
+                (trunc_idx, ceil)
+            } else {
+                let floor = if trunc_idx > 0 { trunc_idx - 1 } else { trunc_idx };
+                (floor, trunc_idx)
+            };
+
+            lut_floor_level[v as usize] = floor_idx as u8;
+            lut_ceil_level[v as usize] = ceil_idx as u8;
+        }
+
+        Self { num_levels, level_values, lut_floor_level, lut_ceil_level }
+    }
+
+    #[inline]
+    fn floor_level(&self, srgb_value: u8) -> usize {
+        self.lut_floor_level[srgb_value as usize] as usize
+    }
+
+    #[inline]
+    fn ceil_level(&self, srgb_value: u8) -> usize {
+        self.lut_ceil_level[srgb_value as usize] as usize
+    }
+
+    #[inline]
+    fn level_to_srgb(&self, level: usize) -> u8 {
+        self.level_values[level]
+    }
+}
+
+fn build_linear_lut() -> [f32; 256] {
+    let mut lut = [0.0f32; 256];
+    for i in 0..256 {
+        lut[i] = srgb_to_linear_single(i as f32 / 255.0);
+    }
+    lut
+}
+
+/// Build perceptual lightness LUT for grayscale levels.
+fn build_gray_lightness_lut(
+    quant: &GrayQuantParams,
+    linear_lut: &[f32; 256],
+    space: PerceptualSpace,
+) -> Vec<f32> {
+    let n = quant.num_levels;
+    let mut lut = vec![0.0f32; n];
+
+    for level in 0..n {
+        let gray_ext = quant.level_values[level];
+        let gray_lin = linear_lut[gray_ext as usize];
+
+        let l = if is_linear_rgb_space(space) {
+            gray_lin
+        } else if is_ycbcr_space(space) {
+            linear_to_srgb_single(gray_lin)
+        } else if is_lab_space(space) {
+            let (l, _, _) = linear_rgb_to_lab(gray_lin, gray_lin, gray_lin);
+            l
+        } else {
+            let (l, _, _) = linear_rgb_to_oklab(gray_lin, gray_lin, gray_lin);
+            l
+        };
+
+        lut[level] = l;
+    }
+
+    lut
+}
+
+// ============================================================================
+// Dither kernels
+// ============================================================================
+
+trait GrayDitherKernel {
+    const PAD_LEFT: usize;
+    const PAD_RIGHT: usize;
+    const PAD_BOTTOM: usize;
+
+    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
+    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
+}
+
+struct FloydSteinberg;
+
+impl GrayDitherKernel for FloydSteinberg {
+    const PAD_LEFT: usize = 1;
+    const PAD_RIGHT: usize = 1;
+    const PAD_BOTTOM: usize = 1;
+
+    #[inline]
+    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        err[y][bx + 1] += err_val * (7.0 / 16.0);
+        err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
+        err[y + 1][bx] += err_val * (5.0 / 16.0);
+        err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
+    }
+
+    #[inline]
+    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        err[y][bx - 1] += err_val * (7.0 / 16.0);
+        err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
+        err[y + 1][bx] += err_val * (5.0 / 16.0);
+        err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
+    }
+}
+
+struct JarvisJudiceNinke;
+
+impl GrayDitherKernel for JarvisJudiceNinke {
+    const PAD_LEFT: usize = 2;
+    const PAD_RIGHT: usize = 2;
+    const PAD_BOTTOM: usize = 2;
+
+    #[inline]
+    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        // Row 0
+        err[y][bx + 1] += err_val * (7.0 / 48.0);
+        err[y][bx + 2] += err_val * (5.0 / 48.0);
+        // Row 1
+        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx] += err_val * (7.0 / 48.0);
+        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+        // Row 2
+        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx] += err_val * (5.0 / 48.0);
+        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+    }
+
+    #[inline]
+    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
+        // Row 0
+        err[y][bx - 1] += err_val * (7.0 / 48.0);
+        err[y][bx - 2] += err_val * (5.0 / 48.0);
+        // Row 1
+        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx] += err_val * (7.0 / 48.0);
+        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+        // Row 2
+        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx] += err_val * (5.0 / 48.0);
+        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+    }
+}
+
+struct NoneKernel;
+
+impl GrayDitherKernel for NoneKernel {
+    const PAD_LEFT: usize = 0;
+    const PAD_RIGHT: usize = 0;
+    const PAD_BOTTOM: usize = 0;
+
+    #[inline]
+    fn apply_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+
+    #[inline]
+    fn apply_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
+}
+
+#[inline]
+fn apply_mixed_kernel(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32, use_jjn: bool, is_rtl: bool) {
+    match (use_jjn, is_rtl) {
+        (true, false) => JarvisJudiceNinke::apply_ltr(err, bx, y, err_val),
+        (true, true) => JarvisJudiceNinke::apply_rtl(err, bx, y, err_val),
+        (false, false) => FloydSteinberg::apply_ltr(err, bx, y, err_val),
+        (false, true) => FloydSteinberg::apply_rtl(err, bx, y, err_val),
+    }
+}
+
+// ============================================================================
+// Alpha-aware dithering context and pixel processing
+// ============================================================================
+
+struct GrayAlphaDitherContext<'a> {
+    quant: &'a GrayQuantParams,
+    linear_lut: &'a [f32; 256],
+    lightness_lut: &'a Vec<f32>,
+    space: PerceptualSpace,
+    /// Pre-dithered alpha channel (u8 values, 0-255)
+    alpha_dithered: &'a [u8],
+}
+
+/// Process a single pixel with alpha-aware error diffusion.
+///
+/// The key difference from grayscale-only dithering is how error is calculated:
+/// - `e_in`: accumulated incoming error from previous pixels
+/// - `α`: normalized alpha (0-1) of this pixel
+/// - `q_err`: quantization error = adjusted - quantized
+///
+/// Error to diffuse = (1 - α) × e_in + α × q_err
+///
+/// This ensures:
+/// - Fully transparent pixels (α=0) pass all incoming error to neighbors
+/// - Fully opaque pixels (α=1) behave like standard dithering
+/// - Partially transparent pixels proportionally absorb/propagate error
+///
+/// Returns (best_gray, err_val)
+#[inline]
+fn process_pixel_gray_alpha(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &[Vec<f32>],
+    idx: usize,
+    bx: usize,
+    y: usize,
+) -> (u8, f32) {
+    // Get dithered alpha for this pixel (normalized to 0-1)
+    let alpha = ctx.alpha_dithered[idx] as f32 / 255.0;
+
+    // 1. Read accumulated error (e_in)
+    let err_in = err_buf[y][bx];
+
+    // 2. Read input, convert to linear
+    let srgb_gray = gray_channel[idx] / 255.0;
+    let lin_gray_orig = srgb_to_linear_single(srgb_gray);
+
+    // 3. Add accumulated error (skip for fully transparent pixels)
+    let lin_gray_adj = if alpha == 0.0 {
+        lin_gray_orig
+    } else {
+        lin_gray_orig + err_in
+    };
+
+    // 4. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
+    let lin_gray_clamped = lin_gray_adj.clamp(0.0, 1.0);
+    let srgb_gray_adj = (linear_to_srgb_single(lin_gray_clamped) * 255.0).clamp(0.0, 255.0);
+
+    // 5. Get level index bounds
+    let level_min = ctx.quant.floor_level(srgb_gray_adj.floor() as u8);
+    let level_max = ctx.quant.ceil_level((srgb_gray_adj.ceil() as u8).min(255));
+
+    // 6. Convert target to perceptual lightness (use unclamped for true distance)
+    let l_target = if is_linear_rgb_space(ctx.space) {
+        lin_gray_adj
+    } else if is_ycbcr_space(ctx.space) {
+        linear_gray_to_ycbcr_y(lin_gray_adj)
+    } else if is_lab_space(ctx.space) {
+        let (l, _, _) = linear_rgb_to_lab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
+    } else {
+        let (l, _, _) = linear_rgb_to_oklab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
+    };
+
+    // 7. Search candidates using perceptual lightness distance
+    let mut best_level = level_min;
+    let mut best_dist = f32::INFINITY;
+
+    for level in level_min..=level_max {
+        let l_candidate = ctx.lightness_lut[level];
+        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+
+        if dist < best_dist {
+            best_dist = dist;
+            best_level = level;
+        }
+    }
+
+    // 8. Get extended value for output
+    let best_gray = ctx.quant.level_to_srgb(best_level);
+
+    // 9. Compute quantized linear value
+    let best_lin_gray = ctx.linear_lut[best_gray as usize];
+
+    // 10. Compute alpha-aware error to diffuse
+    // Formula: error = (1 - α) × e_in + α × q_err
+    // Where q_err = linear_adj - linear_quant
+    let q_err = lin_gray_adj - best_lin_gray;
+    let one_minus_alpha = 1.0 - alpha;
+    let err_val = one_minus_alpha * err_in + alpha * q_err;
+
+    (best_gray, err_val)
+}
+
+// ============================================================================
+// Generic scan pattern implementations
+// ============================================================================
+
+#[inline]
+fn dither_standard_gray_alpha<K: GrayDitherKernel>(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let bx = x + pad_left;
+
+            let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+            out[idx] = best_gray;
+            K::apply_ltr(err_buf, bx, y, err_val);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
+    }
+}
+
+#[inline]
+fn dither_serpentine_gray_alpha<K: GrayDitherKernel>(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    for y in 0..height {
+        if y % 2 == 1 {
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+                K::apply_rtl(err_buf, bx, y, err_val);
+            }
+        } else {
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+                K::apply_ltr(err_buf, bx, y, err_val);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_standard_gray_alpha(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    for y in 0..height {
+        for x in 0..width {
+            let idx = y * width + x;
+            let bx = x + pad_left;
+
+            let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+            out[idx] = best_gray;
+
+            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 != 0;
+            apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_serpentine_gray_alpha(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    for y in 0..height {
+        if y % 2 == 1 {
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
+            }
+        } else {
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_random_gray_alpha(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    pad_left: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    for y in 0..height {
+        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let is_rtl = row_hash & 1 == 1;
+
+        if is_rtl {
+            for x in (0..width).rev() {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
+            }
+        } else {
+            for x in 0..width {
+                let idx = y * width + x;
+                let bx = x + pad_left;
+
+                let (best_gray, err_val) = process_pixel_gray_alpha(ctx, gray_channel, err_buf, idx, bx, y);
+                out[idx] = best_gray;
+
+                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            cb((y + 1) as f32 / height as f32);
+        }
+    }
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/// Color space aware dithering for grayscale with alpha channel.
+///
+/// This is the simplified API that uses Floyd-Steinberg with standard scanning.
+/// For other algorithms and scan patterns, use `colorspace_aware_dither_gray_alpha_with_mode`.
+///
+/// Args:
+///     gray_channel: Grayscale input as f32 in range [0, 255]
+///     alpha_channel: Alpha input as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_gray: Bit depth for grayscale channel (1-8)
+///     bits_alpha: Bit depth for alpha channel (1-8)
+///     space: Perceptual color space for distance calculation
+///
+/// Returns:
+///     (gray_out, alpha_out): Output channels as u8
+pub fn colorspace_aware_dither_gray_alpha(
+    gray_channel: &[f32],
+    alpha_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_gray: u8,
+    bits_alpha: u8,
+    space: PerceptualSpace,
+) -> (Vec<u8>, Vec<u8>) {
+    colorspace_aware_dither_gray_alpha_with_mode(
+        gray_channel,
+        alpha_channel,
+        width,
+        height,
+        bits_gray,
+        bits_alpha,
+        space,
+        DitherMode::Standard,
+        0,
+        None,
+    )
+}
+
+/// Color space aware dithering for grayscale with alpha channel and selectable algorithm.
+///
+/// Process:
+/// 1. Alpha channel is dithered first using standard single-channel error diffusion
+/// 2. Grayscale channel is then dithered with alpha-aware error propagation:
+///    - Error that couldn't be applied due to transparency is fully propagated
+///    - Quantization error is weighted by pixel visibility (alpha)
+///
+/// The alpha-aware error formula is:
+///     error_to_diffuse = (1 - α) × e_in + α × q_err
+///
+/// Where:
+/// - α: normalized alpha (0-1) after dithering
+/// - e_in: accumulated incoming error from previous pixels
+/// - q_err: quantization error (adjusted - quantized)
+///
+/// Args:
+///     gray_channel: Grayscale input as f32 in range [0, 255]
+///     alpha_channel: Alpha input as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_gray: Bit depth for grayscale channel (1-8)
+///     bits_alpha: Bit depth for alpha channel (1-8)
+///     space: Perceptual color space for distance calculation
+///     mode: Dithering algorithm and scanning mode
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     progress: Optional callback called with progress (0.0 to 1.0)
+///
+/// Returns:
+///     (gray_out, alpha_out): Output channels as u8
+pub fn colorspace_aware_dither_gray_alpha_with_mode(
+    gray_channel: &[f32],
+    alpha_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_gray: u8,
+    bits_alpha: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<u8>, Vec<u8>) {
+    let pixels = width * height;
+
+    // Step 1: Dither alpha channel first using standard single-channel dithering
+    // Alpha is linear, so standard dithering is correct
+    let alpha_dithered = dither_with_mode_bits(alpha_channel, width, height, mode, seed.wrapping_add(1), bits_alpha, None);
+
+    // Report alpha dithering complete (10% of total progress)
+    if let Some(ref mut cb) = progress {
+        cb(0.1);
+    }
+
+    // Step 2: Set up grayscale dithering with alpha awareness
+    let quant = GrayQuantParams::new(bits_gray);
+    let linear_lut = build_linear_lut();
+    let lightness_lut = build_gray_lightness_lut(&quant, &linear_lut, space);
+
+    let ctx = GrayAlphaDitherContext {
+        quant: &quant,
+        linear_lut: &linear_lut,
+        lightness_lut: &lightness_lut,
+        space,
+        alpha_dithered: &alpha_dithered,
+    };
+
+    // Use JJN padding for all modes
+    let pad_left = JarvisJudiceNinke::PAD_LEFT;
+    let pad_right = JarvisJudiceNinke::PAD_RIGHT;
+    let pad_bottom = JarvisJudiceNinke::PAD_BOTTOM;
+    let buf_width = width + pad_left + pad_right;
+
+    let mut err_buf: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; height + pad_bottom];
+    let mut out = vec![0u8; pixels];
+
+    let hashed_seed = wang_hash(seed);
+
+    match mode {
+        DitherMode::None => {
+            dither_standard_gray_alpha::<NoneKernel>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, progress,
+            );
+        }
+        DitherMode::Standard => {
+            dither_standard_gray_alpha::<FloydSteinberg>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, progress,
+            );
+        }
+        DitherMode::Serpentine => {
+            dither_serpentine_gray_alpha::<FloydSteinberg>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, progress,
+            );
+        }
+        DitherMode::JarvisStandard => {
+            dither_standard_gray_alpha::<JarvisJudiceNinke>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, progress,
+            );
+        }
+        DitherMode::JarvisSerpentine => {
+            dither_serpentine_gray_alpha::<JarvisJudiceNinke>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, progress,
+            );
+        }
+        DitherMode::MixedStandard => {
+            dither_mixed_standard_gray_alpha(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedSerpentine => {
+            dither_mixed_serpentine_gray_alpha(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedRandom => {
+            dither_mixed_random_gray_alpha(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, pad_left, hashed_seed, progress,
+            );
+        }
+    }
+
+    (out, alpha_dithered)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gray_alpha_dither_basic() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab
+        );
+
+        assert_eq!(gray_out.len(), 100);
+        assert_eq!(alpha_out.len(), 100);
+    }
+
+    #[test]
+    fn test_gray_alpha_produces_valid_levels() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 2, 2, PerceptualSpace::OkLab
+        );
+
+        let valid_levels = [0u8, 85, 170, 255];
+        for &v in &gray_out {
+            assert!(valid_levels.contains(&v), "Gray produced invalid 2-bit value: {}", v);
+        }
+        for &v in &alpha_out {
+            assert!(valid_levels.contains(&v), "Alpha produced invalid 2-bit value: {}", v);
+        }
+    }
+
+    #[test]
+    fn test_gray_alpha_fully_transparent() {
+        let gray: Vec<f32> = vec![128.0; 100];
+        let alpha: Vec<f32> = vec![0.0; 100]; // Fully transparent
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab
+        );
+
+        // Alpha should be 0
+        for &v in &alpha_out {
+            assert_eq!(v, 0, "Transparent alpha should dither to 0");
+        }
+
+        // Gray values will still be quantized
+        assert_eq!(gray_out.len(), 100);
+    }
+
+    #[test]
+    fn test_gray_alpha_fully_opaque() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = vec![255.0; 100]; // Fully opaque
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab
+        );
+
+        // Alpha should be 255
+        for &v in &alpha_out {
+            assert_eq!(v, 255, "Opaque alpha should dither to 255");
+        }
+
+        assert_eq!(gray_out.len(), 100);
+    }
+
+    #[test]
+    fn test_gray_alpha_all_modes() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
+
+        let modes = [
+            DitherMode::Standard,
+            DitherMode::Serpentine,
+            DitherMode::JarvisStandard,
+            DitherMode::JarvisSerpentine,
+            DitherMode::MixedStandard,
+            DitherMode::MixedSerpentine,
+            DitherMode::MixedRandom,
+        ];
+
+        let valid_levels = [0u8, 85, 170, 255]; // 2-bit
+
+        for mode in modes {
+            let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha_with_mode(
+                &gray, &alpha, 10, 10, 2, 2, PerceptualSpace::OkLab, mode, 42, None
+            );
+
+            assert_eq!(gray_out.len(), 100, "Mode {:?} produced wrong gray length", mode);
+            assert_eq!(alpha_out.len(), 100, "Mode {:?} produced wrong alpha length", mode);
+
+            for &v in &gray_out {
+                assert!(valid_levels.contains(&v), "Mode {:?} produced invalid gray value: {}", mode, v);
+            }
+            for &v in &alpha_out {
+                assert!(valid_levels.contains(&v), "Mode {:?} produced invalid alpha value: {}", mode, v);
+            }
+        }
+    }
+
+    #[test]
+    fn test_gray_alpha_mixed_deterministic() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
+
+        let result1 = colorspace_aware_dither_gray_alpha_with_mode(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+        );
+        let result2 = colorspace_aware_dither_gray_alpha_with_mode(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+        );
+
+        assert_eq!(result1.0, result2.0, "Gray should be deterministic");
+        assert_eq!(result1.1, result2.1, "Alpha should be deterministic");
+    }
+
+    #[test]
+    fn test_gray_alpha_different_seeds() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| ((i + 50) % 100) as f32 * 2.55).collect();
+
+        let result1 = colorspace_aware_dither_gray_alpha_with_mode(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 42, None
+        );
+        let result2 = colorspace_aware_dither_gray_alpha_with_mode(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab, DitherMode::MixedStandard, 99, None
+        );
+
+        // At least one should differ
+        assert!(result1.0 != result2.0 || result1.1 != result2.1,
+            "Different seeds should produce different results");
+    }
+
+    #[test]
+    fn test_gray_alpha_semi_transparent() {
+        let gray: Vec<f32> = vec![127.5; 100];
+        let alpha: Vec<f32> = vec![127.5; 100]; // 50% transparent
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 4, 8, PerceptualSpace::OkLab
+        );
+
+        assert_eq!(gray_out.len(), 100);
+        assert_eq!(alpha_out.len(), 100);
+
+        // Alpha should have some variation around 127-128
+        let alpha_sum: u32 = alpha_out.iter().map(|&v| v as u32).sum();
+        let alpha_avg = alpha_sum as f32 / 100.0;
+        assert!((alpha_avg - 127.5).abs() < 5.0, "Alpha average should be near 127.5, got {}", alpha_avg);
+    }
+
+    #[test]
+    fn test_gray_alpha_all_perceptual_spaces() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let spaces = [
+            PerceptualSpace::OkLab,
+            PerceptualSpace::LabCIE76,
+            PerceptualSpace::LabCIE94,
+            PerceptualSpace::LabCIEDE2000,
+            PerceptualSpace::LinearRGB,
+            PerceptualSpace::YCbCr,
+        ];
+
+        for space in spaces {
+            let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+                &gray, &alpha, 10, 10, 4, 8, space
+            );
+            assert_eq!(gray_out.len(), 100, "Space {:?} produced wrong gray length", space);
+            assert_eq!(alpha_out.len(), 100, "Space {:?} produced wrong alpha length", space);
+        }
+    }
+
+    #[test]
+    fn test_gray_alpha_1bit() {
+        let gray: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let alpha: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+
+        let (gray_out, alpha_out) = colorspace_aware_dither_gray_alpha(
+            &gray, &alpha, 10, 10, 1, 1, PerceptualSpace::OkLab
+        );
+
+        for &v in &gray_out {
+            assert!(v == 0 || v == 255, "1-bit gray should only produce 0 or 255, got {}", v);
+        }
+        for &v in &alpha_out {
+            assert!(v == 0 || v == 255, "1-bit alpha should only produce 0 or 255, got {}", v);
+        }
+    }
+}
