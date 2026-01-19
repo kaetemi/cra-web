@@ -2,11 +2,14 @@
 """
 HIGH-PRECISION D65 CHROMATICITY DERIVATION
 
-Derives D65 chromaticity from authoritative 1nm source data:
-- D65 SPD: ISO 11664-2:2007 / CIE S 014-2:2006 Table 1 (300-830nm @ 1nm)
-- CMF: CIE 018:2019 Table 6 / CIE 1931 2° observer (360-830nm @ 1nm)
+Derives D65 chromaticity from authoritative source data:
+- D65 SPD: ISO 11664-2:2007 / CIE S 014-2:2006 Table 1
+- CMF: CIE 018:2019 Table 6 / CIE 1931 2° observer
 
-No rounding, no shortcuts, maximum precision using Python's Decimal module.
+Computes using three configurations:
+1. Full range at 1nm (360-830nm) - maximum precision
+2. Standard visible at 1nm (380-780nm) - common implementation
+3. Standard visible at 5nm (380-780nm) - matches CIE 15:2004 Table T.3
 
 Data files required:
 - cie_standard_illuminants_a_d65_spd.csv (with header: wavelength_nm,SA,SD65)
@@ -14,8 +17,8 @@ Data files required:
 
 References:
 - ISO 11664-2:2007(E) / CIE S 014-2/E:2006, Colorimetry Part 2: CIE Standard Illuminants
+- CIE 015:2004, Colorimetry, 3rd Edition (Table T.3 defines official chromaticity)
 - CIE 018:2019, The Basis of Physical Photometry, 3rd Edition
-- CIE 015:2018, Colorimetry, 4th Edition
 """
 
 import csv
@@ -50,21 +53,13 @@ def load_d65_spd(filepath: str | Path) -> dict[int, Decimal]:
         300,0.930483,0.0341000
         301,0.967643,0.360140
         ...
-    
-    Args:
-        filepath: Path to CSV file
-        
-    Returns:
-        Dictionary mapping wavelength (nm) to D65 spectral power
     """
     spd: dict[int, Decimal] = {}
     
     with open(filepath, 'r', newline='') as f:
         reader = csv.DictReader(f)
-        
         for row in reader:
             wavelength = int(row['wavelength_nm'])
-            # SD65 column contains the D65 spectral power distribution
             power = Decimal(row['SD65'])
             spd[wavelength] = power
     
@@ -79,18 +74,11 @@ def load_cmf(filepath: str | Path) -> dict[int, CMFValues]:
         360,0.000129900000,0.0000039170000,0.000606100000
         361,0.000145847000,0.0000043935810,0.000680879200
         ...
-    
-    Args:
-        filepath: Path to CSV file
-        
-    Returns:
-        Dictionary mapping wavelength (nm) to CMFValues(x_bar, y_bar, z_bar)
     """
     cmf: dict[int, CMFValues] = {}
     
     with open(filepath, 'r', newline='') as f:
         reader = csv.reader(f)
-        
         for row in reader:
             wavelength = int(row[0])
             x_bar = Decimal(row[1])
@@ -102,14 +90,47 @@ def load_cmf(filepath: str | Path) -> dict[int, CMFValues]:
 
 
 # =============================================================================
+# DATA FILTERING FUNCTIONS
+# =============================================================================
+
+def filter_to_range(
+    data: dict[int, any],
+    start_nm: int,
+    end_nm: int,
+    step_nm: int = 1
+) -> dict[int, any]:
+    """
+    Filter data to specified wavelength range and interval.
+    
+    Args:
+        data: Dictionary with wavelength keys
+        start_nm: Start wavelength (inclusive)
+        end_nm: End wavelength (inclusive)
+        step_nm: Wavelength step (1 for all, 5 for 5nm intervals)
+    
+    Returns:
+        Filtered dictionary
+    """
+    return {
+        k: v for k, v in data.items()
+        if start_nm <= k <= end_nm and (k - start_nm) % step_nm == 0
+    }
+
+
+# =============================================================================
 # CONSTANTS
 # =============================================================================
 
-# Official CIE D65 chromaticity (for comparison)
+# Official CIE D65 chromaticity from CIE 15:2004 Table T.3
 CIE_D65_X = Decimal("0.31272")
 CIE_D65_Y = Decimal("0.32903")
 
-# Second radiation constants
+# Official tristimulus values from CIE 15:2004 Table T.3
+CIE_D65_X_TRIST = Decimal("95.04")
+CIE_D65_Y_TRIST = Decimal("100.00")
+CIE_D65_Z_TRIST = Decimal("108.88")
+
+# Second radiation constants (for temperature analysis)
 C2_OLD = Decimal("0.01438")      # m·K (1931)
 C2_ITS90 = Decimal("0.014388")   # m·K (ITS-90)
 
@@ -132,14 +153,6 @@ def derive_chromaticity_from_spd(
         Z = k · Σ S(λ)z̄(λ)Δλ
         
     Where k normalizes Y to 100 for the perfect reflecting diffuser.
-    
-    Args:
-        spd: Spectral power distribution {wavelength_nm: power}
-        cmf: Color matching functions {wavelength_nm: CMFValues}
-        wavelength_step: Integration step size in nm
-        
-    Returns:
-        (X, Y, Z, x, y) - tristimulus values and chromaticity coordinates
     """
     # Find common wavelength range
     spd_wavelengths = set(spd.keys())
@@ -149,7 +162,7 @@ def derive_chromaticity_from_spd(
     if not common:
         raise ValueError("No overlapping wavelengths between SPD and CMF")
     
-    # Integrate using rectangular rule (standard for colorimetry)
+    # Integrate using rectangular rule
     sum_X = Decimal("0")
     sum_Y = Decimal("0")
     sum_Z = Decimal("0")
@@ -162,11 +175,11 @@ def derive_chromaticity_from_spd(
         sum_Y += s * y_bar * wavelength_step
         sum_Z += s * z_bar * wavelength_step
     
-    # Normalize so Y = 100 for perfect reflecting diffuser
+    # Normalize so Y = 100
     k = Decimal("100") / sum_Y if sum_Y != 0 else Decimal("1")
     
     X = k * sum_X
-    Y = k * sum_Y  # Should be exactly 100
+    Y = k * sum_Y
     Z = k * sum_Z
     
     # Chromaticity coordinates
@@ -179,7 +192,7 @@ def derive_chromaticity_from_spd(
 
 def daylight_locus_chromaticity(temp_k: Decimal) -> tuple[Decimal, Decimal]:
     """
-    Calculate chromaticity on CIE daylight locus using Decimal arithmetic.
+    Calculate chromaticity on CIE daylight locus.
     CIE 15:2004 Equations 3.3, 3.4, and 3.2.
     Expects ITS-90 CCT as input.
     """
@@ -197,7 +210,6 @@ def daylight_locus_chromaticity(temp_k: Decimal) -> tuple[Decimal, Decimal]:
              Decimal("0.24748e3") / temp_k +
              Decimal("0.237040"))
     
-    # y(x) quadratic (Equation 3.2)
     y = Decimal("-3.000") * x ** 2 + Decimal("2.870") * x - Decimal("0.275")
     
     return x, y
@@ -215,194 +227,192 @@ def print_section(title: str):
     print()
 
 
+def print_result(
+    label: str,
+    X: Decimal, Y: Decimal, Z: Decimal,
+    x: Decimal, y: Decimal,
+    show_comparison: bool = True
+):
+    """Print tristimulus and chromaticity results."""
+    print(f"{label}")
+    print()
+    print("  Tristimulus values:")
+    print(f"    X = {float(X):.4f}  (official: {CIE_D65_X_TRIST})")
+    print(f"    Y = {float(Y):.4f}  (official: {CIE_D65_Y_TRIST})")
+    print(f"    Z = {float(Z):.4f}  (official: {CIE_D65_Z_TRIST})")
+    print()
+    print("  Chromaticity coordinates:")
+    print(f"    x = {float(x):.10f}")
+    print(f"    y = {float(y):.10f}")
+    
+    if show_comparison:
+        delta_x = (x - CIE_D65_X) * Decimal("1e5")
+        delta_y = (y - CIE_D65_Y) * Decimal("1e5")
+        print()
+        print(f"  Difference from official (×10⁻⁵):")
+        print(f"    Δx = {float(delta_x):+.4f}")
+        print(f"    Δy = {float(delta_y):+.4f}")
+
+
 # =============================================================================
 # MAIN ANALYSIS
 # =============================================================================
 
 def main():
-    # File paths (adjust as needed)
+    # File paths
     spd_file = Path("cie_standard_illuminants_a_d65_spd.csv")
     cmf_file = Path("CIE_xyz_1931_2deg.csv")
     
     print_section("HIGH-PRECISION D65 CHROMATICITY DERIVATION")
-    print("Using authoritative 1nm source data with Decimal arithmetic (50 digit precision)")
+    print("Comparing different wavelength ranges and intervals")
     print()
     print("Data Sources:")
     print(f"  - D65 SPD: {spd_file}")
     print(f"  - CMF:     {cmf_file}")
+    print()
+    print("Official values (CIE 15:2004 Table T.3):")
+    print(f"  X = {CIE_D65_X_TRIST}, Y = {CIE_D65_Y_TRIST}, Z = {CIE_D65_Z_TRIST}")
+    print(f"  x = {CIE_D65_X}, y = {CIE_D65_Y}")
+    print()
+    print("  Note: Table T.3 specifies these were computed using")
+    print("  '5 nm intervals over the range 380 nm to 780 nm'")
     
-    # Load data from CSV files
+    # Load data
     print()
     print("Loading data...")
     
     try:
         d65_spd = load_d65_spd(spd_file)
-        print(f"  Loaded D65 SPD: {len(d65_spd)} data points "
+        print(f"  D65 SPD: {len(d65_spd)} points "
               f"({min(d65_spd.keys())}-{max(d65_spd.keys())}nm)")
     except FileNotFoundError:
         print(f"  ERROR: Could not find {spd_file}")
-        print("  Please ensure the file exists in the current directory.")
         return
     
     try:
         cmf = load_cmf(cmf_file)
-        print(f"  Loaded CMF:     {len(cmf)} data points "
+        print(f"  CMF:     {len(cmf)} points "
               f"({min(cmf.keys())}-{max(cmf.keys())}nm)")
     except FileNotFoundError:
         print(f"  ERROR: Could not find {cmf_file}")
-        print("  Please ensure the file exists in the current directory.")
         return
     
     # =========================================================================
-    print_section("1. INTEGRATION OVER FULL CMF RANGE")
+    print_section("1. OFFICIAL METHOD: 380-780nm @ 5nm (CIE 15:2004 Table T.3)")
+    # =========================================================================
+    
+    spd_5nm = filter_to_range(d65_spd, 380, 780, 5)
+    cmf_5nm = filter_to_range(cmf, 380, 780, 5)
+    
+    print(f"Data points used: {len(spd_5nm)} SPD, {len(cmf_5nm)} CMF")
+    print(f"Wavelengths: 380, 385, 390, ... 780nm")
+    print()
+    
+    X1, Y1, Z1, x1, y1 = derive_chromaticity_from_spd(spd_5nm, cmf_5nm, Decimal("5"))
+    print_result("Results (5nm intervals, 380-780nm):", X1, Y1, Z1, x1, y1)
+    
+    # =========================================================================
+    print_section("2. EXTENDED PRECISION: 380-780nm @ 1nm")
+    # =========================================================================
+    
+    spd_1nm_visible = filter_to_range(d65_spd, 380, 780, 1)
+    cmf_1nm_visible = filter_to_range(cmf, 380, 780, 1)
+    
+    print(f"Data points used: {len(spd_1nm_visible)} SPD, {len(cmf_1nm_visible)} CMF")
+    print()
+    
+    X2, Y2, Z2, x2, y2 = derive_chromaticity_from_spd(
+        spd_1nm_visible, cmf_1nm_visible, Decimal("1")
+    )
+    print_result("Results (1nm intervals, 380-780nm):", X2, Y2, Z2, x2, y2)
+    
+    # =========================================================================
+    print_section("3. FULL RANGE: 360-830nm @ 1nm")
     # =========================================================================
     
     common_range = sorted(set(d65_spd.keys()) & set(cmf.keys()))
-    print(f"Overlapping wavelength range: {min(common_range)}-{max(common_range)}nm")
-    print(f"Integration step: 1nm")
+    print(f"Data points used: {len(common_range)} (overlap of SPD and CMF)")
+    print(f"Wavelength range: {min(common_range)}-{max(common_range)}nm")
     print()
     
-    X, Y, Z, x, y = derive_chromaticity_from_spd(d65_spd, cmf, Decimal("1"))
-    
-    print("TRISTIMULUS VALUES (Y normalized to 100):")
-    print(f"  X = {X}")
-    print(f"  Y = {Y}")
-    print(f"  Z = {Z}")
-    print()
-    
-    print("CHROMATICITY COORDINATES (full precision):")
-    print(f"  x = {x}")
-    print(f"  y = {y}")
-    print()
-    
-    print("COMPARISON WITH OFFICIAL CIE VALUES:")
-    print(f"  Official CIE:  x = {CIE_D65_X}, y = {CIE_D65_Y}")
-    print(f"  Derived:       x = {float(x):.10f}, y = {float(y):.10f}")
-    print()
-    
-    delta_x = (x - CIE_D65_X) * Decimal("1e5")
-    delta_y = (y - CIE_D65_Y) * Decimal("1e5")
-    print(f"  Difference (×10⁻⁵):")
-    print(f"    Δx = {float(delta_x):+.4f}")
-    print(f"    Δy = {float(delta_y):+.4f}")
+    X3, Y3, Z3, x3, y3 = derive_chromaticity_from_spd(d65_spd, cmf, Decimal("1"))
+    print_result("Results (1nm intervals, full range):", X3, Y3, Z3, x3, y3)
     
     # =========================================================================
-    print_section("2. INTEGRATION OVER STANDARD VISIBLE RANGE (380-780nm)")
+    print_section("4. COMPARISON SUMMARY")
     # =========================================================================
     
-    print("Many implementations use 380-780nm. Testing this range...")
+    print(f"{'Configuration':<35} {'x':<16} {'y':<16} {'Δx×10⁻⁵':<10} {'Δy×10⁻⁵':<10}")
+    print("-" * 87)
+    print(f"{'Official CIE 15:2004':<35} {float(CIE_D65_X):<16.5f} {float(CIE_D65_Y):<16.5f} {'—':^10} {'—':^10}")
+    
+    configs = [
+        ("380-780nm @ 5nm (Table T.3)", x1, y1),
+        ("380-780nm @ 1nm", x2, y2),
+        ("360-830nm @ 1nm (full)", x3, y3),
+    ]
+    
+    for label, x, y in configs:
+        dx = float((x - CIE_D65_X) * Decimal("1e5"))
+        dy = float((y - CIE_D65_Y) * Decimal("1e5"))
+        print(f"{label:<35} {float(x):<16.10f} {float(y):<16.10f} {dx:+10.4f} {dy:+10.4f}")
+    
     print()
-    
-    spd_380_780 = {k: v for k, v in d65_spd.items() if 380 <= k <= 780}
-    cmf_380_780 = {k: v for k, v in cmf.items() if 380 <= k <= 780}
-    
-    X2, Y2, Z2, x2, y2 = derive_chromaticity_from_spd(spd_380_780, cmf_380_780, Decimal("1"))
-    
-    print("TRISTIMULUS VALUES (380-780nm):")
-    print(f"  X = {X2}")
-    print(f"  Y = {Y2}")
-    print(f"  Z = {Z2}")
+    print("Tristimulus comparison:")
     print()
-    
-    print("CHROMATICITY COORDINATES (380-780nm):")
-    print(f"  x = {float(x2):.15f}")
-    print(f"  y = {float(y2):.15f}")
-    print()
-    
-    delta_x2 = (x2 - CIE_D65_X) * Decimal("1e5")
-    delta_y2 = (y2 - CIE_D65_Y) * Decimal("1e5")
-    print(f"  Difference from official (×10⁻⁵):")
-    print(f"    Δx = {float(delta_x2):+.4f}")
-    print(f"    Δy = {float(delta_y2):+.4f}")
-    print()
-    
-    range_diff_x = (x2 - x) * Decimal("1e5")
-    range_diff_y = (y2 - y) * Decimal("1e5")
-    print(f"  Difference from full-range result (×10⁻⁵):")
-    print(f"    Δx = {float(range_diff_x):+.4f}")
-    print(f"    Δy = {float(range_diff_y):+.4f}")
+    print(f"{'Configuration':<35} {'X':<12} {'Y':<12} {'Z':<12}")
+    print("-" * 71)
+    print(f"{'Official CIE 15:2004':<35} {float(CIE_D65_X_TRIST):<12.2f} {float(CIE_D65_Y_TRIST):<12.2f} {float(CIE_D65_Z_TRIST):<12.2f}")
+    print(f"{'380-780nm @ 5nm (Table T.3)':<35} {float(X1):<12.4f} {float(Y1):<12.4f} {float(Z1):<12.4f}")
+    print(f"{'380-780nm @ 1nm':<35} {float(X2):<12.4f} {float(Y2):<12.4f} {float(Z2):<12.4f}")
+    print(f"{'360-830nm @ 1nm (full)':<35} {float(X3):<12.4f} {float(Y3):<12.4f} {float(Z3):<12.4f}")
     
     # =========================================================================
-    print_section("3. TEMPERATURE SCALE ANALYSIS")
+    print_section("5. TEMPERATURE SCALE ANALYSIS")
     # =========================================================================
-    
-    print("Testing the daylight locus polynomial at various temperatures...")
-    print()
     
     t_1931 = Decimal("6500")
     t_its90 = t_1931 * (C2_ITS90 / C2_OLD)
     
-    print(f"Temperature conversion:")
-    print(f"  T_1931  = {t_1931}K (nominal)")
-    print(f"  T_ITS90 = {t_its90}K")
-    print(f"  Ratio   = {C2_ITS90 / C2_OLD}")
+    print(f"D65 nominal temperature: {t_1931}K (1931 scale)")
+    print(f"Converted to ITS-90:     {t_its90}K")
     print()
     
     temps = [
-        (t_1931, "6500K (nominal 1931)"),
-        (t_its90, "6503.62K (ITS-90 converted)"),
-        (Decimal("6504"), "6504K (commonly rounded)"),
+        (t_1931, "6500K (nominal)"),
+        (t_its90, "6503.62K (ITS-90)"),
+        (Decimal("6504"), "6504K (rounded)"),
     ]
     
-    print(f"{'Temperature':<30} {'x':<20} {'y':<20} {'Δx (×10⁻⁵)':<12} {'Δy (×10⁻⁵)':<12}")
-    print("-" * 94)
+    print(f"{'Temperature':<25} {'x':<18} {'y':<18} {'Δx×10⁻⁵':<10} {'Δy×10⁻⁵':<10}")
+    print("-" * 81)
     
     for temp, label in temps:
         xp, yp = daylight_locus_chromaticity(temp)
         dx = (xp - CIE_D65_X) * Decimal("1e5")
         dy = (yp - CIE_D65_Y) * Decimal("1e5")
-        print(f"{label:<30} {float(xp):.12f}   {float(yp):.12f}   {float(dx):+8.2f}     {float(dy):+8.2f}")
+        print(f"{label:<25} {float(xp):<18.12f} {float(yp):<18.12f} {float(dx):+10.2f} {float(dy):+10.2f}")
     
     # =========================================================================
-    print_section("4. PRECISION SUMMARY")
+    print_section("6. DATA VERIFICATION")
     # =========================================================================
     
-    print("SUMMARY OF DERIVATION RESULTS:")
-    print()
-    print(f"{'Method':<50} {'x':<18} {'y':<18}")
-    print("-" * 86)
-    print(f"{'Official CIE D65':<50} {float(CIE_D65_X):<18.5f} {float(CIE_D65_Y):<18.5f}")
-    print(f"{'From 1nm SPD (full range)':<50} {float(x):<18.15f} {float(y):<18.15f}")
-    print(f"{'From 1nm SPD (380-780nm)':<50} {float(x2):<18.15f} {float(y2):<18.15f}")
-    xp, yp = daylight_locus_chromaticity(t_its90)
-    print(f"{'From polynomial (6503.62K ITS-90)':<50} {float(xp):<18.15f} {float(yp):<18.15f}")
+    print("Spot checks:")
     print()
     
-    print("KEY FINDINGS:")
-    print()
-    print("  1. The 1nm integration yields:")
-    print(f"     x = {float(x):.10f} (official: 0.31272)")
-    print(f"     y = {float(y):.10f} (official: 0.32903)")
-    print()
-    print(f"  2. Difference from official values:")
-    print(f"     Δx = {float(delta_x):+.4f} × 10⁻⁵")
-    print(f"     Δy = {float(delta_y):+.4f} × 10⁻⁵")
-    print()
-    print("  3. The official values (0.31272, 0.32903) are rounded to 5 decimal places")
-    print("     from the high-precision integration result.")
-    
-    # =========================================================================
-    print_section("5. DATA VERIFICATION")
-    # =========================================================================
-    
-    print("Verifying source data integrity...")
-    print()
-    print(f"D65 SPD data points: {len(d65_spd)} ({min(d65_spd.keys())}-{max(d65_spd.keys())}nm)")
-    print(f"CMF data points:     {len(cmf)} ({min(cmf.keys())}-{max(cmf.keys())}nm)")
-    print()
-    
-    # Spot check key values
-    print("Spot check of tabulated values:")
-    print()
     if 560 in d65_spd:
-        print(f"D65 SPD at 560nm (normalization point): {d65_spd[560]} (should be 100.000)")
+        print(f"  D65 SPD at 560nm: {d65_spd[560]} (should be 100.000)")
     if 450 in d65_spd:
-        print(f"D65 SPD at 450nm: {d65_spd[450]} (table: 117.008)")
-    print()
+        print(f"  D65 SPD at 450nm: {d65_spd[450]} (table: 117.008)")
     if 555 in cmf:
-        print(f"CMF ȳ(λ) at 555nm (peak): {cmf[555].y_bar} (should be 1.0)")
-    if 600 in cmf:
-        print(f"CMF x̄(λ) at 600nm: {cmf[600].x_bar}")
+        print(f"  CMF ȳ at 555nm:   {cmf[555].y_bar} (should be 1.0)")
+    
+    print()
+    print("5nm sample wavelengths in 380-780nm range:")
+    sample_5nm = [380, 400, 500, 555, 600, 700, 780]
+    for wl in sample_5nm:
+        if wl in spd_5nm and wl in cmf_5nm:
+            print(f"  {wl}nm: SPD={spd_5nm[wl]}, x̄={cmf_5nm[wl].x_bar:.6f}")
 
 
 if __name__ == "__main__":
