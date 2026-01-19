@@ -1562,9 +1562,9 @@
                                'MixedStandard', 'MixedSerpentine', 'MixedRandom', 'None'];
             const spaceNames = ['LabCie76', 'Oklab', 'LabCie94', 'LabCiede2000', 'LinearRgb', 'YCbCr'];
 
-            // Get input filename for name field (strip extension)
-            const inputFile = document.getElementById('file-input').files[0];
-            const name = inputFile ? inputFile.name.replace(/\.[^/.]+$/, '') : 'image';
+            // Name matches output filename (without extension)
+            const ts = processTimestamp || Date.now();
+            const name = `cra_${ts}_${lastDitherResult.width}x${lastDitherResult.height}_${format}`;
 
             // Calculate raw output size (matches CLI calculation)
             const bitsPerPixel = format_total_bits_wasm(format);
