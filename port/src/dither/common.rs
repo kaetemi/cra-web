@@ -30,6 +30,10 @@ pub enum PerceptualSpace {
     /// Luma-chroma separation using BT.709 coefficients on gamma-encoded values.
     /// Not perceptually uniform - provided for testing and comparison purposes only
     YCbCr,
+    /// sRGB with Euclidean distance (NOT RECOMMENDED)
+    /// Simple Euclidean distance in gamma-encoded sRGB space.
+    /// Not perceptually uniform - provided for testing and comparison purposes only
+    Srgb,
 }
 
 /// Output dithering technique selection

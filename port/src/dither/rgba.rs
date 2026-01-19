@@ -16,7 +16,7 @@ use crate::color::{
     linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{
-    is_lab_space, is_linear_rgb_space, is_ycbcr_space, perceptual_distance_sq,
+    is_lab_space, is_linear_rgb_space, is_srgb_space, is_ycbcr_space, perceptual_distance_sq,
 };
 use super::basic::dither_with_mode_bits;
 use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
@@ -119,7 +119,10 @@ fn build_perceptual_lut(
                 let b_ext = quant.level_values[b_level];
                 let b_lin = linear_lut[b_ext as usize];
 
-                let (l, a, b_ch) = if is_linear_rgb_space(space) {
+                let (l, a, b_ch) = if is_srgb_space(space) {
+                    // sRGB mode: use gamma-encoded values (normalized 0-1)
+                    (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
+                } else if is_linear_rgb_space(space) {
                     (r_lin, g_lin, b_lin)
                 } else if is_ycbcr_space(space) {
                     linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
@@ -523,7 +526,10 @@ fn process_pixel_rgba(
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
     // 6. Convert target to perceptual space (use unclamped for true distance)
-    let lab_target = if is_linear_rgb_space(ctx.space) {
+    let lab_target = if is_srgb_space(ctx.space) {
+        // sRGB mode: use gamma-encoded values directly (normalized 0-1)
+        (srgb_r_adj / 255.0, srgb_g_adj / 255.0, srgb_b_adj / 255.0)
+    } else if is_linear_rgb_space(ctx.space) {
         (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.space) {
         linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
@@ -555,7 +561,10 @@ fn process_pixel_rgba(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = if is_linear_rgb_space(ctx.space) {
+                    let (l, a, b_ch) = if is_srgb_space(ctx.space) {
+                        // sRGB mode: use gamma-encoded values (normalized 0-1)
+                        (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
+                    } else if is_linear_rgb_space(ctx.space) {
                         (r_lin, g_lin, b_lin)
                     } else if is_ycbcr_space(ctx.space) {
                         linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)

@@ -19,7 +19,7 @@ use crate::color::{
     linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{
-    is_lab_space, is_linear_rgb_space, is_ycbcr_space, perceptual_distance_sq,
+    is_lab_space, is_linear_rgb_space, is_srgb_space, is_ycbcr_space, perceptual_distance_sq,
 };
 
 // Re-export common types for backwards compatibility
@@ -129,9 +129,10 @@ struct LabValue {
     b: f32,
 }
 
-/// Build Lab/OkLab/LinearRGB LUT indexed by (r_level, g_level, b_level)
+/// Build Lab/OkLab/LinearRGB/sRGB LUT indexed by (r_level, g_level, b_level)
 /// Returns a flat Vec where index = r_level * num_levels^2 + g_level * num_levels + b_level
 /// For LinearRGB mode, stores linear R/G/B values in the l/a/b fields
+/// For sRGB mode, stores gamma-encoded R/G/B values in the l/a/b fields
 fn build_perceptual_lut(
     quant: &PerceptualQuantParams,
     linear_lut: &[f32; 256],
@@ -152,7 +153,10 @@ fn build_perceptual_lut(
                 let b_ext = quant.level_values[b_level];
                 let b_lin = linear_lut[b_ext as usize];
 
-                let (l, a, b_ch) = if is_linear_rgb_space(space) {
+                let (l, a, b_ch) = if is_srgb_space(space) {
+                    // Store gamma-encoded sRGB values directly (normalized to 0-1)
+                    (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
+                } else if is_linear_rgb_space(space) {
                     // Store linear RGB values directly (no perceptual conversion)
                     (r_lin, g_lin, b_lin)
                 } else if is_ycbcr_space(space) {
@@ -917,8 +921,12 @@ fn process_pixel(
     let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to Lab/OkLab/LinearRGB/YCbCr (use unclamped for true distance)
-    let lab_target = if is_linear_rgb_space(ctx.space) {
+    // 5. Convert target to Lab/OkLab/LinearRGB/YCbCr/sRGB (use unclamped for true distance)
+    let lab_target = if is_srgb_space(ctx.space) {
+        // sRGB mode: use gamma-encoded values directly (normalized 0-1)
+        // Convert linear back to sRGB for comparison (clamped for valid range)
+        (srgb_r_adj / 255.0, srgb_g_adj / 255.0, srgb_b_adj / 255.0)
+    } else if is_linear_rgb_space(ctx.space) {
         // Linear RGB mode: use linear values directly
         (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.space) {
@@ -954,7 +962,10 @@ fn process_pixel(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = if is_linear_rgb_space(ctx.space) {
+                    let (l, a, b_ch) = if is_srgb_space(ctx.space) {
+                        // sRGB mode: use gamma-encoded values (normalized 0-1)
+                        (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
+                    } else if is_linear_rgb_space(ctx.space) {
                         (r_lin, g_lin, b_lin)
                     } else if is_ycbcr_space(ctx.space) {
                         linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
