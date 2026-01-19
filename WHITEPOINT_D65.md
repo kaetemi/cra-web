@@ -45,11 +45,13 @@ For D65 using the tabulated SPD (Appendix A) and the CIE 1931 observer:
 
 | Value | Result |
 |-------|--------|
-| X | 95.04 |
-| Y | 100.00 |
-| Z | 108.88 |
-| x | 0.31272 |
-| y | 0.32903 |
+| X | 95.0433 |
+| Y | 100.0000 |
+| Z | 108.8801 |
+| x | 0.3127212427 |
+| y | 0.3290303382 |
+
+Rounded to 5 decimal places: **(0.31272, 0.32903)** ✓
 
 ---
 
@@ -135,7 +137,7 @@ Once chromaticity (x_D, y_D) is determined, the relative spectral power distribu
 S(λ) = S₀(λ) + M₁·S₁(λ) + M₂·S₂(λ)
 ```
 
-Where S₀(λ), S₁(λ), S₂(λ) are the daylight basis functions (Appendix B), and M₁, M₂ are coefficients derived from the chromaticity:
+Where S₀(λ), S₁(λ), S₂(λ) are the daylight basis functions (Appendix B), and M₁, M₂ are coefficients derived from the chromaticity (CIE 15:2004 Equation 3.6):
 
 ```
 M₁ = (-1.3515 - 1.7703x_D + 5.9114y_D) / (0.0241 + 0.2562x_D - 0.7341y_D)
@@ -145,9 +147,30 @@ M₂ = (0.0300 - 31.4424x_D + 30.0717y_D) / (0.0241 + 0.2562x_D - 0.7341y_D)
 
 **For D65** (x_D = 0.31272, y_D = 0.32903):
 ```
-M₁ ≈ 0.01266
-M₂ ≈ 0.00000 (effectively zero by design)
+M₁ = -0.2907
+M₂ = -0.6687
 ```
+
+### 4.5 Verification: Reconstructed SPD vs. Tabulated D65
+
+Using M₁ = -0.2907, M₂ = -0.6687 to reconstruct the D65 SPD:
+
+| λ (nm) | Tabulated | Reconstructed | Δ |
+|--------|-----------|---------------|--------|
+| 380 | 49.9755 | 50.2020 | +0.2265 |
+| 400 | 82.7549 | 82.9191 | +0.1642 |
+| 450 | 117.0080 | 117.1030 | +0.0950 |
+| 500 | 109.3540 | 109.3937 | +0.0397 |
+| 550 | 104.0460 | 104.0483 | +0.0023 |
+| 560 | 100.0000 | 100.0000 | +0.0000 |
+| 600 | 90.0062 | 90.0463 | +0.0401 |
+| 650 | 80.0268 | 80.1292 | +0.1024 |
+| 700 | 71.6091 | 71.7470 | +0.1379 |
+| 780 | 63.3828 | 63.4763 | +0.0935 |
+
+Maximum difference: +0.23 at 380nm. The M coefficients correctly reconstruct D65 to within 0.3 units across the visible spectrum.
+
+The small differences are due to rounding in the tabulated values, which CIE 15:2004 Note 4 explicitly acknowledges.
 
 ---
 
@@ -274,7 +297,40 @@ Several factors contribute:
 
 ---
 
-## 11. High-Precision Reference Values
+## 11. The Complete Derivation Chain
+
+The D65 chromaticity can be derived through multiple paths:
+
+### Path A: SPD → Integration → Chromaticity (AUTHORITATIVE)
+```
+D65 SPD (Table T.1) → integrate with CIE 1931 CMFs → X,Y,Z → (0.31272, 0.32903)
+```
+
+### Path B: Temperature → Polynomial → Chromaticity
+```
+6500K (1931) → 6503.62K (ITS-90) → x(T) polynomial → y(x) quadratic → (0.31272, 0.32913)
+```
+Note: ~9.5×10⁻⁵ y error from quadratic approximation.
+
+### Path C: Temperature → Chromaticity → M₁,M₂ → Basis → SPD
+```
+6503.62K → (x,y) → M₁,M₂ → S₀ + M₁·S₁ + M₂·S₂ → reconstructed SPD
+```
+
+### Verification of Paths
+
+| Method | x | y |
+|--------|---|---|
+| Official CIE D65 | 0.31272 | 0.32903 |
+| From tabulated SPD (Path A) | 0.3127212427 | 0.3290303382 |
+| From polynomial at 6503.62K (Path B) | 0.3127202733 | 0.3291252763 |
+| From reconstructed SPD via M₁,M₂ (Path C) | 0.3127089233 | 0.3289234905 |
+
+**Path A (tabulated SPD) is authoritative.** Paths B and C are computational tools for interpolation and arbitrary D-illuminant generation.
+
+---
+
+## 12. High-Precision Reference Values
 
 ### Radiation Constants (CIE 15:2004 Appendix E)
 
@@ -303,6 +359,15 @@ Several factors contribute:
 | D65 | 0.31272 | 0.32903 |
 | D75 | 0.29902 | 0.31485 |
 
+### M₁, M₂ Coefficients for Canonical Illuminants
+
+| Illuminant | M₁ | M₂ |
+|------------|--------|--------|
+| D50 | 0.0459 | -0.0270 |
+| D55 | -0.1178 | -0.3418 |
+| D65 | -0.2907 | -0.6687 |
+| D75 | -0.4537 | -0.9746 |
+
 ### Chromaticity at Key Temperatures (D65)
 
 | Temperature | x | y |
@@ -315,7 +380,7 @@ Several factors contribute:
 
 ---
 
-## 12. Practical Recommendations
+## 13. Practical Recommendations
 
 ### For Software Implementations
 
@@ -345,7 +410,7 @@ All errors discussed are in the 5th decimal place (10⁻⁵), far below any perc
 
 ---
 
-## 13. Summary
+## 14. Summary
 
 | Item | Temperature Scale | Notes |
 |------|------------------|-------|
