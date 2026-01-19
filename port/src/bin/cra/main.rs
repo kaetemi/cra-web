@@ -1317,8 +1317,9 @@ fn main() -> Result<(), String> {
     };
 
     let needs_tonemapping = args.tonemapping.is_some() || args.input_tonemapping.is_some();
+    let needs_exposure = args.exposure.is_some();
     let needs_linear = needs_reference || needs_resize || is_grayscale_format
-        || needs_profile_processing || needs_unpremultiply || needs_tonemapping;
+        || needs_profile_processing || needs_unpremultiply || needs_tonemapping || needs_exposure;
 
     // Track effective safetensors settings for metadata
     let mut safetensors_meta: Option<SafetensorsMetadata> = None;
@@ -1420,7 +1421,14 @@ fn main() -> Result<(), String> {
                 None
             };
 
-            // Step 3: Apply tonemapping to grayscale
+            // Step 3: Apply exposure (linear multiplier)
+            let linear_gray = if let Some(exp) = args.exposure {
+                linear_gray.iter().map(|&l| l * exp).collect()
+            } else {
+                linear_gray
+            };
+
+            // Step 4: Apply tonemapping to grayscale
             let linear_gray = if let Some(tm) = args.tonemapping {
                 match tm {
                     Tonemapping::Aces => linear_gray.iter().map(|&l| tonemap_aces_single(l)).collect(),
@@ -1430,7 +1438,7 @@ fn main() -> Result<(), String> {
                 linear_gray
             };
 
-            // Step 4: Write safetensors output (grayscale as R=G=B=L)
+            // Step 5: Write safetensors output (grayscale as R=G=B=L)
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && alpha.is_some();
                 let transfer = match args.safetensors_transfer {
@@ -1444,7 +1452,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 5: Dither grayscale
+            // Step 6: Dither grayscale
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
 
@@ -1480,9 +1488,18 @@ fn main() -> Result<(), String> {
                 None
             }
         } else {
-            // RGB PATH: Tonemapping, then safetensors, then dither
+            // RGB PATH: Exposure, tonemapping, then safetensors, then dither
 
-            // Step 1: Apply tonemapping to RGB
+            // Step 1: Apply exposure (linear multiplier)
+            let pixels_to_dither = if let Some(exp) = args.exposure {
+                pixels_to_dither.iter()
+                    .map(|p| Pixel4::new(p[0] * exp, p[1] * exp, p[2] * exp, p[3]))
+                    .collect()
+            } else {
+                pixels_to_dither
+            };
+
+            // Step 2: Apply tonemapping to RGB
             let pixels_to_dither = if let Some(tm) = args.tonemapping {
                 let mut p = pixels_to_dither;
                 match tm {
@@ -1494,7 +1511,7 @@ fn main() -> Result<(), String> {
                 pixels_to_dither
             };
 
-            // Step 2: Write safetensors output
+            // Step 3: Write safetensors output
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
                 let transfer = match args.safetensors_transfer {
@@ -1508,7 +1525,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 3: Dither RGB
+            // Step 4: Dither RGB
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
                 let result = dither_pixels_rgb(

@@ -483,9 +483,14 @@ pub struct Args {
     #[arg(long, value_enum)]
     pub input_tonemapping: Option<Tonemapping>,
 
-    /// Output tonemapping: applied before grayscale (aces-inverse) or after grayscale (aces)
+    /// Output tonemapping: applied after grayscale conversion (for grayscale output) or to RGB (for RGB output)
     #[arg(long, value_enum)]
     pub tonemapping: Option<Tonemapping>,
+
+    /// Exposure adjustment (linear multiplier, applied before tonemapping)
+    /// Values > 1.0 brighten, < 1.0 darken. Example: 2.0 = +1 stop, 0.5 = -1 stop
+    #[arg(long)]
+    pub exposure: Option<f32>,
 
     /// Disable automatic uniform scaling detection
     ///

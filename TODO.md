@@ -22,6 +22,6 @@ Currently binned histogram matching doesn't work correctly when the input file i
 
 ---
 
-- For tonemapping, need both an input and output tonemapping stage (so we can tonemap going into color correction, and then reverse tonemap going back to linear space, theoretically -- this is not technically correct, but a practical option for binned histogram matching of "unbounded" linear RGB)
-- Additionally, have an option to enable supersampling the tonemapping, meaning, the image gets lanczos upscaled before and downscaled after the actual tonemapping function is applied. This more accurately applies the tonemapping in physical source light space, and samples the image in physical display space.
-- Option --tonemapping would be applied somewhere before histogram matching, option --output-tonemapping would be applied after the histogram matching
+Theoretically, we would need a premultiplied alpha pipeline in parallel to the regular alpha pipeline
+See https://openexr.com/en/latest/test_images/ScanLines/CandleGlass.html
+This image file uses "0 alpha" to mean pure additive blending

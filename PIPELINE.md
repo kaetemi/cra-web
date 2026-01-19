@@ -117,7 +117,7 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Grayscale (opt) → Tonemap (opt) → Safetensors (opt) → sRGB Encode → Dither
+CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Grayscale (opt) → Exposure (opt) → Tonemap (opt) → Safetensors (opt) → sRGB Encode → Dither
 ```
 
 ### 3.0 Un-premultiply Alpha
@@ -150,18 +150,35 @@ Color correction matches the input image's color distribution to a reference ima
 
 See [Section 4: Color Correction Methods](#4-color-correction-methods) for algorithm details.
 
-### 3.3 Tonemapping
+### 3.3 Exposure
+
+**`--exposure`**: A linear multiplier applied to light values, placed after grayscale conversion (if applicable) and before tonemapping. This is the standard "exposure" control found in photo editing software.
+
+```
+R' = R × exposure
+G' = G × exposure
+B' = B × exposure
+```
+
+- Values > 1.0 brighten the image
+- Values < 1.0 darken the image
+- 2.0 = +1 stop (doubles light)
+- 0.5 = -1 stop (halves light)
+
+Exposure is applied in linear space where the multiplication is physically meaningful—it directly scales the light intensity.
+
+### 3.4 Tonemapping
 
 Tonemapping adjusts the dynamic range of images using the ACES (Academy Color Encoding System) filmic curve. Two tonemapping options are available:
 
 **`--input-tonemapping`**: Applied immediately after loading/un-premultiplying, **before** resize and histogram matching. Use this to adjust dynamic range early in the pipeline.
 
-**`--tonemapping`**: Applied after grayscale conversion (if grayscale output) or to RGB (if RGB output), **before** safetensors output and dithering. Both variants are applied at the same point:
+**`--tonemapping`**: Applied after grayscale conversion and exposure (if specified), **before** safetensors output and dithering. Both variants are applied at the same point:
 - `aces`: Compresses dynamic range (HDR → SDR)
 - `aces-inverse`: Expands dynamic range (SDR → HDR approximation)
 
-For grayscale output, the pipeline is: RGB → Grayscale → Tonemapping → Safetensors → Dither
-For RGB output, the pipeline is: RGB → Tonemapping → Safetensors → Dither
+For grayscale output, the pipeline is: RGB → Grayscale → Exposure → Tonemapping → Safetensors → Dither
+For RGB output, the pipeline is: Exposure → Tonemapping → Safetensors → Dither
 
 **ACES Tonemapping Curve**:
 ```
@@ -171,7 +188,7 @@ inverse(y) = (-0.03 + 0.59y + √(4 × 0.14y × (2.51 - 2.43y) + (0.03 - 0.59y)�
 
 The forward curve maps HDR values to the [0, 1] SDR range with a characteristic film-like shoulder rolloff. The inverse approximates the reverse mapping.
 
-### 3.4 Grayscale Conversion
+### 3.5 Grayscale Conversion
 
 If grayscale output is requested, luminance is extracted using Rec.709 coefficients:
 
@@ -181,7 +198,7 @@ Y = 0.2126 R + 0.7152 G + 0.0722 B
 
 This is done in linear space where the coefficients are physically meaningful (they represent the eye's sensitivity to each primary).
 
-### 3.5 sRGB Encode
+### 3.6 sRGB Encode
 
 After linear processing, values are converted back to sRGB using the standard transfer function:
 
@@ -358,6 +375,12 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    │
                                    ▼
                          Luminance (Y = Rec.709)
+                                   │
+                                   ▼
+                            [Exposure?]
+                                   │
+                                   ▼
+                        Linear multiply (×exp)
                                    │
                                    ▼
                             [Tonemap?]
