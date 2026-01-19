@@ -25,3 +25,15 @@ Currently binned histogram matching doesn't work correctly when the input file i
 Theoretically, we would need a premultiplied alpha pipeline in parallel to the regular alpha pipeline
 See https://openexr.com/en/latest/test_images/ScanLines/CandleGlass.html
 This image file uses "0 alpha" to mean pure additive blending
+
+---
+
+We could theoretically do Bayer dithering with linear/sRGB awareness, by plotting all the quantized sRGB values in linear space, and then interpolating the intermediate values in linear space (as the dithering affects linear light emission -- it does not align with the gamma function)
+
+---
+
+Add exr loading to web somehow if possible.
+
+---
+
+Tga saving with different formats?
