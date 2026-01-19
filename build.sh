@@ -25,7 +25,7 @@ export RUSTFLAGS='-C target-feature=+simd128'
 cd "$SCRIPT_DIR/dither"
 wasm-pack build --target web --release
 cd "$SCRIPT_DIR/port"
-wasm-pack build --target web --out-dir pkg
+wasm-pack build --target web --release --out-dir pkg
 cd "$SCRIPT_DIR"
 echo "WASM build complete (with SIMD enabled)."
 

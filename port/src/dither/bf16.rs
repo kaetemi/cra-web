@@ -112,6 +112,7 @@ fn srgb_to_linear(srgb: f32) -> f32 {
 
 /// Convert linear f32 to sRGB f32 (0-1)
 #[inline]
+#[allow(dead_code)]
 fn linear_to_srgb(linear: f32) -> f32 {
     linear_to_srgb_single(linear)
 }

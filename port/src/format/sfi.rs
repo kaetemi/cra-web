@@ -85,6 +85,7 @@ impl SfiPrimaries {
         }
     }
 
+    #[allow(dead_code)]
     fn as_str(&self) -> &'static str {
         match self {
             SfiPrimaries::Unspecified => "unspecified",
@@ -170,6 +171,7 @@ impl SfiDimensionOrder {
         }
     }
 
+    #[allow(dead_code)]
     fn as_str(&self) -> &'static str {
         match self {
             SfiDimensionOrder::Hwc => "HWC",
