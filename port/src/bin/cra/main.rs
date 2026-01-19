@@ -15,10 +15,10 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use cra_wasm::binary_format::{
-    encode_argb_packed, encode_argb_row_aligned_stride,
-    encode_channel_from_interleaved_row_aligned_stride, encode_gray_packed,
-    encode_gray_row_aligned_stride, encode_la_packed, encode_la_row_aligned_stride,
-    encode_rgb_packed, encode_rgb_row_aligned_stride,
+    encode_argb_row_aligned_stride,
+    encode_channel_from_interleaved_row_aligned_stride,
+    encode_gray_row_aligned_stride, encode_la_row_aligned_stride,
+    encode_rgb_row_aligned_stride,
     is_valid_stride, ColorFormat, StrideFill, RawImageMetadata,
 };
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
@@ -590,56 +590,36 @@ fn dither_pixels_srgb_rgb(
     }
 }
 
-/// Encode dithered pixels to binary format
+/// Encode dithered pixels to binary format (always row-aligned)
+/// Each row is byte-aligned at minimum, with optional stride padding for hardware alignment.
+/// There is no use case for "packed" encoding where rows continue from the previous row
+/// without byte alignment - such output would be impractical for embedded/hardware use.
 fn encode_binary(
     result: &DitherResult,
     format: &ColorFormat,
     width: usize,
     height: usize,
-    row_aligned: bool,
     stride: usize,
     fill: StrideFill,
 ) -> Vec<u8> {
     if result.is_grayscale && result.has_alpha {
         // LA format: grayscale with alpha (Alpha in MSB, Luminosity in LSB)
-        if row_aligned {
-            encode_la_row_aligned_stride(
-                &result.interleaved, width, height, format.bits_r, format.bits_a, stride, fill,
-            )
-        } else {
-            encode_la_packed(
-                &result.interleaved, width, height, format.bits_r, format.bits_a,
-            )
-        }
+        encode_la_row_aligned_stride(
+            &result.interleaved, width, height, format.bits_r, format.bits_a, stride, fill,
+        )
     } else if result.is_grayscale {
         // Pure grayscale format
-        if row_aligned {
-            encode_gray_row_aligned_stride(&result.interleaved, width, height, format.bits_r, stride, fill)
-        } else {
-            encode_gray_packed(&result.interleaved, width, height, format.bits_r)
-        }
+        encode_gray_row_aligned_stride(&result.interleaved, width, height, format.bits_r, stride, fill)
     } else if result.has_alpha {
         // ARGB format (hardware ordering: A in MSB, R, G, B toward LSB)
-        if row_aligned {
-            encode_argb_row_aligned_stride(
-                &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b, stride, fill,
-            )
-        } else {
-            encode_argb_packed(
-                &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b,
-            )
-        }
+        encode_argb_row_aligned_stride(
+            &result.interleaved, width, height, format.bits_a, format.bits_r, format.bits_g, format.bits_b, stride, fill,
+        )
     } else {
         // RGB format
-        if row_aligned {
-            encode_rgb_row_aligned_stride(
-                &result.interleaved, width, height, format.bits_r, format.bits_g, format.bits_b, stride, fill,
-            )
-        } else {
-            encode_rgb_packed(
-                &result.interleaved, width, height, format.bits_r, format.bits_g, format.bits_b, fill,
-            )
-        }
+        encode_rgb_row_aligned_stride(
+            &result.interleaved, width, height, format.bits_r, format.bits_g, format.bits_b, stride, fill,
+        )
     }
 }
 
@@ -1654,36 +1634,33 @@ fn main() -> Result<(), String> {
             outputs.push(("png".to_string(), png_path.clone(), size));
         }
 
-        // Write binary output (respects --stride setting, default 1 = packed)
+        // Write binary output (always row-aligned, respects --stride for additional alignment)
         if let Some(ref bin_path) = args.output_raw {
             let fill = args.stride_fill.to_stride_fill();
-            let row_aligned = args.stride > 1;
 
             if args.verbose {
-                if row_aligned {
+                if args.stride > 1 {
                     eprintln!(
-                        "Writing binary (stride={}, fill={:?}): {}",
+                        "Writing binary (row-aligned, stride={}, fill={:?}): {}",
                         args.stride, args.stride_fill, bin_path.display()
                     );
                 } else {
-                    eprintln!("Writing binary (packed): {}", bin_path.display());
+                    eprintln!("Writing binary (row-aligned): {}", bin_path.display());
                 }
             }
 
-            let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, row_aligned, args.stride, fill);
+            let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, args.stride, fill);
 
             let mut file = File::create(bin_path)
                 .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
             file.write_all(&bin_data)
                 .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
-            let label = if row_aligned { "binary_row_aligned" } else { "binary_packed" };
-            outputs.push((label.to_string(), bin_path.clone(), bin_data.len()));
+            outputs.push(("binary".to_string(), bin_path.clone(), bin_data.len()));
         }
 
         // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
         let fill = args.stride_fill.to_stride_fill();
-        let row_aligned = args.stride > 1;
         let needs_rgb_channel_output = args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some();
         let num_channels = if dither_result.has_alpha { 4 } else { 3 };
 
@@ -1699,8 +1676,7 @@ fn main() -> Result<(), String> {
                     .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
                 file.write_all(&bin_data)
                     .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-                let label = if row_aligned { "binary_r_row_aligned" } else { "binary_r" };
-                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+                outputs.push(("binary_r".to_string(), path.clone(), bin_data.len()));
             }
 
             if let Some(ref path) = args.output_raw_g {
@@ -1714,8 +1690,7 @@ fn main() -> Result<(), String> {
                     .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
                 file.write_all(&bin_data)
                     .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-                let label = if row_aligned { "binary_g_row_aligned" } else { "binary_g" };
-                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+                outputs.push(("binary_g".to_string(), path.clone(), bin_data.len()));
             }
 
             if let Some(ref path) = args.output_raw_b {
@@ -1729,8 +1704,7 @@ fn main() -> Result<(), String> {
                     .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
                 file.write_all(&bin_data)
                     .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-                let label = if row_aligned { "binary_b_row_aligned" } else { "binary_b" };
-                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+                outputs.push(("binary_b".to_string(), path.clone(), bin_data.len()));
             }
         }
 
@@ -1747,8 +1721,7 @@ fn main() -> Result<(), String> {
                     .map_err(|e| format!("Failed to create {}: {}", path.display(), e))?;
                 file.write_all(&bin_data)
                     .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
-                let label = if row_aligned { "binary_a_row_aligned" } else { "binary_a" };
-                outputs.push((label.to_string(), path.clone(), bin_data.len()));
+                outputs.push(("binary_a".to_string(), path.clone(), bin_data.len()));
             } else {
                 eprintln!("Warning: --output-raw-a specified but input image has no alpha channel, skipping");
             }

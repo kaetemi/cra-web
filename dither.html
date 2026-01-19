@@ -1864,97 +1864,54 @@
             const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
             let rawData;
 
-            if (stride === 1) {
-                // Packed output
-                if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
-                    // LA format - grayscale with alpha
-                    rawData = encode_la_packed_wasm(
-                        lastDitherResult.laInterleaved,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR, // luminosity bits stored in bitsR
-                        lastDitherResult.bitsA
-                    );
-                } else if (lastDitherResult.isGrayscale) {
-                    rawData = encode_gray_packed_wasm(
-                        lastDitherResult.grayChannel,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR
-                    );
-                } else if (lastDitherResult.hasAlpha) {
-                    // ARGB format - use RGBA interleaved data
-                    rawData = encode_argb_packed_wasm(
-                        lastDitherResult.rgbaInterleaved,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsA,
-                        lastDitherResult.bitsR,
-                        lastDitherResult.bitsG,
-                        lastDitherResult.bitsB
-                    );
-                } else {
-                    // RGB format
-                    const rgbData = getRgbInterleaved();
-                    rawData = encode_rgb_packed_wasm(
-                        rgbData,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR,
-                        lastDitherResult.bitsG,
-                        lastDitherResult.bitsB,
-                        fill
-                    );
-                }
+            // Always use row-aligned output (each row byte-aligned, then optionally padded to stride)
+            // This ensures output matches metadata and is compatible with hardware/embedded use
+            if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                // LA format - grayscale with alpha
+                rawData = encode_la_row_aligned_stride_wasm(
+                    lastDitherResult.laInterleaved,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR, // luminosity bits stored in bitsR
+                    lastDitherResult.bitsA,
+                    stride,
+                    fill
+                );
+            } else if (lastDitherResult.isGrayscale) {
+                rawData = encode_gray_row_aligned_stride_wasm(
+                    lastDitherResult.grayChannel,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR,
+                    stride,
+                    fill
+                );
+            } else if (lastDitherResult.hasAlpha) {
+                // ARGB format - use RGBA interleaved data
+                rawData = encode_argb_row_aligned_stride_wasm(
+                    lastDitherResult.rgbaInterleaved,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsA,
+                    lastDitherResult.bitsR,
+                    lastDitherResult.bitsG,
+                    lastDitherResult.bitsB,
+                    stride,
+                    fill
+                );
             } else {
-                // Row-aligned output
-                if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
-                    // LA format - grayscale with alpha
-                    rawData = encode_la_row_aligned_stride_wasm(
-                        lastDitherResult.laInterleaved,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR, // luminosity bits stored in bitsR
-                        lastDitherResult.bitsA,
-                        stride,
-                        fill
-                    );
-                } else if (lastDitherResult.isGrayscale) {
-                    rawData = encode_gray_row_aligned_stride_wasm(
-                        lastDitherResult.grayChannel,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR,
-                        stride,
-                        fill
-                    );
-                } else if (lastDitherResult.hasAlpha) {
-                    // ARGB format - use RGBA interleaved data
-                    rawData = encode_argb_row_aligned_stride_wasm(
-                        lastDitherResult.rgbaInterleaved,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsA,
-                        lastDitherResult.bitsR,
-                        lastDitherResult.bitsG,
-                        lastDitherResult.bitsB,
-                        stride,
-                        fill
-                    );
-                } else {
-                    // RGB format
-                    const rgbData = getRgbInterleaved();
-                    rawData = encode_rgb_row_aligned_stride_wasm(
-                        rgbData,
-                        lastDitherResult.width,
-                        lastDitherResult.height,
-                        lastDitherResult.bitsR,
-                        lastDitherResult.bitsG,
-                        lastDitherResult.bitsB,
-                        stride,
-                        fill
-                    );
-                }
+                // RGB format
+                const rgbData = getRgbInterleaved();
+                rawData = encode_rgb_row_aligned_stride_wasm(
+                    rgbData,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    lastDitherResult.bitsR,
+                    lastDitherResult.bitsG,
+                    lastDitherResult.bitsB,
+                    stride,
+                    fill
+                );
             }
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
