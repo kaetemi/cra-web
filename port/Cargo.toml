@@ -1,6 +1,6 @@
 [package]
 name = "cra_wasm"
-version = "1.9.1"
+version = "1.9.2"
 edition = "2024"
 description = "Color correction algorithms ported to Rust/WASM"
 
