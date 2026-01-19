@@ -1349,7 +1349,8 @@
                 const bitsA = parseInt(document.getElementById('bits-gray-alpha').value);
                 // Use LA format when input has alpha and alpha bits > 0
                 if (inputHasAlpha && bitsA > 0) {
-                    return `LA${bitsL}${bitsA}`;
+                    // Shorthand when bits are equal (LA4 instead of LA44)
+                    return bitsL === bitsA ? `LA${bitsL}` : `LA${bitsL}${bitsA}`;
                 }
                 return `L${bitsL}`;
             } else {
@@ -1360,9 +1361,15 @@
 
                 // Use ARGB format when alpha is preserved (bitsA > 0 and input has alpha)
                 if (inputHasAlpha && bitsA > 0) {
-                    return `ARGB${bitsA}${bitsR}${bitsG}${bitsB}`;
+                    // Shorthand when all bits are equal (ARGB8 instead of ARGB8888)
+                    return (bitsA === bitsR && bitsR === bitsG && bitsG === bitsB)
+                        ? `ARGB${bitsA}`
+                        : `ARGB${bitsA}${bitsR}${bitsG}${bitsB}`;
                 } else {
-                    return `RGB${bitsR}${bitsG}${bitsB}`;
+                    // Shorthand when all bits are equal (RGB8 instead of RGB888)
+                    return (bitsR === bitsG && bitsG === bitsB)
+                        ? `RGB${bitsR}`
+                        : `RGB${bitsR}${bitsG}${bitsB}`;
                 }
             }
         }

@@ -84,8 +84,15 @@ impl ColorFormat {
 
             let total_bits = bits_l + bits_a;
 
+            // Use shorthand name when bits are equal (LA4 instead of LA44)
+            let name = if bits_l == bits_a {
+                format!("LA{}", bits_l)
+            } else {
+                format!("LA{}{}", bits_l, bits_a)
+            };
+
             return Ok(ColorFormat {
-                name: format_upper,
+                name,
                 is_grayscale: true, // LA is still grayscale-based
                 has_alpha: true,
                 bits_a,
@@ -171,8 +178,15 @@ impl ColorFormat {
 
             let total_bits = bits_a + bits_r + bits_g + bits_b;
 
+            // Use shorthand name when all bits are equal (ARGB8 instead of ARGB8888)
+            let name = if bits_a == bits_r && bits_r == bits_g && bits_g == bits_b {
+                format!("ARGB{}", bits_a)
+            } else {
+                format!("ARGB{}{}{}{}", bits_a, bits_r, bits_g, bits_b)
+            };
+
             return Ok(ColorFormat {
-                name: format_upper,
+                name,
                 is_grayscale: false,
                 has_alpha: true,
                 bits_a,
@@ -228,8 +242,15 @@ impl ColorFormat {
 
             let total_bits = bits_r + bits_g + bits_b;
 
+            // Use shorthand name when all bits are equal (RGB8 instead of RGB888)
+            let name = if bits_r == bits_g && bits_g == bits_b {
+                format!("RGB{}", bits_r)
+            } else {
+                format!("RGB{}{}{}", bits_r, bits_g, bits_b)
+            };
+
             return Ok(ColorFormat {
-                name: format_upper,
+                name,
                 is_grayscale: false,
                 has_alpha: false,
                 bits_a: 0,
