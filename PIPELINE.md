@@ -84,7 +84,8 @@ Used when any of these conditions apply:
 - Grayscale output selected
 - Non-sRGB color space detected (via CICP or ICC profile)
 - Premultiplied alpha needs un-premultiplying (EXR by default)
-- Tonemapping requested (`--tonemapping` or `--output-tonemapping`)
+- Tonemapping requested (`--tonemapping` or `--input-tonemapping`)
+- Supersampling requested (`--supersample tent-volume`)
 
 This path converts to linear RGB (0–1 float), performs all processing, then converts back to sRGB.
 
@@ -97,6 +98,7 @@ Used when all of these are true:
 - Standard sRGB input (CICP indicates sRGB, or no CICP and no non-sRGB ICC profile)
 - No premultiplied alpha to un-premultiply
 - No tonemapping requested
+- No supersampling requested
 
 This path converts directly to sRGB float (0–255 range) without gamma decode, avoiding unnecessary round-trips through linear space.
 
@@ -117,7 +119,7 @@ The sRGB direct path preserves full precision for dither-only operations. Even t
 When the linear path is taken, operations occur in this order:
 
 ```
-CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Input Tonemap (opt) → Resize → Color Correct → Grayscale (opt) → Exposure (opt) → Tonemap (opt) → Safetensors (opt) → sRGB Encode → Dither
+CICP/ICC Transform (opt) → Linear RGB → Un-premultiply (opt) → Tent Expand (opt) → Input Tonemap (opt) → Resize → Color Correct → Grayscale (opt) → Exposure (opt) → Tonemap (opt) → Tent Contract (opt) → Safetensors (opt) → sRGB Encode → Dither
 ```
 
 ### 3.0 Un-premultiply Alpha
@@ -131,6 +133,29 @@ B = B' / α
 ```
 
 Pixels with `α = 0` are left unchanged. This must happen in linear space because alpha blending is a linear operation.
+
+### 3.05 Tent-Volume Supersampling
+
+When enabled (`--supersample tent-volume`), the image is expanded to a bilinear "tent-space" representation before processing:
+
+**Tent Expansion** (W × H → (2W−1) × (2H−1)):
+- Original pixels become the odd-indexed samples
+- New even-indexed samples are bilinearly interpolated from neighbors
+- Edge samples are linearly extrapolated, creating values that can exceed the original range (including negative values in linear RGB)
+
+This expansion happens **before input tonemapping** and **before resize/color correction**.
+
+**Tent Contraction** ((2W−1) × (2H−1) → W × H):
+- Applies a 3×3 tent (bilinear) filter kernel
+- Averages 9 samples weighted by tent coefficients: corners (1), edges (2), center (4)
+- Returns to the original resolution
+
+Contraction happens **after output tonemapping** and **before safetensors output**.
+
+**Why it works**: The extrapolated edge values in tent-space represent information about local gradients that would otherwise be lost. By processing (resizing, color correction, tonemapping) in this expanded space and then contracting, the pipeline can make decisions informed by these extrapolated extremes. Both input and output tonemapping occur symmetrically within tent-space. This is particularly useful for:
+- Preserving highlight and shadow detail through tonemapping
+- More accurate histogram matching that accounts for gradient information
+- Reducing edge artifacts in resize operations
 
 ### 3.1 Resize
 
@@ -360,21 +385,29 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    ▼
                          Linear RGB [0-1 float]
                                    │
+                                   ▼
+                          [Tent Expand?]
+                                   │
+                                   ▼
+                      W×H → (2W−1)×(2H−1)
+                   (bilinear interpolation +
+                     edge extrapolation)
+                                   │
+                                   ▼
+                          [Input Tonemap?]
+                                   │
+                                   ▼
+                        ACES forward or inverse
+                                   │
               ┌────────────────────┼────────────────────┐
               │                    │                    │
-       [Input Tonemap?]       [Resize?]         [Color Correct?]
+          [Resize?]         [Color Correct?]     [Grayscale?]
               │                    │                    │
               ▼                    ▼                    ▼
-          ACES forward      Lanczos/Bilinear     CRA Histogram
-           or inverse       (linear space)         Matching
+        Lanczos/Bilinear     CRA Histogram       Luminance
+         (linear space)        Matching        (Y = Rec.709)
               │                    │                    │
               └────────────────────┼────────────────────┘
-                                   │
-                                   ▼
-                            [Grayscale?]
-                                   │
-                                   ▼
-                         Luminance (Y = Rec.709)
                                    │
                                    ▼
                             [Exposure?]
@@ -384,6 +417,16 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                                    │
                                    ▼
                             [Tonemap?]
+                                   │
+                                   ▼
+                        ACES forward or inverse
+                                   │
+                                   ▼
+                         [Tent Contract?]
+                                   │
+                                   ▼
+                      (2W−1)×(2H−1) → W×H
+                       (3×3 tent filter)
                                    │
                                    ▼
                           [Safetensors?]

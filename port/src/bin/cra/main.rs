@@ -1344,7 +1344,22 @@ fn main() -> Result<(), String> {
 
         let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
 
-        // Apply input tonemapping before resize (if specified)
+        // Determine if tent-volume supersampling is enabled
+        let use_supersample = matches!(args.supersample, Supersample::TentVolume) && needs_resize;
+
+        // Apply tent-volume expansion before input tonemapping (if enabled)
+        let (input_pixels, expanded_width, expanded_height) = if use_supersample {
+            if args.verbose {
+                eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
+                    src_width, src_height, src_width * 2 - 1, src_height * 2 - 1);
+            }
+            let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
+            (expanded, w as u32, h as u32)
+        } else {
+            (input_pixels, src_width, src_height)
+        };
+
+        // Apply input tonemapping in tent-space (if specified)
         let input_pixels = if let Some(tm) = args.input_tonemapping {
             let mut p = input_pixels;
             match tm {
@@ -1364,21 +1379,6 @@ fn main() -> Result<(), String> {
             false
         } else {
             original_has_alpha
-        };
-
-        // Determine if tent-volume supersampling is enabled
-        let use_supersample = matches!(args.supersample, Supersample::TentVolume) && needs_resize;
-
-        // Apply tent-volume expansion before resizing (if enabled)
-        let (input_pixels, expanded_width, expanded_height) = if use_supersample {
-            if args.verbose {
-                eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
-                    src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
-            }
-            let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
-            (expanded, w as u32, h as u32)
-        } else {
-            (input_pixels, src_width, src_height)
         };
 
         // Resize in linear RGB space (use alpha-aware rescaling if image has alpha)
