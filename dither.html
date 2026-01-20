@@ -898,13 +898,23 @@
                 <p class="scale-hint">Rescaling is performed in linear RGB space for correct color blending.</p>
             </div>
 
-            <div class="option-row">
-                <label for="tonemapping">Tonemapping:</label>
-                <select id="tonemapping">
-                    <option value="none" selected>None</option>
-                    <option value="aces">ACES (compress HDR→SDR)</option>
-                    <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
-                </select>
+            <div id="hdr-options" style="display: none;">
+                <div class="option-row">
+                    <label for="tonemapping">Tonemapping:</label>
+                    <select id="tonemapping">
+                        <option value="none" selected>None</option>
+                        <option value="aces">ACES (compress HDR→SDR)</option>
+                        <option value="aces-inverse">ACES Inverse (expand SDR→HDR)</option>
+                    </select>
+                </div>
+
+                <div class="option-row" id="supersample-row" style="display: none;">
+                    <label for="supersample">Supersampling:</label>
+                    <select id="supersample">
+                        <option value="none" selected>None</option>
+                        <option value="tent-volume">Tent Volume</option>
+                    </select>
+                </div>
             </div>
 
             <div class="toggle-row">
@@ -1174,6 +1184,7 @@
         let inputFileBytes = null;      // Raw file bytes (decoded on demand based on processing mode)
         let inputHasNonSrgbIcc = false; // True if image has ICC profile that differs from sRGB
         let inputHasAlpha = false;      // True if input image has alpha channel
+        let inputIsHdr = false;         // True if input is HDR (EXR/f32)
         let inputWidth = 0;
         let inputHeight = 0;
         let originalWidth = 0;
@@ -1325,6 +1336,7 @@
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
             const tonemapping = document.getElementById('tonemapping').value;
+            const supersample = document.getElementById('supersample').value;
 
             // Determine target dimensions
             let processWidth = originalWidth;
@@ -1369,7 +1381,8 @@
                 isPerceptual: isPerceptual,
                 perceptualSpace: perceptualSpace,
                 seed: seed,
-                tonemapping: tonemapping
+                tonemapping: tonemapping,
+                supersample: supersample
             });
         }
 
@@ -1589,6 +1602,12 @@
                 cmd += ` --tonemapping ${tonemapping}`;
             }
 
+            // Add supersampling option
+            const supersample = document.getElementById('supersample').value;
+            if (supersample !== 'none') {
+                cmd += ` --supersample ${supersample}`;
+            }
+
             return cmd;
         }
 
@@ -1675,20 +1694,28 @@
                 const height = metadata[1];
                 const hasNonSrgbIcc = metadata[2] > 0.5;
                 const is16bit = metadata[3] > 0.5;
+                const isF32 = metadata[4] > 0.5;
                 const hasAlpha = metadata[5] > 0.5;
 
-                // Store ICC and alpha info for worker
+                // Store ICC, alpha, and HDR info for worker
                 inputHasNonSrgbIcc = hasNonSrgbIcc;
                 inputHasAlpha = hasAlpha;
+                inputIsHdr = isF32;
                 if (inputHasNonSrgbIcc) {
                     console.log('Detected non-sRGB ICC profile - will use color management');
                 }
                 if (inputHasAlpha) {
                     console.log('Detected alpha channel in input image');
                 }
+                if (inputIsHdr) {
+                    console.log('Detected HDR (f32) image - showing tonemapping options');
+                }
 
                 // Show/hide alpha channel controls based on input
                 updateAlphaControlVisibility();
+
+                // Show/hide HDR options based on input format
+                updateHdrOptionsVisibility();
 
                 // Store raw bytes for processing
                 inputFileBytes = fileBytes;
@@ -1800,6 +1827,42 @@
                 : (showRgbAlpha && parseInt(document.getElementById('bits-a').value) > 0);
             alphaDitherRow.classList.toggle('hidden', !hasAlphaOutput);
         }
+
+        // HDR options visibility (tonemapping + supersampling)
+        function updateHdrOptionsVisibility() {
+            const hdrOptions = document.getElementById('hdr-options');
+            const tonemappingSelect = document.getElementById('tonemapping');
+            const supersampleRow = document.getElementById('supersample-row');
+            const supersampleSelect = document.getElementById('supersample');
+
+            // Show HDR options only for HDR (f32) images
+            hdrOptions.style.display = inputIsHdr ? 'block' : 'none';
+
+            // Reset selections when hiding
+            if (!inputIsHdr) {
+                tonemappingSelect.value = 'none';
+                supersampleSelect.value = 'none';
+                supersampleRow.style.display = 'none';
+            }
+        }
+
+        // Update supersample visibility based on tonemapping selection
+        function updateSupersampleVisibility() {
+            const tonemapping = document.getElementById('tonemapping').value;
+            const supersampleRow = document.getElementById('supersample-row');
+            const supersampleSelect = document.getElementById('supersample');
+
+            // Show supersampling only when tonemapping is active
+            const showSupersample = tonemapping !== 'none';
+            supersampleRow.style.display = showSupersample ? 'flex' : 'none';
+
+            // Reset supersample when hiding
+            if (!showSupersample) {
+                supersampleSelect.value = 'none';
+            }
+        }
+
+        document.getElementById('tonemapping').addEventListener('change', updateSupersampleVisibility);
 
         // Color space aware toggle
         function updatePerceptualMode() {
