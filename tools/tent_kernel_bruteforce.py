@@ -110,11 +110,11 @@ def box_integrated(src_pos: float, si: int, filter_scale: float) -> float:
     return max(0.0, overlap_end - overlap_start)
 
 
-def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool = False) -> list[float]:
+def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1, debug: bool = False) -> list[float]:
     """
     Resample 1D array using box filter with exact overlap computation.
 
-    For 2× downscale in tent space, the scale is always exactly 2.0.
+    For R× downscale in tent space, scale = R and filter_scale = 2.0 (1x native).
     The offset accounts for the fringe growth at each depth level.
 
     Key insight: The fringe grows as (fringe * 2) + 0.5 per depth:
@@ -134,36 +134,33 @@ def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool 
     if dst_len == 1:
         return [sum(src) / src_len]
 
-    # For 2× downscale in tent space:
-    # - scale = 2.0 (coordinate mapping: output sample i → input position 2i + offset)
-    # - filter_scale = 2.0 (1x native width, matching the downscale ratio)
+    # For R× downscale in tent space:
+    # - scale = R (coordinate mapping: output sample i → input position R*i + offset)
+    # - filter_scale = 2.0 (1x native width, independent of ratio)
     #
-    # Why NOT scale with depth? From TENT-SPACE.md:
+    # Why NOT scale filter with ratio or depth? From TENT-SPACE.md:
     # "Filter width stays at 1x (native), taking advantage of the higher-resolution surface."
     #
     # The tent expansion encodes sharpening at center points (negative lobes).
     # A narrow box filter samples this encoded information, and the contraction
     # operations then integrate it to produce the correct kernel with negative lobes.
     # A wider filter would average out the encoded sharpening, producing blur.
-    scale = 2.0
-    filter_scale = 2.0  # 1x native width, NOT scaled by depth
+    scale = ratio
+    filter_scale = 2.0  # 1x native width, NOT scaled by ratio or depth
 
     # Offset to align content centers
-    # Output tent sample 'fringe' (first content center) should map to
-    # input tent position that corresponds to the box filter center
+    # At depth d, output tent sample 'fringe' (= 2^d - 1) corresponds to output box pixel 0 center.
+    # For R× downscale, output box 0 covers input box [0, R), centered at input box R/2.
     #
-    # For output box pixel 0 center → filter center at input box 0.5
-    # Output tent idx (2^d - 1) → should map to input box 0.5
-    # Input box 0.5 = input tent idx (0.5 * 2^d + (2^d - 1)) = 1.5 * 2^d - 1
+    # At depth d, the continuous mapping is: tent = 2^d × box + (2^(d-1) - 1)
+    # Input tent position for center R/2 = 2^d × (R/2) + 2^(d-1) - 1 = (R+1) × 2^(d-1) - 1
     #
-    # So: fringe * 2 + offset = 1.5 * 2^d - 1
-    #     (2^d - 1) * 2 + offset = 1.5 * 2^d - 1
-    #     2^(d+1) - 2 + offset = 1.5 * 2^d - 1
-    #     offset = 1.5 * 2^d - 1 - 2^(d+1) + 2
-    #            = 1.5 * 2^d - 2 * 2^d + 1
-    #            = -0.5 * 2^d + 1
-    #            = 1 - 2^(d-1)
-    offset = 1.0 - (2 ** (depth - 1))
+    # Mapping: src_pos = dst_i × scale + offset
+    # (2^d - 1) × R + offset = (R+1) × 2^(d-1) - 1
+    # offset = (R+1) × 2^(d-1) - 1 - R × (2^d - 1)
+    #        = (R+1) × 2^(d-1) - 1 - R × 2^d + R
+    #        = (R-1) × (1 - 2^(d-1))
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
 
     if debug:
         print(f"    Resample: {src_len} → {dst_len}, scale={scale:.6f}, filter_scale={filter_scale:.6f}, offset={offset:.6f}")
@@ -242,7 +239,7 @@ def format_array(arr: list[float], max_show: int = 20) -> str:
         return f"[{first}, ... ({len(arr)} total) ..., {last}]"
 
 
-def full_pipeline(src: list[float], output_len: int, recurse: int = 1, debug: bool = False) -> list[float]:
+def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int = 1, debug: bool = False) -> list[float]:
     """
     Full tent-space downscaling pipeline.
 
@@ -281,7 +278,7 @@ def full_pipeline(src: list[float], output_len: int, recurse: int = 1, debug: bo
         print(f"  Resample target: {len(data)} → {tent_target}")
 
     # Resample in tent space using box filter
-    data = resample_1d_box(data, tent_target, depth=recurse, debug=debug)
+    data = resample_1d_box(data, tent_target, ratio=ratio, depth=recurse, debug=debug)
 
     if debug:
         print(f"  After resample ({len(data)}): {format_array(data)}")
@@ -297,7 +294,7 @@ def full_pipeline(src: list[float], output_len: int, recurse: int = 1, debug: bo
     return data
 
 
-def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, recurse: int = 1) -> list[float]:
+def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, ratio: float, recurse: int = 1) -> list[float]:
     """
     Derive the effective kernel by computing impulse responses.
 
@@ -312,7 +309,7 @@ def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, r
         impulse[i] = 1.0
 
         # Run through pipeline
-        output = full_pipeline(impulse, output_len, recurse)
+        output = full_pipeline(impulse, output_len, ratio=ratio, recurse=recurse)
 
         # Record contribution to reference output pixel
         if 0 <= output_idx < len(output):
@@ -384,7 +381,7 @@ def main():
         print("Sequential input mode: [0, 1, 2, 3, ...]")
         print("=" * 60)
         seq_input = list(range(input_len))
-        output = full_pipeline(seq_input, output_len, args.recurse, debug=args.debug)
+        output = full_pipeline(seq_input, output_len, ratio=args.ratio, recurse=args.recurse, debug=args.debug)
 
         print()
         print(f"Input:  {format_array(list(map(float, seq_input)))}")
@@ -404,12 +401,12 @@ def main():
     if args.debug:
         # Debug mode: show stages for a single impulse
         print("=" * 60)
-        print(f"Debug: impulse at input position {output_idx * 2}")
+        print(f"Debug: impulse at input position {output_idx * int(args.ratio)}")
         print("=" * 60)
         impulse = [0.0] * input_len
-        impulse_pos = min(output_idx * 2, input_len - 1)
+        impulse_pos = min(output_idx * int(args.ratio), input_len - 1)
         impulse[impulse_pos] = 1.0
-        output = full_pipeline(impulse, output_len, args.recurse, debug=True)
+        output = full_pipeline(impulse, output_len, ratio=args.ratio, recurse=args.recurse, debug=True)
         print()
         print(f"Final output: {format_array(output)}")
         print()
@@ -418,7 +415,7 @@ def main():
     print("=" * 60)
     print("Kernel derivation")
     print("=" * 60)
-    kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, args.recurse)
+    kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, ratio=args.ratio, recurse=args.recurse)
 
     # Find non-zero region
     nonzero = [(i, k) for i, k in enumerate(kernel) if abs(k) > 1e-10]
@@ -482,7 +479,7 @@ def main():
     print("=" * 60)
     print("Verification: constant input should give constant output")
     test_input = [0.5] * input_len
-    test_output = full_pipeline(test_input, output_len, args.recurse)
+    test_output = full_pipeline(test_input, output_len, ratio=args.ratio, recurse=args.recurse)
     print(f"  Input:  all 0.5")
     print(f"  Output[{output_idx}]: {test_output[output_idx]:.10f}")
     print(f"  (Should be 0.5)")
