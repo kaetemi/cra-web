@@ -404,7 +404,7 @@ def resample_2d_box(
     src_w = len(src[0]) if src_h > 0 else 0
     dst = create_2d(dst_h, dst_w)
 
-    if src_h == dst_h and src_w == dst_w:
+    if src_h == dst_h and src_w == dst_w and abs(extra_offset) < 1e-10:
         return copy_2d(src)
 
     scale = ratio
@@ -478,7 +478,7 @@ def resample_2d_ewa(
     src_w = len(src[0]) if src_h > 0 else 0
     dst = create_2d(dst_h, dst_w)
 
-    if src_h == dst_h and src_w == dst_w:
+    if src_h == dst_h and src_w == dst_w and abs(extra_offset) < 1e-10:
         return copy_2d(src)
 
     scale = ratio
@@ -562,7 +562,7 @@ def resample_2d_kernel(
     src_w = len(src[0]) if src_h > 0 else 0
     dst = create_2d(dst_h, dst_w)
 
-    if src_h == dst_h and src_w == dst_w:
+    if src_h == dst_h and src_w == dst_w and abs(extra_offset) < 1e-10:
         return copy_2d(src)
 
     scale = ratio

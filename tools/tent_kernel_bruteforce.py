@@ -194,7 +194,7 @@ def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1
     src_len = len(src)
     dst = [0.0] * dst_len
 
-    if src_len == dst_len:
+    if src_len == dst_len and abs(extra_offset) < 1e-10:
         return list(src)
 
     if dst_len == 1:
@@ -322,7 +322,7 @@ def resample_1d_kernel(
     src_len = len(src)
     dst = [0.0] * dst_len
 
-    if src_len == dst_len:
+    if src_len == dst_len and abs(extra_offset) < 1e-10:
         return list(src)
 
     if dst_len == 1:
