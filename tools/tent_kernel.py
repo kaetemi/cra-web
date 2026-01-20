@@ -358,6 +358,15 @@ def resample_tent_exact(
 # Full Pipeline: Expand → Resample → Contract
 # =============================================================================
 
+def contract_tent_values(corner_left: SymbolicCoeffs, center: SymbolicCoeffs, corner_right: SymbolicCoeffs) -> SymbolicCoeffs:
+    """Apply tent contraction: 1/4 * corner_left + 1/2 * center + 1/4 * corner_right."""
+    return (
+        corner_left * Fraction(1, 4) +
+        center * Fraction(1, 2) +
+        corner_right * Fraction(1, 4)
+    )
+
+
 def derive_direct_kernel(
     ratio: float,
     offset: float = 0.0,
@@ -368,121 +377,102 @@ def derive_direct_kernel(
     """
     Derive the effective direct kernel for tent-space downsampling.
 
-    Full pipeline:
-    1. Expand box → tent (potentially multiple times with recurse > 1)
-    2. Output tent positions are at corner_left, center, corner_right
-    3. At each position, resample with the kernel
-    4. Apply contraction weights (1/4, 1/2, 1/4) to get final value
+    Full pipeline for recurse=N:
+    1. Expand box → tent N times (2^N resolution increase)
+    2. Resample at the finest tent level (level N) with the kernel
+    3. Contract N times back to box space
+
+    Each contraction needs 3 inputs (corner, center, corner).
+    Recurse=1: 3 samples, recurse=2: 3×3=9 samples, recurse=N: 3^N samples.
 
     Args:
         ratio: Downsampling ratio (e.g., 2 for 2× downsample)
         offset: Offset of output pixel center from input position 0.
-                Default 0 means centered on position 0.
         kernel_name: Resampling kernel name ('box', 'triangle', etc.)
         kernel_width: Kernel width in tent units (default 2)
-        recurse: Number of tent expansion levels (default 1).
-                 Higher values create finer grids before resampling.
-                 Level N has 2^N times the resolution of box space.
+        recurse: Number of tent expansion/contraction levels (default 1).
 
     Returns:
         SymbolicCoeffs representing the direct kernel
     """
     kernel_func, kernel_radius, _ = KERNELS.get(kernel_name, KERNELS['box'])
 
-    # Create the tent value function for the specified recursion level
-    tent_value_func = make_recursive_tent_func(recurse)
+    # We'll sample from the deepest tent level and contract back
+    deepest_tent_func = make_recursive_tent_func(recurse)
 
-    # Scale factor for positions: each recursion level doubles the resolution
-    # At level N, tent positions are at 2^N times the box-space resolution
-    scale = 2 ** recurse
+    def resample_at_deepest(pos: float, width: float) -> SymbolicCoeffs:
+        """Resample the deepest tent surface at a given position."""
+        use_exact = (
+            pos == int(pos) and
+            width == int(width) and
+            kernel_name == 'box'
+        )
 
+        if use_exact:
+            hw = int(width) // 2
+            return resample_tent_exact(int(pos), hw, deepest_tent_func)
+        else:
+            return resample_tent_trapezoidal(pos, width, kernel_func, kernel_radius, deepest_tent_func)
+
+    def derive_recursive(levels_remaining: int, center_pos: float, spacing: float, width: float) -> SymbolicCoeffs:
+        """
+        Recursively derive kernel by sampling and contracting.
+
+        At each level we need 3 positions (corner, center, corner) spaced by `spacing`.
+        - If levels_remaining == 1: sample from deepest tent, contract once
+        - If levels_remaining > 1: recurse to get 3 values, then contract
+
+        Position and spacing are in the CURRENT level's coordinates.
+        """
+        # The 3 positions for contraction at this level
+        left_pos = center_pos - spacing
+        right_pos = center_pos + spacing
+
+        if levels_remaining == 1:
+            # Base case: sample from deepest tent level at these positions
+            # Positions are already in deepest level coordinates
+            samples = [
+                resample_at_deepest(left_pos, width),
+                resample_at_deepest(center_pos, width),
+                resample_at_deepest(right_pos, width),
+            ]
+            return contract_tent_values(samples[0], samples[1], samples[2])
+        else:
+            # Recursive case: each position needs to be computed from finer level
+            # When we go one level deeper, positions double and spacing doubles
+            # (because the deeper level has 2× resolution)
+
+            corner_left = derive_recursive(
+                levels_remaining - 1,
+                left_pos * 2 + 1,    # Map to deeper level: pos → 2*pos + 1
+                spacing * 2,          # Spacing doubles at deeper level
+                width                 # Width stays constant (same physical extent)
+            )
+            center = derive_recursive(
+                levels_remaining - 1,
+                center_pos * 2 + 1,
+                spacing * 2,
+                width
+            )
+            corner_right = derive_recursive(
+                levels_remaining - 1,
+                right_pos * 2 + 1,
+                spacing * 2,
+                width
+            )
+
+            return contract_tent_values(corner_left, center, corner_right)
+
+    # Starting position: center of output pixel in L1 tent space
     # Output pixel centered at input position `offset`
-    # In box space, pixel i is centered at position i (integer coordinates)
-    # At recursion level N, the center of pixel i is at position:
-    #   scale * i + (scale - 1) / 2 for odd scale (which is never the case)
-    #   Actually: position = scale * (2*i + 1) / 2 = scale*i + scale/2
-    # For level 1 (scale=2): center of pixel 0 is at position 1
-    # For level 2 (scale=4): center of pixel 0 is at position 2
-    # General: center_tent = scale * offset + scale / 2 = scale * (offset + 0.5)
-    # But we want integer positions, so: center_tent = scale * offset + (scale // 2)
-    # Wait, let me think again...
-    #
-    # Level 1: positions 0,1,2,3,4... where odd positions are centers
-    #   Pixel 0 center is at position 1
-    # Level 2: positions 0,1,2,3,4,5,6,7,8...
-    #   Level 1's position 0 (corner) expands to positions 0,1 with corner at 0, center at 1
-    #   Level 1's position 1 (center) expands to positions 2,3 with corner at 2, center at 3
-    #   So pixel 0's center (level 1 pos 1) becomes level 2 pos 3
-    # General pattern: level N center of pixel i is at position (2i+1) * 2^(N-1)
-    #   = (2*0+1) * 2^0 = 1 for level 1
-    #   = (2*0+1) * 2^1 = 2 for level 2? No, we said it's 3...
-    #
-    # Let me trace more carefully:
-    # Level 1: tent_pos maps to box_idx via: corner at 2i, center at 2i+1
-    #   Box pixel 0: center at tent_pos = 1
-    # Level 2: tent_pos at level 2 maps to tent_pos at level 1 via same rule
-    #   Level 1 tent_pos 0: corner at level 2 tent_pos 0, center at 1
-    #   Level 1 tent_pos 1: corner at level 2 tent_pos 2, center at 3
-    #   So box pixel 0's center (L1 pos 1) → L2 pos 3 (the center of L1 pos 1)
-    #
-    # Pattern: for level N, pixel i's center is at: (2i+1) * 2^(N-1) + 2^(N-1) - 1
-    #   = (2i+1) * 2^(N-1) + 2^(N-1) - 1
-    # For i=0, N=1: 1 * 1 + 1 - 1 = 1 ✓
-    # For i=0, N=2: 1 * 2 + 2 - 1 = 3 ✓
-    # Simplify: 2^(N-1) * (2i + 2) - 1 = 2^N * (i + 1) - 1
-    # For i=0: 2^N - 1
-    # Hmm, let's verify: N=1: 2-1=1 ✓, N=2: 4-1=3 ✓
-    #
-    # So center_tent for pixel at offset is: 2^recurse * (offset + 1) - 1
-    #   = scale * (offset + 1) - 1
-    #   = scale * offset + scale - 1
+    # In L1 tent space, pixel i's center is at position 2*i + 1
+    center_L1 = 2 * offset + 1
 
-    center_tent = scale * offset + scale - 1
+    # Spacing in L1: for ratio R downsampling, corner positions are at center ± R
+    spacing_L1 = ratio
 
-    # Ratio in tent space is also scaled
-    tent_ratio = ratio * scale / 2  # Divide by 2 because each tent level doubles resolution
-
-    # Output tent positions: corner_left, center, corner_right
-    # These are spaced by `tent_ratio` in the final tent space
-    out_corner_left_pos = center_tent - tent_ratio
-    out_center_pos = center_tent
-    out_corner_right_pos = center_tent + tent_ratio
-
-    # Kernel width also scales with recursion level
-    tent_kernel_width = kernel_width * scale / 2
-
-    # Use exact computation for integer positions and widths
-    use_exact = (
-        tent_ratio == int(tent_ratio) and
-        (center_tent - tent_ratio) == int(center_tent - tent_ratio) and
-        tent_kernel_width == int(tent_kernel_width) and
-        kernel_name == 'box'
-    )
-
-    if use_exact:
-        w = int(tent_kernel_width)
-        hw = w // 2
-
-        out_corner_left = resample_tent_exact(int(out_corner_left_pos), hw, tent_value_func)
-        out_center = resample_tent_exact(int(out_center_pos), hw, tent_value_func)
-        out_corner_right = resample_tent_exact(int(out_corner_right_pos), hw, tent_value_func)
-    else:
-        out_corner_left = resample_tent_trapezoidal(
-            out_corner_left_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
-        )
-        out_center = resample_tent_trapezoidal(
-            out_center_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
-        )
-        out_corner_right = resample_tent_trapezoidal(
-            out_corner_right_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
-        )
-
-    # Contraction: 1/4 * corner_left + 1/2 * center + 1/4 * corner_right
-    result = (
-        out_corner_left * Fraction(1, 4) +
-        out_center * Fraction(1, 2) +
-        out_corner_right * Fraction(1, 4)
-    )
+    # Start the recursion from L1, going deeper
+    result = derive_recursive(recurse, center_L1, spacing_L1, kernel_width)
 
     return result
 
