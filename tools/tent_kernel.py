@@ -112,26 +112,80 @@ class SymbolicCoeffs:
 #   C_i = corner at position 2i = (V_{i-1} + V_i) / 2
 #   M_i = center at position 2i+1 = 3/2*V_i - 1/4*V_{i-1} - 1/4*V_{i+1}
 
+def tent_corner_coeffs_from(idx: int, source_func: Callable[[int], SymbolicCoeffs]) -> SymbolicCoeffs:
+    """Corner C_idx at tent position 2*idx, using source_func for input values."""
+    return (source_func(idx - 1) + source_func(idx)) * Fraction(1, 2)
+
+
+def tent_center_coeffs_from(idx: int, source_func: Callable[[int], SymbolicCoeffs]) -> SymbolicCoeffs:
+    """Center M_idx at tent position 2*idx + 1 (volume-preserving), using source_func for input values."""
+    return (
+        Fraction(3, 2) * source_func(idx)
+        - Fraction(1, 4) * source_func(idx - 1)
+        - Fraction(1, 4) * source_func(idx + 1)
+    )
+
+
+def tent_value_coeffs_from(tent_pos: int, source_func: Callable[[int], SymbolicCoeffs]) -> SymbolicCoeffs:
+    """Get symbolic coefficients for tent value at integer position, using source_func for input values."""
+    if tent_pos % 2 == 0:
+        return tent_corner_coeffs_from(tent_pos // 2, source_func)
+    else:
+        return tent_center_coeffs_from(tent_pos // 2, source_func)
+
+
 def tent_corner_coeffs(idx: int) -> SymbolicCoeffs:
     """Corner C_idx at tent position 2*idx."""
-    return (SymbolicCoeffs.unit(idx - 1) + SymbolicCoeffs.unit(idx)) * Fraction(1, 2)
+    return tent_corner_coeffs_from(idx, SymbolicCoeffs.unit)
 
 
 def tent_center_coeffs(idx: int) -> SymbolicCoeffs:
     """Center M_idx at tent position 2*idx + 1 (volume-preserving)."""
-    return (
-        Fraction(3, 2) * SymbolicCoeffs.unit(idx)
-        - Fraction(1, 4) * SymbolicCoeffs.unit(idx - 1)
-        - Fraction(1, 4) * SymbolicCoeffs.unit(idx + 1)
-    )
+    return tent_center_coeffs_from(idx, SymbolicCoeffs.unit)
 
 
 def tent_value_coeffs(tent_pos: int) -> SymbolicCoeffs:
     """Get symbolic coefficients for tent value at integer position."""
-    if tent_pos % 2 == 0:
-        return tent_corner_coeffs(tent_pos // 2)
-    else:
-        return tent_center_coeffs(tent_pos // 2)
+    return tent_value_coeffs_from(tent_pos, SymbolicCoeffs.unit)
+
+
+def make_recursive_tent_func(levels: int) -> Callable[[int], SymbolicCoeffs]:
+    """
+    Create a function that returns coefficients for a recursively expanded tent space.
+
+    Level 0: Original box pixels (SymbolicCoeffs.unit)
+    Level 1: Single tent expansion (tent_value_coeffs)
+    Level 2: Tent of tent (tent expansion applied to level 1)
+    ...
+
+    Each level doubles the resolution: position p at level N maps to position p*2^N in box space.
+    """
+    if levels <= 0:
+        return SymbolicCoeffs.unit
+
+    # Build up the function recursively
+    # Level 1 uses SymbolicCoeffs.unit as source
+    # Level 2 uses level 1's function as source, etc.
+
+    # Cache to avoid recomputation
+    cache: dict[tuple[int, int], SymbolicCoeffs] = {}
+
+    def get_level_value(level: int, pos: int) -> SymbolicCoeffs:
+        """Get the value at position `pos` at recursion `level`."""
+        if level <= 0:
+            return SymbolicCoeffs.unit(pos)
+
+        key = (level, pos)
+        if key in cache:
+            return cache[key]
+
+        # This level's value is a tent expansion of the previous level
+        prev_level_func = lambda p: get_level_value(level - 1, p)
+        result = tent_value_coeffs_from(pos, prev_level_func)
+        cache[key] = result
+        return result
+
+    return lambda pos: get_level_value(levels, pos)
 
 
 # =============================================================================
@@ -199,6 +253,7 @@ def resample_tent_trapezoidal(
     width: float,
     kernel_func: Callable[[float], float],
     support_half_width: float,
+    tent_value_func: Callable[[int], SymbolicCoeffs] | None = None,
 ) -> SymbolicCoeffs:
     """
     Resample the tent surface at center_pos using a kernel of given width.
@@ -211,10 +266,14 @@ def resample_tent_trapezoidal(
         width: Kernel width in tent units (total extent of sampling)
         kernel_func: The sampling kernel function
         support_half_width: Half-width of the kernel's natural support domain
+        tent_value_func: Function to get tent value coefficients (default: tent_value_coeffs)
 
     Returns:
         SymbolicCoeffs representing the resampled value
     """
+    if tent_value_func is None:
+        tent_value_func = tent_value_coeffs
+
     half_width = width / 2
     interval_start = center_pos - half_width
     interval_end = center_pos + half_width
@@ -253,7 +312,7 @@ def resample_tent_trapezoidal(
             # Combined weight: overlap area × kernel weight
             combined_weight = overlap * kernel_weight
 
-        result = result + tent_value_coeffs(pos) * combined_weight
+        result = result + tent_value_func(pos) * combined_weight
         weight_sum += combined_weight
 
     # Normalize
@@ -263,16 +322,23 @@ def resample_tent_trapezoidal(
     return result
 
 
-def resample_tent_exact(center_pos: int, half_width: int) -> SymbolicCoeffs:
+def resample_tent_exact(
+    center_pos: int,
+    half_width: int,
+    tent_value_func: Callable[[int], SymbolicCoeffs] | None = None,
+) -> SymbolicCoeffs:
     """
     Exact resampling using trapezoidal rule for integer positions and widths.
 
     This matches the derivation in TENT-SPACE.md for the 2× downsample kernel.
     For half_width=0, returns point sampling at center_pos.
     """
+    if tent_value_func is None:
+        tent_value_func = tent_value_coeffs
+
     # Point sampling when width=0
     if half_width == 0:
-        return tent_value_coeffs(center_pos)
+        return tent_value_func(center_pos)
 
     result = SymbolicCoeffs.zero()
 
@@ -280,7 +346,7 @@ def resample_tent_exact(center_pos: int, half_width: int) -> SymbolicCoeffs:
         pos = center_pos + offset
         # Trapezoidal weights: 0.5 at endpoints, 1.0 in middle
         weight = Fraction(1, 2) if abs(offset) == half_width else Fraction(1)
-        result = result + tent_value_coeffs(pos) * weight
+        result = result + tent_value_func(pos) * weight
 
     # Normalize by total weight (2 * half_width)
     result = result / (2 * half_width)
@@ -297,13 +363,14 @@ def derive_direct_kernel(
     offset: float = 0.0,
     kernel_name: str = 'box',
     kernel_width: float = 2.0,
+    recurse: int = 1,
 ) -> SymbolicCoeffs:
     """
     Derive the effective direct kernel for tent-space downsampling.
 
     Full pipeline:
-    1. Output tent positions are at 0, 1, 2 (for output pixel 0)
-    2. These map to input tent positions: 0*ratio, 1*ratio, 2*ratio
+    1. Expand box → tent (potentially multiple times with recurse > 1)
+    2. Output tent positions are at corner_left, center, corner_right
     3. At each position, resample with the kernel
     4. Apply contraction weights (1/4, 1/2, 1/4) to get final value
 
@@ -313,54 +380,101 @@ def derive_direct_kernel(
                 Default 0 means centered on position 0.
         kernel_name: Resampling kernel name ('box', 'triangle', etc.)
         kernel_width: Kernel width in tent units (default 2)
+        recurse: Number of tent expansion levels (default 1).
+                 Higher values create finer grids before resampling.
+                 Level N has 2^N times the resolution of box space.
 
     Returns:
         SymbolicCoeffs representing the direct kernel
     """
     kernel_func, kernel_radius, _ = KERNELS.get(kernel_name, KERNELS['box'])
 
+    # Create the tent value function for the specified recursion level
+    tent_value_func = make_recursive_tent_func(recurse)
+
+    # Scale factor for positions: each recursion level doubles the resolution
+    # At level N, tent positions are at 2^N times the box-space resolution
+    scale = 2 ** recurse
+
     # Output pixel centered at input position `offset`
     # In box space, pixel i is centered at position i (integer coordinates)
-    # In tent space, the center of pixel i is at position 2*i + 1 (the M_i center point)
-    # So offset=0 means centered on pixel 0, which is tent position 1
+    # At recursion level N, the center of pixel i is at position:
+    #   scale * i + (scale - 1) / 2 for odd scale (which is never the case)
+    #   Actually: position = scale * (2*i + 1) / 2 = scale*i + scale/2
+    # For level 1 (scale=2): center of pixel 0 is at position 1
+    # For level 2 (scale=4): center of pixel 0 is at position 2
+    # General: center_tent = scale * offset + scale / 2 = scale * (offset + 0.5)
+    # But we want integer positions, so: center_tent = scale * offset + (scale // 2)
+    # Wait, let me think again...
     #
-    # Output tent positions (corner, center, corner) are spaced by `ratio`:
-    #   corner_left:  center_tent - ratio
-    #   center:       center_tent
-    #   corner_right: center_tent + ratio
+    # Level 1: positions 0,1,2,3,4... where odd positions are centers
+    #   Pixel 0 center is at position 1
+    # Level 2: positions 0,1,2,3,4,5,6,7,8...
+    #   Level 1's position 0 (corner) expands to positions 0,1 with corner at 0, center at 1
+    #   Level 1's position 1 (center) expands to positions 2,3 with corner at 2, center at 3
+    #   So pixel 0's center (level 1 pos 1) becomes level 2 pos 3
+    # General pattern: level N center of pixel i is at position (2i+1) * 2^(N-1)
+    #   = (2*0+1) * 2^0 = 1 for level 1
+    #   = (2*0+1) * 2^1 = 2 for level 2? No, we said it's 3...
+    #
+    # Let me trace more carefully:
+    # Level 1: tent_pos maps to box_idx via: corner at 2i, center at 2i+1
+    #   Box pixel 0: center at tent_pos = 1
+    # Level 2: tent_pos at level 2 maps to tent_pos at level 1 via same rule
+    #   Level 1 tent_pos 0: corner at level 2 tent_pos 0, center at 1
+    #   Level 1 tent_pos 1: corner at level 2 tent_pos 2, center at 3
+    #   So box pixel 0's center (L1 pos 1) → L2 pos 3 (the center of L1 pos 1)
+    #
+    # Pattern: for level N, pixel i's center is at: (2i+1) * 2^(N-1) + 2^(N-1) - 1
+    #   = (2i+1) * 2^(N-1) + 2^(N-1) - 1
+    # For i=0, N=1: 1 * 1 + 1 - 1 = 1 ✓
+    # For i=0, N=2: 1 * 2 + 2 - 1 = 3 ✓
+    # Simplify: 2^(N-1) * (2i + 2) - 1 = 2^N * (i + 1) - 1
+    # For i=0: 2^N - 1
+    # Hmm, let's verify: N=1: 2-1=1 ✓, N=2: 4-1=3 ✓
+    #
+    # So center_tent for pixel at offset is: 2^recurse * (offset + 1) - 1
+    #   = scale * (offset + 1) - 1
+    #   = scale * offset + scale - 1
 
-    center_tent = 2 * offset + 1  # Center of pixel `offset` in tent space
+    center_tent = scale * offset + scale - 1
+
+    # Ratio in tent space is also scaled
+    tent_ratio = ratio * scale / 2  # Divide by 2 because each tent level doubles resolution
 
     # Output tent positions: corner_left, center, corner_right
-    # These are spaced by `ratio` in tent space, centered on center_tent
-    out_corner_left_pos = center_tent - ratio
+    # These are spaced by `tent_ratio` in the final tent space
+    out_corner_left_pos = center_tent - tent_ratio
     out_center_pos = center_tent
-    out_corner_right_pos = center_tent + ratio
+    out_corner_right_pos = center_tent + tent_ratio
+
+    # Kernel width also scales with recursion level
+    tent_kernel_width = kernel_width * scale / 2
 
     # Use exact computation for integer positions and widths
     use_exact = (
-        ratio == int(ratio) and
-        (center_tent - ratio) == int(center_tent - ratio) and
-        kernel_width == int(kernel_width) and
+        tent_ratio == int(tent_ratio) and
+        (center_tent - tent_ratio) == int(center_tent - tent_ratio) and
+        tent_kernel_width == int(tent_kernel_width) and
         kernel_name == 'box'
     )
 
     if use_exact:
-        w = int(kernel_width)
+        w = int(tent_kernel_width)
         hw = w // 2
 
-        out_corner_left = resample_tent_exact(int(out_corner_left_pos), hw)
-        out_center = resample_tent_exact(int(out_center_pos), hw)
-        out_corner_right = resample_tent_exact(int(out_corner_right_pos), hw)
+        out_corner_left = resample_tent_exact(int(out_corner_left_pos), hw, tent_value_func)
+        out_center = resample_tent_exact(int(out_center_pos), hw, tent_value_func)
+        out_corner_right = resample_tent_exact(int(out_corner_right_pos), hw, tent_value_func)
     else:
         out_corner_left = resample_tent_trapezoidal(
-            out_corner_left_pos, kernel_width, kernel_func, kernel_radius
+            out_corner_left_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
         )
         out_center = resample_tent_trapezoidal(
-            out_center_pos, kernel_width, kernel_func, kernel_radius
+            out_center_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
         )
         out_corner_right = resample_tent_trapezoidal(
-            out_corner_right_pos, kernel_width, kernel_func, kernel_radius
+            out_corner_right_pos, tent_kernel_width, kernel_func, kernel_radius, tent_value_func
         )
 
     # Contraction: 1/4 * corner_left + 1/2 * center + 1/4 * corner_right
@@ -500,6 +614,9 @@ Examples:
                        help="Sampling kernel (default: box)")
     parser.add_argument('--width', '-w', type=float, default=2.0,
                        help="Kernel width in tent units (default: 2.0)")
+    parser.add_argument('--recurse', '-R', type=int, default=1,
+                       help="Tent expansion recursion levels (default: 1). "
+                            "Higher values create finer grids (2^N resolution).")
     parser.add_argument('--verify', '-v', action='store_true',
                        help="Verify against known 2× kernel from TENT-SPACE.md")
     parser.add_argument('--list-kernels', '-l', action='store_true',
@@ -518,16 +635,18 @@ Examples:
         return
 
     print(f"Parameters: ratio={args.ratio}, offset={args.offset}, "
-          f"kernel={args.kernel}, width={args.width}")
+          f"kernel={args.kernel}, width={args.width}, recurse={args.recurse}")
 
     coeffs = derive_direct_kernel(
         ratio=args.ratio,
         offset=args.offset,
         kernel_name=args.kernel,
         kernel_width=args.width,
+        recurse=args.recurse,
     )
 
-    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={args.width})"
+    recurse_str = f", {args.recurse}× tent recursion" if args.recurse > 1 else ""
+    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={args.width}{recurse_str})"
     pretty_print_kernel(coeffs, name)
 
 
