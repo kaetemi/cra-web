@@ -621,14 +621,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Derive 2× downsample kernel (uses default offset and width)
+  # Derive 2× downsample kernel (uses default offset=0.5, width=1 box px)
   python tent_kernel.py --ratio 2
 
-  # 3× downsample (uses default offset=1, width=3)
+  # 3× downsample (uses default offset=1, width=1.5 box px)
   python tent_kernel.py --ratio 3
 
-  # 4× with custom offset
-  python tent_kernel.py --ratio 4 --offset 2.0
+  # 4× with wider filter (2 box pixels instead of default 2)
+  python tent_kernel.py --ratio 4 --width 2
 
   # 2× with triangle (bilinear) kernel
   python tent_kernel.py --ratio 2 --kernel triangle
@@ -646,8 +646,8 @@ Examples:
                        choices=list(KERNELS.keys()),
                        help="Sampling kernel (default: box)")
     parser.add_argument('--width', '-w', type=float, default=None,
-                       help="Kernel width in tent units. Default: ratio (matches filter_scale "
-                            "for proper coverage of output pixel footprint).")
+                       help="Kernel width in source (box) space. Default: ratio/2. "
+                            "This is the filter radius in source pixels.")
     parser.add_argument('--recurse', '-R', type=int, default=1,
                        help="Tent expansion recursion levels (default: 1). "
                             "Higher values create finer grids (2^N resolution).")
@@ -670,21 +670,24 @@ Examples:
 
     # Apply defaults based on ratio
     offset = args.offset if args.offset is not None else (args.ratio - 1) / 2
-    width = args.width if args.width is not None else args.ratio
+    # Width is specified in box (source) space, default is ratio/2
+    # Convert to tent space internally (1 box pixel = 2 tent units)
+    width_box = args.width if args.width is not None else args.ratio / 2
+    width_tent = width_box * 2  # Convert to tent space
 
     print(f"Parameters: ratio={args.ratio}, offset={offset}, "
-          f"kernel={args.kernel}, width={width}, recurse={args.recurse}")
+          f"kernel={args.kernel}, width={width_box} (box space), recurse={args.recurse}")
 
     coeffs = derive_direct_kernel(
         ratio=args.ratio,
         offset=offset,
         kernel_name=args.kernel,
-        kernel_width=width,
+        kernel_width=width_tent,
         recurse=args.recurse,
     )
 
     recurse_str = f", {args.recurse}× tent recursion" if args.recurse > 1 else ""
-    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={width}{recurse_str})"
+    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={width_box} box px{recurse_str})"
     pretty_print_kernel(coeffs, name)
 
 
