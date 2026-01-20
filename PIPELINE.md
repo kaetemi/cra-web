@@ -138,14 +138,14 @@ Pixels with `α = 0` are left unchanged. This must happen in linear space becaus
 
 When enabled (`--supersample tent-volume`), the image is expanded to a bilinear "tent-space" representation before processing:
 
-**Tent Expansion** (W × H → (2W−1) × (2H−1)):
+**Tent Expansion** (W × H → (2W+1) × (2H+1)):
 - Original pixels become the odd-indexed samples
 - New even-indexed samples are bilinearly interpolated from neighbors
 - Edge samples are linearly extrapolated, creating values that can exceed the original range (including negative values in linear RGB)
 
 This expansion happens **before input tonemapping** and **before resize/color correction**.
 
-**Tent Contraction** ((2W−1) × (2H−1) → W × H):
+**Tent Contraction** ((2W+1) × (2H+1) → W × H):
 - Applies a 3×3 tent (bilinear) filter kernel
 - Averages 9 samples weighted by tent coefficients: corners (1), edges (2), center (4)
 - Returns to the original resolution
@@ -389,7 +389,7 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                           [Tent Expand?]
                                    │
                                    ▼
-                      W×H → (2W−1)×(2H−1)
+                      W×H → (2W+1)×(2H+1)
                    (bilinear interpolation +
                      edge extrapolation)
                                    │
@@ -425,7 +425,7 @@ Stride padding can be filled with black (zeros) or by repeating the last pixel.
                          [Tent Contract?]
                                    │
                                    ▼
-                      (2W−1)×(2H−1) → W×H
+                      (2W+1)×(2H+1) → W×H
                        (3×3 tent filter)
                                    │
                                    ▼

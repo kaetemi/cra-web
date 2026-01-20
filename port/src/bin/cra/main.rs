@@ -1351,7 +1351,7 @@ fn main() -> Result<(), String> {
         let (input_pixels, expanded_width, expanded_height) = if use_supersample {
             if args.verbose {
                 eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
-                    src_width, src_height, src_width * 2 - 1, src_height * 2 - 1);
+                    src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
             }
             let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
             (expanded, w as u32, h as u32)
