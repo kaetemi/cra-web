@@ -433,6 +433,11 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized => "Stochastic Jinc Scatter (normalized)",
             cra_wasm::rescale::RescaleMethod::TentBox => "Tent Box",
             cra_wasm::rescale::RescaleMethod::TentLanczos3 => "Tent Lanczos3",
+            cra_wasm::rescale::RescaleMethod::Tent2DBox => "Tent 2D Box",
+            cra_wasm::rescale::RescaleMethod::Tent2DLanczos3Jinc => "Tent 2D Lanczos3-Jinc",
+            cra_wasm::rescale::RescaleMethod::TentBoxIterative => "Tent Box Iterative",
+            cra_wasm::rescale::RescaleMethod::Tent2DBoxIterative => "Tent 2D Box Iterative",
+            cra_wasm::rescale::RescaleMethod::BilinearIterative => "Bilinear Iterative",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         let ss_note = if use_supersample { " (supersample target)" } else { "" };

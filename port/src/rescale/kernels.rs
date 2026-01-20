@@ -191,7 +191,7 @@ pub fn box_integrated(src_pos: f32, si: f32, filter_scale: f32) -> f32 {
 #[inline]
 pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
     match method {
-        RescaleMethod::Bilinear => {
+        RescaleMethod::Bilinear | RescaleMethod::BilinearIterative => {
             let x = x.abs();
             if x < 1.0 { 1.0 - x } else { 0.0 }
         }

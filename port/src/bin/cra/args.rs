@@ -210,6 +210,16 @@ pub enum ScaleMethod {
     TentBox,
     /// Tent-space Lanczos3 filter pipeline: expand to tent, lanczos3 resample, contract
     TentLanczos3,
+    /// Tent-space 2D Box filter: non-separable 2D tent-space box kernel
+    Tent2dBox,
+    /// Tent-space 2D Lanczos3-Jinc filter: non-separable 2D tent-space EWA kernel
+    Tent2dLanczos3Jinc,
+    /// Iterative Tent Box: 2× tent-box passes for power-of-2, then final factor
+    TentBoxIterative,
+    /// Iterative Tent 2D Box: 2× 2D tent-box passes for power-of-2, then final factor
+    Tent2dBoxIterative,
+    /// Iterative Bilinear: mipmap-style 2× bilinear passes for power-of-2, then final factor
+    BilinearIterative,
 }
 
 impl ScaleMethod {
@@ -238,6 +248,11 @@ impl ScaleMethod {
             ScaleMethod::StochasticJincScatterNormalized => cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized,
             ScaleMethod::TentBox => cra_wasm::rescale::RescaleMethod::TentBox,
             ScaleMethod::TentLanczos3 => cra_wasm::rescale::RescaleMethod::TentLanczos3,
+            ScaleMethod::Tent2dBox => cra_wasm::rescale::RescaleMethod::Tent2DBox,
+            ScaleMethod::Tent2dLanczos3Jinc => cra_wasm::rescale::RescaleMethod::Tent2DLanczos3Jinc,
+            ScaleMethod::TentBoxIterative => cra_wasm::rescale::RescaleMethod::TentBoxIterative,
+            ScaleMethod::Tent2dBoxIterative => cra_wasm::rescale::RescaleMethod::Tent2DBoxIterative,
+            ScaleMethod::BilinearIterative => cra_wasm::rescale::RescaleMethod::BilinearIterative,
         }
     }
 }

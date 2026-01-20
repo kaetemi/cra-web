@@ -9,11 +9,13 @@
 //! - **Tent2DLanczos3Jinc**: 2D tent-space with EWA Lanczos3-jinc kernel
 //! - **TentBoxIterative**: Iterative 2× separable tent-box downscaling
 //! - **Tent2DBoxIterative**: Iterative 2× 2D tent-box downscaling
+//! - **BilinearIterative**: Iterative 2× bilinear downscaling (mipmap-style)
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
 use super::kernels::precompute_tent_2d_kernel_weights;
 use super::separable;
+use super::bilinear;
 
 /// 2D Tent-space resampling for Pixel4 images using precomputed kernel weights.
 ///
@@ -405,6 +407,122 @@ pub fn rescale_tent_iterative_alpha_pixels(
                 false, None,
             )
         };
+
+        current = next;
+        current_w = next_w;
+        current_h = next_h;
+
+        // Report progress
+        if let Some(ref mut cb) = progress {
+            cb((pass_idx + 1) as f32 / total_passes as f32);
+        }
+    }
+
+    current
+}
+
+// ============================================================================
+// Iterative Bilinear Downscaling
+// ============================================================================
+
+/// Iterative bilinear downscaling for Pixel4 images (mipmap-style).
+///
+/// For downscaling by factor N, iteratively applies 2× bilinear for each power of 2,
+/// then applies the remaining factor. This produces mipmap-quality downscaling
+/// which is often better than a single pass for large scale factors.
+pub fn rescale_bilinear_iterative_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Calculate the pass schedule
+    let passes = calculate_iterative_passes(src_width, src_height, dst_width, dst_height);
+
+    if passes.is_empty() {
+        // Identity
+        if let Some(ref mut cb) = progress {
+            cb(1.0);
+        }
+        return src.to_vec();
+    }
+
+    let total_passes = passes.len();
+    let mut current = src.to_vec();
+    let mut current_w = src_width;
+    let mut current_h = src_height;
+
+    for (pass_idx, &(next_w, next_h)) in passes.iter().enumerate() {
+        // Skip if dimensions unchanged
+        if next_w == current_w && next_h == current_h {
+            continue;
+        }
+
+        // Apply bilinear downscale
+        let next = bilinear::rescale_bilinear_pixels(
+            &current, current_w, current_h,
+            next_w, next_h,
+            scale_mode,
+            false, // tent_mode
+            None,
+        );
+
+        current = next;
+        current_w = next_w;
+        current_h = next_h;
+
+        // Report progress
+        if let Some(ref mut cb) = progress {
+            cb((pass_idx + 1) as f32 / total_passes as f32);
+        }
+    }
+
+    current
+}
+
+/// Alpha-aware iterative bilinear downscaling for Pixel4 images.
+pub fn rescale_bilinear_iterative_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Calculate the pass schedule
+    let passes = calculate_iterative_passes(src_width, src_height, dst_width, dst_height);
+
+    if passes.is_empty() {
+        // Identity
+        if let Some(ref mut cb) = progress {
+            cb(1.0);
+        }
+        return src.to_vec();
+    }
+
+    let total_passes = passes.len();
+    let mut current = src.to_vec();
+    let mut current_w = src_width;
+    let mut current_h = src_height;
+
+    for (pass_idx, &(next_w, next_h)) in passes.iter().enumerate() {
+        // Skip if dimensions unchanged
+        if next_w == current_w && next_h == current_h {
+            continue;
+        }
+
+        // Apply bilinear downscale (alpha-aware)
+        let next = bilinear::rescale_bilinear_alpha_pixels(
+            &current, current_w, current_h,
+            next_w, next_h,
+            scale_mode,
+            false, // tent_mode
+            None,
+        );
 
         current = next;
         current_w = next_w;
