@@ -512,7 +512,8 @@ fn test_tent_box_2x_kernel_weights() {
     use super::kernels::precompute_tent_kernel_weights;
 
     // 6 input pixels → 3 output pixels (2× downscale)
-    let weights = precompute_tent_kernel_weights(6, 3, RescaleMethod::Box);
+    let scale = 6.0 / 3.0;  // 2× downscale
+    let weights = precompute_tent_kernel_weights(6, 3, scale, RescaleMethod::Box);
 
     // Check output pixel 1 (center) which should have the canonical kernel
     // For 2× downscale with offset=0.5, output pixel 1 is centered at input 2.5

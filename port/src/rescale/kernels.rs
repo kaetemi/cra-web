@@ -555,15 +555,16 @@ fn contract_tent_coeffs(
 /// The `inner_method` specifies the resampling kernel used in tent space.
 /// For TentBox, use RescaleMethod::Box.
 /// For TentLanczos3, use RescaleMethod::Lanczos3.
+///
+/// The `scale` parameter allows uniform scaling support - pass the desired scale
+/// factor (which may differ from src_len/dst_len for uniform scaling modes).
 pub fn precompute_tent_kernel_weights(
     src_len: usize,
     dst_len: usize,
+    scale: f32,
     inner_method: RescaleMethod,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
-
-    // Scale factor: src_len / dst_len
-    let scale = src_len as f32 / dst_len as f32;
 
     // Kernel half-width in tent space
     // Following tent_kernel.py: for box, width_tent = ratio, half_width = ratio/2
