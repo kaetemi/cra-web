@@ -402,9 +402,15 @@ def derive_direct_kernel(
 
     def resample_at_deepest(pos: float, width: float) -> SymbolicCoeffs:
         """Resample the deepest tent surface at a given position."""
+        # Use exact (trapezoidal) only when:
+        # - Position is integer
+        # - Width is even integer (trapezoidal matches box overlap for even widths)
+        # - Kernel is box
+        # For odd widths, trapezoidal rule gives wrong weights, so use overlap method
         use_exact = (
             pos == int(pos) and
             width == int(width) and
+            int(width) % 2 == 0 and  # Only for even widths
             kernel_name == 'box'
         )
 
@@ -534,18 +540,16 @@ def pretty_print_kernel(coeffs: SymbolicCoeffs, name: str = "Kernel"):
 def verify_against_known():
     """Verify against the known 2× kernel from TENT-SPACE.md."""
     print("="*70)
-    print("VERIFICATION AGAINST TENT-SPACE.md")
+    print("VERIFICATION AGAINST TENT-SPACE.md AND BRUTEFORCE")
     print("="*70)
 
     print("\nExpected 2× downsample kernel from docs:")
     print("  1D: [-1, 7, 26, 26, 7, -1] / 64")
-    print("  (centered between pixels, i.e., offset=-0.5)")
 
-    # The documented kernel is centered between two pixels (offset=-0.5)
-    # This is the natural position for 2× downsampling where output pixel
-    # covers input pixels -1 and 0 symmetrically
-    coeffs = derive_direct_kernel(ratio=2, offset=-0.5, kernel_name='box', kernel_width=2)
-    pretty_print_kernel(coeffs, "Derived 2× kernel (box, width=2)")
+    # The standard centering: output pixel 0 covers input [0, ratio), centered at ratio/2
+    # offset = (ratio - 1) / 2, width = ratio
+    coeffs = derive_direct_kernel(ratio=2, offset=0.5, kernel_name='box', kernel_width=2)
+    pretty_print_kernel(coeffs, "Derived 2× kernel (box, width=2, offset=0.5)")
 
     # Check if matches
     min_i = coeffs.min_index()
@@ -555,25 +559,60 @@ def verify_against_known():
 
     print("\n" + "-"*70)
     if actual == expected:
-        print("✓ MATCH! Derived kernel matches TENT-SPACE.md exactly.")
+        print("✓ MATCH! Derived 2× kernel matches TENT-SPACE.md exactly.")
     else:
         print(f"✗ MISMATCH")
         print(f"  Expected: {expected}")
         print(f"  Got:      {actual}")
 
     print("\n" + "="*70)
-    print("Additional Examples")
+    print("Additional Examples (matching bruteforce)")
     print("="*70)
 
-    # 3× downsample
-    print("\n3× downsample with box kernel (width=2):")
-    coeffs3 = derive_direct_kernel(ratio=3, offset=0, kernel_name='box', kernel_width=2)
+    # 3× downsample - offset=(3-1)/2=1, width=3
+    print("\n3× downsample (offset=1, width=3):")
+    print("  Expected from bruteforce: [-1, 7, 9, 18, 9, 7, -1] / 48")
+    coeffs3 = derive_direct_kernel(ratio=3, offset=1, kernel_name='box', kernel_width=3)
     pretty_print_kernel(coeffs3, "3× kernel")
 
-    # 4× downsample
-    print("\n4× downsample with box kernel (width=2):")
-    coeffs4 = derive_direct_kernel(ratio=4, offset=0, kernel_name='box', kernel_width=2)
+    expected3 = [-1, 7, 9, 18, 9, 7, -1]
+    min_i3 = coeffs3.min_index()
+    max_i3 = coeffs3.max_index()
+    actual3 = [int(coeffs3.coeffs.get(i, 0) * 48) for i in range(min_i3, max_i3 + 1)]
+    if actual3 == expected3:
+        print("✓ MATCH! 3× kernel matches bruteforce.")
+    else:
+        print(f"✗ MISMATCH: expected {expected3}, got {actual3}")
+
+    # 4× downsample - offset=(4-1)/2=1.5, width=4
+    print("\n4× downsample (offset=1.5, width=4):")
+    print("  Expected from bruteforce: [1, 1, 2, 2, 1, 1] / 8")
+    coeffs4 = derive_direct_kernel(ratio=4, offset=1.5, kernel_name='box', kernel_width=4)
     pretty_print_kernel(coeffs4, "4× kernel")
+
+    expected4 = [1, 1, 2, 2, 1, 1]
+    min_i4 = coeffs4.min_index()
+    max_i4 = coeffs4.max_index()
+    actual4 = [int(coeffs4.coeffs.get(i, 0) * 8) for i in range(min_i4, max_i4 + 1)]
+    if actual4 == expected4:
+        print("✓ MATCH! 4× kernel matches bruteforce.")
+    else:
+        print(f"✗ MISMATCH: expected {expected4}, got {actual4}")
+
+    # 8× downsample - offset=(8-1)/2=3.5, width=8
+    print("\n8× downsample (offset=3.5, width=8):")
+    print("  Expected from bruteforce: [1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1] / 16")
+    coeffs8 = derive_direct_kernel(ratio=8, offset=3.5, kernel_name='box', kernel_width=8)
+    pretty_print_kernel(coeffs8, "8× kernel")
+
+    expected8 = [1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 1, 1]
+    min_i8 = coeffs8.min_index()
+    max_i8 = coeffs8.max_index()
+    actual8 = [int(coeffs8.coeffs.get(i, 0) * 16) for i in range(min_i8, max_i8 + 1)]
+    if actual8 == expected8:
+        print("✓ MATCH! 8× kernel matches bruteforce.")
+    else:
+        print(f"✗ MISMATCH: expected {expected8}, got {actual8}")
 
 
 def main():
@@ -582,14 +621,17 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Derive 2× downsample kernel (matches TENT-SPACE.md)
+  # Derive 2× downsample kernel (uses default offset and width)
   python tent_kernel.py --ratio 2
 
-  # 3× downsample with wider kernel
-  python tent_kernel.py --ratio 3 --width 4
+  # 3× downsample (uses default offset=1, width=3)
+  python tent_kernel.py --ratio 3
+
+  # 4× with custom offset
+  python tent_kernel.py --ratio 4 --offset 2.0
 
   # 2× with triangle (bilinear) kernel
-  python tent_kernel.py --ratio 2 --kernel triangle --width 2
+  python tent_kernel.py --ratio 2 --kernel triangle
 
   # Verify against documented kernel
   python tent_kernel.py --verify
@@ -597,13 +639,15 @@ Examples:
     )
     parser.add_argument('--ratio', '-r', type=float, default=2.0,
                        help="Downsampling ratio (default: 2.0)")
-    parser.add_argument('--offset', '-o', type=float, default=0.0,
-                       help="Pixel offset (default: 0.0)")
+    parser.add_argument('--offset', '-o', type=float, default=None,
+                       help="Pixel offset. Default: (ratio-1)/2 to center output pixel 0 "
+                            "over input pixels [0, ratio).")
     parser.add_argument('--kernel', '-k', type=str, default='box',
                        choices=list(KERNELS.keys()),
                        help="Sampling kernel (default: box)")
-    parser.add_argument('--width', '-w', type=float, default=2.0,
-                       help="Kernel width in tent units (default: 2.0)")
+    parser.add_argument('--width', '-w', type=float, default=None,
+                       help="Kernel width in tent units. Default: ratio (matches filter_scale "
+                            "for proper coverage of output pixel footprint).")
     parser.add_argument('--recurse', '-R', type=int, default=1,
                        help="Tent expansion recursion levels (default: 1). "
                             "Higher values create finer grids (2^N resolution).")
@@ -624,19 +668,23 @@ Examples:
         verify_against_known()
         return
 
-    print(f"Parameters: ratio={args.ratio}, offset={args.offset}, "
-          f"kernel={args.kernel}, width={args.width}, recurse={args.recurse}")
+    # Apply defaults based on ratio
+    offset = args.offset if args.offset is not None else (args.ratio - 1) / 2
+    width = args.width if args.width is not None else args.ratio
+
+    print(f"Parameters: ratio={args.ratio}, offset={offset}, "
+          f"kernel={args.kernel}, width={width}, recurse={args.recurse}")
 
     coeffs = derive_direct_kernel(
         ratio=args.ratio,
-        offset=args.offset,
+        offset=offset,
         kernel_name=args.kernel,
-        kernel_width=args.width,
+        kernel_width=width,
         recurse=args.recurse,
     )
 
     recurse_str = f", {args.recurse}× tent recursion" if args.recurse > 1 else ""
-    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={args.width}{recurse_str})"
+    name = f"{args.ratio}× downsample with {args.kernel} kernel (width={width}{recurse_str})"
     pretty_print_kernel(coeffs, name)
 
 
