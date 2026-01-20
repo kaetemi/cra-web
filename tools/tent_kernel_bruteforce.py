@@ -6,14 +6,14 @@ For each input pixel position, set it to 1.0 (all others 0.0),
 run through the full pipeline, and measure the output at a reference pixel.
 The sequence of outputs IS the effective kernel.
 
-Pipeline: box → tent_expand → resample → tent_contract → box
+Pipeline: box → tent_expand (×recurse) → resample → tent_contract (×recurse) → box
 """
 
 from __future__ import annotations
 import argparse
 
 
-def tent_expand_1d(src: list[float]) -> list[float]:
+def tent_expand_1d(src: list[float], debug: bool = False) -> list[float]:
     """
     Expand 1D box-space array to tent-space.
 
@@ -41,8 +41,12 @@ def tent_expand_1d(src: list[float]) -> list[float]:
             sx_right = dx // 2
             dst[dx] = (get_src(sx_left) + get_src(sx_right)) / 2
 
+    if debug:
+        print(f"    After pass 1 (interpolation): {format_array(dst)}")
+
     # Pass 2: Adjust centers for volume preservation
-    # M' = 4V - 0.5*sum(edges) - 0.25*sum(corners)
+    # In 1D: V = 1/4*left + 1/2*center + 1/4*right
+    # So: M = 2V - 0.5*left - 0.5*right = 2V - 0.5*(left + right)
     for sx in range(w):
         dx = sx * 2 + 1  # Center position in tent space
         original = src[sx]
@@ -52,10 +56,6 @@ def tent_expand_1d(src: list[float]) -> list[float]:
         edge_right = dst[dx + 1]  # corner to the right
         edge_sum = edge_left + edge_right
 
-        # In 1D, "corners" of the integration stencil are the same as edges
-        # Actually in 1D, the integration is just: 1/4 * left + 1/2 * center + 1/4 * right
-        # So we solve: V = 1/4*left + 1/2*M + 1/4*right
-        # M = 2V - 0.5*left - 0.5*right = 2V - 0.5*(left + right)
         adjusted = 2 * original - 0.5 * edge_sum
         dst[dx] = adjusted
 
@@ -93,7 +93,6 @@ def box_integrated(src_pos: float, si: int, filter_scale: float) -> float:
     """
     Compute overlap between destination pixel footprint and source pixel cell.
 
-    This matches the Rust implementation in kernels.rs exactly:
     - Destination pixel at src_pos has footprint [src_pos - half_width, src_pos + half_width]
     - Source pixel si owns the cell [si - 0.5, si + 0.5]
     - Returns the length of the overlap
@@ -111,14 +110,20 @@ def box_integrated(src_pos: float, si: int, filter_scale: float) -> float:
     return max(0.0, overlap_end - overlap_start)
 
 
-def resample_1d_box(src: list[float], dst_len: int) -> list[float]:
+def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool = False) -> list[float]:
     """
     Resample 1D array using box filter with exact overlap computation.
 
-    This matches the Rust implementation in kernels.rs / separable.rs:
-    - Uses sample-to-sample mapping for tent space
-    - Each source sample "owns" a unit cell [si - 0.5, si + 0.5]
-    - Weight = overlap between filter footprint and cell
+    For 2× downscale in tent space, the scale is always exactly 2.0.
+    The offset accounts for the fringe growth at each depth level.
+
+    Key insight: The fringe grows as (fringe * 2) + 0.5 per depth:
+    - Depth 1: fringe = 0.5 box pixels = 1 sample
+    - Depth 2: fringe = 1.5 box pixels = 3 samples
+    - Depth 3: fringe = 3.5 box pixels = 7 samples
+    Formula: fringe_samples = 2^depth - 1
+
+    The mapping must align content centers, not sample endpoints.
     """
     src_len = len(src)
     dst = [0.0] * dst_len
@@ -127,31 +132,45 @@ def resample_1d_box(src: list[float], dst_len: int) -> list[float]:
         return list(src)
 
     if dst_len == 1:
-        # Average all samples
         return [sum(src) / src_len]
 
-    # Sample-to-sample scale (tent mode)
-    scale = (src_len - 1) / (dst_len - 1)
+    # For 2× downscale in tent space, scale is ALWAYS exactly 2.0
+    # This is the physical scaling factor, independent of array sizes
+    scale = 2.0
+    filter_scale = 2.0
 
-    # Center offset to align centers (matches Rust)
-    center_offset = (src_len - dst_len * scale) / 2.0
+    # Offset to align content centers
+    # Output tent sample 'fringe' (first content center) should map to
+    # input tent position that corresponds to the box filter center
+    #
+    # For output box pixel 0 center → filter center at input box 0.5
+    # Output tent idx (2^d - 1) → should map to input box 0.5
+    # Input box 0.5 = input tent idx (0.5 * 2^d + (2^d - 1)) = 1.5 * 2^d - 1
+    #
+    # So: fringe * 2 + offset = 1.5 * 2^d - 1
+    #     (2^d - 1) * 2 + offset = 1.5 * 2^d - 1
+    #     2^(d+1) - 2 + offset = 1.5 * 2^d - 1
+    #     offset = 1.5 * 2^d - 1 - 2^(d+1) + 2
+    #            = 1.5 * 2^d - 2 * 2^d + 1
+    #            = -0.5 * 2^d + 1
+    #            = 1 - 2^(d-1)
+    offset = 1.0 - (2 ** (depth - 1))
 
-    # Filter scale for box integration (use scale directly, clamped to >= 1)
-    filter_scale = max(scale, 1.0)
+    if debug:
+        print(f"    Resample: {src_len} → {dst_len}, scale={scale:.6f}, filter_scale={filter_scale:.6f}, offset={offset:.6f}")
 
-    # Box radius: how far to search for overlapping source samples
-    box_radius = int((0.5 * filter_scale) + 1) + 1
+    box_radius = int(filter_scale / 2 + 1) + 1
 
     for di in range(dst_len):
-        # Map destination position to source position (matches Rust formula exactly)
-        src_pos = (di + 0.5) * scale - 0.5 + center_offset
+        # Content-aligned mapping: dst sample di maps to src position di * scale + offset
+        src_pos = di * scale + offset
         center = int(src_pos)
 
         # Find valid source index range
         start = max(0, center - box_radius)
         end = min(src_len - 1, center + box_radius)
 
-        # Collect weights
+        # Collect weights using the filter half-width
         weights = []
         weight_sum = 0.0
 
@@ -175,31 +194,67 @@ def resample_1d_box(src: list[float], dst_len: int) -> list[float]:
     return dst
 
 
-def full_pipeline(src: list[float], output_len: int, recurse: int = 1) -> list[float]:
+def format_array(arr: list[float], max_show: int = 20) -> str:
+    """Format array for display, showing values as fractions where clean."""
+    if len(arr) <= max_show:
+        return "[" + ", ".join(f"{v:.4f}" for v in arr) + "]"
+    else:
+        first = ", ".join(f"{v:.4f}" for v in arr[:5])
+        last = ", ".join(f"{v:.4f}" for v in arr[-5:])
+        return f"[{first}, ... ({len(arr)} total) ..., {last}]"
+
+
+def full_pipeline(src: list[float], output_len: int, recurse: int = 1, debug: bool = False) -> list[float]:
     """
     Full tent-space downscaling pipeline.
 
     box → tent_expand (×recurse) → resample → tent_contract (×recurse) → box
     """
-    # Expand to tent space (recurse times)
     data = src
-    for _ in range(recurse):
-        data = tent_expand_1d(data)
+
+    if debug:
+        print(f"  Input box ({len(data)}): {format_array(data)}")
+
+    # Track dimensions through the pipeline
+    box_w = len(src)
+
+    # Expand to tent space (recurse times)
+    for i in range(recurse):
+        prev_len = len(data)
+        data = tent_expand_1d(data, debug=debug)
+        if debug:
+            # Compute fringe in original box units
+            # After i+1 expansions: tent_len = 2^(i+1) * box_w + (2^(i+1) - 1)
+            # The "content" centers span from sample 2^(i+1)-1 to tent_len - 2^(i+1)
+            # Actually simpler: fringe = (2^n - 1) / 2 box pixels on each side
+            scale_factor = 2 ** (i + 1)
+            fringe_box = (scale_factor - 1) / 2.0
+            print(f"  Expand {i+1}: {prev_len} → {len(data)} (fringe = {fringe_box:.1f} box px)")
+            print(f"    {format_array(data)}")
 
     # Calculate target tent-space size for desired output
     # After recurse expansions: len = 2^recurse * W + (2^recurse - 1)
-    # After recurse contractions of M samples: (M - (2^recurse - 1)) / 2^recurse
     # We want final output to be output_len, so:
     # tent_target = 2^recurse * output_len + (2^recurse - 1)
     scale = 2 ** recurse
     tent_target = scale * output_len + (scale - 1)
 
-    # Resample in tent space using box filter (matches Rust implementation)
-    data = resample_1d_box(data, tent_target)
+    if debug:
+        print(f"  Resample target: {len(data)} → {tent_target}")
+
+    # Resample in tent space using box filter
+    data = resample_1d_box(data, tent_target, depth=recurse, debug=debug)
+
+    if debug:
+        print(f"  After resample ({len(data)}): {format_array(data)}")
 
     # Contract back to box space (recurse times)
-    for _ in range(recurse):
+    for i in range(recurse):
+        prev_len = len(data)
         data = tent_contract_1d(data)
+        if debug:
+            print(f"  Contract {i+1}: {prev_len} → {len(data)}")
+            print(f"    {format_array(data)}")
 
     return data
 
@@ -242,6 +297,10 @@ def main():
                        help="Output index to measure (default: center)")
     parser.add_argument('--recurse', '-R', type=int, default=1,
                        help="Number of tent expansion/contraction cycles (default: 1)")
+    parser.add_argument('--debug', '-d', action='store_true',
+                       help="Show all intermediate stages")
+    parser.add_argument('--sequence', '-s', action='store_true',
+                       help="Use sequential input [0,1,2,3,...] instead of impulse")
 
     args = parser.parse_args()
 
@@ -255,7 +314,67 @@ def main():
     print(f"Recurse levels: {args.recurse}")
     print()
 
+    # Show dimension progression
+    print("Dimension progression:")
+    w = input_len
+    for i in range(args.recurse):
+        tent_w = 2 * w + 1
+        fringe = (2 ** (i+1) - 1) / 2.0
+        print(f"  Depth {i+1}: box {w} → tent {tent_w} (fringe = {fringe:.1f} original box px)")
+        w = tent_w
+
+    # Target tent size
+    scale = 2 ** args.recurse
+    tent_target = scale * output_len + (scale - 1)
+    print(f"  Resample: tent {w} → tent {tent_target}")
+
+    w = tent_target
+    for i in range(args.recurse):
+        box_w = (w - 1) // 2
+        print(f"  Contract {i+1}: tent {w} → box {box_w}")
+        w = box_w
+    print()
+
+    if args.sequence:
+        # Run with sequential input to see patterns
+        print("=" * 60)
+        print("Sequential input mode: [0, 1, 2, 3, ...]")
+        print("=" * 60)
+        seq_input = list(range(input_len))
+        output = full_pipeline(seq_input, output_len, args.recurse, debug=args.debug)
+
+        print()
+        print(f"Input:  {format_array(list(map(float, seq_input)))}")
+        print(f"Output: {format_array(output)}")
+
+        # Check if output is linear (which it should be for correct resampling)
+        print()
+        print("Output linearity check:")
+        expected_scale = args.ratio
+        for i, v in enumerate(output):
+            expected = i * expected_scale + (expected_scale - 1) / 2  # Midpoint of input range
+            diff = v - expected
+            marker = " " if abs(diff) < 0.001 else " ← DEVIATION"
+            print(f"  output[{i}] = {v:.4f}, expected ≈ {expected:.4f}, diff = {diff:+.4f}{marker}")
+        return
+
+    if args.debug:
+        # Debug mode: show stages for a single impulse
+        print("=" * 60)
+        print(f"Debug: impulse at input position {output_idx * 2}")
+        print("=" * 60)
+        impulse = [0.0] * input_len
+        impulse_pos = min(output_idx * 2, input_len - 1)
+        impulse[impulse_pos] = 1.0
+        output = full_pipeline(impulse, output_len, args.recurse, debug=True)
+        print()
+        print(f"Final output: {format_array(output)}")
+        print()
+
     # Derive kernel
+    print("=" * 60)
+    print("Kernel derivation")
+    print("=" * 60)
     kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, args.recurse)
 
     # Find non-zero region
@@ -278,6 +397,19 @@ def main():
         print(f"  Sum: {total:.10f}")
         print()
 
+        # Check symmetry
+        n = len(kernel_slice)
+        is_symmetric = all(abs(kernel_slice[i] - kernel_slice[n-1-i]) < 1e-8 for i in range(n//2 + 1))
+        print(f"  Symmetric: {is_symmetric}")
+        if not is_symmetric:
+            print("  Symmetry differences:")
+            for i in range(n//2 + 1):
+                j = n - 1 - i
+                diff = kernel_slice[i] - kernel_slice[j]
+                if abs(diff) > 1e-10:
+                    print(f"    [{i}] vs [{j}]: {kernel_slice[i]:.8f} vs {kernel_slice[j]:.8f} (diff={diff:+.8f})")
+        print()
+
         # Print as fractions of a power of 2
         for denom in [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096]:
             int_coeffs = [round(k * denom) for k in kernel_slice]
@@ -294,12 +426,9 @@ def main():
 
         print()
         print("  Per-position breakdown:")
+        center = (output_idx + 0.5) * args.ratio
         for i, k in enumerate(kernel_slice):
             input_pos = first_idx + i
-            # Position relative to output pixel center
-            # Output pixel output_idx covers input range [output_idx * ratio, (output_idx+1) * ratio]
-            # Center is at (output_idx + 0.5) * ratio
-            center = (output_idx + 0.5) * args.ratio
             rel_pos = input_pos - center
             print(f"    Input[{input_pos}] (rel {rel_pos:+.1f}): {k:.6f}")
     else:
