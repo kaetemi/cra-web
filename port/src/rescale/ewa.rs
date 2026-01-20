@@ -130,8 +130,11 @@ pub fn rescale_ewa_pixels(
     );
 
     // Filter scale: expand kernel when downscaling
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
     // Use the larger filter scale for the radially symmetric kernel
     // This ensures we don't miss any source pixels when scales differ
@@ -255,8 +258,12 @@ pub fn rescale_ewa_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale: expand kernel when downscaling
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     let base_radius = ewa_radius(method);
@@ -415,8 +422,11 @@ pub fn rescale_stochastic_jinc_pixels(
     );
 
     // Filter scale: expand kernel when downscaling
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     // Match Lanczos5 sample count: π × r² where r = base_radius × filter_scale
@@ -540,8 +550,12 @@ fn rescale_stochastic_jinc_scatter_core(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale: expand kernel when downscaling
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     const BASE_RADIUS: f32 = 5.0;
@@ -714,8 +728,12 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale: expand kernel when downscaling
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     const BASE_RADIUS: f32 = 5.0;
@@ -918,8 +936,12 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale: expand kernel when downscaling
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
 
     // Match Lanczos5 sample count: π × r² where r = base_radius × filter_scale

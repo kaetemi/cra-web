@@ -150,8 +150,12 @@ pub fn rescale_scatter_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale controls kernel support
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
     let kernel_method = method.kernel_method();
 
@@ -237,8 +241,12 @@ pub fn rescale_scatter_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale controls kernel support
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
     let kernel_method = method.kernel_method();
 

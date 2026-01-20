@@ -119,8 +119,12 @@ pub fn rescale_kernel_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale controls kernel support
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
     // For Sinc, use full image extent; otherwise use kernel's base radius
     let (radius_x, radius_y) = if method.is_full_extent() {
@@ -140,8 +144,9 @@ pub fn rescale_kernel_pixels(
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
             // scale = src/dst, which is exactly the dest pixel footprint in source space
-            precompute_box_weights(src_width, dst_width, scale_x, scale_x, tent_mode),
-            precompute_box_weights(src_height, dst_height, scale_y, scale_y, tent_mode),
+            // In tent mode, apply the same multiplier for box as other kernels
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
@@ -213,8 +218,12 @@ pub fn rescale_kernel_alpha_pixels(
         src_width, src_height, dst_width, dst_height, scale_mode
     );
 
-    let filter_scale_x = scale_x.max(1.0);
-    let filter_scale_y = scale_y.max(1.0);
+    // Filter scale controls kernel support
+    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let filter_scale_x = scale_x.max(1.0) * multiplier_x;
+    let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
     // For Sinc, use full image extent; otherwise use kernel's base radius
     let (radius_x, radius_y) = if method.is_full_extent() {
@@ -231,8 +240,9 @@ pub fn rescale_kernel_alpha_pixels(
     let (h_weights, v_weights) = match method {
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
-            precompute_box_weights(src_width, dst_width, scale_x, scale_x, tent_mode),
-            precompute_box_weights(src_height, dst_height, scale_y, scale_y, tent_mode),
+            // In tent mode, apply the same multiplier for box as other kernels
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
