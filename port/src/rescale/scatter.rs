@@ -28,6 +28,8 @@ pub struct ScatterWeights {
 
 /// Precompute scatter weights for 1D resampling
 /// Returns weights for each SOURCE position (inverse of gather weights)
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn precompute_scatter_weights(
     src_len: usize,
     dst_len: usize,
@@ -35,28 +37,40 @@ pub fn precompute_scatter_weights(
     filter_scale: f32,
     radius: i32,
     method: RescaleMethod,
+    tent_mode: bool,
 ) -> Vec<ScatterWeights> {
     let mut all_weights = Vec::with_capacity(src_len);
 
     // Use the actual kernel method (not the scatter variant)
     let kernel_method = method.kernel_method();
 
-    // Center offset for uniform scaling
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+    // For tent mode, use sample-to-sample mapping
+    let (effective_scale, offset) = if tent_mode {
+        let tent_scale = if dst_len > 1 {
+            (src_len - 1) as f32 / (dst_len - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale, 0.5 * (1.0 - tent_scale))
+    } else {
+        // Standard pixel-center mapping with centering offset
+        let mapped_src_len = dst_len as f32 * scale;
+        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
+        (scale, center_offset)
+    };
 
     // Inverse scale: how destination positions map to source positions
-    let inv_scale = 1.0 / scale;
+    let inv_scale = 1.0 / effective_scale;
 
     for src_i in 0..src_len {
         // Find which destination pixels this source pixel affects
         // A source at src_i affects destination pixels where:
         //   |src_i - src_pos(dst_i)| < radius * filter_scale
-        // where src_pos(dst_i) = (dst_i + 0.5) * scale - 0.5 + offset
+        // where src_pos(dst_i) = (dst_i + 0.5) * effective_scale - 0.5 + offset
         //
         // Solving for dst_i:
-        //   dst_i = (src_i - offset + 0.5) / scale - 0.5
-        // with a range of ± radius * filter_scale / scale
+        //   dst_i = (src_i - offset + 0.5) / effective_scale - 0.5
+        // with a range of ± radius * filter_scale / effective_scale
 
         let dst_center = (src_i as f32 - offset + 0.5) * inv_scale - 0.5;
         let dst_radius = (radius as f32 * filter_scale) * inv_scale;
@@ -68,7 +82,7 @@ pub fn precompute_scatter_weights(
 
         for dst_i in start..=end {
             // Calculate where this destination samples in source space
-            let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+            let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
             let d = (src_i as f32 - src_pos) / filter_scale;
             let weight = eval_kernel(kernel_method, d);
             weights.push(weight);
@@ -119,6 +133,8 @@ fn scatter_row_pixel4(
 }
 
 /// Scatter-based separable kernel rescale (2-pass)
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_scatter_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -127,6 +143,7 @@ pub fn rescale_scatter_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -150,8 +167,8 @@ pub fn rescale_scatter_pixels(
     };
 
     // Precompute scatter weights (source -> destination mapping)
-    let h_weights = precompute_scatter_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
-    let v_weights = precompute_scatter_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
+    let h_weights = precompute_scatter_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode);
+    let v_weights = precompute_scatter_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method, tent_mode);
 
     // Pass 1: Horizontal scatter resample (src_width -> dst_width)
     let mut temp = vec![Pixel4::default(); dst_width * src_height];
@@ -203,6 +220,8 @@ pub fn rescale_scatter_pixels(
 }
 
 /// Alpha-aware scatter-based separable kernel rescale (2-pass)
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_scatter_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -211,6 +230,7 @@ pub fn rescale_scatter_alpha_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -232,8 +252,8 @@ pub fn rescale_scatter_alpha_pixels(
         )
     };
 
-    let h_weights = precompute_scatter_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method);
-    let v_weights = precompute_scatter_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method);
+    let h_weights = precompute_scatter_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode);
+    let v_weights = precompute_scatter_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method, tent_mode);
 
     // Pass 1: Alpha-aware horizontal scatter
     let mut temp = vec![Pixel4::default(); dst_width * src_height];

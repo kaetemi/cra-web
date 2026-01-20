@@ -112,6 +112,8 @@ fn ewa_radius(method: RescaleMethod) -> f32 {
 
 /// EWA resampling for Pixel4 images
 /// Uses 2D radially symmetric Lanczos kernel
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_ewa_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -120,6 +122,7 @@ pub fn rescale_ewa_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -142,17 +145,36 @@ pub fn rescale_ewa_pixels(
         base_radius * filter_scale
     };
 
-    // Center offsets for uniform scaling
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters
+    let (effective_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_x, 0.5 * (1.0 - tent_scale_x))
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (effective_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_y, 0.5 * (1.0 - tent_scale_y))
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     for dst_y in 0..dst_height {
         // Map destination pixel center to source coordinates
-        let src_pos_y = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let src_pos_y = (dst_y as f32 + 0.5) * effective_scale_y - 0.5 + offset_y;
 
         // Find vertical range of source pixels that could contribute
         let src_y_min = ((src_pos_y - radius).floor() as i32).max(0) as usize;
@@ -160,7 +182,7 @@ pub fn rescale_ewa_pixels(
 
         for dst_x in 0..dst_width {
             // Map destination pixel center to source coordinates
-            let src_pos_x = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let src_pos_x = (dst_x as f32 + 0.5) * effective_scale_x - 0.5 + offset_x;
 
             // Find horizontal range of source pixels that could contribute
             let src_x_min = ((src_pos_x - radius).floor() as i32).max(0) as usize;
@@ -216,6 +238,8 @@ pub fn rescale_ewa_pixels(
 
 /// Alpha-aware EWA resampling for Pixel4 images
 /// RGB channels are weighted by alpha to prevent transparent pixel color bleeding
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_ewa_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -224,6 +248,7 @@ pub fn rescale_ewa_alpha_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -242,21 +267,41 @@ pub fn rescale_ewa_alpha_pixels(
         base_radius * filter_scale
     };
 
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters
+    let (effective_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_x, 0.5 * (1.0 - tent_scale_x))
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (effective_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_y, 0.5 * (1.0 - tent_scale_y))
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     for dst_y in 0..dst_height {
-        let src_pos_y = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let src_pos_y = (dst_y as f32 + 0.5) * effective_scale_y - 0.5 + offset_y;
 
         let src_y_min = ((src_pos_y - radius).floor() as i32).max(0) as usize;
         let src_y_max = ((src_pos_y + radius).ceil() as i32).min(src_height as i32 - 1) as usize;
 
         for dst_x in 0..dst_width {
-            let src_pos_x = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let src_pos_x = (dst_x as f32 + 0.5) * effective_scale_x - 0.5 + offset_x;
 
             let src_x_min = ((src_pos_x - radius).floor() as i32).max(0) as usize;
             let src_x_max = ((src_pos_x + radius).ceil() as i32).min(src_width as i32 - 1) as usize;
@@ -353,6 +398,8 @@ pub fn rescale_ewa_alpha_pixels(
 /// - Base radius: 5.0 (Lanczos5 equivalent)
 /// - Sample count: π × (radius × filter_scale)², clamped to [64, 4096]
 /// - Sigma: radius × filter_scale (Gaussian matches kernel support)
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -360,6 +407,7 @@ pub fn rescale_stochastic_jinc_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -381,11 +429,30 @@ pub fn rescale_stochastic_jinc_pixels(
     // Sigma for Gaussian sampling - matches the kernel support radius
     let sigma = scaled_radius;
 
-    // Center offsets for uniform scaling
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters
+    let (effective_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_x, 0.5 * (1.0 - tent_scale_x))
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (effective_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_y, 0.5 * (1.0 - tent_scale_y))
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let src_w = src_width as i32;
     let src_h = src_height as i32;
@@ -393,10 +460,10 @@ pub fn rescale_stochastic_jinc_pixels(
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     for dst_y in 0..dst_height {
-        let src_pos_y = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let src_pos_y = (dst_y as f32 + 0.5) * effective_scale_y - 0.5 + offset_y;
 
         for dst_x in 0..dst_width {
-            let src_pos_x = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let src_pos_x = (dst_x as f32 + 0.5) * effective_scale_x - 0.5 + offset_x;
 
             let mut sum = Pixel4::default();
             let mut weight_sum = 0.0f32;
@@ -456,6 +523,8 @@ pub fn rescale_stochastic_jinc_pixels(
 ///
 /// If `normalize_destination` is true, a final pass normalizes by total weight
 /// received per destination pixel.
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 fn rescale_stochastic_jinc_scatter_core(
     src: &[Pixel4],
     src_width: usize,
@@ -463,6 +532,7 @@ fn rescale_stochastic_jinc_scatter_core(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
@@ -488,10 +558,32 @@ fn rescale_stochastic_jinc_scatter_core(
     const JINC_FIRST_ZERO: f32 = 1.2197;
     let sigma = JINC_FIRST_ZERO * filter_scale;
 
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters (inverse of gather mapping)
+    let (inv_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        let tent_offset_x = 0.5 * (1.0 - tent_scale_x);
+        (1.0 / tent_scale_x, tent_offset_x)
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (1.0 / scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (inv_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        let tent_offset_y = 0.5 * (1.0 - tent_scale_y);
+        (1.0 / tent_scale_y, tent_offset_y)
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (1.0 / scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let dst_w = dst_width as i32;
     let dst_h = dst_height as i32;
@@ -507,8 +599,9 @@ fn rescale_stochastic_jinc_scatter_core(
         for src_x in 0..src_width {
             let src_pixel = src[src_y * src_width + src_x];
 
-            let dst_pos_x = (src_x as f32 + 0.5 - offset_x) / scale_x - 0.5;
-            let dst_pos_y = (src_y as f32 + 0.5 - offset_y) / scale_y - 0.5;
+            // Map source pixel to destination space (inverse of gather mapping)
+            let dst_pos_x = (src_x as f32 + 0.5 - offset_x) * inv_scale_x - 0.5;
+            let dst_pos_y = (src_y as f32 + 0.5 - offset_y) * inv_scale_y - 0.5;
 
             let mut samples: Vec<(usize, usize, f32)> = Vec::with_capacity(num_samples);
             let mut weight_sum = 0.0f32;
@@ -566,6 +659,8 @@ fn rescale_stochastic_jinc_scatter_core(
 }
 
 /// Stochastic Jinc scatter resampling - normalizes emission per source pixel
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_scatter_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -573,15 +668,18 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_core(
         src, src_width, src_height, dst_width, dst_height,
-        scale_mode, false, progress
+        scale_mode, tent_mode, false, progress
     )
 }
 
 /// Stochastic Jinc scatter resampling with destination normalization
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_scatter_normalized_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -589,15 +687,18 @@ pub fn rescale_stochastic_jinc_scatter_normalized_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_core(
         src, src_width, src_height, dst_width, dst_height,
-        scale_mode, true, progress
+        scale_mode, tent_mode, true, progress
     )
 }
 
 /// Core alpha-aware stochastic Jinc scatter implementation
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 fn rescale_stochastic_jinc_scatter_alpha_core(
     src: &[Pixel4],
     src_width: usize,
@@ -605,6 +706,7 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
@@ -630,10 +732,32 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
     const JINC_FIRST_ZERO: f32 = 1.2197;
     let sigma = JINC_FIRST_ZERO * filter_scale;
 
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters (inverse of gather mapping)
+    let (inv_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        let tent_offset_x = 0.5 * (1.0 - tent_scale_x);
+        (1.0 / tent_scale_x, tent_offset_x)
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (1.0 / scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (inv_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        let tent_offset_y = 0.5 * (1.0 - tent_scale_y);
+        (1.0 / tent_scale_y, tent_offset_y)
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (1.0 / scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let dst_w = dst_width as i32;
     let dst_h = dst_height as i32;
@@ -654,8 +778,9 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
             let p = src[src_y * src_width + src_x];
             let alpha = p.a();
 
-            let dst_pos_x = (src_x as f32 + 0.5 - offset_x) / scale_x - 0.5;
-            let dst_pos_y = (src_y as f32 + 0.5 - offset_y) / scale_y - 0.5;
+            // Map source pixel to destination space (inverse of gather mapping)
+            let dst_pos_x = (src_x as f32 + 0.5 - offset_x) * inv_scale_x - 0.5;
+            let dst_pos_y = (src_y as f32 + 0.5 - offset_y) * inv_scale_y - 0.5;
 
             let mut samples: Vec<(usize, usize, f32)> = Vec::with_capacity(num_samples);
             let mut weight_sum = 0.0f32;
@@ -738,6 +863,8 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
 }
 
 /// Alpha-aware stochastic Jinc scatter resampling (no destination normalization)
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -745,15 +872,18 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_alpha_core(
         src, src_width, src_height, dst_width, dst_height,
-        scale_mode, false, progress
+        scale_mode, tent_mode, false, progress
     )
 }
 
 /// Alpha-aware stochastic Jinc scatter resampling with destination normalization
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_scatter_normalized_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -761,16 +891,19 @@ pub fn rescale_stochastic_jinc_scatter_normalized_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_alpha_core(
         src, src_width, src_height, dst_width, dst_height,
-        scale_mode, true, progress
+        scale_mode, tent_mode, true, progress
     )
 }
 
 /// Alpha-aware stochastic EWA Jinc resampling with adaptive sample count
 /// RGB channels are weighted by alpha to prevent transparent pixel color bleeding
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn rescale_stochastic_jinc_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -778,6 +911,7 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -798,10 +932,30 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
     // Sigma for Gaussian sampling - matches the kernel support radius
     let sigma = scaled_radius;
 
-    let mapped_src_width = dst_width as f32 * scale_x;
-    let mapped_src_height = dst_height as f32 * scale_y;
-    let offset_x = (src_width as f32 - mapped_src_width) / 2.0;
-    let offset_y = (src_height as f32 - mapped_src_height) / 2.0;
+    // Coordinate mapping parameters
+    let (effective_scale_x, offset_x) = if tent_mode {
+        let tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_x, 0.5 * (1.0 - tent_scale_x))
+    } else {
+        let mapped_src_width = dst_width as f32 * scale_x;
+        (scale_x, (src_width as f32 - mapped_src_width) / 2.0)
+    };
+
+    let (effective_scale_y, offset_y) = if tent_mode {
+        let tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale_y, 0.5 * (1.0 - tent_scale_y))
+    } else {
+        let mapped_src_height = dst_height as f32 * scale_y;
+        (scale_y, (src_height as f32 - mapped_src_height) / 2.0)
+    };
 
     let src_w = src_width as i32;
     let src_h = src_height as i32;
@@ -809,10 +963,10 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
 
     for dst_y in 0..dst_height {
-        let src_pos_y = (dst_y as f32 + 0.5) * scale_y - 0.5 + offset_y;
+        let src_pos_y = (dst_y as f32 + 0.5) * effective_scale_y - 0.5 + offset_y;
 
         for dst_x in 0..dst_width {
-            let src_pos_x = (dst_x as f32 + 0.5) * scale_x - 0.5 + offset_x;
+            let src_pos_x = (dst_x as f32 + 0.5) * effective_scale_x - 0.5 + offset_x;
 
             // Accumulators for alpha-aware blending
             let mut sum_r = 0.0f32;

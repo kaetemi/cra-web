@@ -367,30 +367,30 @@ pub fn rescale_with_progress_tent(
     }
 
     match method {
-        RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Bilinear => bilinear::rescale_bilinear_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
         RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
-            scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
         RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest |
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
-            ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            ewa::rescale_ewa_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJinc => {
-            ewa::rescale_stochastic_jinc_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJincScatter => {
-            ewa::rescale_stochastic_jinc_scatter_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_scatter_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJincScatterNormalized => {
-            ewa::rescale_stochastic_jinc_scatter_normalized_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_scatter_normalized_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
     }
 }
@@ -453,30 +453,30 @@ pub fn rescale_with_alpha_progress_tent(
     }
 
     match method {
-        RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress),
+        RescaleMethod::Bilinear => bilinear::rescale_bilinear_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress),
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
         RescaleMethod::Sinc | RescaleMethod::Box => {
             separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
-            scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::EWASincLanczos2 | RescaleMethod::EWASincLanczos3 |
         RescaleMethod::EWALanczos2 | RescaleMethod::EWALanczos3 |
         RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest |
         RescaleMethod::EWAMitchell | RescaleMethod::EWACatmullRom |
         RescaleMethod::Jinc => {
-            ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            ewa::rescale_ewa_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJinc => {
-            ewa::rescale_stochastic_jinc_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJincScatter => {
-            ewa::rescale_stochastic_jinc_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
         RescaleMethod::StochasticJincScatterNormalized => {
-            ewa::rescale_stochastic_jinc_scatter_normalized_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, progress)
+            ewa::rescale_stochastic_jinc_scatter_normalized_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
     }
 }
