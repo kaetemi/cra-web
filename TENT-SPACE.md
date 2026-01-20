@@ -201,3 +201,32 @@ This is a standard weighted average—no special structure needed.
 **Upscaling** (works, with wider kernel):
 
 Scale kernel width up to 2x to smooth over the encoded sharpness. Results are sharper and smoother than traditional upscaling because edge information is explicitly encoded rather than guessed.
+
+## Tent-Space 2× Downscale Kernels
+
+### 1D Kernel (÷64)
+
+| | | | | | |
+|---:|---:|---:|---:|---:|---:|
+| -1 | 7 | 26 | 26 | 7 | -1 |
+
+### 2D Kernel (÷4096)
+
+| | | | | | |
+|---:|---:|---:|---:|---:|---:|
+| -1 | -9 | -22 | -22 | -9 | -1 |
+| -9 | 47 | 186 | 186 | 47 | -9 |
+| -22 | 186 | 668 | 668 | 186 | -22 |
+| -22 | 186 | 668 | 668 | 186 | -22 |
+| -9 | 47 | 186 | 186 | 47 | -9 |
+| -1 | -9 | -22 | -22 | -9 | -1 |
+
+---
+
+**Notes:**
+
+- These are the **equivalent direct kernels** for 2× downscaling in box space. Applying these kernels produces identical results to the full tent-space pipeline (expand → resample → contract), but in a single convolution.
+
+- These kernels were derived using a **box filter** for the resampling step in tent space. Other kernels (Lanczos, Mitchell, etc.) would produce different effective kernels, though in practice the results are nearly identical due to the well-behaved tent surface.
+
+- The 2D kernel is **not separable**. If it were the outer product of the 1D kernel with itself, the corner would be +1/4096, but the actual corner is −1/4096. The non-separability arises from the bilinear tent surface coupling x and y.
