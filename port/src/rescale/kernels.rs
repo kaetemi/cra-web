@@ -202,7 +202,7 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized |
         RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest => jinc(x),  // 2D radial, but fallback for 1D context
-        RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox => box_filter(x),
+        RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative => box_filter(x),
         RescaleMethod::TentLanczos3 => lanczos3(x),
         // 2D methods use EWA/radial kernels, but provide fallback for 1D context
         RescaleMethod::Tent2DLanczos3Jinc => ewa_lanczos(x, 3.0),

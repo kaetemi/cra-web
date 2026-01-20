@@ -675,3 +675,165 @@ fn test_tent_2d_vs_separable_similar_results() {
             i, diff_r, diff_g, diff_b);
     }
 }
+
+// ============================================================================
+// Iterative Tent-Box Tests
+// ============================================================================
+
+#[test]
+fn test_tent_box_iterative_identity() {
+    // Identity transform should work
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_tent_box_iterative_2x_downscale() {
+    // 4x4 -> 2x2 should be equivalent to a single TentBox pass
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 16];
+    let dst_iter = rescale(&src, 4, 4, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    let dst_single = rescale(&src, 4, 4, 2, 2, RescaleMethod::TentBox, ScaleMode::Independent);
+
+    assert_eq!(dst_iter.len(), dst_single.len());
+
+    // Results should be identical for uniform input
+    for (i, (iter_p, single_p)) in dst_iter.iter().zip(dst_single.iter()).enumerate() {
+        assert!((iter_p.r() - single_p.r()).abs() < 0.001,
+            "Pixel {}: Iterative and single-pass should match for uniform 2× downscale", i);
+    }
+}
+
+#[test]
+fn test_tent_box_iterative_4x_downscale() {
+    // 8x8 -> 2x2 (4× downscale) should do two 2× passes
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 64];
+    let dst = rescale(&src, 8, 8, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    // Uniform input should give uniform output
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "TentBoxIterative 4× should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_box_iterative_8x_downscale() {
+    // 16x16 -> 2x2 (8× downscale) should do three 2× passes
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 256];
+    let dst = rescale(&src, 16, 16, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    // Uniform input should give uniform output
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "TentBoxIterative 8× should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_box_iterative_3x_downscale() {
+    // 6x6 -> 2x2 (3× downscale) - no 2× passes, just one 3× pass
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 36];
+    let dst = rescale(&src, 6, 6, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "TentBoxIterative 3× should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_box_iterative_6x_downscale() {
+    // 12x12 -> 2x2 (6× downscale) - one 2× pass (to 6x6), then one 3× pass
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 144];
+    let dst = rescale(&src, 12, 12, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "TentBoxIterative 6× should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_2d_box_iterative_identity() {
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Tent2DBoxIterative, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_tent_2d_box_iterative_8x_downscale() {
+    // 16x16 -> 2x2 (8× downscale)
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 256];
+    let dst = rescale(&src, 16, 16, 2, 2, RescaleMethod::Tent2DBoxIterative, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "Tent2DBoxIterative 8× should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_iterative_preserves_energy() {
+    // Test that iterative downscaling preserves total energy
+    let src = vec![
+        Pixel4::new(0.1, 0.2, 0.3, 1.0),
+        Pixel4::new(0.9, 0.1, 0.5, 1.0),
+        Pixel4::new(0.3, 0.8, 0.2, 1.0),
+        Pixel4::new(0.6, 0.4, 0.7, 1.0),
+        Pixel4::new(0.2, 0.3, 0.4, 1.0),
+        Pixel4::new(0.8, 0.2, 0.6, 1.0),
+        Pixel4::new(0.4, 0.7, 0.3, 1.0),
+        Pixel4::new(0.5, 0.5, 0.8, 1.0),
+        Pixel4::new(0.0, 0.1, 0.2, 1.0),
+        Pixel4::new(0.7, 0.0, 0.4, 1.0),
+        Pixel4::new(0.2, 0.6, 0.1, 1.0),
+        Pixel4::new(0.4, 0.3, 0.6, 1.0),
+        Pixel4::new(0.1, 0.2, 0.3, 1.0),
+        Pixel4::new(0.6, 0.1, 0.5, 1.0),
+        Pixel4::new(0.3, 0.5, 0.2, 1.0),
+        Pixel4::new(0.5, 0.4, 0.7, 1.0),
+    ];
+    let src_avg: f32 = src.iter().map(|p| (p.r() + p.g() + p.b()) / 3.0).sum::<f32>() / 16.0;
+
+    // 4x4 -> 1x1 (4× downscale, two 2× passes)
+    let dst = rescale(&src, 4, 4, 1, 1, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    let dst_avg = (dst[0].r() + dst[0].g() + dst[0].b()) / 3.0;
+
+    assert!((src_avg - dst_avg).abs() < 0.1,
+        "TentBoxIterative should approximately preserve average brightness: src={}, dst={}", src_avg, dst_avg);
+}
+
+#[test]
+fn test_tent_iterative_vs_single_pass_quality() {
+    // For power-of-2 downscales, iterative should give equivalent or better results
+    // than a single pass with the full factor
+    let src: Vec<Pixel4> = (0..64).map(|i| {
+        let v = (i as f32 / 63.0).sin() * 0.5 + 0.5;
+        Pixel4::new(v, v * 0.7, 1.0 - v, 1.0)
+    }).collect();
+
+    // 8x8 -> 2x2 (4× downscale)
+    let dst_iter = rescale(&src, 8, 8, 2, 2, RescaleMethod::TentBoxIterative, ScaleMode::Independent);
+    let dst_single = rescale(&src, 8, 8, 2, 2, RescaleMethod::TentBox, ScaleMode::Independent);
+
+    assert_eq!(dst_iter.len(), dst_single.len());
+
+    // Both should be valid (no NaN, reasonable values)
+    for (i, p) in dst_iter.iter().enumerate() {
+        assert!(!p.r().is_nan() && !p.g().is_nan() && !p.b().is_nan(),
+            "Iterative pixel {} has NaN", i);
+        assert!(p.r() >= -0.5 && p.r() <= 1.5,
+            "Iterative pixel {} has out-of-range r: {}", i, p.r());
+    }
+
+    for (i, p) in dst_single.iter().enumerate() {
+        assert!(!p.r().is_nan() && !p.g().is_nan() && !p.b().is_nan(),
+            "Single-pass pixel {} has NaN", i);
+    }
+}

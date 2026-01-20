@@ -91,6 +91,10 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         22 => rescale::RescaleMethod::EWALanczos4Sharpest,
         23 => rescale::RescaleMethod::TentBox,
         24 => rescale::RescaleMethod::TentLanczos3,
+        25 => rescale::RescaleMethod::Tent2DBox,
+        26 => rescale::RescaleMethod::Tent2DLanczos3Jinc,
+        27 => rescale::RescaleMethod::TentBoxIterative,
+        28 => rescale::RescaleMethod::Tent2DBoxIterative,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

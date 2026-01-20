@@ -111,6 +111,14 @@ pub enum RescaleMethod {
     /// Full tent-space pipeline using EWA Lanczos3-jinc radial kernel.
     /// Combines tent-space volume preservation with proper 2D radial filtering.
     Tent2DLanczos3Jinc,
+    /// Iterative Tent-space Box filter (separable)
+    /// For downscaling by factor N, iteratively applies 2× tent-box for each power of 2,
+    /// then applies the remaining factor. E.g., 8× = 2×→2×→2×, 6× = 2×→3×.
+    /// This can produce better quality than a single large-factor kernel.
+    TentBoxIterative,
+    /// Iterative 2D Tent-space Box filter (non-separable)
+    /// Same iterative approach as TentBoxIterative but using the full 2D kernel.
+    Tent2DBoxIterative,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -153,6 +161,8 @@ impl RescaleMethod {
             "tent-lanczos3" | "tent_lanczos3" | "tentlanczos3" | "tent-lanczos" | "tent_lanczos" | "tentlanczos" => Some(RescaleMethod::TentLanczos3),
             "tent-2d-box" | "tent_2d_box" | "tent2dbox" | "tent-2d" | "tent_2d" | "tent2d" => Some(RescaleMethod::Tent2DBox),
             "tent-2d-lanczos3-jinc" | "tent_2d_lanczos3_jinc" | "tent2dlanczos3jinc" | "tent-2d-lanczos" | "tent_2d_lanczos" | "tent2dlanczos" | "tent-2d-jinc" | "tent_2d_jinc" | "tent2djinc" => Some(RescaleMethod::Tent2DLanczos3Jinc),
+            "tent-box-iterative" | "tent_box_iterative" | "tentboxiterative" | "tent-iterative" | "tent_iterative" | "tentiterative" => Some(RescaleMethod::TentBoxIterative),
+            "tent-2d-box-iterative" | "tent_2d_box_iterative" | "tent2dboxiterative" | "tent-2d-iterative" | "tent_2d_iterative" | "tent2diterative" => Some(RescaleMethod::Tent2DBoxIterative),
             _ => None,
         }
     }
@@ -167,7 +177,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
             RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
-            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DLanczos3Jinc => 3.0,  // Uses Lanczos3 internally
         }
     }
@@ -204,7 +214,7 @@ impl RescaleMethod {
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
-            RescaleMethod::TentBox | RescaleMethod::Tent2DBox => RescaleMethod::Box,
+            RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative => RescaleMethod::Box,
             RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
             RescaleMethod::Tent2DLanczos3Jinc => RescaleMethod::EWALanczos3,  // Uses jinc-based Lanczos3
             other => *other,
@@ -213,12 +223,17 @@ impl RescaleMethod {
 
     /// Returns true if this is a tent-space pipeline method
     pub fn is_tent_pipeline(&self) -> bool {
-        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc)
+        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative)
     }
 
     /// Returns true if this is a 2D (non-separable) tent-space method
     pub fn is_tent_2d(&self) -> bool {
-        matches!(self, RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc)
+        matches!(self, RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::Tent2DBoxIterative)
+    }
+
+    /// Returns true if this is an iterative tent-space method
+    pub fn is_tent_iterative(&self) -> bool {
+        matches!(self, RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative)
     }
 
 }
@@ -456,6 +471,28 @@ pub fn rescale_with_progress_tent(
                 progress,
             )
         }
+        RescaleMethod::TentBoxIterative => {
+            // Iterative 2× tent-box downscaling using separable kernels.
+            // Applies 2× downscales iteratively, then final factor.
+            tent_ewa::rescale_tent_iterative_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
+                false,  // separable
+                progress,
+            )
+        }
+        RescaleMethod::Tent2DBoxIterative => {
+            // Iterative 2× tent-box downscaling using 2D kernels.
+            // Applies 2× downscales iteratively, then final factor.
+            tent_ewa::rescale_tent_iterative_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
+                true,  // 2D
+                progress,
+            )
+        }
     }
 }
 
@@ -559,6 +596,26 @@ pub fn rescale_with_alpha_progress_tent(
                 src, src_width, src_height,
                 dst_width, dst_height,
                 method, scale_mode,
+                progress,
+            )
+        }
+        RescaleMethod::TentBoxIterative => {
+            // Iterative 2× tent-box downscaling using separable kernels (alpha-aware).
+            tent_ewa::rescale_tent_iterative_alpha_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
+                false,  // separable
+                progress,
+            )
+        }
+        RescaleMethod::Tent2DBoxIterative => {
+            // Iterative 2× tent-box downscaling using 2D kernels (alpha-aware).
+            tent_ewa::rescale_tent_iterative_alpha_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
+                true,  // 2D
                 progress,
             )
         }
