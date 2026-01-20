@@ -1434,24 +1434,9 @@ fn main() -> Result<(), String> {
             input_pixels
         };
 
-        // Apply tent-volume contraction after all processing (if supersampling was used)
-        let (pixels_to_dither, width, height) = if use_supersample {
-            if args.verbose {
-                eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
-                    width, height, (width - 1) / 2, (height - 1) / 2);
-            }
-            let (contracted, w, h) = tent_contract(&pixels_to_dither, width_usize, height_usize);
-            (contracted, w as u32, h as u32)
-        } else {
-            (pixels_to_dither, width, height)
-        };
-
-        let width_usize = width as usize;
-        let height_usize = height as usize;
-
         // Process differently based on output format (grayscale vs RGB)
         let result = if is_grayscale_format {
-            // GRAYSCALE PATH: Convert to grayscale, then tonemapping, then safetensors, then dither
+            // GRAYSCALE PATH: Convert to grayscale, then tonemapping, then tent_contract, then safetensors, then dither
 
             // Step 1: Convert linear RGB to linear grayscale
             let linear_gray = linear_pixels_to_grayscale(&pixels_to_dither);
@@ -1480,7 +1465,32 @@ fn main() -> Result<(), String> {
                 linear_gray
             };
 
-            // Step 5: Write safetensors output (grayscale as R=G=B=L)
+            // Step 5: Apply tent-volume contraction after tonemapping (if supersampling was used)
+            let (linear_gray, alpha, width, height) = if use_supersample {
+                if args.verbose {
+                    eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
+                        width, height, (width - 1) / 2, (height - 1) / 2);
+                }
+                // Contract grayscale by reconstructing as single-channel Pixel4
+                let gray_pixels: Vec<Pixel4> = linear_gray.iter()
+                    .zip(alpha.as_ref().map(|a| a.iter()).into_iter().flatten().chain(std::iter::repeat(&1.0f32)))
+                    .map(|(&l, &a)| Pixel4::new(l, l, l, a))
+                    .collect();
+                let (contracted, w, h) = tent_contract(&gray_pixels, width_usize, height_usize);
+                let new_gray: Vec<f32> = contracted.iter().map(|p| p[0]).collect();
+                let new_alpha: Option<Vec<f32>> = if alpha.is_some() {
+                    Some(contracted.iter().map(|p| p[3]).collect())
+                } else {
+                    None
+                };
+                (new_gray, new_alpha, w as u32, h as u32)
+            } else {
+                (linear_gray, alpha, width, height)
+            };
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+
+            // Step 6: Write safetensors output (grayscale as R=G=B=L)
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && alpha.is_some();
                 let transfer = match args.safetensors_transfer {
@@ -1494,7 +1504,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 6: Dither grayscale
+            // Step 7: Dither grayscale
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
 
@@ -1530,7 +1540,7 @@ fn main() -> Result<(), String> {
                 None
             }
         } else {
-            // RGB PATH: Exposure, tonemapping, then safetensors, then dither
+            // RGB PATH: Exposure, tonemapping, tent_contract, then safetensors, then dither
 
             // Step 1: Apply exposure (linear multiplier)
             let pixels_to_dither = if let Some(exp) = args.exposure {
@@ -1553,7 +1563,21 @@ fn main() -> Result<(), String> {
                 pixels_to_dither
             };
 
-            // Step 3: Write safetensors output
+            // Step 3: Apply tent-volume contraction after tonemapping (if supersampling was used)
+            let (pixels_to_dither, width, height) = if use_supersample {
+                if args.verbose {
+                    eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
+                        width, height, (width - 1) / 2, (height - 1) / 2);
+                }
+                let (contracted, w, h) = tent_contract(&pixels_to_dither, width_usize, height_usize);
+                (contracted, w as u32, h as u32)
+            } else {
+                (pixels_to_dither, width, height)
+            };
+            let width_usize = width as usize;
+            let height_usize = height as usize;
+
+            // Step 4: Write safetensors output
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
                 let transfer = match args.safetensors_transfer {
@@ -1567,7 +1591,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 4: Dither RGB
+            // Step 5: Dither RGB
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
                 let result = dither_pixels_rgb(
