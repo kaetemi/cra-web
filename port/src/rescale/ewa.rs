@@ -168,7 +168,11 @@ pub fn rescale_ewa_pixels(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
@@ -316,7 +320,11 @@ pub fn rescale_ewa_alpha_pixels(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
@@ -498,7 +506,11 @@ pub fn rescale_stochastic_jinc_pixels(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
@@ -646,7 +658,11 @@ fn rescale_stochastic_jinc_scatter_core(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
@@ -845,7 +861,11 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
@@ -1074,7 +1094,11 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
                 ScaleMode::UniformWidth => (prescale_x, prescale_x),
                 ScaleMode::UniformHeight => (prescale_y, prescale_y),
             };
-            (scale_x, scale_y, 0.0, 0.0)
+            // Center offset: ensures center of dst maps to center of src
+            // offset = (src_len - 1) / 2 - (dst_len / 2) * scale + 0.5
+            let offset_x = (src_width - 1) as f32 / 2.0 - (dst_width as f32 / 2.0) * scale_x + 0.5;
+            let offset_y = (src_height - 1) as f32 / 2.0 - (dst_height as f32 / 2.0) * scale_y + 0.5;
+            (scale_x, scale_y, offset_x, offset_y)
         }
     };
 
