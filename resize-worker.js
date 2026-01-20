@@ -38,6 +38,10 @@ async function initialize() {
 
 // No separate decode functions needed - use LoadedImage pattern directly
 
+// Supersample mode constants
+const SUPERSAMPLE_NONE = 0;
+const SUPERSAMPLE_TENT_VOLUME = 1;
+
 // Process resize request (with precise WASM decoding)
 function processResize(params) {
     if (!wasmReady) {
@@ -55,7 +59,8 @@ function processResize(params) {
             ditherMode,
             ditherTechnique,
             perceptualSpace,
-            inputIsLinear  // True if input is already linear (normal maps, data textures)
+            inputIsLinear,  // True if input is already linear (normal maps, data textures)
+            supersample = SUPERSAMPLE_NONE  // Supersampling mode
         } = params;
 
         // Check for SFI (safetensors) format and use appropriate loader
@@ -64,8 +69,8 @@ function processResize(params) {
         const loadedImage = isSfi
             ? craWasm.load_sfi_wasm(fileData)
             : craWasm.load_image_wasm(fileData);
-        const srcWidth = loadedImage.width;
-        const srcHeight = loadedImage.height;
+        let srcWidth = loadedImage.width;
+        let srcHeight = loadedImage.height;
         const hasAlpha = loadedImage.has_alpha;
 
         // Check for premultiplied alpha (auto: only EXR has premultiplied alpha by default)
@@ -104,23 +109,77 @@ function processResize(params) {
         // Step 4: Rescale in linear space with progress (handles all 4 channels)
         // Use alpha-aware rescaling for images with alpha to prevent transparent pixels
         // from bleeding their color into opaque regions
-        const resizedBuffer = hasAlpha
-            ? craWasm.rescale_rgb_alpha_with_progress_wasm(
-                buffer,
-                srcWidth, srcHeight,
-                dstWidth, dstHeight,
-                interpolation,
-                scaleMode,
-                (progress) => sendProgress(Math.round(progress * 80))  // 0-80% for resize
-            )
-            : craWasm.rescale_rgb_with_progress_wasm(
-                buffer,
-                srcWidth, srcHeight,
-                dstWidth, dstHeight,
-                interpolation,
-                scaleMode,
-                (progress) => sendProgress(Math.round(progress * 80))  // 0-80% for resize
-            );
+        let resizedBuffer;
+        let finalWidth = dstWidth;
+        let finalHeight = dstHeight;
+
+        if (supersample === SUPERSAMPLE_TENT_VOLUME) {
+            // Tent-volume supersampling:
+            // 1. Expand to tent-space (2W+1, 2H+1)
+            // 2. Resize to tent-space target (2*dst+1) with tent_mode=true
+            // 3. Contract back to box-space
+
+            // Expand to tent-space
+            const expandResult = craWasm.tent_expand_wasm(buffer, srcWidth, srcHeight);
+            buffer = expandResult.buffer;
+            srcWidth = expandResult.width;
+            srcHeight = expandResult.height;
+
+            // Calculate tent-space target dimensions
+            const tentTargetDims = craWasm.supersample_target_dimensions_wasm(dstWidth, dstHeight);
+            const tentDstWidth = tentTargetDims[0];
+            const tentDstHeight = tentTargetDims[1];
+
+            // Resize in tent-space with tent_mode=true
+            const tentResized = hasAlpha
+                ? craWasm.rescale_rgb_alpha_tent_with_progress_wasm(
+                    buffer,
+                    srcWidth, srcHeight,
+                    tentDstWidth, tentDstHeight,
+                    interpolation,
+                    scaleMode,
+                    true,  // tent_mode
+                    (progress) => sendProgress(Math.round(progress * 70))  // 0-70% for resize
+                )
+                : craWasm.rescale_rgb_tent_with_progress_wasm(
+                    buffer,
+                    srcWidth, srcHeight,
+                    tentDstWidth, tentDstHeight,
+                    interpolation,
+                    scaleMode,
+                    true,  // tent_mode
+                    (progress) => sendProgress(Math.round(progress * 70))  // 0-70% for resize
+                );
+
+            sendProgress(75);
+
+            // Contract back to box-space
+            const contractResult = craWasm.tent_contract_wasm(tentResized, tentDstWidth, tentDstHeight);
+            resizedBuffer = contractResult.buffer;
+            finalWidth = contractResult.width;
+            finalHeight = contractResult.height;
+
+            sendProgress(80);
+        } else {
+            // Standard resize without supersampling
+            resizedBuffer = hasAlpha
+                ? craWasm.rescale_rgb_alpha_with_progress_wasm(
+                    buffer,
+                    srcWidth, srcHeight,
+                    dstWidth, dstHeight,
+                    interpolation,
+                    scaleMode,
+                    (progress) => sendProgress(Math.round(progress * 80))  // 0-80% for resize
+                )
+                : craWasm.rescale_rgb_with_progress_wasm(
+                    buffer,
+                    srcWidth, srcHeight,
+                    dstWidth, dstHeight,
+                    interpolation,
+                    scaleMode,
+                    (progress) => sendProgress(Math.round(progress * 80))  // 0-80% for resize
+                );
+        }
 
         sendProgress(85);
 
@@ -134,13 +193,13 @@ function processResize(params) {
 
         // Step 7: Dither to 8-bit output
         let outputData;
-        const dstPixels = dstWidth * dstHeight;
+        const outputPixels = finalWidth * finalHeight;
 
         if (hasAlpha) {
             // Use RGBA dithering with alpha-aware error propagation
             const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                 resizedBuffer,
-                dstWidth, dstHeight,
+                finalWidth, finalHeight,
                 8, 8, 8, 8,  // RGB at 8-bit, alpha at 8-bit
                 ditherTechnique,
                 ditherMode,
@@ -155,7 +214,7 @@ function processResize(params) {
             // Use RGB dithering for images without alpha
             const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
                 resizedBuffer,
-                dstWidth, dstHeight,
+                finalWidth, finalHeight,
                 8, 8, 8,
                 ditherTechnique,
                 ditherMode,
@@ -166,8 +225,8 @@ function processResize(params) {
             const dithered = ditheredBuffer.to_vec();
 
             // Convert RGB to RGBA for ImageData (alpha = 255)
-            outputData = new Uint8ClampedArray(dstPixels * 4);
-            for (let i = 0; i < dstPixels; i++) {
+            outputData = new Uint8ClampedArray(outputPixels * 4);
+            for (let i = 0; i < outputPixels; i++) {
                 outputData[i * 4] = dithered[i * 3];
                 outputData[i * 4 + 1] = dithered[i * 3 + 1];
                 outputData[i * 4 + 2] = dithered[i * 3 + 2];
@@ -175,7 +234,7 @@ function processResize(params) {
             }
         }
 
-        sendComplete(outputData, dstWidth, dstHeight, hasAlpha);
+        sendComplete(outputData, finalWidth, finalHeight, hasAlpha);
 
     } catch (error) {
         sendError(error);

@@ -850,6 +850,170 @@ pub fn rescale_rgb_alpha_with_progress_wasm(
     BufferF32x4::new(result)
 }
 
+/// Rescale with tent_mode support for supersampling
+#[wasm_bindgen]
+pub fn rescale_rgb_tent_with_progress_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+    scale_mode: u8,
+    tent_mode: bool,
+    progress_callback: &js_sys::Function,
+) -> BufferF32x4 {
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result = rescale::rescale_with_progress_tent(
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
+        rescale_method_from_u8(method),
+        scale_mode_from_u8(scale_mode),
+        tent_mode,
+        Some(&mut progress_fn),
+    );
+
+    BufferF32x4::new(result)
+}
+
+/// Alpha-aware rescale with tent_mode support for supersampling
+#[wasm_bindgen]
+pub fn rescale_rgb_alpha_tent_with_progress_wasm(
+    buf: &BufferF32x4,
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: u8,
+    scale_mode: u8,
+    tent_mode: bool,
+    progress_callback: &js_sys::Function,
+) -> BufferF32x4 {
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    let result = rescale::rescale_with_alpha_progress_tent(
+        buf.as_slice(),
+        src_width,
+        src_height,
+        dst_width,
+        dst_height,
+        rescale_method_from_u8(method),
+        scale_mode_from_u8(scale_mode),
+        tent_mode,
+        Some(&mut progress_fn),
+    );
+
+    BufferF32x4::new(result)
+}
+
+// ============================================================================
+// Supersampling (Tent Volume)
+// ============================================================================
+
+/// Expand box-space image to tent-space for supersampling
+/// Returns expanded buffer and new dimensions as [width, height]
+#[wasm_bindgen]
+pub fn tent_expand_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+) -> TentExpandResult {
+    let (expanded, new_width, new_height) = supersample::tent_expand(buf.as_slice(), width, height);
+    TentExpandResult {
+        buffer: BufferF32x4::new(expanded),
+        width: new_width as u32,
+        height: new_height as u32,
+    }
+}
+
+/// Result of tent expansion containing buffer and new dimensions
+#[wasm_bindgen]
+pub struct TentExpandResult {
+    buffer: BufferF32x4,
+    width: u32,
+    height: u32,
+}
+
+#[wasm_bindgen]
+impl TentExpandResult {
+    #[wasm_bindgen(getter)]
+    pub fn buffer(&self) -> BufferF32x4 {
+        self.buffer.clone_buffer()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+/// Contract tent-space image back to box-space after supersampled processing
+/// Returns contracted buffer and new dimensions as [width, height]
+#[wasm_bindgen]
+pub fn tent_contract_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+) -> TentContractResult {
+    let (contracted, new_width, new_height) = supersample::tent_contract(buf.as_slice(), width, height);
+    TentContractResult {
+        buffer: BufferF32x4::new(contracted),
+        width: new_width as u32,
+        height: new_height as u32,
+    }
+}
+
+/// Result of tent contraction containing buffer and new dimensions
+#[wasm_bindgen]
+pub struct TentContractResult {
+    buffer: BufferF32x4,
+    width: u32,
+    height: u32,
+}
+
+#[wasm_bindgen]
+impl TentContractResult {
+    #[wasm_bindgen(getter)]
+    pub fn buffer(&self) -> BufferF32x4 {
+        self.buffer.clone_buffer()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+}
+
+/// Calculate tent-space target dimensions for supersampling
+/// Given a target box-space size, returns the tent-space dimensions needed
+#[wasm_bindgen]
+pub fn supersample_target_dimensions_wasm(width: u32, height: u32) -> Vec<u32> {
+    let (w, h) = supersample::supersample_target_dimensions(width as usize, height as usize);
+    vec![w as u32, h as u32]
+}
+
 // ============================================================================
 // Dithering
 // ============================================================================

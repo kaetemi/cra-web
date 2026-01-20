@@ -477,6 +477,14 @@
                 </select>
             </div>
 
+            <div class="option-row">
+                <label>Supersampling:</label>
+                <select id="supersample">
+                    <option value="0" selected>None</option>
+                    <option value="1">Tent Volume (experimental)</option>
+                </select>
+            </div>
+
             <!-- Dither options hidden - using good defaults (Mixed + OKLab color-aware) -->
             <div class="option-row" style="display: none;">
                 <label>Dither Mode:</label>
@@ -737,9 +745,13 @@
             const ditherMode = parseInt(document.getElementById('dither-mode').value);
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const supersample = parseInt(document.getElementById('supersample').value);
 
             // Map interpolation to CLI names
             const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest' };
+
+            // Map supersample to CLI names
+            const supersampleMap = { 0: 'none', 1: 'tent-volume' };
 
             // Map dither mode values to CLI names
             const modeMap = {
@@ -792,6 +804,11 @@
             // Add --no-colorspace-aware-output if not using perceptual
             if (!isPerceptual) {
                 cmd += ' --no-colorspace-aware-output';
+            }
+
+            // Add supersample if not none
+            if (supersample !== 0) {
+                cmd += ` --supersample ${supersampleMap[supersample]}`;
             }
 
             return cmd;
@@ -903,6 +920,7 @@
             const showComparison = document.getElementById('show-comparison').checked;
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const supersample = parseInt(document.getElementById('supersample').value);
 
             // Dither technique: 1 = PerChannel, 2 = ColorAware
             const ditherTechnique = isPerceptual ? 2 : 1;
@@ -920,7 +938,8 @@
                 scaleMode,
                 ditherMode,
                 ditherTechnique,
-                perceptualSpace
+                perceptualSpace,
+                supersample
             };
 
             if (showComparison) {
