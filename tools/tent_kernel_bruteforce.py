@@ -134,10 +134,19 @@ def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool 
     if dst_len == 1:
         return [sum(src) / src_len]
 
-    # For 2× downscale in tent space, scale is ALWAYS exactly 2.0
-    # This is the physical scaling factor, independent of array sizes
+    # For 2× downscale in tent space:
+    # - scale = 2.0 (coordinate mapping: output sample i → input position 2i + offset)
+    # - filter_scale = 2.0 (1x native width, matching the downscale ratio)
+    #
+    # Why NOT scale with depth? From TENT-SPACE.md:
+    # "Filter width stays at 1x (native), taking advantage of the higher-resolution surface."
+    #
+    # The tent expansion encodes sharpening at center points (negative lobes).
+    # A narrow box filter samples this encoded information, and the contraction
+    # operations then integrate it to produce the correct kernel with negative lobes.
+    # A wider filter would average out the encoded sharpening, producing blur.
     scale = 2.0
-    filter_scale = 2.0
+    filter_scale = 2.0  # 1x native width, NOT scaled by depth
 
     # Offset to align content centers
     # Output tent sample 'fringe' (first content center) should map to
@@ -161,6 +170,9 @@ def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool 
 
     box_radius = int(filter_scale / 2 + 1) + 1
 
+    # For debug: track sample counts
+    sample_counts = []
+
     for di in range(dst_len):
         # Content-aligned mapping: dst sample di maps to src position di * scale + offset
         src_pos = di * scale + offset
@@ -179,6 +191,10 @@ def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool 
             weights.append(w)
             weight_sum += w
 
+        # Count non-zero weights
+        nonzero_weights = [(si, w) for si, w in enumerate(weights, start) if w > 1e-10]
+        sample_counts.append(len(nonzero_weights))
+
         # Compute weighted sum (normalize)
         if weight_sum > 1e-8:
             result = 0.0
@@ -190,6 +206,28 @@ def resample_1d_box(src: list[float], dst_len: int, depth: int = 1, debug: bool 
             fallback = int(round(src_pos))
             fallback = max(0, min(src_len - 1, fallback))
             dst[di] = src[fallback]
+
+    if debug:
+        # Show sample count statistics
+        from collections import Counter
+        count_hist = Counter(sample_counts)
+        print(f"    Box filter sample counts: {dict(sorted(count_hist.items()))}")
+        # Show a few examples
+        print(f"    Examples (dst_idx → src_pos, samples used):")
+        examples = [0, 1, dst_len // 2, dst_len - 2, dst_len - 1]
+        for di in examples:
+            if di < dst_len:
+                src_pos = di * scale + offset
+                center = int(src_pos)
+                start = max(0, center - box_radius)
+                end = min(src_len - 1, center + box_radius)
+                weights_debug = []
+                for si in range(start, end + 1):
+                    w = box_integrated(src_pos, si, filter_scale)
+                    if w > 1e-10:
+                        weights_debug.append((si, w))
+                weight_str = ", ".join(f"{si}:{w:.3f}" for si, w in weights_debug)
+                print(f"      dst[{di}] → src_pos={src_pos:.2f}, {len(weights_debug)} samples: [{weight_str}]")
 
     return dst
 
@@ -307,6 +345,11 @@ def main():
     input_len = args.input_len
     output_len = int(input_len / args.ratio)
     output_idx = args.output_idx if args.output_idx is not None else output_len // 2
+
+    # Bounds check
+    if output_idx >= output_len:
+        print(f"Error: output_idx {output_idx} is out of bounds (output length is {output_len}, valid indices 0-{output_len-1})")
+        return
 
     print(f"Input length: {input_len}")
     print(f"Output length: {output_len} (ratio {args.ratio}×)")
