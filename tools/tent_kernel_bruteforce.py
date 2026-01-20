@@ -49,6 +49,14 @@ def sinc_kernel(x: float) -> float:
     return math.sin(pi_x) / pi_x
 
 
+def sinc_full_kernel(x: float) -> float:
+    """Pure sinc kernel - no truncation (infinite support)."""
+    if abs(x) < 1e-10:
+        return 1.0
+    pi_x = math.pi * x
+    return math.sin(pi_x) / pi_x
+
+
 def mitchell_kernel(x: float) -> float:
     """Mitchell-Netravali (B=C=1/3)."""
     x = abs(x)
@@ -65,7 +73,8 @@ KERNELS: dict[str, tuple] = {
     'triangle': (triangle_kernel, 1.0, "Triangle/bilinear"),
     'lanczos2': (lambda x: lanczos_kernel(x, 2), 2.0, "Lanczos a=2"),
     'lanczos3': (lambda x: lanczos_kernel(x, 3), 3.0, "Lanczos a=3"),
-    'sinc': (sinc_kernel, 8.0, "Pure sinc (truncated)"),
+    'sinc': (sinc_kernel, 8.0, "Pure sinc (truncated r=8)"),
+    'sinc-full': (sinc_full_kernel, 10000.0, "Pure sinc (full width)"),
     'mitchell': (mitchell_kernel, 2.0, "Mitchell-Netravali"),
 }
 
