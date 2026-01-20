@@ -100,6 +100,10 @@ fn resample_row_alpha_precomputed(
 /// Rescale Pixel4 array using separable kernel interpolation (2-pass)
 /// Uses precomputed kernel weights for efficiency
 /// Progress callback is optional - receives 0.0-1.0 after each row
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
+/// - Maps edge samples to edge samples (position 0→0, position N-1→M-1)
+/// - Used for tent-volume supersampling where samples represent a bilinear surface
 pub fn rescale_kernel_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -108,6 +112,7 @@ pub fn rescale_kernel_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -135,12 +140,12 @@ pub fn rescale_kernel_pixels(
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
             // scale = src/dst, which is exactly the dest pixel footprint in source space
-            precompute_box_weights(src_width, dst_width, scale_x, scale_x),
-            precompute_box_weights(src_height, dst_height, scale_y, scale_y),
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x, tent_mode),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y, tent_mode),
         ),
         _ => (
-            precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),
-            precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method),
+            precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
+            precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method, tent_mode),
         ),
     };
 
@@ -201,6 +206,7 @@ pub fn rescale_kernel_alpha_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let (scale_x, scale_y) = calculate_scales(
@@ -225,12 +231,12 @@ pub fn rescale_kernel_alpha_pixels(
     let (h_weights, v_weights) = match method {
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
-            precompute_box_weights(src_width, dst_width, scale_x, scale_x),
-            precompute_box_weights(src_height, dst_height, scale_y, scale_y),
+            precompute_box_weights(src_width, dst_width, scale_x, scale_x, tent_mode),
+            precompute_box_weights(src_height, dst_height, scale_y, scale_y, tent_mode),
         ),
         _ => (
-            precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method),
-            precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method),
+            precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
+            precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method, tent_mode),
         ),
     };
 

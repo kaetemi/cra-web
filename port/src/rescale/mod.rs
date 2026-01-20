@@ -325,7 +325,7 @@ pub fn rescale(
     method: RescaleMethod,
     scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
-    rescale_with_progress(src, src_width, src_height, dst_width, dst_height, method, scale_mode, None)
+    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, None)
 }
 
 /// Rescale Pixel4 image with optional progress callback (SIMD-friendly, linear space)
@@ -340,6 +340,25 @@ pub fn rescale_with_progress(
     scale_mode: ScaleMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
+    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, progress)
+}
+
+/// Rescale Pixel4 image with tent-mode support for supersampling
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
+/// - Maps edge samples to edge samples (position 0→0, position N-1→M-1)
+/// - Used for tent-volume supersampling where samples represent a bilinear surface
+pub fn rescale_with_progress_tent(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+    tent_mode: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
     if src_width == dst_width && src_height == dst_height {
         if let Some(cb) = progress {
             cb(1.0);
@@ -352,7 +371,7 @@ pub fn rescale_with_progress(
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
         RescaleMethod::Sinc | RescaleMethod::Box => {
-            separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            separable::rescale_kernel_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
@@ -397,7 +416,7 @@ pub fn rescale_with_alpha(
     method: RescaleMethod,
     scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
-    rescale_with_alpha_progress(src, src_width, src_height, dst_width, dst_height, method, scale_mode, None)
+    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, None)
 }
 
 /// Alpha-aware rescale with progress callback
@@ -409,6 +428,21 @@ pub fn rescale_with_alpha_progress(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, progress)
+}
+
+/// Alpha-aware rescale with tent-mode support for supersampling
+pub fn rescale_with_alpha_progress_tent(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    method: RescaleMethod,
+    scale_mode: ScaleMode,
+    tent_mode: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     if src_width == dst_width && src_height == dst_height {
@@ -423,7 +457,7 @@ pub fn rescale_with_alpha_progress(
         RescaleMethod::Mitchell | RescaleMethod::CatmullRom |
         RescaleMethod::Lanczos2 | RescaleMethod::Lanczos3 |
         RescaleMethod::Sinc | RescaleMethod::Box => {
-            separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)
+            separable::rescale_kernel_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, tent_mode, progress)
         }
         RescaleMethod::Lanczos3Scatter | RescaleMethod::SincScatter => {
             scatter::rescale_scatter_alpha_pixels(src, src_width, src_height, dst_width, dst_height, method, scale_mode, progress)

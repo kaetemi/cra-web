@@ -220,6 +220,10 @@ pub struct KernelWeights {
 
 /// Precompute all kernel weights for 1D resampling
 /// Returns exact weights for each destination position
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
+/// - Scale becomes (src_len-1)/(dst_len-1) to map edge samples to edge samples
+/// - Offset is adjusted to align integer sample positions rather than pixel centers
 pub fn precompute_kernel_weights(
     src_len: usize,
     dst_len: usize,
@@ -227,16 +231,29 @@ pub fn precompute_kernel_weights(
     filter_scale: f32,
     radius: i32,
     method: RescaleMethod,
+    tent_mode: bool,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // Center offset: if scale doesn't match src_len/dst_len (uniform scaling),
-    // center the mapping so edges are equally cropped/extended
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+    // For tent mode, use sample-to-sample mapping:
+    // - Scale maps sample 0→0 and sample (src_len-1)→(dst_len-1)
+    // - Offset aligns integer positions rather than pixel centers
+    let (effective_scale, offset) = if tent_mode {
+        let tent_scale = if dst_len > 1 {
+            (src_len - 1) as f32 / (dst_len - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale, 0.5 * (1.0 - tent_scale))
+    } else {
+        // Standard pixel-center mapping with centering offset
+        let mapped_src_len = dst_len as f32 * scale;
+        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
+        (scale, center_offset)
+    };
 
     for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+        let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
         let center = src_pos.floor() as i32;
 
         // Find the valid source index range
@@ -279,17 +296,31 @@ pub fn precompute_kernel_weights(
 /// NOT the clamped max(scale, 1.0) value. This ensures:
 /// - Upscaling: dest footprint < source pixel → nearest-neighbor behavior
 /// - Downscaling: dest footprint > source pixel → proper area averaging
+///
+/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
 pub fn precompute_box_weights(
     src_len: usize,
     dst_len: usize,
     scale: f32,
     filter_scale: f32,
+    tent_mode: bool,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // Center offset
-    let mapped_src_len = dst_len as f32 * scale;
-    let offset = (src_len as f32 - mapped_src_len) / 2.0;
+    // For tent mode, use sample-to-sample mapping
+    let (effective_scale, offset) = if tent_mode {
+        let tent_scale = if dst_len > 1 {
+            (src_len - 1) as f32 / (dst_len - 1) as f32
+        } else {
+            1.0
+        };
+        (tent_scale, 0.5 * (1.0 - tent_scale))
+    } else {
+        // Standard pixel-center mapping with centering offset
+        let mapped_src_len = dst_len as f32 * scale;
+        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
+        (scale, center_offset)
+    };
 
     // Box filter radius depends on filter_scale:
     // The destination pixel footprint is filter_scale wide in source space
@@ -297,7 +328,7 @@ pub fn precompute_box_weights(
     let box_radius = (0.5 * filter_scale).ceil() as i32 + 1;
 
     for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * scale - 0.5 + offset;
+        let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
         let center = src_pos.floor() as i32;
 
         // Find the valid source index range

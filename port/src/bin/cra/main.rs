@@ -385,7 +385,7 @@ fn resize_linear(
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress, rescale_with_alpha_progress, ScaleMode};
+    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress_tent, rescale_with_alpha_progress_tent, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -442,22 +442,25 @@ fn resize_linear(
 
     // Use alpha-aware rescaling when image has alpha channel to prevent
     // transparent pixels from bleeding their color into opaque regions
+    // When use_supersample is true, use tent-mode for correct sample-to-sample mapping
     let dst_pixels = if has_alpha {
-        rescale_with_alpha_progress(
+        rescale_with_alpha_progress_tent(
             pixels,
             src_width as usize, src_height as usize,
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
+            use_supersample,
             progress,
         )
     } else {
-        rescale_with_progress(
+        rescale_with_progress_tent(
             pixels,
             src_width as usize, src_height as usize,
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
+            use_supersample,
             progress,
         )
     };
