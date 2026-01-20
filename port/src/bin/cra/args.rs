@@ -274,6 +274,10 @@ pub enum Supersample {
     /// using pyramid tent volume matching, then contracts back after processing.
     /// Preserves total light energy during resizing operations.
     TentVolume,
+    /// Tent-volume prescale: expands to tent-space, then rescales directly to
+    /// final dimensions with integrated contraction. If no resize is specified,
+    /// uses box filter to input size. More efficient than TentVolume.
+    TentVolumePrescale,
 }
 
 /// Build ColorCorrectionMethod from CLI arguments

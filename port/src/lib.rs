@@ -95,6 +95,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         26 => rescale::RescaleMethod::Tent2DLanczos3Jinc,
         27 => rescale::RescaleMethod::TentBoxIterative,
         28 => rescale::RescaleMethod::Tent2DBoxIterative,
+        29 => rescale::RescaleMethod::BilinearIterative,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }
@@ -104,6 +105,15 @@ fn scale_mode_from_u8(mode: u8) -> rescale::ScaleMode {
         1 => rescale::ScaleMode::UniformWidth,
         2 => rescale::ScaleMode::UniformHeight,
         _ => rescale::ScaleMode::Independent,
+    }
+}
+
+fn tent_mode_from_u8(tent_mode: u8) -> rescale::TentMode {
+    match tent_mode {
+        0 => rescale::TentMode::Off,
+        1 => rescale::TentMode::SampleToSample,
+        2 => rescale::TentMode::Prescale,
+        _ => rescale::TentMode::Off,
     }
 }
 
@@ -857,6 +867,7 @@ pub fn rescale_rgb_alpha_with_progress_wasm(
 }
 
 /// Rescale with tent_mode support for supersampling
+/// tent_mode: 0=Off, 1=SampleToSample (for tent-volume), 2=Prescale (tent-to-box)
 #[wasm_bindgen]
 pub fn rescale_rgb_tent_with_progress_wasm(
     buf: &BufferF32x4,
@@ -866,7 +877,7 @@ pub fn rescale_rgb_tent_with_progress_wasm(
     dst_height: usize,
     method: u8,
     scale_mode: u8,
-    tent_mode: bool,
+    tent_mode: u8,
     progress_callback: &js_sys::Function,
 ) -> BufferF32x4 {
     let js_this = wasm_bindgen::JsValue::NULL;
@@ -883,7 +894,7 @@ pub fn rescale_rgb_tent_with_progress_wasm(
         dst_height,
         rescale_method_from_u8(method),
         scale_mode_from_u8(scale_mode),
-        tent_mode,
+        tent_mode_from_u8(tent_mode),
         Some(&mut progress_fn),
     );
 
@@ -891,6 +902,7 @@ pub fn rescale_rgb_tent_with_progress_wasm(
 }
 
 /// Alpha-aware rescale with tent_mode support for supersampling
+/// tent_mode: 0=Off, 1=SampleToSample (for tent-volume), 2=Prescale (tent-to-box)
 #[wasm_bindgen]
 pub fn rescale_rgb_alpha_tent_with_progress_wasm(
     buf: &BufferF32x4,
@@ -900,7 +912,7 @@ pub fn rescale_rgb_alpha_tent_with_progress_wasm(
     dst_height: usize,
     method: u8,
     scale_mode: u8,
-    tent_mode: bool,
+    tent_mode: u8,
     progress_callback: &js_sys::Function,
 ) -> BufferF32x4 {
     let js_this = wasm_bindgen::JsValue::NULL;
@@ -917,7 +929,7 @@ pub fn rescale_rgb_alpha_tent_with_progress_wasm(
         dst_height,
         rescale_method_from_u8(method),
         scale_mode_from_u8(scale_mode),
-        tent_mode,
+        tent_mode_from_u8(tent_mode),
         Some(&mut progress_fn),
     );
 

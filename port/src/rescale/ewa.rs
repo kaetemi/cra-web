@@ -12,7 +12,7 @@
 //! - **StochasticJinc**: Probabilistic jinc with Gaussian sampling as implicit window.
 
 use crate::pixel::Pixel4;
-use super::{RescaleMethod, ScaleMode, calculate_scales};
+use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
 use super::kernels::{lanczos2, lanczos3, ewa_lanczos, mitchell, catmull_rom, jinc};
 
 /// Blur factors for sharpened EWA Lanczos variants (Nicolas Robidoux optimization)
@@ -122,55 +122,61 @@ pub fn rescale_ewa_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
@@ -264,55 +270,61 @@ pub fn rescale_ewa_alpha_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -440,55 +452,61 @@ pub fn rescale_stochastic_jinc_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -581,50 +599,55 @@ fn rescale_stochastic_jinc_scatter_core(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Inverse scales for scatter mapping
@@ -633,8 +656,9 @@ fn rescale_stochastic_jinc_scatter_core(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -736,7 +760,7 @@ pub fn rescale_stochastic_jinc_scatter_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_core(
@@ -755,7 +779,7 @@ pub fn rescale_stochastic_jinc_scatter_normalized_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_core(
@@ -774,50 +798,55 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     normalize_destination: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Inverse scales for scatter mapping
@@ -826,8 +855,9 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -959,7 +989,7 @@ pub fn rescale_stochastic_jinc_scatter_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_alpha_core(
@@ -978,7 +1008,7 @@ pub fn rescale_stochastic_jinc_scatter_normalized_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     rescale_stochastic_jinc_scatter_alpha_core(
@@ -998,55 +1028,61 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales and coordinate mapping parameters
-    // In tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y, offset_x, offset_y) = if tent_mode {
-        // Compute natural tent scales for each dimension (sample-to-sample mapping)
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        let (tent_scale_x, tent_scale_y) = match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
-        };
-
-        // Calculate centering offsets
-        // General formula: offset = (src_size - dst_size * scale) / 2
-        let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
-        let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
-
-        (tent_scale_x, tent_scale_y, offset_x, offset_y)
-    } else {
-        let (scale_x, scale_y) = calculate_scales(
-            src_width, src_height, dst_width, dst_height, scale_mode
-        );
-        let mapped_src_width = dst_width as f32 * scale_x;
-        let mapped_src_height = dst_height as f32 * scale_y;
-        (
-            scale_x,
-            scale_y,
-            (src_width as f32 - mapped_src_width) / 2.0,
-            (src_height as f32 - mapped_src_height) / 2.0,
-        )
+    // Compute scales and coordinate mapping parameters based on tent_mode
+    let (scale_x, scale_y, offset_x, offset_y) = match tent_mode {
+        TentMode::Off => {
+            let (scale_x, scale_y) = calculate_scales(
+                src_width, src_height, dst_width, dst_height, scale_mode
+            );
+            let mapped_src_width = dst_width as f32 * scale_x;
+            let mapped_src_height = dst_height as f32 * scale_y;
+            (
+                scale_x,
+                scale_y,
+                (src_width as f32 - mapped_src_width) / 2.0,
+                (src_height as f32 - mapped_src_height) / 2.0,
+            )
+        }
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            let (tent_scale_x, tent_scale_y) = match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            };
+            let offset_x = (src_width as f32 - dst_width as f32 * tent_scale_x) / 2.0;
+            let offset_y = (src_height as f32 - dst_height as f32 * tent_scale_y) / 2.0;
+            (tent_scale_x, tent_scale_y, offset_x, offset_y)
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            let (scale_x, scale_y) = match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            };
+            (scale_x, scale_y, 0.0, 0.0)
+        }
     };
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);

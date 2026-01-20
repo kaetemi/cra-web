@@ -12,7 +12,7 @@
 //! - **BilinearIterative**: Iterative 2× bilinear downscaling (mipmap-style)
 
 use crate::pixel::Pixel4;
-use super::{RescaleMethod, ScaleMode, calculate_scales};
+use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
 use super::kernels::precompute_tent_2d_kernel_weights;
 use super::separable;
 use super::bilinear;
@@ -341,7 +341,7 @@ pub fn rescale_tent_iterative_pixels(
                 &current, current_w, current_h,
                 next_w, next_h,
                 RescaleMethod::TentBox, scale_mode,
-                false, None,
+                TentMode::Off, None,
             )
         };
 
@@ -404,7 +404,7 @@ pub fn rescale_tent_iterative_alpha_pixels(
                 &current, current_w, current_h,
                 next_w, next_h,
                 RescaleMethod::TentBox, scale_mode,
-                false, None,
+                TentMode::Off, None,
             )
         };
 
@@ -466,7 +466,7 @@ pub fn rescale_bilinear_iterative_pixels(
             &current, current_w, current_h,
             next_w, next_h,
             scale_mode,
-            false, // tent_mode
+            TentMode::Off,
             None,
         );
 
@@ -520,7 +520,7 @@ pub fn rescale_bilinear_iterative_alpha_pixels(
             &current, current_w, current_h,
             next_w, next_h,
             scale_mode,
-            false, // tent_mode
+            TentMode::Off,
             None,
         );
 

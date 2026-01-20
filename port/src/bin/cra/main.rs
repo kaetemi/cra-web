@@ -381,11 +381,11 @@ fn resize_linear(
     method: cra_wasm::rescale::RescaleMethod,
     has_alpha: bool,
     force_exact: bool,
-    use_supersample: bool,
+    tent_mode: cra_wasm::rescale::TentMode,
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress_tent, rescale_with_alpha_progress_tent, ScaleMode};
+    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress_tent, rescale_with_alpha_progress_tent, ScaleMode, TentMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
@@ -397,8 +397,9 @@ fn resize_linear(
         force_exact,
     );
 
-    // When supersampling, target dimensions are (2*requested+1) so contraction gives requested size
-    let (dst_width, dst_height) = if use_supersample {
+    // When in SampleToSample mode (tent-volume), target dimensions are (2*requested+1) so contraction gives requested size
+    // When in Prescale mode, target dimensions are the final requested size (contract integrated into rescale)
+    let (dst_width, dst_height) = if tent_mode == TentMode::SampleToSample {
         supersample_target_dimensions(base_dst_width, base_dst_height)
     } else {
         (base_dst_width, base_dst_height)
@@ -440,7 +441,11 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::BilinearIterative => "Bilinear Iterative",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
-        let ss_note = if use_supersample { " (supersample target)" } else { "" };
+        let ss_note = match tent_mode {
+            TentMode::SampleToSample => " (supersample target)",
+            TentMode::Prescale => " (prescale)",
+            TentMode::Off => "",
+        };
         eprintln!(
             "Resizing in linear RGB ({}{}{}): {}x{} -> {}x{}",
             method_name, alpha_note, ss_note, src_width, src_height, dst_width, dst_height
@@ -449,7 +454,6 @@ fn resize_linear(
 
     // Use alpha-aware rescaling when image has alpha channel to prevent
     // transparent pixels from bleeding their color into opaque regions
-    // When use_supersample is true, use tent-mode for correct sample-to-sample mapping
     let dst_pixels = if has_alpha {
         rescale_with_alpha_progress_tent(
             pixels,
@@ -457,7 +461,7 @@ fn resize_linear(
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
-            use_supersample,
+            tent_mode,
             progress,
         )
     } else {
@@ -467,7 +471,7 @@ fn resize_linear(
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
-            use_supersample,
+            tent_mode,
             progress,
         )
     };
@@ -1351,11 +1355,15 @@ fn main() -> Result<(), String> {
 
         let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
 
-        // Determine if tent-volume supersampling is enabled
-        let use_supersample = matches!(args.supersample, Supersample::TentVolume) && needs_resize;
+        // Determine supersampling mode
+        let (tent_mode, needs_expansion) = match args.supersample {
+            Supersample::TentVolume if needs_resize => (cra_wasm::rescale::TentMode::SampleToSample, true),
+            Supersample::TentVolumePrescale => (cra_wasm::rescale::TentMode::Prescale, true),
+            _ => (cra_wasm::rescale::TentMode::Off, false),
+        };
 
         // Apply tent-volume expansion before input tonemapping (if enabled)
-        let (input_pixels, expanded_width, expanded_height) = if use_supersample {
+        let (input_pixels, expanded_width, expanded_height) = if needs_expansion {
             if args.verbose {
                 eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
                     src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
@@ -1397,7 +1405,7 @@ fn main() -> Result<(), String> {
             args.scale_method.to_rescale_method(),
             original_has_alpha,
             args.non_uniform,
-            use_supersample,
+            tent_mode,
             args.verbose,
             if args.progress { Some(&mut resize_progress) } else { None },
         )?;
@@ -1472,8 +1480,9 @@ fn main() -> Result<(), String> {
                 linear_gray
             };
 
-            // Step 5: Apply tent-volume contraction after tonemapping (if supersampling was used)
-            let (linear_gray, alpha, width, height) = if use_supersample {
+            // Step 5: Apply tent-volume contraction after tonemapping (only for SampleToSample mode)
+            // Prescale mode integrates contraction into rescale, so no explicit contract needed
+            let (linear_gray, alpha, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
                 if args.verbose {
                     eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
                         width, height, (width - 1) / 2, (height - 1) / 2);
@@ -1570,8 +1579,9 @@ fn main() -> Result<(), String> {
                 pixels_to_dither
             };
 
-            // Step 3: Apply tent-volume contraction after tonemapping (if supersampling was used)
-            let (pixels_to_dither, width, height) = if use_supersample {
+            // Step 3: Apply tent-volume contraction after tonemapping (only for SampleToSample mode)
+            // Prescale mode integrates contraction into rescale, so no explicit contract needed
+            let (pixels_to_dither, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
                 if args.verbose {
                     eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
                         width, height, (width - 1) / 2, (height - 1) / 2);

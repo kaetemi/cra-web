@@ -20,7 +20,6 @@ mod tests_basic;
 mod tests_advanced;
 
 use crate::pixel::Pixel4;
-use crate::supersample;
 
 // Re-export kernel types for internal use
 pub use kernels::KernelWeights;
@@ -135,6 +134,23 @@ pub enum ScaleMode {
     UniformWidth,
     /// Uniform scaling based on height (height is primary dimension)
     UniformHeight,
+}
+
+/// Tent-space coordinate mapping mode
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum TentMode {
+    /// Standard box-to-box mapping (pixel centers to pixel centers)
+    #[default]
+    Off,
+    /// Sample-to-sample mapping for tent-space (edge samples map to edge samples)
+    /// Used when both source and destination are in tent-space.
+    /// Maps position 0→0, position N-1→M-1.
+    SampleToSample,
+    /// Tent-to-box prescale mapping (integrates tent_contract into rescale)
+    /// Source is tent-space (samples at integer positions), destination is box-space.
+    /// Maps src tent sample 1 → dst pixel center 0.5, etc.
+    /// The 0.5 pixel fringe is only on the src (tent) side, not the dst (box) side.
+    Prescale,
 }
 
 impl RescaleMethod {
@@ -389,7 +405,7 @@ pub fn rescale(
     method: RescaleMethod,
     scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
-    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, None)
+    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, None)
 }
 
 /// Rescale Pixel4 image with optional progress callback (SIMD-friendly, linear space)
@@ -404,14 +420,15 @@ pub fn rescale_with_progress(
     scale_mode: ScaleMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, progress)
+    rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, progress)
 }
 
 /// Rescale Pixel4 image with tent-mode support for supersampling
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
-/// - Maps edge samples to edge samples (position 0→0, position N-1→M-1)
-/// - Used for tent-volume supersampling where samples represent a bilinear surface
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off`: Standard box-to-box mapping (pixel centers to pixel centers)
+/// - `TentMode::SampleToSample`: Sample-to-sample mapping for tent-space (position 0→0, N-1→M-1)
+/// - `TentMode::Prescale`: Tent-to-box prescale (integrates tent_contract into rescale)
 pub fn rescale_with_progress_tent(
     src: &[Pixel4],
     src_width: usize,
@@ -420,10 +437,10 @@ pub fn rescale_with_progress_tent(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    if src_width == dst_width && src_height == dst_height {
+    if src_width == dst_width && src_height == dst_height && tent_mode != TentMode::Prescale {
         if let Some(cb) = progress {
             cb(1.0);
         }
@@ -467,7 +484,7 @@ pub fn rescale_with_progress_tent(
                 src, src_width, src_height,
                 dst_width, dst_height,
                 method, scale_mode,
-                false,  // Not using tent_mode - weights already handle tent operations
+                TentMode::Off,  // Not using tent_mode - weights already handle tent operations
                 progress,
             )
         }
@@ -537,7 +554,7 @@ pub fn rescale_with_alpha(
     method: RescaleMethod,
     scale_mode: ScaleMode,
 ) -> Vec<Pixel4> {
-    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, None)
+    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, None)
 }
 
 /// Alpha-aware rescale with progress callback
@@ -551,7 +568,7 @@ pub fn rescale_with_alpha_progress(
     scale_mode: ScaleMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, false, progress)
+    rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, progress)
 }
 
 /// Alpha-aware rescale with tent-mode support for supersampling
@@ -563,10 +580,10 @@ pub fn rescale_with_alpha_progress_tent(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    if src_width == dst_width && src_height == dst_height {
+    if src_width == dst_width && src_height == dst_height && tent_mode != TentMode::Prescale {
         if let Some(cb) = progress {
             cb(1.0);
         }
@@ -606,7 +623,7 @@ pub fn rescale_with_alpha_progress_tent(
                 src, src_width, src_height,
                 dst_width, dst_height,
                 method, scale_mode,
-                false,  // Not using tent_mode - weights already handle tent operations
+                TentMode::Off,  // Not using tent_mode - weights already handle tent operations
                 progress,
             )
         }

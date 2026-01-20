@@ -4,7 +4,7 @@
 //! (Mitchell, Catmull-Rom, Lanczos3, Sinc) with precomputed weights.
 
 use crate::pixel::Pixel4;
-use super::{RescaleMethod, ScaleMode, calculate_scales};
+use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
 use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights, precompute_tent_kernel_weights};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
@@ -101,9 +101,10 @@ fn resample_row_alpha_precomputed(
 /// Uses precomputed kernel weights for efficiency
 /// Progress callback is optional - receives 0.0-1.0 after each row
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
-/// - Maps edge samples to edge samples (position 0→0, position N-1→M-1)
-/// - Used for tent-volume supersampling where samples represent a bilinear surface
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off`: Standard pixel-center mapping
+/// - `TentMode::SampleToSample`: Sample-to-sample mapping for tent-space
+/// - `TentMode::Prescale`: Tent-to-box prescale (integrates tent_contract)
 pub fn rescale_kernel_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -112,37 +113,50 @@ pub fn rescale_kernel_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales - in tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y) = if tent_mode {
-        // Compute natural tent scales for each dimension
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+    // Compute scales based on tent_mode
+    let (scale_x, scale_y) = match tent_mode {
+        TentMode::Off => {
+            calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
         }
-    } else {
-        calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
+        TentMode::SampleToSample => {
+            // Compute natural tent scales for each dimension (sample-to-sample mapping)
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            }
+        }
+        TentMode::Prescale => {
+            // Prescale: src is tent-space, dst is box-space
+            // Scale factor is (src_len - 1) / dst_len for coordinate mapping
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            }
+        }
     };
 
     // Filter scale controls kernel support
-    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // In tent modes: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
@@ -244,37 +258,46 @@ pub fn rescale_kernel_alpha_pixels(
     dst_height: usize,
     method: RescaleMethod,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    // Compute scales - in tent mode, use sample-to-sample mapping with uniform scaling support
-    let (scale_x, scale_y) = if tent_mode {
-        // Compute natural tent scales for each dimension
-        let natural_tent_scale_x = if dst_width > 1 {
-            (src_width - 1) as f32 / (dst_width - 1) as f32
-        } else {
-            1.0
-        };
-        let natural_tent_scale_y = if dst_height > 1 {
-            (src_height - 1) as f32 / (dst_height - 1) as f32
-        } else {
-            1.0
-        };
-
-        // Apply uniform scaling if requested
-        match scale_mode {
-            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
-            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
-            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+    // Compute scales based on tent_mode
+    let (scale_x, scale_y) = match tent_mode {
+        TentMode::Off => {
+            calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
         }
-    } else {
-        calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
+        TentMode::SampleToSample => {
+            let natural_tent_scale_x = if dst_width > 1 {
+                (src_width - 1) as f32 / (dst_width - 1) as f32
+            } else {
+                1.0
+            };
+            let natural_tent_scale_y = if dst_height > 1 {
+                (src_height - 1) as f32 / (dst_height - 1) as f32
+            } else {
+                1.0
+            };
+            match scale_mode {
+                ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+                ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+                ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+            }
+        }
+        TentMode::Prescale => {
+            let prescale_x = (src_width - 1) as f32 / dst_width as f32;
+            let prescale_y = (src_height - 1) as f32 / dst_height as f32;
+            match scale_mode {
+                ScaleMode::Independent => (prescale_x, prescale_y),
+                ScaleMode::UniformWidth => (prescale_x, prescale_x),
+                ScaleMode::UniformHeight => (prescale_y, prescale_y),
+            }
+        }
     };
 
     // Filter scale controls kernel support
-    // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let multiplier_x = if tent_mode { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if tent_mode { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    let use_tent_multiplier = tent_mode != TentMode::Off;
+    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
+    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 

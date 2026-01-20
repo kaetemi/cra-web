@@ -3,39 +3,54 @@
 //! Contains both standard and alpha-aware bilinear rescaling.
 
 use crate::pixel::{Pixel4, lerp};
-use super::{ScaleMode, calculate_scales};
+use super::{ScaleMode, TentMode, calculate_scales};
 
 /// Calculate source coordinate for a destination position
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
+/// Supports multiple coordinate mapping modes via `tent_mode`.
 #[inline]
 fn calculate_src_coord(
     dst_i: usize,
     src_len: usize,
     dst_len: usize,
     scale: f32,
-    tent_mode: bool,
+    tent_mode: TentMode,
 ) -> f32 {
     let max = (src_len - 1) as f32;
-    if tent_mode {
-        // Sample-to-sample mapping: position 0→0, position N-1→M-1
-        let tent_scale = if dst_len > 1 {
-            (src_len - 1) as f32 / (dst_len - 1) as f32
-        } else {
-            1.0
-        };
-        let offset = 0.5 * (1.0 - tent_scale);
-        ((dst_i as f32 + 0.5) * tent_scale - 0.5 + offset).clamp(0.0, max)
-    } else {
-        // Standard pixel-center mapping
-        ((dst_i as f32 + 0.5) * scale - 0.5).clamp(0.0, max)
+    match tent_mode {
+        TentMode::Off => {
+            // Standard pixel-center mapping
+            ((dst_i as f32 + 0.5) * scale - 0.5).clamp(0.0, max)
+        }
+        TentMode::SampleToSample => {
+            // Sample-to-sample mapping: position 0→0, position N-1→M-1
+            let tent_scale = if dst_len > 1 {
+                (src_len - 1) as f32 / (dst_len - 1) as f32
+            } else {
+                1.0
+            };
+            let offset = 0.5 * (1.0 - tent_scale);
+            ((dst_i as f32 + 0.5) * tent_scale - 0.5 + offset).clamp(0.0, max)
+        }
+        TentMode::Prescale => {
+            // Tent-to-box prescale mapping:
+            // src is tent-space (size 2W+1), dst is box-space (size dstW)
+            // Maps dst pixel centers to tent sample positions such that:
+            // - dst pixel 0 (center 0.5) → tent position where original pixel 0.5 would be
+            // Formula: src_pos = (dst_x + 0.5) * (src_len - 1) / dst_len
+            let prescale_factor = (src_len - 1) as f32 / dst_len as f32;
+            ((dst_i as f32 + 0.5) * prescale_factor).clamp(0.0, max)
+        }
     }
 }
 
 /// Rescale Pixel4 array using bilinear interpolation
 /// Progress callback is optional - receives 0.0-1.0 after each row
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off`: Standard pixel-center mapping
+/// - `TentMode::SampleToSample`: Sample-to-sample mapping for tent-space
+/// - `TentMode::Prescale`: Tent-to-box prescale (integrates tent_contract)
 pub fn rescale_bilinear_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -43,7 +58,7 @@ pub fn rescale_bilinear_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];
@@ -138,7 +153,10 @@ fn bilinear_alpha_aware(
 /// transparent pixels from bleeding color into opaque regions.
 /// Fully transparent regions preserve their underlying RGB values.
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off`: Standard pixel-center mapping
+/// - `TentMode::SampleToSample`: Sample-to-sample mapping for tent-space
+/// - `TentMode::Prescale`: Tent-to-box prescale (integrates tent_contract)
 pub fn rescale_bilinear_alpha_pixels(
     src: &[Pixel4],
     src_width: usize,
@@ -146,7 +164,7 @@ pub fn rescale_bilinear_alpha_pixels(
     dst_width: usize,
     dst_height: usize,
     scale_mode: ScaleMode,
-    tent_mode: bool,
+    tent_mode: TentMode,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let mut dst = vec![Pixel4::default(); dst_width * dst_height];

@@ -4,7 +4,7 @@
 //! and the weight precomputation logic for separable 2-pass rescaling.
 
 use std::f32::consts::PI;
-use super::RescaleMethod;
+use super::{RescaleMethod, TentMode};
 
 /// Mitchell-Netravali kernel with B=C=1/3
 /// This setting minimizes both blur and ringing artifacts.
@@ -243,9 +243,9 @@ pub struct KernelWeights2D {
 /// Precompute all kernel weights for 1D resampling
 /// Returns exact weights for each destination position
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates:
-/// - Scale becomes (src_len-1)/(dst_len-1) to map edge samples to edge samples
-/// - Offset is adjusted to align integer sample positions rather than pixel centers
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off` / `TentMode::SampleToSample`: Standard centering with passed scale
+/// - `TentMode::Prescale`: Tent-to-box mapping where src is tent-space
 pub fn precompute_kernel_weights(
     src_len: usize,
     dst_len: usize,
@@ -253,20 +253,25 @@ pub fn precompute_kernel_weights(
     filter_scale: f32,
     radius: i32,
     method: RescaleMethod,
-    tent_mode: bool,
+    tent_mode: TentMode,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // Coordinate mapping:
-    // - In tent mode, caller provides the effective tent scale (potentially uniform across dimensions)
-    // - In non-tent mode, use the passed-in scale directly
-    // Both cases use the same centering formula: offset = (src - dst * scale) / 2
-    let _ = tent_mode; // tent_mode affects how caller computes scale; here we just use the passed scale
-    let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
-    let (effective_scale, offset) = (scale, center_offset);
+    // Coordinate mapping based on tent_mode
+    let use_prescale = tent_mode == TentMode::Prescale;
 
     for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
+        // Calculate source position based on tent_mode
+        let src_pos = if use_prescale {
+            // Prescale: src is tent-space, dst is box-space
+            // Formula: src_pos = (dst_i + 0.5) * (src_len - 1) / dst_len
+            let prescale_factor = (src_len - 1) as f32 / dst_len as f32;
+            (dst_i as f32 + 0.5) * prescale_factor
+        } else {
+            // Standard centering formula
+            let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
+            (dst_i as f32 + 0.5) * scale - 0.5 + center_offset
+        };
         let center = src_pos.floor() as i32;
 
         // Find the valid source index range
@@ -310,21 +315,20 @@ pub fn precompute_kernel_weights(
 /// - Upscaling: dest footprint < source pixel → nearest-neighbor behavior
 /// - Downscaling: dest footprint > source pixel → proper area averaging
 ///
-/// When `tent_mode` is true, uses sample-to-sample mapping for tent-space coordinates.
+/// `tent_mode` controls coordinate mapping:
+/// - `TentMode::Off` / `TentMode::SampleToSample`: Standard centering with passed scale
+/// - `TentMode::Prescale`: Tent-to-box mapping where src is tent-space
 pub fn precompute_box_weights(
     src_len: usize,
     dst_len: usize,
     scale: f32,
     filter_scale: f32,
-    tent_mode: bool,
+    tent_mode: TentMode,
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // Coordinate mapping: use passed-in scale with centering offset
-    // In tent mode, caller provides the effective tent scale (potentially uniform across dimensions)
-    let _ = tent_mode; // tent_mode affects how caller computes scale; here we just use the passed scale
-    let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
-    let (effective_scale, offset) = (scale, center_offset);
+    // Coordinate mapping based on tent_mode
+    let use_prescale = tent_mode == TentMode::Prescale;
 
     // Box filter radius depends on filter_scale:
     // The destination pixel footprint is filter_scale wide in source space
@@ -332,7 +336,16 @@ pub fn precompute_box_weights(
     let box_radius = (0.5 * filter_scale).ceil() as i32 + 1;
 
     for dst_i in 0..dst_len {
-        let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
+        // Calculate source position based on tent_mode
+        let src_pos = if use_prescale {
+            // Prescale: src is tent-space, dst is box-space
+            let prescale_factor = (src_len - 1) as f32 / dst_len as f32;
+            (dst_i as f32 + 0.5) * prescale_factor
+        } else {
+            // Standard centering formula
+            let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
+            (dst_i as f32 + 0.5) * scale - 0.5 + center_offset
+        };
         let center = src_pos.floor() as i32;
 
         // Find the valid source index range

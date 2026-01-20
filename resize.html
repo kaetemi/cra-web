@@ -489,6 +489,7 @@
                 <select id="supersample">
                     <option value="0" selected>None</option>
                     <option value="1">Tent Volume (experimental)</option>
+                    <option value="2">Tent Volume Prescale (integrated resize)</option>
                 </select>
             </div>
 
@@ -823,7 +824,7 @@
             const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 23: 'tent-box', 24: 'tent-lanczos3', 25: 'tent-2d-box', 26: 'tent-2d-lanczos3-jinc', 27: 'tent-box-iterative', 28: 'tent-2d-box-iterative', 29: 'bilinear-iterative' };
 
             // Map supersample to CLI names
-            const supersampleMap = { 0: 'none', 1: 'tent-volume' };
+            const supersampleMap = { 0: 'none', 1: 'tent-volume', 2: 'tent-volume-prescale' };
 
             // Map dither mode values to CLI names
             const modeMap = {
