@@ -421,8 +421,8 @@
 
         <div class="upload-box" id="upload-box">
             <label>Drop image here or click to upload</label>
-            <p class="hint">Supports PNG, JPG, WebP</p>
-            <input type="file" id="file-input" accept="image/*,.safetensors">
+            <p class="hint">Supports PNG, JPG, WebP, EXR</p>
+            <input type="file" id="file-input" accept="image/*,.safetensors,.exr">
         </div>
 
         <div class="error-message" id="error-message"></div>
@@ -482,6 +482,15 @@
                 <select id="supersample">
                     <option value="0" selected>None</option>
                     <option value="1">Tent Volume (experimental)</option>
+                </select>
+            </div>
+
+            <div class="option-row" id="tonemapping-row" style="display: none;">
+                <label>Tonemapping:</label>
+                <select id="tonemapping">
+                    <option value="none" selected>None</option>
+                    <option value="aces">ACES (compress HDR to SDR)</option>
+                    <option value="aces-inverse">ACES Inverse (expand SDR to HDR)</option>
                 </select>
             </div>
 
@@ -575,6 +584,8 @@
         let lastOutputHeight = 0;
         let lastHasAlpha = false;
         let processTimestamp = null; // Timestamp when processing started
+        let inputIsHdr = false;       // True if input is HDR (EXR)
+        let currentFileName = '';     // Store filename for format detection
 
         // Scale mode constants (must match Rust enum)
         const SCALE_MODE_INDEPENDENT = 0;
@@ -583,6 +594,9 @@
 
         // Pending operation state for comparison mode
         let pendingComparison = null;
+
+        // Pending file for EXR dimension detection
+        let pendingExrFile = null;
 
         // Generate download filename with timestamp
         function generateDownloadFilename(width, height, format, ext) {
@@ -618,6 +632,10 @@
 
                     case 'png-encoded':
                         handlePngEncoded(data);
+                        break;
+
+                    case 'dimensions':
+                        handleDimensions(data);
                         break;
                 }
             };
@@ -698,6 +716,52 @@
             pendingComparison = null;
         }
 
+        // Handle dimensions response for EXR files
+        function handleDimensions(data) {
+            const { width, height } = data;
+            if (!pendingExrFile) return;
+
+            const file = pendingExrFile;
+            pendingExrFile = null;
+
+            originalWidth = width;
+            originalHeight = height;
+            aspectRatio = width / height;
+
+            // Set initial target size (fit to 256 on longest side)
+            const maxDim = 256;
+            if (aspectRatio >= 1) {
+                primaryDimension = 'width';
+                document.getElementById('target-width').value = maxDim;
+                document.getElementById('target-height').value = Math.round(maxDim / aspectRatio);
+            } else {
+                primaryDimension = 'height';
+                document.getElementById('target-height').value = maxDim;
+                document.getElementById('target-width').value = Math.round(maxDim * aspectRatio);
+            }
+            updateDimensionStyling();
+
+            const box = document.getElementById('upload-box');
+            box.classList.add('has-image');
+
+            // Show placeholder for EXR (can't preview in browser)
+            box.innerHTML = `
+                <div style="padding: 40px; background: linear-gradient(135deg, #2c3e50, #34495e); border-radius: 8px; color: #ecf0f1;">
+                    <div style="font-size: 48px; margin-bottom: 10px;">HDR</div>
+                    <div style="font-size: 14px; opacity: 0.8;">EXR format</div>
+                </div>
+                <label>Image loaded: ${width}x${height}</label>
+                <p class="hint">Click to change image</p>
+                <input type="file" id="file-input" accept="image/*,.safetensors,.exr">
+            `;
+
+            // Re-attach event listener
+            document.getElementById('file-input').addEventListener('change', (e) => handleFile(e.target.files[0]));
+
+            updateProcessButtonState();
+            document.getElementById('error-message').classList.remove('visible');
+        }
+
         function displaySingleResult(imageData, width, height) {
             document.getElementById('single-output').style.display = 'block';
             document.getElementById('comparison-output').style.display = 'none';
@@ -746,6 +810,7 @@
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const supersample = parseInt(document.getElementById('supersample').value);
+            const tonemapping = document.getElementById('tonemapping').value;
 
             // Map interpolation to CLI names
             const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest' };
@@ -809,6 +874,11 @@
             // Add supersample if not none
             if (supersample !== 0) {
                 cmd += ` --supersample ${supersampleMap[supersample]}`;
+            }
+
+            // Add tonemapping if not none
+            if (tonemapping !== 'none') {
+                cmd += ` --output-tonemapping ${tonemapping}`;
             }
 
             return cmd;
@@ -888,6 +958,18 @@
             document.getElementById('process-btn').disabled = !shouldEnable;
         }
 
+        // Show/hide tonemapping option based on whether input is HDR
+        function updateTonemappingVisibility() {
+            const tonemappingRow = document.getElementById('tonemapping-row');
+            if (inputIsHdr) {
+                tonemappingRow.style.display = 'flex';
+            } else {
+                tonemappingRow.style.display = 'none';
+                // Reset to none when hiding
+                document.getElementById('tonemapping').value = 'none';
+            }
+        }
+
         function calculateOutputDimensions() {
             const width = parseInt(document.getElementById('target-width').value) || 256;
             const height = parseInt(document.getElementById('target-height').value) || 256;
@@ -921,6 +1003,7 @@
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const supersample = parseInt(document.getElementById('supersample').value);
+            const tonemapping = document.getElementById('tonemapping').value;
 
             // Dither technique: 1 = PerChannel, 2 = ColorAware
             const ditherTechnique = isPerceptual ? 2 : 1;
@@ -939,7 +1022,8 @@
                 ditherMode,
                 ditherTechnique,
                 perceptualSpace,
-                supersample
+                supersample,
+                tonemapping
             };
 
             if (showComparison) {
@@ -1000,10 +1084,25 @@
             if (!file) return;
 
             try {
+                // Store filename and detect HDR format
+                currentFileName = file.name.toLowerCase();
+                inputIsHdr = currentFileName.endsWith('.exr');
+                updateTonemappingVisibility();
+
                 // Load file bytes for precise WASM decoding in worker
                 const fileBytes = await loadImageBytes(file);
                 inputFileBytes = fileBytes;
                 console.log('[resize] inputFileBytes set, size:', fileBytes.byteLength);
+
+                // For EXR files, use worker to get dimensions (browser can't preview EXR)
+                if (inputIsHdr) {
+                    pendingExrFile = file;
+                    worker.postMessage({
+                        type: 'get-dimensions',
+                        fileBytes: inputFileBytes
+                    });
+                    return;  // handleDimensions will complete the UI update
+                }
 
                 // Load preview image for UI (dimensions and display)
                 const { dataUrl, width, height } = await loadImagePreview(file);
@@ -1034,7 +1133,7 @@
                     </div>
                     <label>Image loaded: ${width}x${height}</label>
                     <p class="hint">Click to change image</p>
-                    <input type="file" id="file-input" accept="image/*,.safetensors">
+                    <input type="file" id="file-input" accept="image/*,.safetensors,.exr">
                 `;
 
                 // Re-attach event listener to new input element
@@ -1065,7 +1164,7 @@
             e.currentTarget.style.borderColor = '';
             const file = e.dataTransfer.files[0];
             console.log('[resize] drop event, file:', file?.name, 'type:', file?.type);
-            if (file && (file.type.startsWith('image/') || file.name.endsWith('.safetensors') || !file.type)) {
+            if (file && (file.type.startsWith('image/') || file.name.endsWith('.safetensors') || file.name.endsWith('.exr') || !file.type)) {
                 handleFile(file);
             }
         });

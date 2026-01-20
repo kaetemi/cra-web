@@ -60,7 +60,8 @@ function processResize(params) {
             ditherTechnique,
             perceptualSpace,
             inputIsLinear,  // True if input is already linear (normal maps, data textures)
-            supersample = SUPERSAMPLE_NONE  // Supersampling mode
+            supersample = SUPERSAMPLE_NONE,  // Supersampling mode
+            tonemapping = 'none'  // 'none', 'aces', 'aces-inverse'
         } = params;
 
         // Check for SFI (safetensors) format and use appropriate loader
@@ -151,7 +152,18 @@ function processResize(params) {
                     (progress) => sendProgress(Math.round(progress * 70))  // 0-70% for resize
                 );
 
-            sendProgress(75);
+            sendProgress(72);
+
+            // Apply tonemapping in tent-space (before contraction)
+            if (tonemapping === 'aces') {
+                sendProgress(74, 'Applying tonemapping (ACES)...');
+                craWasm.tonemap_aces_wasm(tentResized);
+            } else if (tonemapping === 'aces-inverse') {
+                sendProgress(74, 'Applying tonemapping (ACES inverse)...');
+                craWasm.tonemap_aces_inverse_wasm(tentResized);
+            }
+
+            sendProgress(76);
 
             // Contract back to box-space
             const contractResult = craWasm.tent_contract_wasm(tentResized, tentDstWidth, tentDstHeight);
@@ -181,17 +193,30 @@ function processResize(params) {
                 );
         }
 
-        sendProgress(85);
+        sendProgress(82);
 
-        // Step 5: Convert linear back to sRGB (0-1) in-place (alpha passes through)
+        // Step 5: Apply tonemapping (if enabled and not supersampling - supersampling does it in tent-space)
+        if (supersample !== SUPERSAMPLE_TENT_VOLUME) {
+            if (tonemapping === 'aces') {
+                sendProgress(84, 'Applying tonemapping (ACES)...');
+                craWasm.tonemap_aces_wasm(resizedBuffer);
+            } else if (tonemapping === 'aces-inverse') {
+                sendProgress(84, 'Applying tonemapping (ACES inverse)...');
+                craWasm.tonemap_aces_inverse_wasm(resizedBuffer);
+            }
+        }
+
+        sendProgress(86);
+
+        // Step 6: Convert linear back to sRGB (0-1) in-place (alpha passes through)
         craWasm.linear_to_srgb_wasm(resizedBuffer);
 
-        // Step 6: Denormalize to 0-255 in-place (all 4 channels)
+        // Step 7: Denormalize to 0-255 in-place (all 4 channels)
         craWasm.denormalize_clamped_wasm(resizedBuffer);
 
         sendProgress(90);
 
-        // Step 7: Dither to 8-bit output
+        // Step 8: Dither to 8-bit output
         let outputData;
         const outputPixels = finalWidth * finalHeight;
 
@@ -550,6 +575,32 @@ function encodePng(params) {
     }
 }
 
+// Get image dimensions without full processing (for EXR preview)
+function getImageDimensions(params) {
+    if (!wasmReady) {
+        sendError(new Error('WASM not ready'));
+        return;
+    }
+
+    try {
+        const { fileBytes } = params;
+        const fileData = new Uint8Array(fileBytes);
+        const isSfi = craWasm.is_sfi_format_wasm(fileData);
+        const loadedImage = isSfi
+            ? craWasm.load_sfi_wasm(fileData)
+            : craWasm.load_image_wasm(fileData);
+
+        self.postMessage({
+            type: 'dimensions',
+            width: loadedImage.width,
+            height: loadedImage.height,
+            requestId: currentRequestId
+        });
+    } catch (error) {
+        sendError(error);
+    }
+}
+
 // Handle messages from main thread
 self.onmessage = function(e) {
     const { type, requestId, ...data } = e.data;
@@ -570,6 +621,9 @@ self.onmessage = function(e) {
             break;
         case 'encode-png':
             encodePng(data);
+            break;
+        case 'get-dimensions':
+            getImageDimensions(data);
             break;
     }
 };

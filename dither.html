@@ -1725,14 +1725,26 @@
                 originalHeight = height;
                 aspectRatio = width / height;
 
-                // Create preview image for display (using DataURL for compatibility)
-                const previewUrl = await createPreview(file);
-                const preview = document.getElementById('input-preview');
-                const previewWrapper = document.getElementById('input-preview-wrapper');
-                preview.src = previewUrl;
-                previewWrapper.style.display = 'inline-block';
-
+                // Create preview image for display
                 const uploadBox = document.getElementById('input-upload');
+                const previewWrapper = document.getElementById('input-preview-wrapper');
+
+                if (inputIsHdr) {
+                    // EXR files can't be previewed in browser - show placeholder
+                    previewWrapper.innerHTML = `
+                        <div style="padding: 40px; background: linear-gradient(135deg, #2c3e50, #34495e); border-radius: 8px; color: #ecf0f1;">
+                            <div style="font-size: 48px; margin-bottom: 10px;">HDR</div>
+                            <div style="font-size: 14px; opacity: 0.8;">EXR format (${width}x${height})</div>
+                        </div>
+                    `;
+                    previewWrapper.style.display = 'inline-block';
+                } else {
+                    // Standard image - use DataURL preview
+                    const previewUrl = await createPreview(file);
+                    previewWrapper.innerHTML = `<img id="input-preview" src="${previewUrl}" alt="Preview" style="max-width: 100%; max-height: 300px; border-radius: 4px;">`;
+                    previewWrapper.style.display = 'inline-block';
+                }
+
                 uploadBox.classList.add('has-image');
                 uploadBox.querySelectorAll('.hint, label').forEach(el => el.style.display = 'none');
 
