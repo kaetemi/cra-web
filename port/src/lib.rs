@@ -25,6 +25,7 @@ pub mod output;
 pub mod pixel;
 pub mod rescale;
 mod rotation;
+pub mod supersample;
 pub mod tiled_lab;
 mod tiling;
 

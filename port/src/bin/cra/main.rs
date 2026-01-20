@@ -38,6 +38,7 @@ use cra_wasm::dither::common::{DitherMode, OutputTechnique, PerceptualSpace};
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
 use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
+use cra_wasm::supersample::{tent_expand, tent_contract, supersample_target_dimensions};
 
 // ============================================================================
 // Progress Bar
@@ -370,6 +371,7 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
 /// When has_alpha is true, uses alpha-aware rescaling to prevent transparent pixels
 /// from bleeding their color into opaque regions.
 /// When force_exact is true, disables automatic uniform scaling detection.
+/// When use_supersample is true, the resizer targets (2*target+1) dimensions for tent-volume supersampling.
 fn resize_linear(
     pixels: &[Pixel4],
     src_width: u32,
@@ -379,6 +381,7 @@ fn resize_linear(
     method: cra_wasm::rescale::RescaleMethod,
     has_alpha: bool,
     force_exact: bool,
+    use_supersample: bool,
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
@@ -386,13 +389,20 @@ fn resize_linear(
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
-    let (dst_width, dst_height) = calculate_target_dimensions_exact(
+    let (base_dst_width, base_dst_height) = calculate_target_dimensions_exact(
         src_width as usize,
         src_height as usize,
         tw,
         th,
         force_exact,
     );
+
+    // When supersampling, target dimensions are (2*requested+1) so contraction gives requested size
+    let (dst_width, dst_height) = if use_supersample {
+        supersample_target_dimensions(base_dst_width, base_dst_height)
+    } else {
+        (base_dst_width, base_dst_height)
+    };
 
     if dst_width == src_width as usize && dst_height == src_height as usize {
         return Ok((pixels.to_vec(), src_width, src_height));
@@ -423,9 +433,10 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized => "Stochastic Jinc Scatter (normalized)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
+        let ss_note = if use_supersample { " (supersample target)" } else { "" };
         eprintln!(
-            "Resizing in linear RGB ({}{}): {}x{} -> {}x{}",
-            method_name, alpha_note, src_width, src_height, dst_width, dst_height
+            "Resizing in linear RGB ({}{}{}): {}x{} -> {}x{}",
+            method_name, alpha_note, ss_note, src_width, src_height, dst_width, dst_height
         );
     }
 
@@ -1352,15 +1363,31 @@ fn main() -> Result<(), String> {
             original_has_alpha
         };
 
+        // Determine if tent-volume supersampling is enabled
+        let use_supersample = matches!(args.supersample, Supersample::TentVolume) && needs_resize;
+
+        // Apply tent-volume expansion before resizing (if enabled)
+        let (input_pixels, expanded_width, expanded_height) = if use_supersample {
+            if args.verbose {
+                eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
+                    src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
+            }
+            let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
+            (expanded, w as u32, h as u32)
+        } else {
+            (input_pixels, src_width, src_height)
+        };
+
         // Resize in linear RGB space (use alpha-aware rescaling if image has alpha)
         let mut resize_progress = |p: f32| print_progress("Resize", p);
         let (input_pixels, width, height) = resize_linear(
             &input_pixels,
-            src_width, src_height,
+            expanded_width, expanded_height,
             args.width, args.height,
             args.scale_method.to_rescale_method(),
             original_has_alpha,
             args.non_uniform,
+            use_supersample,
             args.verbose,
             if args.progress { Some(&mut resize_progress) } else { None },
         )?;
@@ -1403,6 +1430,21 @@ fn main() -> Result<(), String> {
         } else {
             input_pixels
         };
+
+        // Apply tent-volume contraction after all processing (if supersampling was used)
+        let (pixels_to_dither, width, height) = if use_supersample {
+            if args.verbose {
+                eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
+                    width, height, (width - 1) / 2, (height - 1) / 2);
+            }
+            let (contracted, w, h) = tent_contract(&pixels_to_dither, width_usize, height_usize);
+            (contracted, w as u32, h as u32)
+        } else {
+            (pixels_to_dither, width, height)
+        };
+
+        let width_usize = width as usize;
+        let height_usize = height as usize;
 
         // Process differently based on output format (grayscale vs RGB)
         let result = if is_grayscale_format {
