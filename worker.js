@@ -172,9 +172,13 @@ async function encodePng(data, width, height, isRgba = false) {
     return new Uint8Array(await blob.arrayBuffer());
 }
 
+// Supersample mode constants
+const SUPERSAMPLE_NONE = 0;
+const SUPERSAMPLE_TENT_VOLUME = 1;
+
 // Process images using WASM with precise 16-bit and ICC support
 // Pipeline: file bytes → decode (16-bit preserved) → ICC transform if needed → linear RGB → color_correct → sRGB → dither
-async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
+async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample = SUPERSAMPLE_NONE) {
     sendProgress('process', 'Decoding images (precise)...', 5);
 
     // First decode input to check for alpha
@@ -249,6 +253,9 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             5: "Y'CbCr"
         };
         sendConsole(`Color-aware output: ON (${distanceSpaceNames[outputDistanceSpace] || distanceSpaceNames[1]})`);
+    }
+    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
+        sendConsole('Supersampling: Tent Volume');
     }
 
     // Method mapping: method name -> [methodCode, luminosityFlag, description]
@@ -346,26 +353,67 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         craWasm.unpremultiply_alpha_wasm(inputBuffer);
     }
 
+    // Track dimensions for potential supersampling
+    let processWidth = inputImg.width;
+    let processHeight = inputImg.height;
+    let refProcessWidth = refImg.width;
+    let refProcessHeight = refImg.height;
+    let processInputBuffer = inputBuffer;
+    let processRefBuffer = refBuffer;
+
+    // Tent-volume supersampling: expand to tent-space before processing
+    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
+        sendProgress('process', 'Expanding to tent-space...', 28);
+        sendConsole('  Expanding input to tent-space...');
+        const inputExpanded = craWasm.tent_expand_wasm(inputBuffer, inputImg.width, inputImg.height);
+        processInputBuffer = inputExpanded.buffer;
+        processWidth = inputExpanded.width;
+        processHeight = inputExpanded.height;
+        sendConsole(`    ${inputImg.width}x${inputImg.height} -> ${processWidth}x${processHeight}`);
+
+        sendConsole('  Expanding reference to tent-space...');
+        const refExpanded = craWasm.tent_expand_wasm(refBuffer, refImg.width, refImg.height);
+        processRefBuffer = refExpanded.buffer;
+        refProcessWidth = refExpanded.width;
+        refProcessHeight = refExpanded.height;
+        sendConsole(`    ${refImg.width}x${refImg.height} -> ${refProcessWidth}x${refProcessHeight}`);
+    }
+
     // Color correction (in linear RGB space)
     sendProgress('process', 'Running color correction...', 30);
-    const resultBuffer = craWasm.color_correct_with_progress_wasm(
-        inputBuffer,
-        refBuffer,
-        inputImg.width,
-        inputImg.height,
-        refImg.width,
-        refImg.height,
+    let resultBuffer = craWasm.color_correct_with_progress_wasm(
+        processInputBuffer,
+        processRefBuffer,
+        processWidth,
+        processHeight,
+        refProcessWidth,
+        refProcessHeight,
         methodCode,
         luminosityFlag,
         histogramMode,
         histogramDitherMode,
         colorAwareHistogram,
         histogramDistanceSpace,
-        (progress) => sendProgress('process', 'Running color correction...', 30 + Math.round(progress * 25))
+        (progress) => sendProgress('process', 'Running color correction...', 30 + Math.round(progress * 20))
     );
 
+    // Track final dimensions (may change if contracting from tent-space)
+    let finalWidth = processWidth;
+    let finalHeight = processHeight;
+
+    // Tent-volume supersampling: contract back from tent-space
+    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
+        sendProgress('process', 'Contracting from tent-space...', 52);
+        sendConsole('  Contracting result from tent-space...');
+        const contracted = craWasm.tent_contract_wasm(resultBuffer, processWidth, processHeight);
+        resultBuffer = contracted.buffer;
+        finalWidth = contracted.width;
+        finalHeight = contracted.height;
+        sendConsole(`    ${processWidth}x${processHeight} -> ${finalWidth}x${finalHeight}`);
+    }
+
     // Convert linear back to sRGB (0-1) in-place
-    sendProgress('process', 'Converting to sRGB...', 60);
+    sendProgress('process', 'Converting to sRGB...', 55);
     craWasm.linear_to_srgb_wasm(resultBuffer);
 
     // Denormalize to 0-255 in-place
@@ -381,8 +429,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         // Use RGBA dithering - alpha is passed through without dithering
         const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
             resultBuffer,
-            inputImg.width,
-            inputImg.height,
+            finalWidth,
+            finalHeight,
             8, 8, 8, 8,  // RGBA8888
             ditherTechnique,
             outputDitherMode,
@@ -396,8 +444,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         // Use RGB dithering for images without alpha
         const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
             resultBuffer,
-            inputImg.width,
-            inputImg.height,
+            finalWidth,
+            finalHeight,
             8, 8, 8,  // RGB888
             ditherTechnique,
             outputDitherMode,
@@ -412,7 +460,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
     sendConsole(`Processing completed in ${elapsed.toFixed(0)}ms`);
 
     sendProgress('process', 'Encoding result...', 80);
-    const outputData = await encodePng(resultData, inputImg.width, inputImg.height, inputHasAlpha);
+    const outputData = await encodePng(resultData, finalWidth, finalHeight, inputHasAlpha);
 
     return outputData;
 }
@@ -452,12 +500,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace) {
+async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace);
+            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -491,7 +539,8 @@ self.onmessage = async function(e) {
                 data.colorAwareHistogram !== undefined ? data.colorAwareHistogram : true,
                 data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
                 data.colorAwareOutput !== undefined ? data.colorAwareOutput : true,
-                data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1
+                data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1,
+                data.supersample !== undefined ? data.supersample : 0
             );
             break;
     }

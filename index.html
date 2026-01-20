@@ -599,6 +599,17 @@
             </div>
         </div>
 
+        <div class="implementation-section" id="supersample-section">
+            <label for="supersample-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Supersampling:</label>
+            <select id="supersample-select" class="method-select" style="margin-bottom: 10px;">
+                <option value="0" selected>None</option>
+                <option value="1">Tent Volume (experimental)</option>
+            </select>
+            <p class="impl-description" id="supersample-description">
+                No supersampling. Process images at their original resolution.
+            </p>
+        </div>
+
         <button class="process-btn" id="process-btn" disabled>Process Images</button>
 
         <div class="wasm-only-warning" id="wasm-only-warning">
