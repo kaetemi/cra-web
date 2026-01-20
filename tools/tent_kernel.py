@@ -177,8 +177,11 @@ def mitchell_kernel(x: float) -> float:
     return ((7/6) * x**3 - 2 * x**2 + 8/9)
 
 
+# KERNELS: (function, support_half_width, description)
+# support_half_width is the half-width of the kernel's natural support
+# e.g., box returns 1 for |x| <= 0.5, so support_half_width = 0.5
 KERNELS: dict[str, tuple[Callable[[float], float], float, str]] = {
-    'box': (box_kernel, 1.0, "Box filter"),
+    'box': (box_kernel, 0.5, "Box filter"),
     'triangle': (triangle_kernel, 1.0, "Triangle/bilinear"),
     'lanczos2': (lambda x: lanczos_kernel(x, 2), 2.0, "Lanczos a=2"),
     'lanczos3': (lambda x: lanczos_kernel(x, 3), 3.0, "Lanczos a=3"),
@@ -195,45 +198,63 @@ def resample_tent_trapezoidal(
     center_pos: float,
     width: float,
     kernel_func: Callable[[float], float],
-    kernel_radius: float,
+    support_half_width: float,
 ) -> SymbolicCoeffs:
     """
     Resample the tent surface at center_pos using a kernel of given width.
 
-    Uses trapezoidal integration over integer tent positions within the kernel support.
-    The kernel is evaluated at normalized distances (position / (width/2)).
+    Uses proper area-weighted integration: each tent position contributes
+    proportionally to its overlap with the sampling interval.
 
     Args:
         center_pos: Center position in tent space (can be fractional)
-        width: Kernel width in tent units
+        width: Kernel width in tent units (total extent of sampling)
         kernel_func: The sampling kernel function
-        kernel_radius: Base radius of the kernel (in normalized units)
+        support_half_width: Half-width of the kernel's natural support domain
 
     Returns:
         SymbolicCoeffs representing the resampled value
     """
     half_width = width / 2
-    effective_radius = half_width * kernel_radius
+    interval_start = center_pos - half_width
+    interval_end = center_pos + half_width
 
-    # Determine range of tent positions to sample
-    start = int(math.floor(center_pos - effective_radius))
-    end = int(math.ceil(center_pos + effective_radius))
+    # Sample all integer positions that could overlap with the interval
+    # Each tent position i "owns" the range [i - 0.5, i + 0.5] for integration
+    # Add padding of 3 to catch any edge cases and verify they're zero
+    PADDING = 3
+    start = int(math.floor(interval_start + 0.5)) - PADDING
+    end = int(math.floor(interval_end + 0.5)) + PADDING
 
     result = SymbolicCoeffs.zero()
     weight_sum = 0.0
 
     for pos in range(start, end + 1):
-        # Normalized distance for kernel evaluation
-        d = (pos - center_pos) / half_width
-        w = kernel_func(d / kernel_radius) if kernel_radius > 0 else (1.0 if abs(d) < 0.5 else 0.0)
+        # Compute overlap between [interval_start, interval_end] and [pos - 0.5, pos + 0.5]
+        overlap_start = max(interval_start, pos - 0.5)
+        overlap_end = min(interval_end, pos + 0.5)
+        overlap = max(0.0, overlap_end - overlap_start)
 
-        if abs(w) > 1e-10:
-            # Trapezoidal weighting: half weight at boundaries
-            trap_weight = 0.5 if pos == start or pos == end else 1.0
-            combined_weight = w * trap_weight
+        if overlap < 1e-10:
+            continue
 
-            result = result + tent_value_coeffs(pos) * combined_weight
-            weight_sum += combined_weight
+        # For box filter, the weight is just the overlap (box is constant 1.0 within its support)
+        # For other kernels, weight is overlap × kernel value at position center
+        if kernel_func == box_kernel:
+            combined_weight = overlap
+        else:
+            # Map position to kernel's natural domain for kernel weighting
+            kernel_arg = (pos - center_pos) / half_width * support_half_width if half_width > 1e-10 else 0.0
+            kernel_weight = kernel_func(kernel_arg)
+
+            if abs(kernel_weight) < 1e-10:
+                continue
+
+            # Combined weight: overlap area × kernel weight
+            combined_weight = overlap * kernel_weight
+
+        result = result + tent_value_coeffs(pos) * combined_weight
+        weight_sum += combined_weight
 
     # Normalize
     if weight_sum > 1e-10:
@@ -247,7 +268,12 @@ def resample_tent_exact(center_pos: int, half_width: int) -> SymbolicCoeffs:
     Exact resampling using trapezoidal rule for integer positions and widths.
 
     This matches the derivation in TENT-SPACE.md for the 2× downsample kernel.
+    For half_width=0, returns point sampling at center_pos.
     """
+    # Point sampling when width=0
+    if half_width == 0:
+        return tent_value_coeffs(center_pos)
+
     result = SymbolicCoeffs.zero()
 
     for offset in range(-half_width, half_width + 1):
@@ -283,7 +309,8 @@ def derive_direct_kernel(
 
     Args:
         ratio: Downsampling ratio (e.g., 2 for 2× downsample)
-        offset: Offset in input pixels for the output pixel center
+        offset: Offset of output pixel center from input position 0.
+                Default 0 means centered on position 0.
         kernel_name: Resampling kernel name ('box', 'triangle', etc.)
         kernel_width: Kernel width in tent units (default 2)
 
@@ -292,34 +319,39 @@ def derive_direct_kernel(
     """
     kernel_func, kernel_radius, _ = KERNELS.get(kernel_name, KERNELS['box'])
 
-    # Output pixel 0 has tent positions 0, 1, 2
-    # With offset, these shift by 2*offset in tent space
-    # Mapping to input tent: multiply by ratio
+    # Output pixel centered at input position `offset`
+    # In box space, pixel i is centered at position i (integer coordinates)
+    # In tent space, the center of pixel i is at position 2*i + 1 (the M_i center point)
+    # So offset=0 means centered on pixel 0, which is tent position 1
+    #
+    # Output tent positions (corner, center, corner) are spaced by `ratio`:
+    #   corner_left:  center_tent - ratio
+    #   center:       center_tent
+    #   corner_right: center_tent + ratio
 
-    base_tent = 2 * offset  # Starting position in input tent space
+    center_tent = 2 * offset + 1  # Center of pixel `offset` in tent space
 
-    # Output tent positions mapped to input tent positions
-    out_corner_left_pos = base_tent + 0 * ratio  # Output tent 0
-    out_center_pos = base_tent + 1 * ratio       # Output tent 1
-    out_corner_right_pos = base_tent + 2 * ratio # Output tent 2
+    # Output tent positions: corner_left, center, corner_right
+    # These are spaced by `ratio` in tent space, centered on center_tent
+    out_corner_left_pos = center_tent - ratio
+    out_center_pos = center_tent
+    out_corner_right_pos = center_tent + ratio
 
     # Use exact computation for integer positions and widths
     use_exact = (
         ratio == int(ratio) and
-        offset == int(offset) and
+        (center_tent - ratio) == int(center_tent - ratio) and
         kernel_width == int(kernel_width) and
         kernel_name == 'box'
     )
 
     if use_exact:
-        r = int(ratio)
-        o = int(offset)
         w = int(kernel_width)
         hw = w // 2
 
-        out_corner_left = resample_tent_exact(2 * o + 0 * r, hw)
-        out_center = resample_tent_exact(2 * o + 1 * r, hw)
-        out_corner_right = resample_tent_exact(2 * o + 2 * r, hw)
+        out_corner_left = resample_tent_exact(int(out_corner_left_pos), hw)
+        out_center = resample_tent_exact(int(out_center_pos), hw)
+        out_corner_right = resample_tent_exact(int(out_corner_right_pos), hw)
     else:
         out_corner_left = resample_tent_trapezoidal(
             out_corner_left_pos, kernel_width, kernel_func, kernel_radius
@@ -403,8 +435,12 @@ def verify_against_known():
 
     print("\nExpected 2× downsample kernel from docs:")
     print("  1D: [-1, 7, 26, 26, 7, -1] / 64")
+    print("  (centered between pixels, i.e., offset=-0.5)")
 
-    coeffs = derive_direct_kernel(ratio=2, offset=0, kernel_name='box', kernel_width=2)
+    # The documented kernel is centered between two pixels (offset=-0.5)
+    # This is the natural position for 2× downsampling where output pixel
+    # covers input pixels -1 and 0 symmetrically
+    coeffs = derive_direct_kernel(ratio=2, offset=-0.5, kernel_name='box', kernel_width=2)
     pretty_print_kernel(coeffs, "Derived 2× kernel (box, width=2)")
 
     # Check if matches
