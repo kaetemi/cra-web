@@ -235,22 +235,13 @@ pub fn precompute_kernel_weights(
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // For tent mode, use sample-to-sample mapping:
-    // - Scale maps sample 0→0 and sample (src_len-1)→(dst_len-1)
-    // - Offset aligns integer positions rather than pixel centers
-    let (effective_scale, offset) = if tent_mode {
-        let tent_scale = if dst_len > 1 {
-            (src_len - 1) as f32 / (dst_len - 1) as f32
-        } else {
-            1.0
-        };
-        (tent_scale, 0.5 * (1.0 - tent_scale))
-    } else {
-        // Standard pixel-center mapping with centering offset
-        let mapped_src_len = dst_len as f32 * scale;
-        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
-        (scale, center_offset)
-    };
+    // Coordinate mapping:
+    // - In tent mode, caller provides the effective tent scale (potentially uniform across dimensions)
+    // - In non-tent mode, use the passed-in scale directly
+    // Both cases use the same centering formula: offset = (src - dst * scale) / 2
+    let _ = tent_mode; // tent_mode affects how caller computes scale; here we just use the passed scale
+    let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
+    let (effective_scale, offset) = (scale, center_offset);
 
     for dst_i in 0..dst_len {
         let src_pos = (dst_i as f32 + 0.5) * effective_scale - 0.5 + offset;
@@ -307,20 +298,11 @@ pub fn precompute_box_weights(
 ) -> Vec<KernelWeights> {
     let mut all_weights = Vec::with_capacity(dst_len);
 
-    // For tent mode, use sample-to-sample mapping
-    let (effective_scale, offset) = if tent_mode {
-        let tent_scale = if dst_len > 1 {
-            (src_len - 1) as f32 / (dst_len - 1) as f32
-        } else {
-            1.0
-        };
-        (tent_scale, 0.5 * (1.0 - tent_scale))
-    } else {
-        // Standard pixel-center mapping with centering offset
-        let mapped_src_len = dst_len as f32 * scale;
-        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
-        (scale, center_offset)
-    };
+    // Coordinate mapping: use passed-in scale with centering offset
+    // In tent mode, caller provides the effective tent scale (potentially uniform across dimensions)
+    let _ = tent_mode; // tent_mode affects how caller computes scale; here we just use the passed scale
+    let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
+    let (effective_scale, offset) = (scale, center_offset);
 
     // Box filter radius depends on filter_scale:
     // The destination pixel footprint is filter_scale wide in source space

@@ -44,20 +44,11 @@ pub fn precompute_scatter_weights(
     // Use the actual kernel method (not the scatter variant)
     let kernel_method = method.kernel_method();
 
-    // For tent mode, use sample-to-sample mapping
-    let (effective_scale, offset) = if tent_mode {
-        let tent_scale = if dst_len > 1 {
-            (src_len - 1) as f32 / (dst_len - 1) as f32
-        } else {
-            1.0
-        };
-        (tent_scale, 0.5 * (1.0 - tent_scale))
-    } else {
-        // Standard pixel-center mapping with centering offset
-        let mapped_src_len = dst_len as f32 * scale;
-        let center_offset = (src_len as f32 - mapped_src_len) / 2.0;
-        (scale, center_offset)
-    };
+    // Coordinate mapping: use passed-in scale with centering offset
+    // In tent mode, caller provides the effective tent scale (potentially uniform across dimensions)
+    let _ = tent_mode; // tent_mode affects how caller computes scale; here we just use the passed scale
+    let center_offset = (src_len as f32 - dst_len as f32 * scale) / 2.0;
+    let (effective_scale, offset) = (scale, center_offset);
 
     // Inverse scale: how destination positions map to source positions
     let inv_scale = 1.0 / effective_scale;
@@ -146,9 +137,29 @@ pub fn rescale_scatter_pixels(
     tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
+    // Compute scales - in tent mode, use sample-to-sample mapping with uniform scaling support
+    let (scale_x, scale_y) = if tent_mode {
+        // Compute natural tent scales for each dimension
+        let natural_tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        let natural_tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+
+        // Apply uniform scaling if requested
+        match scale_mode {
+            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+        }
+    } else {
+        calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
+    };
 
     // Filter scale controls kernel support
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
@@ -237,9 +248,29 @@ pub fn rescale_scatter_alpha_pixels(
     tent_mode: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
-    let (scale_x, scale_y) = calculate_scales(
-        src_width, src_height, dst_width, dst_height, scale_mode
-    );
+    // Compute scales - in tent mode, use sample-to-sample mapping with uniform scaling support
+    let (scale_x, scale_y) = if tent_mode {
+        // Compute natural tent scales for each dimension
+        let natural_tent_scale_x = if dst_width > 1 {
+            (src_width - 1) as f32 / (dst_width - 1) as f32
+        } else {
+            1.0
+        };
+        let natural_tent_scale_y = if dst_height > 1 {
+            (src_height - 1) as f32 / (dst_height - 1) as f32
+        } else {
+            1.0
+        };
+
+        // Apply uniform scaling if requested
+        match scale_mode {
+            ScaleMode::Independent => (natural_tent_scale_x, natural_tent_scale_y),
+            ScaleMode::UniformWidth => (natural_tent_scale_x, natural_tent_scale_x),
+            ScaleMode::UniformHeight => (natural_tent_scale_y, natural_tent_scale_y),
+        }
+    } else {
+        calculate_scales(src_width, src_height, dst_width, dst_height, scale_mode)
+    };
 
     // Filter scale controls kernel support
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
