@@ -19,6 +19,7 @@ mod tests_basic;
 mod tests_advanced;
 
 use crate::pixel::Pixel4;
+use crate::supersample;
 
 // Re-export kernel types for internal use
 pub use kernels::KernelWeights;
@@ -91,6 +92,15 @@ pub enum RescaleMethod {
     /// Like StochasticJincScatter but also normalizes by total weight received per destination.
     /// Makes brightness equivalent to gather while keeping scatter characteristics.
     StochasticJincScatterNormalized,
+    /// Tent-space Box filter pipeline
+    /// Full tent-space downscaling: box→tent expand, resample with box filter, tent→box contract.
+    /// Produces equivalent direct kernel: [-1, 7, 26, 26, 7, -1]/64 for 2× downscale.
+    /// Better quality than plain box filter due to volume-preserving tent representation.
+    TentBox,
+    /// Tent-space Lanczos3 filter pipeline
+    /// Full tent-space downscaling: box→tent expand, resample with Lanczos3, tent→box contract.
+    /// Combines tent-space's ringing-free surface with Lanczos3's sharpness.
+    TentLanczos3,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -129,6 +139,8 @@ impl RescaleMethod {
             "stochastic-jinc" | "stochastic_jinc" | "stochasticjinc" | "stochastic" => Some(RescaleMethod::StochasticJinc),
             "stochastic-jinc-scatter" | "stochastic_jinc_scatter" | "stochasticjincscatter" | "stochastic-scatter" | "stochastic_scatter" => Some(RescaleMethod::StochasticJincScatter),
             "stochastic-jinc-scatter-normalized" | "stochastic_jinc_scatter_normalized" | "stochasticjincscatternormalized" | "stochastic-scatter-normalized" | "stochastic_scatter_normalized" => Some(RescaleMethod::StochasticJincScatterNormalized),
+            "tent-box" | "tent_box" | "tentbox" => Some(RescaleMethod::TentBox),
+            "tent-lanczos3" | "tent_lanczos3" | "tentlanczos3" | "tent-lanczos" | "tent_lanczos" | "tentlanczos" => Some(RescaleMethod::TentLanczos3),
             _ => None,
         }
     }
@@ -143,7 +155,8 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
             RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
-            RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::Box | RescaleMethod::TentBox => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::TentLanczos3 => 3.0,  // Uses Lanczos3 internally
         }
     }
 
@@ -179,8 +192,15 @@ impl RescaleMethod {
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
+            RescaleMethod::TentBox => RescaleMethod::Box,
+            RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
             other => *other,
         }
+    }
+
+    /// Returns true if this is a tent-space pipeline method
+    pub fn is_tent_pipeline(&self) -> bool {
+        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3)
     }
 
 }
@@ -392,6 +412,21 @@ pub fn rescale_with_progress_tent(
         RescaleMethod::StochasticJincScatterNormalized => {
             ewa::rescale_stochastic_jinc_scatter_normalized_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
+        RescaleMethod::TentBox | RescaleMethod::TentLanczos3 => {
+            // Tent-space pipeline as equivalent direct separable kernel.
+            // The kernel weights are precomputed to incorporate:
+            // 1. Box → Tent expansion (volume-preserving)
+            // 2. Resampling in tent space
+            // 3. Tent → Box contraction
+            // This is more efficient than actually expanding/contracting the image.
+            separable::rescale_kernel_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                method, scale_mode,
+                false,  // Not using tent_mode - weights already handle tent operations
+                progress,
+            )
+        }
     }
 }
 
@@ -477,6 +512,17 @@ pub fn rescale_with_alpha_progress_tent(
         }
         RescaleMethod::StochasticJincScatterNormalized => {
             ewa::rescale_stochastic_jinc_scatter_normalized_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
+        }
+        RescaleMethod::TentBox | RescaleMethod::TentLanczos3 => {
+            // Tent-space pipeline as equivalent direct separable kernel (alpha-aware).
+            // The kernel weights incorporate expand → resample → contract operations.
+            separable::rescale_kernel_alpha_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                method, scale_mode,
+                false,  // Not using tent_mode - weights already handle tent operations
+                progress,
+            )
         }
     }
 }

@@ -467,6 +467,8 @@
                     <option value="14">EWA Mitchell (2D, soft)</option>
                     <option value="0">★ Bilinear (faster)</option>
                     <option value="20">★ Box (nearest up, area-average down)</option>
+                    <option value="23">Tent Box (tent-space box, experimental)</option>
+                    <option value="24">Tent Lanczos3 (tent-space lanczos3, experimental)</option>
                     <option value="4">Sinc (research only, SLOW)</option>
                     <option value="16">Jinc (2D sinc analog, research only, SLOW)</option>
                     <option value="17">Stochastic Jinc (gather, probabilistic)</option>
@@ -813,7 +815,7 @@
             const tonemapping = document.getElementById('tonemapping').value;
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 23: 'tent-box', 24: 'tent-lanczos3' };
 
             // Map supersample to CLI names
             const supersampleMap = { 0: 'none', 1: 'tent-volume' };

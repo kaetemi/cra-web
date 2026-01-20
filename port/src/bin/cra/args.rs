@@ -206,6 +206,10 @@ pub enum ScaleMethod {
     StochasticJincScatter,
     /// Stochastic Jinc Scatter Normalized: scatter with destination normalization
     StochasticJincScatterNormalized,
+    /// Tent-space Box filter pipeline: expand to tent, box resample, contract
+    TentBox,
+    /// Tent-space Lanczos3 filter pipeline: expand to tent, lanczos3 resample, contract
+    TentLanczos3,
 }
 
 impl ScaleMethod {
@@ -232,6 +236,8 @@ impl ScaleMethod {
             ScaleMethod::StochasticJinc => cra_wasm::rescale::RescaleMethod::StochasticJinc,
             ScaleMethod::StochasticJincScatter => cra_wasm::rescale::RescaleMethod::StochasticJincScatter,
             ScaleMethod::StochasticJincScatterNormalized => cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized,
+            ScaleMethod::TentBox => cra_wasm::rescale::RescaleMethod::TentBox,
+            ScaleMethod::TentLanczos3 => cra_wasm::rescale::RescaleMethod::TentLanczos3,
         }
     }
 }

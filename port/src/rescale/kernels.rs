@@ -202,7 +202,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized |
         RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest => jinc(x),  // 2D radial, but fallback for 1D context
-        RescaleMethod::Box => box_filter(x),
+        RescaleMethod::Box | RescaleMethod::TentBox => box_filter(x),
+        RescaleMethod::TentLanczos3 => lanczos3(x),
     }
 }
 
@@ -341,6 +342,327 @@ pub fn precompute_box_weights(
             weights,
             fallback_idx: fallback,
         });
+    }
+
+    all_weights
+}
+
+// =============================================================================
+// Tent-Space Kernel Computation
+// =============================================================================
+//
+// Implements the equivalent direct kernel for tent-space downsampling pipeline:
+// 1. Box → Tent expansion (with volume-preserving sharpening)
+// 2. Resampling with a 1D kernel in tent space
+// 3. Tent → Box contraction
+//
+// The key insight is that this entire pipeline can be collapsed into a single
+// set of weights per output pixel, derived analytically.
+//
+// Example: 2× downsample with box kernel produces [-1, 7, 26, 26, 7, -1]/64
+
+use std::collections::HashMap;
+
+/// Tent expansion coefficients for a corner position (even tent index).
+/// Corner C_i at tent position 2*i = (V_{i-1} + V_i) / 2
+#[inline]
+fn tent_corner_coeffs(box_idx: i32, src_len: usize) -> Vec<(usize, f32)> {
+    let mut coeffs = Vec::with_capacity(2);
+    let i_minus_1 = box_idx - 1;
+    let i = box_idx;
+
+    // Clamp to valid range with edge extension
+    let i_minus_1_clamped = i_minus_1.clamp(0, src_len as i32 - 1) as usize;
+    let i_clamped = i.clamp(0, src_len as i32 - 1) as usize;
+
+    coeffs.push((i_minus_1_clamped, 0.5));
+    coeffs.push((i_clamped, 0.5));
+    coeffs
+}
+
+/// Tent expansion coefficients for a center position (odd tent index).
+/// Center M_i at tent position 2*i+1 = 3/2*V_i - 1/4*V_{i-1} - 1/4*V_{i+1}
+#[inline]
+fn tent_center_coeffs(box_idx: i32, src_len: usize) -> Vec<(usize, f32)> {
+    let mut coeffs = Vec::with_capacity(3);
+    let i = box_idx;
+    let i_minus_1 = box_idx - 1;
+    let i_plus_1 = box_idx + 1;
+
+    // Clamp to valid range with edge extension
+    let i_clamped = i.clamp(0, src_len as i32 - 1) as usize;
+    let i_minus_1_clamped = i_minus_1.clamp(0, src_len as i32 - 1) as usize;
+    let i_plus_1_clamped = i_plus_1.clamp(0, src_len as i32 - 1) as usize;
+
+    coeffs.push((i_minus_1_clamped, -0.25));
+    coeffs.push((i_clamped, 1.5));
+    coeffs.push((i_plus_1_clamped, -0.25));
+    coeffs
+}
+
+/// Get tent expansion coefficients for a tent position (integer).
+/// Even positions are corners, odd positions are centers.
+#[inline]
+fn tent_value_coeffs(tent_pos: i32, src_len: usize) -> Vec<(usize, f32)> {
+    if tent_pos % 2 == 0 {
+        tent_corner_coeffs(tent_pos / 2, src_len)
+    } else {
+        tent_center_coeffs(tent_pos / 2, src_len)
+    }
+}
+
+/// Sample the tent surface at a position using box-integrated weighting.
+/// Returns coefficients for input pixels that contribute to this sample.
+fn sample_tent_surface_box(
+    center_pos: f32,
+    half_width: f32,
+    src_len: usize,
+) -> HashMap<usize, f32> {
+    let mut combined_coeffs: HashMap<usize, f32> = HashMap::new();
+
+    let interval_start = center_pos - half_width;
+    let interval_end = center_pos + half_width;
+
+    // Tent space has positions 0, 1, 2, ... where each owns [pos-0.5, pos+0.5]
+    // We need to find tent positions that overlap with [interval_start, interval_end]
+    let start_tent = (interval_start + 0.5).floor() as i32 - 1;
+    let end_tent = (interval_end + 0.5).ceil() as i32 + 1;
+
+    // Maximum tent position is 2*(src_len-1)+1 = 2*src_len - 1
+    let max_tent_pos = (2 * src_len) as i32 - 1;
+
+    let mut weight_sum = 0.0f32;
+
+    for tent_pos in start_tent..=end_tent {
+        // Clamp tent position
+        let tent_pos_clamped = tent_pos.clamp(0, max_tent_pos);
+
+        // Compute overlap between [interval_start, interval_end] and [tent_pos - 0.5, tent_pos + 0.5]
+        let tent_start = tent_pos_clamped as f32 - 0.5;
+        let tent_end = tent_pos_clamped as f32 + 0.5;
+        let overlap_start = interval_start.max(tent_start);
+        let overlap_end = interval_end.min(tent_end);
+        let overlap = (overlap_end - overlap_start).max(0.0);
+
+        if overlap < 1e-10 {
+            continue;
+        }
+
+        // Get input pixel coefficients for this tent position
+        let tent_coeffs = tent_value_coeffs(tent_pos_clamped, src_len);
+
+        // Add weighted contributions
+        for (idx, coeff) in tent_coeffs {
+            *combined_coeffs.entry(idx).or_insert(0.0) += overlap * coeff;
+        }
+        weight_sum += overlap;
+    }
+
+    // Normalize by weight sum
+    if weight_sum.abs() > 1e-10 {
+        for (_, coeff) in combined_coeffs.iter_mut() {
+            *coeff /= weight_sum;
+        }
+    }
+
+    combined_coeffs
+}
+
+/// Sample the tent surface at a position using a general kernel.
+/// Returns coefficients for input pixels that contribute to this sample.
+fn sample_tent_surface_kernel(
+    center_pos: f32,
+    half_width: f32,
+    kernel_func: fn(f32) -> f32,
+    kernel_radius: f32,
+    src_len: usize,
+) -> HashMap<usize, f32> {
+    let mut combined_coeffs: HashMap<usize, f32> = HashMap::new();
+
+    // Find tent positions within kernel radius
+    let start_tent = (center_pos - half_width).floor() as i32 - 1;
+    let end_tent = (center_pos + half_width).ceil() as i32 + 1;
+
+    // Maximum tent position is 2*(src_len-1)+1 = 2*src_len - 1
+    let max_tent_pos = (2 * src_len) as i32 - 1;
+
+    let mut weight_sum = 0.0f32;
+
+    for tent_pos in start_tent..=end_tent {
+        // Clamp tent position
+        let tent_pos_clamped = tent_pos.clamp(0, max_tent_pos);
+
+        // Map position to kernel's domain
+        let kernel_arg = if half_width > 1e-10 {
+            (tent_pos_clamped as f32 - center_pos) / half_width * kernel_radius
+        } else {
+            0.0
+        };
+
+        let kernel_weight = kernel_func(kernel_arg);
+        if kernel_weight.abs() < 1e-10 {
+            continue;
+        }
+
+        // Get input pixel coefficients for this tent position
+        let tent_coeffs = tent_value_coeffs(tent_pos_clamped, src_len);
+
+        // Add weighted contributions
+        for (idx, coeff) in tent_coeffs {
+            *combined_coeffs.entry(idx).or_insert(0.0) += kernel_weight * coeff;
+        }
+        weight_sum += kernel_weight;
+    }
+
+    // Normalize by weight sum
+    if weight_sum.abs() > 1e-10 {
+        for (_, coeff) in combined_coeffs.iter_mut() {
+            *coeff /= weight_sum;
+        }
+    }
+
+    combined_coeffs
+}
+
+/// Apply tent contraction weights: 1/4 * left + 1/2 * center + 1/4 * right
+fn contract_tent_coeffs(
+    left_coeffs: &HashMap<usize, f32>,
+    center_coeffs: &HashMap<usize, f32>,
+    right_coeffs: &HashMap<usize, f32>,
+) -> HashMap<usize, f32> {
+    let mut combined: HashMap<usize, f32> = HashMap::new();
+
+    for (&idx, &coeff) in left_coeffs {
+        *combined.entry(idx).or_insert(0.0) += 0.25 * coeff;
+    }
+    for (&idx, &coeff) in center_coeffs {
+        *combined.entry(idx).or_insert(0.0) += 0.5 * coeff;
+    }
+    for (&idx, &coeff) in right_coeffs {
+        *combined.entry(idx).or_insert(0.0) += 0.25 * coeff;
+    }
+
+    combined
+}
+
+/// Precompute tent-space kernel weights for 1D resampling.
+///
+/// This implements the tent-space pipeline as direct kernel weights:
+/// 1. Expansion: box → tent (with volume-preserving sharpening)
+/// 2. Resampling: sample tent surface with specified kernel
+/// 3. Contraction: tent → box (1/4, 1/2, 1/4 weighting)
+///
+/// The `inner_method` specifies the resampling kernel used in tent space.
+/// For TentBox, use RescaleMethod::Box.
+/// For TentLanczos3, use RescaleMethod::Lanczos3.
+pub fn precompute_tent_kernel_weights(
+    src_len: usize,
+    dst_len: usize,
+    inner_method: RescaleMethod,
+) -> Vec<KernelWeights> {
+    let mut all_weights = Vec::with_capacity(dst_len);
+
+    // Scale factor: src_len / dst_len
+    let scale = src_len as f32 / dst_len as f32;
+
+    // Kernel half-width in tent space
+    // Following tent_kernel.py: for box, width_tent = ratio, half_width = ratio/2
+    // For other kernels: radius * scale
+    let (kernel_radius, half_width) = match inner_method {
+        RescaleMethod::Box | RescaleMethod::TentBox => {
+            // Box filter: width in tent space = scale, half_width = scale/2
+            // This matches tent_kernel.py's default: width_box = ratio/2, width_tent = ratio
+            (0.5_f32, scale / 2.0)
+        }
+        RescaleMethod::Lanczos3 | RescaleMethod::TentLanczos3 => (3.0_f32, scale * 3.0 / 2.0),
+        RescaleMethod::Lanczos2 => (2.0_f32, scale * 2.0 / 2.0),
+        RescaleMethod::Mitchell => (2.0_f32, scale * 2.0 / 2.0),
+        RescaleMethod::CatmullRom => (2.0_f32, scale * 2.0 / 2.0),
+        _ => (3.0_f32, scale * 3.0 / 2.0), // Default to Lanczos3-like
+    };
+
+    // Center offset for standard centering: output pixel 0 centered at input (scale-1)/2
+    let offset = (scale - 1.0) / 2.0;
+
+    for dst_i in 0..dst_len {
+        // Output pixel center in input (box) space
+        let box_center = dst_i as f32 * scale + offset;
+
+        // Map to tent space: box position i → tent position 2*i + 1 (center)
+        let tent_center = 2.0 * box_center + 1.0;
+
+        // Spacing in tent space for contraction = scale (matches tent_kernel.py)
+        let spacing = scale;
+
+        // Three positions for contraction
+        let left_pos = tent_center - spacing;
+        let center_pos = tent_center;
+        let right_pos = tent_center + spacing;
+
+        // Sample tent surface at each position
+        let (left_coeffs, center_coeffs, right_coeffs) = match inner_method {
+            RescaleMethod::Box | RescaleMethod::TentBox => {
+                // Box uses area-integrated sampling
+                (
+                    sample_tent_surface_box(left_pos, half_width, src_len),
+                    sample_tent_surface_box(center_pos, half_width, src_len),
+                    sample_tent_surface_box(right_pos, half_width, src_len),
+                )
+            }
+            _ => {
+                // Other kernels use point-weighted sampling
+                let kernel_func: fn(f32) -> f32 = match inner_method {
+                    RescaleMethod::Lanczos3 | RescaleMethod::TentLanczos3 => lanczos3,
+                    RescaleMethod::Lanczos2 => lanczos2,
+                    RescaleMethod::Mitchell => mitchell,
+                    RescaleMethod::CatmullRom => catmull_rom,
+                    _ => lanczos3,
+                };
+                (
+                    sample_tent_surface_kernel(left_pos, half_width, kernel_func, kernel_radius, src_len),
+                    sample_tent_surface_kernel(center_pos, half_width, kernel_func, kernel_radius, src_len),
+                    sample_tent_surface_kernel(right_pos, half_width, kernel_func, kernel_radius, src_len),
+                )
+            }
+        };
+
+        // Apply contraction
+        let contracted = contract_tent_coeffs(&left_coeffs, &center_coeffs, &right_coeffs);
+
+        // Convert to KernelWeights format
+        if contracted.is_empty() {
+            let fallback = box_center.round().clamp(0.0, (src_len - 1) as f32) as usize;
+            all_weights.push(KernelWeights {
+                start_idx: fallback,
+                weights: vec![1.0],
+                fallback_idx: fallback,
+            });
+        } else {
+            // Find the range of indices
+            let min_idx = contracted.keys().copied().min().unwrap();
+            let max_idx = contracted.keys().copied().max().unwrap();
+
+            // Build contiguous weight array
+            let mut weights = vec![0.0f32; max_idx - min_idx + 1];
+            for (&idx, &coeff) in &contracted {
+                weights[idx - min_idx] = coeff;
+            }
+
+            // Normalize weights
+            let sum: f32 = weights.iter().sum();
+            if sum.abs() > 1e-8 {
+                for w in &mut weights {
+                    *w /= sum;
+                }
+            }
+
+            let fallback = box_center.round().clamp(0.0, (src_len - 1) as f32) as usize;
+            all_weights.push(KernelWeights {
+                start_idx: min_idx,
+                weights,
+                fallback_idx: fallback,
+            });
+        }
     }
 
     all_weights

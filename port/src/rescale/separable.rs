@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights};
+use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights, precompute_tent_kernel_weights};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -160,6 +160,7 @@ pub fn rescale_kernel_pixels(
 
     // Precompute weights for horizontal and vertical passes (reused across all rows/columns)
     // Box uses true area integration for physically correct averaging
+    // Tent-space methods use precomputed equivalent direct kernels
     let (h_weights, v_weights) = match method {
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
@@ -167,6 +168,16 @@ pub fn rescale_kernel_pixels(
             // In tent mode, apply the same multiplier for box as other kernels
             precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
             precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
+        ),
+        RescaleMethod::TentBox => (
+            // Tent-space box pipeline as equivalent direct kernel
+            precompute_tent_kernel_weights(src_width, dst_width, RescaleMethod::Box),
+            precompute_tent_kernel_weights(src_height, dst_height, RescaleMethod::Box),
+        ),
+        RescaleMethod::TentLanczos3 => (
+            // Tent-space lanczos3 pipeline as equivalent direct kernel
+            precompute_tent_kernel_weights(src_width, dst_width, RescaleMethod::Lanczos3),
+            precompute_tent_kernel_weights(src_height, dst_height, RescaleMethod::Lanczos3),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
@@ -277,12 +288,23 @@ pub fn rescale_kernel_alpha_pixels(
     };
 
     // Box uses true area integration for physically correct averaging
+    // Tent-space methods use precomputed equivalent direct kernels
     let (h_weights, v_weights) = match method {
         RescaleMethod::Box => (
             // Box filter uses raw scale (not clamped) for true area integration
             // In tent mode, apply the same multiplier for box as other kernels
             precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
             precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
+        ),
+        RescaleMethod::TentBox => (
+            // Tent-space box pipeline as equivalent direct kernel
+            precompute_tent_kernel_weights(src_width, dst_width, RescaleMethod::Box),
+            precompute_tent_kernel_weights(src_height, dst_height, RescaleMethod::Box),
+        ),
+        RescaleMethod::TentLanczos3 => (
+            // Tent-space lanczos3 pipeline as equivalent direct kernel
+            precompute_tent_kernel_weights(src_width, dst_width, RescaleMethod::Lanczos3),
+            precompute_tent_kernel_weights(src_height, dst_height, RescaleMethod::Lanczos3),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
