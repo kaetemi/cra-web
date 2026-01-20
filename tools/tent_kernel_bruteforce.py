@@ -136,17 +136,16 @@ def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1
 
     # For R× downscale in tent space:
     # - scale = R (coordinate mapping: output sample i → input position R*i + offset)
-    # - filter_scale = 2.0 (1x native width, independent of ratio)
+    # - filter_scale = R (filter spans R units to cover the full output pixel footprint)
     #
-    # Why NOT scale filter with ratio or depth? From TENT-SPACE.md:
-    # "Filter width stays at 1x (native), taking advantage of the higher-resolution surface."
+    # The filter must span R tent-space units to properly integrate over all R input
+    # box pixels that contribute to each output pixel. With scale=R, consecutive output
+    # samples are R apart in input space, so the filter width must match.
     #
-    # The tent expansion encodes sharpening at center points (negative lobes).
-    # A narrow box filter samples this encoded information, and the contraction
-    # operations then integrate it to produce the correct kernel with negative lobes.
-    # A wider filter would average out the encoded sharpening, producing blur.
+    # Note: "1x native" in TENT-SPACE.md refers to the 2× case specifically.
+    # The general rule is filter_scale = ratio (which equals 2 for 2× downscale).
     scale = ratio
-    filter_scale = 2.0  # 1x native width, NOT scaled by ratio or depth
+    filter_scale = ratio  # Filter spans ratio units to cover full footprint
 
     # Offset to align content centers
     # At depth d, output tent sample 'fringe' (= 2^d - 1) corresponds to output box pixel 0 center.
