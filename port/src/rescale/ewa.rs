@@ -178,9 +178,19 @@ pub fn rescale_ewa_pixels(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
 
@@ -330,9 +340,19 @@ pub fn rescale_ewa_alpha_pixels(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -516,9 +536,19 @@ pub fn rescale_stochastic_jinc_pixels(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -672,9 +702,19 @@ fn rescale_stochastic_jinc_scatter_core(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -875,9 +915,19 @@ fn rescale_stochastic_jinc_scatter_alpha_core(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);
@@ -1104,9 +1154,19 @@ pub fn rescale_stochastic_jinc_alpha_pixels(
 
     // Filter scale: expand kernel when downscaling
     // In tent mode: expand kernel when upscaling (scale < 1.0), multiplier goes from 1.0 to 2.0
-    let use_tent_multiplier = tent_mode != TentMode::Off;
-    let multiplier_x = if use_tent_multiplier { (1.0 / scale_x).clamp(1.0, 2.0) } else { 1.0 };
-    let multiplier_y = if use_tent_multiplier { (1.0 / scale_y).clamp(1.0, 2.0) } else { 1.0 };
+    // Kernel multiplier for tent modes:
+    // - SampleToSample: (1/scale).clamp(1,2) - gradual 2x expansion for upscaling
+    // - Prescale: (2/scale).clamp(1,2) - ensures filter_scale >= 2.0 for tent-space density
+    let multiplier_x = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_x).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_x).clamp(1.0, 2.0),
+    };
+    let multiplier_y = match tent_mode {
+        TentMode::Off => 1.0,
+        TentMode::SampleToSample => (1.0 / scale_y).clamp(1.0, 2.0),
+        TentMode::Prescale => (2.0 / scale_y).clamp(1.0, 2.0),
+    };
     let filter_scale_x = scale_x.max(1.0) * multiplier_x;
     let filter_scale_y = scale_y.max(1.0) * multiplier_y;
     let filter_scale = filter_scale_x.max(filter_scale_y);

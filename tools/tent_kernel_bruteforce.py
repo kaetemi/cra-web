@@ -176,7 +176,7 @@ def box_integrated(src_pos: float, si: int, filter_scale: float) -> float:
     return max(0.0, overlap_end - overlap_start)
 
 
-def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1, debug: bool = False) -> list[float]:
+def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1, extra_offset: float = 0.0, debug: bool = False) -> list[float]:
     """
     Resample 1D array using box filter with exact overlap computation.
 
@@ -225,10 +225,10 @@ def resample_1d_box(src: list[float], dst_len: int, ratio: float, depth: int = 1
     # offset = (R+1) × 2^(d-1) - 1 - R × (2^d - 1)
     #        = (R+1) × 2^(d-1) - 1 - R × 2^d + R
     #        = (R-1) × (1 - 2^(d-1))
-    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1))) + extra_offset
 
     if debug:
-        print(f"    Resample: {src_len} → {dst_len}, scale={scale:.6f}, filter_scale={filter_scale:.6f}, offset={offset:.6f}")
+        print(f"    Resample: {src_len} → {dst_len}, scale={scale:.6f}, filter_scale={filter_scale:.6f}, offset={offset:.6f} (extra={extra_offset:.6f})")
 
     box_radius = int(filter_scale / 2 + 1) + 1
 
@@ -301,6 +301,7 @@ def resample_1d_kernel(
     depth: int = 1,
     kernel_name: str = 'box',
     filter_width: float | None = None,
+    extra_offset: float = 0.0,
     debug: bool = False
 ) -> list[float]:
     """
@@ -314,7 +315,7 @@ def resample_1d_kernel(
     """
     # For box kernel, use the exact overlap method
     if kernel_name == 'box':
-        return resample_1d_box(src, dst_len, ratio, depth, debug)
+        return resample_1d_box(src, dst_len, ratio, depth, extra_offset, debug)
 
     kernel_func, kernel_radius, _ = KERNELS.get(kernel_name, KERNELS['box'])
 
@@ -330,8 +331,8 @@ def resample_1d_kernel(
     scale = ratio
     filter_scale = filter_width if filter_width is not None else ratio
 
-    # Offset to align content centers (same as box)
-    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
+    # Offset to align content centers (same as box) plus any extra offset
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1))) + extra_offset
 
     # Radius in samples for this kernel (scaled by filter)
     # The kernel support is kernel_radius in normalized coordinates
@@ -385,7 +386,7 @@ def format_array(arr: list[float], max_show: int = 20) -> str:
         return f"[{first}, ... ({len(arr)} total) ..., {last}]"
 
 
-def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int = 1, kernel_name: str = 'box', filter_width: float | None = None, debug: bool = False) -> list[float]:
+def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int = 1, kernel_name: str = 'box', filter_width: float | None = None, extra_offset: float = 0.0, debug: bool = False) -> list[float]:
     """
     Full tent-space downscaling pipeline.
 
@@ -393,6 +394,7 @@ def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int 
 
     Args:
         filter_width: Filter width in tent space units. Default: ratio.
+        extra_offset: Additional offset for phase shift testing. Default: 0.0.
     """
     data = src
 
@@ -427,7 +429,7 @@ def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int 
         print(f"  Resample target: {len(data)} → {tent_target}")
 
     # Resample in tent space using specified kernel
-    data = resample_1d_kernel(data, tent_target, ratio=ratio, depth=recurse, kernel_name=kernel_name, filter_width=filter_width, debug=debug)
+    data = resample_1d_kernel(data, tent_target, ratio=ratio, depth=recurse, kernel_name=kernel_name, filter_width=filter_width, extra_offset=extra_offset, debug=debug)
 
     if debug:
         print(f"  After resample ({len(data)}): {format_array(data)}")
@@ -443,7 +445,7 @@ def full_pipeline(src: list[float], output_len: int, ratio: float, recurse: int 
     return data
 
 
-def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, ratio: float, recurse: int = 1, kernel_name: str = 'box', filter_width: float | None = None) -> list[float]:
+def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, ratio: float, recurse: int = 1, kernel_name: str = 'box', filter_width: float | None = None, extra_offset: float = 0.0) -> list[float]:
     """
     Derive the effective kernel by computing impulse responses.
 
@@ -458,7 +460,7 @@ def derive_kernel_bruteforce(input_len: int, output_len: int, output_idx: int, r
         impulse[i] = 1.0
 
         # Run through pipeline
-        output = full_pipeline(impulse, output_len, ratio=ratio, recurse=recurse, kernel_name=kernel_name, filter_width=filter_width)
+        output = full_pipeline(impulse, output_len, ratio=ratio, recurse=recurse, kernel_name=kernel_name, filter_width=filter_width, extra_offset=extra_offset)
 
         # Record contribution to reference output pixel
         if 0 <= output_idx < len(output):
@@ -490,6 +492,8 @@ def main():
                        help="Sampling kernel (default: box)")
     parser.add_argument('--width', '-w', type=float, default=None,
                        help="Filter width in box space (default: ratio/2)")
+    parser.add_argument('--offset', type=float, default=0.0,
+                       help="Fractional offset for phase shift testing (in tent-space units, default: 0.0)")
     parser.add_argument('--compare', '-c', action='store_true',
                        help="Compare all kernels")
 
@@ -515,6 +519,7 @@ def main():
     print(f"Recurse levels: {args.recurse}")
     print(f"Kernel: {args.kernel}")
     print(f"Width: {width_box} box px ({filter_width} tent units)")
+    print(f"Extra offset: {args.offset} tent units")
     print()
 
     # Show dimension progression
@@ -544,7 +549,7 @@ def main():
         print("Sequential input mode: [0, 1, 2, 3, ...]")
         print("=" * 60)
         seq_input = list(range(input_len))
-        output = full_pipeline(seq_input, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, debug=args.debug)
+        output = full_pipeline(seq_input, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, extra_offset=args.offset, debug=args.debug)
 
         print()
         print(f"Input:  {format_array(list(map(float, seq_input)))}")
@@ -569,7 +574,7 @@ def main():
         impulse = [0.0] * input_len
         impulse_pos = min(output_idx * int(args.ratio), input_len - 1)
         impulse[impulse_pos] = 1.0
-        output = full_pipeline(impulse, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, debug=True)
+        output = full_pipeline(impulse, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, extra_offset=args.offset, debug=True)
         print()
         print(f"Final output: {format_array(output)}")
         print()
@@ -581,7 +586,7 @@ def main():
         print("=" * 60)
         print()
         for kname in KERNELS.keys():
-            kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, ratio=args.ratio, recurse=args.recurse, kernel_name=kname, filter_width=filter_width)
+            kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, ratio=args.ratio, recurse=args.recurse, kernel_name=kname, filter_width=filter_width, extra_offset=args.offset)
             nonzero = [(i, k) for i, k in enumerate(kernel) if abs(k) > 1e-10]
             if nonzero:
                 first_idx = nonzero[0][0]
@@ -605,7 +610,7 @@ def main():
     print("=" * 60)
     print("Kernel derivation")
     print("=" * 60)
-    kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width)
+    kernel = derive_kernel_bruteforce(input_len, output_len, output_idx, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, extra_offset=args.offset)
 
     # Find non-zero region
     nonzero = [(i, k) for i, k in enumerate(kernel) if abs(k) > 1e-10]
@@ -669,7 +674,7 @@ def main():
     print("=" * 60)
     print("Verification: constant input should give constant output")
     test_input = [0.5] * input_len
-    test_output = full_pipeline(test_input, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width)
+    test_output = full_pipeline(test_input, output_len, ratio=args.ratio, recurse=args.recurse, kernel_name=args.kernel, filter_width=filter_width, extra_offset=args.offset)
     print(f"  Input:  all 0.5")
     print(f"  Output[{output_idx}]: {test_output[output_idx]:.10f}")
     print(f"  (Should be 0.5)")

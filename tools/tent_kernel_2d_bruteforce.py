@@ -394,6 +394,7 @@ def resample_2d_box(
     dst_w: int,
     ratio: float,
     depth: int = 1,
+    extra_offset: float = 0.0,
     debug: bool = False
 ) -> list[list[float]]:
     """
@@ -408,12 +409,12 @@ def resample_2d_box(
 
     scale = ratio
     filter_scale = ratio
-    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1))) + extra_offset
 
     box_radius = int(filter_scale / 2 + 1) + 1
 
     if debug:
-        print(f"    Resample 2D: {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}, offset={offset:.4f}")
+        print(f"    Resample 2D: {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}, offset={offset:.4f} (extra={extra_offset:.4f})")
 
     for dy in range(dst_h):
         src_y = dy * scale + offset
@@ -462,6 +463,7 @@ def resample_2d_ewa(
     depth: int = 1,
     kernel_name: str = 'ewa-lanczos3-jinc',
     filter_width: float | None = None,
+    extra_offset: float = 0.0,
     debug: bool = False
 ) -> list[list[float]]:
     """
@@ -481,13 +483,13 @@ def resample_2d_ewa(
 
     scale = ratio
     filter_scale = filter_width if filter_width is not None else ratio
-    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1))) + extra_offset
 
     # Radius in samples: kernel support scaled by filter
     sample_radius = int(kernel_radius * filter_scale / 2 + 2)
 
     if debug:
-        print(f"    Resample 2D EWA ({kernel_name}): {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}, radius={sample_radius}")
+        print(f"    Resample 2D EWA ({kernel_name}): {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}, radius={sample_radius}, offset={offset:.4f} (extra={extra_offset:.4f})")
 
     for dy in range(dst_h):
         src_y = dy * scale + offset
@@ -537,6 +539,7 @@ def resample_2d_kernel(
     depth: int = 1,
     kernel_name: str = 'box',
     filter_width: float | None = None,
+    extra_offset: float = 0.0,
     debug: bool = False
 ) -> list[list[float]]:
     """
@@ -547,11 +550,11 @@ def resample_2d_kernel(
     For other kernels, uses separable weighted point sampling.
     """
     if kernel_name == 'box':
-        return resample_2d_box(src, dst_h, dst_w, ratio, depth, debug)
+        return resample_2d_box(src, dst_h, dst_w, ratio, depth, extra_offset, debug)
 
     # Check if this is an EWA kernel (non-separable, radial)
     if kernel_name in EWA_KERNELS:
-        return resample_2d_ewa(src, dst_h, dst_w, ratio, depth, kernel_name, filter_width, debug)
+        return resample_2d_ewa(src, dst_h, dst_w, ratio, depth, kernel_name, filter_width, extra_offset, debug)
 
     kernel_func, kernel_radius, _ = KERNELS.get(kernel_name, KERNELS['box'])
 
@@ -564,12 +567,12 @@ def resample_2d_kernel(
 
     scale = ratio
     filter_scale = filter_width if filter_width is not None else ratio
-    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1)))
+    offset = (ratio - 1.0) * (1.0 - (2 ** (depth - 1))) + extra_offset
 
     sample_radius = int(kernel_radius * filter_scale / 2 + 2)
 
     if debug:
-        print(f"    Resample 2D ({kernel_name}): {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}")
+        print(f"    Resample 2D ({kernel_name}): {src_h}×{src_w} → {dst_h}×{dst_w}, scale={scale:.4f}, offset={offset:.4f} (extra={extra_offset:.4f})")
 
     for dy in range(dst_h):
         src_y = dy * scale + offset
@@ -631,12 +634,16 @@ def full_pipeline_2d(
     recurse: int = 1,
     kernel_name: str = 'box',
     filter_width: float | None = None,
+    extra_offset: float = 0.0,
     debug: bool = False
 ) -> list[list[float]]:
     """
     Full 2D tent-space downscaling pipeline.
 
     box → tent_expand_2d (×recurse) → resample_2d → tent_contract_2d (×recurse) → box
+
+    Args:
+        extra_offset: Additional offset for phase shift testing. Default: 0.0.
     """
     data = copy_2d(src)
 
@@ -663,7 +670,7 @@ def full_pipeline_2d(
         data, tent_target_h, tent_target_w,
         ratio=ratio, depth=recurse,
         kernel_name=kernel_name, filter_width=filter_width,
-        debug=debug
+        extra_offset=extra_offset, debug=debug
     )
 
     if debug:
@@ -689,7 +696,8 @@ def derive_kernel_bruteforce_2d(
     ratio: float,
     recurse: int = 1,
     kernel_name: str = 'box',
-    filter_width: float | None = None
+    filter_width: float | None = None,
+    extra_offset: float = 0.0
 ) -> list[list[float]]:
     """
     Derive the effective 2D kernel by computing impulse responses.
@@ -709,7 +717,8 @@ def derive_kernel_bruteforce_2d(
             output = full_pipeline_2d(
                 impulse, output_h, output_w,
                 ratio=ratio, recurse=recurse,
-                kernel_name=kernel_name, filter_width=filter_width
+                kernel_name=kernel_name, filter_width=filter_width,
+                extra_offset=extra_offset
             )
 
             # Record contribution to reference output pixel
@@ -800,6 +809,8 @@ def main():
                        help="Sampling kernel (default: box)")
     parser.add_argument('--width', '-w', type=float, default=None,
                        help="Filter width in box space (default: ratio/2)")
+    parser.add_argument('--offset', type=float, default=0.0,
+                       help="Fractional offset for phase shift testing (in tent-space units, default: 0.0)")
     parser.add_argument('--compare', '-c', action='store_true',
                        help="Compare all kernels")
 
@@ -824,6 +835,7 @@ def main():
     print(f"Recurse levels: {args.recurse}")
     print(f"Kernel: {args.kernel}")
     print(f"Width: {width_box} box px ({filter_width} tent units)")
+    print(f"Extra offset: {args.offset} tent units")
     print()
 
     # Show dimension progression
@@ -857,7 +869,8 @@ def main():
                 output_size, output_size,
                 output_y, output_x,
                 ratio=args.ratio, recurse=args.recurse,
-                kernel_name=kname, filter_width=filter_width
+                kernel_name=kname, filter_width=filter_width,
+                extra_offset=args.offset
             )
             print(f"--- {kname} ---")
             print(format_2d_kernel(kernel))
@@ -877,7 +890,7 @@ def main():
             impulse, output_size, output_size,
             ratio=args.ratio, recurse=args.recurse,
             kernel_name=args.kernel, filter_width=filter_width,
-            debug=True
+            extra_offset=args.offset, debug=True
         )
         print()
         print(f"Final output[{output_y}][{output_x}]: {output[output_y][output_x]:.10f}")
@@ -892,7 +905,8 @@ def main():
         output_size, output_size,
         output_y, output_x,
         ratio=args.ratio, recurse=args.recurse,
-        kernel_name=args.kernel, filter_width=filter_width
+        kernel_name=args.kernel, filter_width=filter_width,
+        extra_offset=args.offset
     )
 
     print(format_2d_kernel(kernel))
@@ -905,7 +919,8 @@ def main():
     test_output = full_pipeline_2d(
         test_input, output_size, output_size,
         ratio=args.ratio, recurse=args.recurse,
-        kernel_name=args.kernel, filter_width=filter_width
+        kernel_name=args.kernel, filter_width=filter_width,
+        extra_offset=args.offset
     )
     print(f"  Input:  all 0.5")
     print(f"  Output[{output_y}][{output_x}]: {test_output[output_y][output_x]:.10f}")
