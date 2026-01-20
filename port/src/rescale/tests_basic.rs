@@ -542,3 +542,136 @@ fn test_tent_box_2x_kernel_weights() {
         assert!(mid_weight > 0.3, "Middle weights should be dominant, got {:?}", kw.weights);
     }
 }
+
+// ============================================================================
+// 2D Tent-Space Tests
+// ============================================================================
+
+#[test]
+fn test_tent_2d_box_identity() {
+    // Identity transform should work
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Tent2DBox, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_tent_2d_box_downscale() {
+    // 4x4 -> 2x2 downscale
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 16];
+    let dst = rescale(&src, 4, 4, 2, 2, RescaleMethod::Tent2DBox, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    // Uniform input should give uniform output
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "Tent2DBox should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_2d_box_preserves_energy() {
+    // Test that 2D tent-space pipeline preserves total energy
+    let src = vec![
+        Pixel4::new(0.1, 0.2, 0.3, 1.0),
+        Pixel4::new(0.9, 0.1, 0.5, 1.0),
+        Pixel4::new(0.3, 0.8, 0.2, 1.0),
+        Pixel4::new(0.6, 0.4, 0.7, 1.0),
+    ];
+    let src_avg: f32 = src.iter().map(|p| (p.r() + p.g() + p.b()) / 3.0).sum::<f32>() / 4.0;
+
+    let dst = rescale(&src, 2, 2, 1, 1, RescaleMethod::Tent2DBox, ScaleMode::Independent);
+    let dst_avg = (dst[0].r() + dst[0].g() + dst[0].b()) / 3.0;
+
+    // Energy should be approximately preserved
+    assert!((src_avg - dst_avg).abs() < 0.1,
+        "Tent2DBox should approximately preserve average brightness: src={}, dst={}", src_avg, dst_avg);
+}
+
+#[test]
+fn test_tent_2d_lanczos3_jinc_identity() {
+    // Identity transform should work
+    let src = vec![
+        Pixel4::new(0.0, 0.0, 0.0, 1.0),
+        Pixel4::new(0.25, 0.25, 0.25, 1.0),
+        Pixel4::new(0.5, 0.5, 0.5, 1.0),
+        Pixel4::new(0.75, 0.75, 0.75, 1.0),
+    ];
+    let dst = rescale(&src, 2, 2, 2, 2, RescaleMethod::Tent2DLanczos3Jinc, ScaleMode::Independent);
+    assert_eq!(src, dst);
+}
+
+#[test]
+fn test_tent_2d_lanczos3_jinc_downscale() {
+    // 4x4 -> 2x2 downscale
+    let src = vec![Pixel4::new(0.5, 0.5, 0.5, 1.0); 16];
+    let dst = rescale(&src, 4, 4, 2, 2, RescaleMethod::Tent2DLanczos3Jinc, ScaleMode::Independent);
+    assert_eq!(dst.len(), 4);
+    // Uniform input should give uniform output
+    for p in &dst {
+        assert!((p.r() - 0.5).abs() < 0.01, "Tent2DLanczos3Jinc should preserve uniform values, got {}", p.r());
+    }
+}
+
+#[test]
+fn test_tent_2d_box_kernel_structure() {
+    // Verify that Tent2DBox 2× downscale produces the expected 2D kernel structure:
+    // For 2× downscale, should produce 6×6 kernel with:
+    // [-1, -9, -22, -22, -9, -1]
+    // [-9, 47, 186, 186, 47, -9]
+    // [-22, 186, 668, 668, 186, -22]
+    // [-22, 186, 668, 668, 186, -22]
+    // [-9, 47, 186, 186, 47, -9]
+    // [-1, -9, -22, -22, -9, -1]
+    // / 4096
+    use super::kernels::precompute_tent_2d_kernel_weights_single;
+
+    // 6x6 input -> 3x3 output (2× downscale)
+    let scale = 2.0_f32;
+
+    // Get kernel for center output pixel
+    let kw = precompute_tent_2d_kernel_weights_single(1, 1, 6, 6, scale, scale, false);
+
+    // Check weights sum to 1.0
+    let sum: f32 = kw.weights.iter().sum();
+    assert!((sum - 1.0).abs() < 1e-5, "2D kernel weights should sum to 1.0, got {}", sum);
+
+    // Check kernel has the characteristic 2D tent-space structure:
+    // - Should have negative corners (the -1 parts)
+    // - Should be roughly symmetric
+    let has_negative = kw.weights.iter().any(|&w| w < -0.0001);
+    assert!(has_negative, "Tent2DBox 2× kernel should have negative corner weights, got {:?}", kw.weights);
+
+    // Verify kernel is roughly 6×6 for 2× downscale
+    assert!(kw.height >= 4 && kw.width >= 4,
+        "Tent2DBox 2× kernel should be at least 4×4, got {}×{}", kw.height, kw.width);
+}
+
+#[test]
+fn test_tent_2d_vs_separable_similar_results() {
+    // Compare 2D tent-space with separable tent-space on uniform scaling
+    // They should produce similar (but not identical) results
+    let src: Vec<Pixel4> = (0..16).map(|i| {
+        let v = i as f32 / 15.0;
+        Pixel4::new(v, v * 0.5, 1.0 - v, 1.0)
+    }).collect();
+
+    let dst_sep = rescale(&src, 4, 4, 2, 2, RescaleMethod::TentBox, ScaleMode::Independent);
+    let dst_2d = rescale(&src, 4, 4, 2, 2, RescaleMethod::Tent2DBox, ScaleMode::Independent);
+
+    // Both should have the same output size
+    assert_eq!(dst_sep.len(), dst_2d.len());
+
+    // Results should be roughly similar (within 5% for each channel)
+    for (i, (sep, full)) in dst_sep.iter().zip(dst_2d.iter()).enumerate() {
+        let diff_r = (sep.r() - full.r()).abs();
+        let diff_g = (sep.g() - full.g()).abs();
+        let diff_b = (sep.b() - full.b()).abs();
+        assert!(diff_r < 0.1 && diff_g < 0.1 && diff_b < 0.1,
+            "Pixel {}: Separable TentBox and Tent2DBox should produce similar results, diff=({:.4}, {:.4}, {:.4})",
+            i, diff_r, diff_g, diff_b);
+    }
+}

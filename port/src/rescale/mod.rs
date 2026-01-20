@@ -12,6 +12,7 @@ mod bilinear;
 mod separable;
 mod scatter;
 mod ewa;
+mod tent_ewa;
 
 #[cfg(test)]
 mod tests_basic;
@@ -101,6 +102,15 @@ pub enum RescaleMethod {
     /// Full tent-space downscaling: box→tent expand, resample with Lanczos3, tent→box contract.
     /// Combines tent-space's ringing-free surface with Lanczos3's sharpness.
     TentLanczos3,
+    /// 2D Tent-space Box filter (non-separable)
+    /// Full tent-space pipeline using true 2D box integration (area overlap).
+    /// Unlike separable TentBox, this uses the exact 2D tent-space kernel.
+    /// For 2× downscale, produces 6×6 kernel: sum=4096, negative lobes at corners.
+    Tent2DBox,
+    /// 2D Tent-space EWA Lanczos3 with jinc (non-separable)
+    /// Full tent-space pipeline using EWA Lanczos3-jinc radial kernel.
+    /// Combines tent-space volume preservation with proper 2D radial filtering.
+    Tent2DLanczos3Jinc,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -141,6 +151,8 @@ impl RescaleMethod {
             "stochastic-jinc-scatter-normalized" | "stochastic_jinc_scatter_normalized" | "stochasticjincscatternormalized" | "stochastic-scatter-normalized" | "stochastic_scatter_normalized" => Some(RescaleMethod::StochasticJincScatterNormalized),
             "tent-box" | "tent_box" | "tentbox" => Some(RescaleMethod::TentBox),
             "tent-lanczos3" | "tent_lanczos3" | "tentlanczos3" | "tent-lanczos" | "tent_lanczos" | "tentlanczos" => Some(RescaleMethod::TentLanczos3),
+            "tent-2d-box" | "tent_2d_box" | "tent2dbox" | "tent-2d" | "tent_2d" | "tent2d" => Some(RescaleMethod::Tent2DBox),
+            "tent-2d-lanczos3-jinc" | "tent_2d_lanczos3_jinc" | "tent2dlanczos3jinc" | "tent-2d-lanczos" | "tent_2d_lanczos" | "tent2dlanczos" | "tent-2d-jinc" | "tent_2d_jinc" | "tent2djinc" => Some(RescaleMethod::Tent2DLanczos3Jinc),
             _ => None,
         }
     }
@@ -155,8 +167,8 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
             RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
-            RescaleMethod::Box | RescaleMethod::TentBox => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
-            RescaleMethod::TentLanczos3 => 3.0,  // Uses Lanczos3 internally
+            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DLanczos3Jinc => 3.0,  // Uses Lanczos3 internally
         }
     }
 
@@ -192,15 +204,21 @@ impl RescaleMethod {
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
-            RescaleMethod::TentBox => RescaleMethod::Box,
+            RescaleMethod::TentBox | RescaleMethod::Tent2DBox => RescaleMethod::Box,
             RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
+            RescaleMethod::Tent2DLanczos3Jinc => RescaleMethod::EWALanczos3,  // Uses jinc-based Lanczos3
             other => *other,
         }
     }
 
     /// Returns true if this is a tent-space pipeline method
     pub fn is_tent_pipeline(&self) -> bool {
-        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3)
+        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc)
+    }
+
+    /// Returns true if this is a 2D (non-separable) tent-space method
+    pub fn is_tent_2d(&self) -> bool {
+        matches!(self, RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc)
     }
 
 }
@@ -427,6 +445,17 @@ pub fn rescale_with_progress_tent(
                 progress,
             )
         }
+        RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc => {
+            // 2D Tent-space pipeline using non-separable kernel.
+            // Uses precomputed 2D kernel weights that incorporate the full
+            // expand → resample → contract pipeline in a single convolution.
+            tent_ewa::rescale_tent_2d_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                method, scale_mode,
+                progress,
+            )
+        }
     }
 }
 
@@ -521,6 +550,15 @@ pub fn rescale_with_alpha_progress_tent(
                 dst_width, dst_height,
                 method, scale_mode,
                 false,  // Not using tent_mode - weights already handle tent operations
+                progress,
+            )
+        }
+        RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc => {
+            // 2D Tent-space pipeline using non-separable kernel (alpha-aware).
+            tent_ewa::rescale_tent_2d_alpha_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                method, scale_mode,
                 progress,
             )
         }
