@@ -891,6 +891,132 @@ mod tests {
         assert_eq!(oklab_to_linear_rgb_pixel(p)[3], 0.99);
     }
 
+    // ============== sRGB Smooth-Join vs Standard Spec Cross-Conversion Test ==============
+    //
+    // The smooth-join sRGB constants (SRGB_THRESHOLD, SRGB_LINEAR_SLOPE) are derived
+    // from γ=2.4 and offset=0.055 to ensure continuous value AND slope at the junction.
+    // This differs slightly from the IEC 61966-2-1 spec values (0.0031308, 12.92).
+    //
+    // This test verifies that cross-converting between implementations produces
+    // identical u8 values, proving the smooth-join optimization has no practical
+    // impact at 8-bit precision.
+
+    /// Standard sRGB EOTF (decode: encoded -> linear) using IEC 61966-2-1 spec values.
+    /// Threshold: 0.04045, slope: 12.92
+    fn srgb_decode_standard(u: f32) -> f32 {
+        if u <= 0.04045 {
+            u / 12.92
+        } else {
+            ((u + 0.055) / 1.055).powf(2.4)
+        }
+    }
+
+    /// Standard sRGB OETF (encode: linear -> encoded) using IEC 61966-2-1 spec values.
+    /// Threshold: 0.0031308, slope: 12.92
+    fn srgb_encode_standard(x: f32) -> f32 {
+        if x <= 0.0031308 {
+            12.92 * x
+        } else {
+            1.055 * x.powf(1.0 / 2.4) - 0.055
+        }
+    }
+
+    /// Quantize to 8-bit with round-half-up
+    fn quantize_u8(v: f32) -> u8 {
+        let clamped = v.clamp(0.0, 1.0);
+        (clamped * 255.0 + 0.5).floor() as u8
+    }
+
+    #[test]
+    fn test_srgb_smooth_vs_standard_u8_encode() {
+        // Test: encode linear samples (i/255) with both implementations.
+        // Verifies that the smooth-join OETF produces the same u8 codes as the
+        // standard spec OETF for all 256 possible 8-bit linear input values.
+        let mut max_delta = 0i32;
+        let mut diff_count = 0;
+
+        for i in 0..=255 {
+            let linear = i as f32 / 255.0;
+            let std_code = quantize_u8(srgb_encode_standard(linear));
+            let smooth_code = quantize_u8(linear_to_srgb_single(linear));
+            let delta = (smooth_code as i32 - std_code as i32).abs();
+            if delta != 0 {
+                diff_count += 1;
+            }
+            max_delta = max_delta.max(delta);
+        }
+
+        assert_eq!(
+            max_delta, 0,
+            "Smooth-join encoding differs from standard: {} codes differ, max delta = {}",
+            diff_count, max_delta
+        );
+    }
+
+    #[test]
+    fn test_srgb_smooth_vs_standard_u8_roundtrip() {
+        // Test: decode sRGB codes with STANDARD EOTF, re-encode with SMOOTH OETF.
+        // This is the critical test for cross-implementation compatibility.
+        // If existing 8-bit sRGB content is decoded by standard software and
+        // re-encoded by our smooth implementation, codes must be preserved.
+        let mut max_delta = 0i32;
+        let mut diff_count = 0;
+        let mut first_diff: Option<(u8, u8)> = None;
+
+        for c in 0..=255u8 {
+            let u = c as f32 / 255.0;
+            // Decode with STANDARD spec
+            let linear = srgb_decode_standard(u);
+            // Re-encode with SMOOTH (our implementation)
+            let back_code = quantize_u8(linear_to_srgb_single(linear));
+            let delta = (back_code as i32 - c as i32).abs();
+            if delta != 0 {
+                diff_count += 1;
+                if first_diff.is_none() {
+                    first_diff = Some((c, back_code));
+                }
+            }
+            max_delta = max_delta.max(delta);
+        }
+
+        assert_eq!(
+            max_delta, 0,
+            "Standard decode -> smooth encode roundtrip fails: {} codes differ, max delta = {}, first diff: {:?}",
+            diff_count, max_delta, first_diff
+        );
+    }
+
+    #[test]
+    fn test_srgb_standard_vs_smooth_u8_roundtrip() {
+        // Inverse test: decode sRGB codes with SMOOTH EOTF (our implementation),
+        // re-encode with STANDARD OETF. Verifies symmetry.
+        let mut max_delta = 0i32;
+        let mut diff_count = 0;
+        let mut first_diff: Option<(u8, u8)> = None;
+
+        for c in 0..=255u8 {
+            let u = c as f32 / 255.0;
+            // Decode with SMOOTH (our implementation)
+            let linear = srgb_to_linear_single(u);
+            // Re-encode with STANDARD spec
+            let back_code = quantize_u8(srgb_encode_standard(linear));
+            let delta = (back_code as i32 - c as i32).abs();
+            if delta != 0 {
+                diff_count += 1;
+                if first_diff.is_none() {
+                    first_diff = Some((c, back_code));
+                }
+            }
+            max_delta = max_delta.max(delta);
+        }
+
+        assert_eq!(
+            max_delta, 0,
+            "Smooth decode -> standard encode roundtrip fails: {} codes differ, max delta = {}, first diff: {:?}",
+            diff_count, max_delta, first_diff
+        );
+    }
+
     #[test]
     fn test_scale_scales_alpha() {
         // Scale operations should scale all 4 channels including alpha
