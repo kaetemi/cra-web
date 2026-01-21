@@ -137,6 +137,11 @@ pub enum RescaleMethod {
     /// Fully reversible: Lanczos3 interpolation at peaks returns original values.
     /// Inner scaling uses box filter in tent-space.
     TentLanczos3Constraint,
+    /// Hybrid Lanczos3: separable Lanczos3 for bulk scaling, EWA Lanczos3 for final 2x
+    /// For scale ratios >= 2x: applies separable Lanczos3 down to 2x final size, then EWA Lanczos3
+    /// For scale ratios < 2x: uses EWA Lanczos3 directly
+    /// Combines the speed of separable convolution with EWA quality for the final refinement.
+    HybridLanczos3,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -202,6 +207,7 @@ impl RescaleMethod {
             "iterative-tent-volume" | "iterative_tent_volume" | "iterativetentvolume" | "tent-volume-iterative" | "tent_volume_iterative" | "tentvolume" | "tent-vol" | "tent_vol" | "iterative-tent-volume-box" | "iterative_tent_volume_box" => Some(RescaleMethod::IterativeTentVolume),
             "iterative-tent-volume-bilinear" | "iterative_tent_volume_bilinear" | "tentvolume-bilinear" | "tent-vol-bilinear" | "tent_vol_bilinear" => Some(RescaleMethod::IterativeTentVolumeBilinear),
             "tent-lanczos3-constraint" | "tent_lanczos3_constraint" | "tentlanczos3constraint" | "tent-l3c" | "tent_l3c" | "tl3c" => Some(RescaleMethod::TentLanczos3Constraint),
+            "hybrid-lanczos3" | "hybrid_lanczos3" | "hybridlanczos3" | "hybrid-lanczos" | "hybrid_lanczos" | "hybrid" => Some(RescaleMethod::HybridLanczos3),
             _ => None,
         }
     }
@@ -218,6 +224,7 @@ impl RescaleMethod {
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
             RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear | RescaleMethod::TentLanczos3Constraint => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DLanczos3Jinc => 3.0,  // Uses Lanczos3 internally
+            RescaleMethod::HybridLanczos3 => 3.0,  // Uses Lanczos3/EWA Lanczos3
         }
     }
 
@@ -258,6 +265,7 @@ impl RescaleMethod {
             RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
             RescaleMethod::Tent2DLanczos3Jinc => RescaleMethod::EWALanczos3,  // Uses jinc-based Lanczos3
             RescaleMethod::BilinearIterative => RescaleMethod::Bilinear,
+            RescaleMethod::HybridLanczos3 => RescaleMethod::Lanczos3,  // Primary kernel (also uses EWALanczos3)
             other => *other,
         }
     }
@@ -578,6 +586,65 @@ pub fn rescale_with_progress_tent(
                 progress,
             )
         }
+        RescaleMethod::HybridLanczos3 => {
+            // Hybrid: separable Lanczos3 for bulk, EWA Lanczos3 for final 2x
+            // Works for both downscaling and upscaling
+            let scale_x = src_width as f32 / dst_width as f32;
+            let scale_y = src_height as f32 / dst_height as f32;
+            let max_scale = scale_x.max(scale_y);
+            let min_scale = scale_x.min(scale_y);
+
+            if max_scale >= 2.0 {
+                // DOWNSCALING by >= 2x: separable to 2x final, then EWA for final 2x
+                let intermediate_width = dst_width * 2;
+                let intermediate_height = dst_height * 2;
+
+                // First pass: separable Lanczos3 (no progress - it's fast)
+                let intermediate = separable::rescale_kernel_pixels(
+                    src, src_width, src_height,
+                    intermediate_width, intermediate_height,
+                    RescaleMethod::Lanczos3, scale_mode, tent_mode,
+                    None,
+                );
+
+                // Second pass: EWA Lanczos3 for final 2x downscale
+                ewa::rescale_ewa_pixels(
+                    &intermediate, intermediate_width, intermediate_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            } else if min_scale <= 0.5 {
+                // UPSCALING by >= 2x: separable for bulk, then EWA for final 2x
+                // Intermediate is dst/2 (so EWA does the final 2x upscale)
+                let intermediate_width = dst_width / 2;
+                let intermediate_height = dst_height / 2;
+
+                // First pass: separable Lanczos3 for bulk upscale (faster)
+                let intermediate = separable::rescale_kernel_pixels(
+                    src, src_width, src_height,
+                    intermediate_width, intermediate_height,
+                    RescaleMethod::Lanczos3, scale_mode, tent_mode,
+                    None,
+                );
+
+                // Second pass: EWA Lanczos3 for final 2x upscale (quality)
+                ewa::rescale_ewa_pixels(
+                    &intermediate, intermediate_width, intermediate_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            } else {
+                // Scale ratio < 2x in both directions: just use EWA Lanczos3 directly
+                ewa::rescale_ewa_pixels(
+                    src, src_width, src_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            }
+        }
     }
 }
 
@@ -741,6 +808,65 @@ pub fn rescale_with_alpha_progress_tent(
                 scale_mode,
                 progress,
             )
+        }
+        RescaleMethod::HybridLanczos3 => {
+            // Hybrid: separable Lanczos3 for bulk, EWA Lanczos3 for final 2x (alpha-aware)
+            // Works for both downscaling and upscaling
+            let scale_x = src_width as f32 / dst_width as f32;
+            let scale_y = src_height as f32 / dst_height as f32;
+            let max_scale = scale_x.max(scale_y);
+            let min_scale = scale_x.min(scale_y);
+
+            if max_scale >= 2.0 {
+                // DOWNSCALING by >= 2x: separable to 2x final, then EWA for final 2x
+                let intermediate_width = dst_width * 2;
+                let intermediate_height = dst_height * 2;
+
+                // First pass: separable Lanczos3 (no progress - it's fast)
+                let intermediate = separable::rescale_kernel_alpha_pixels(
+                    src, src_width, src_height,
+                    intermediate_width, intermediate_height,
+                    RescaleMethod::Lanczos3, scale_mode, tent_mode,
+                    None,
+                );
+
+                // Second pass: EWA Lanczos3 for final 2x downscale
+                ewa::rescale_ewa_alpha_pixels(
+                    &intermediate, intermediate_width, intermediate_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            } else if min_scale <= 0.5 {
+                // UPSCALING by >= 2x: separable for bulk, then EWA for final 2x
+                // Intermediate is dst/2 (so EWA does the final 2x upscale)
+                let intermediate_width = dst_width / 2;
+                let intermediate_height = dst_height / 2;
+
+                // First pass: separable Lanczos3 for bulk upscale (faster)
+                let intermediate = separable::rescale_kernel_alpha_pixels(
+                    src, src_width, src_height,
+                    intermediate_width, intermediate_height,
+                    RescaleMethod::Lanczos3, scale_mode, tent_mode,
+                    None,
+                );
+
+                // Second pass: EWA Lanczos3 for final 2x upscale (quality)
+                ewa::rescale_ewa_alpha_pixels(
+                    &intermediate, intermediate_width, intermediate_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            } else {
+                // Scale ratio < 2x in both directions: just use EWA Lanczos3 directly
+                ewa::rescale_ewa_alpha_pixels(
+                    src, src_width, src_height,
+                    dst_width, dst_height,
+                    RescaleMethod::EWALanczos3, scale_mode, tent_mode,
+                    progress,
+                )
+            }
         }
     }
 }

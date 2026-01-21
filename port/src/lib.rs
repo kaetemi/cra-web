@@ -99,6 +99,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         30 => rescale::RescaleMethod::IterativeTentVolume,
         31 => rescale::RescaleMethod::IterativeTentVolumeBilinear,
         32 => rescale::RescaleMethod::TentLanczos3Constraint,
+        33 => rescale::RescaleMethod::HybridLanczos3,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }

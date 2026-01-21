@@ -457,6 +457,7 @@
                     <option value="12">EWA Lanczos2 (jinc-based, less ringing)</option>
                     <option value="21">EWA Lanczos3 Sharp (Robidoux, preserves lines)</option>
                     <option value="22">EWA Lanczos4 Sharpest (Robidoux, hash patterns)</option>
+                    <option value="33">Hybrid Lanczos3 (sep→EWA 2x, fast+quality)</option>
                     <option value="1">Lanczos3 (separable, faster)</option>
                     <option value="7">Lanczos2 (separable, less ringing)</option>
                     <option value="9">EWA Sinc-Lanczos3 (radial sinc, faster)</option>
@@ -826,7 +827,7 @@
             const tonemapping = document.getElementById('tonemapping').value;
 
             // Map interpolation to CLI names
-            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 23: 'tent-box', 24: 'tent-lanczos3', 25: 'tent-2d-box', 26: 'tent-2d-lanczos3-jinc', 27: 'tent-box-iterative', 28: 'tent-2d-box-iterative', 29: 'bilinear-iterative', 30: 'iterative-tent-volume', 31: 'iterative-tent-volume-bilinear', 32: 'tent-lanczos3-constraint' };
+            const interpolationMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 23: 'tent-box', 24: 'tent-lanczos3', 25: 'tent-2d-box', 26: 'tent-2d-lanczos3-jinc', 27: 'tent-box-iterative', 28: 'tent-2d-box-iterative', 29: 'bilinear-iterative', 30: 'iterative-tent-volume', 31: 'iterative-tent-volume-bilinear', 32: 'tent-lanczos3-constraint', 33: 'hybrid-lanczos3' };
 
             // Map supersample to CLI names
             const supersampleMap = { 0: 'none', 1: 'tent-volume', 2: 'tent-volume-prescale', 3: 'tent-lanczos3', 4: 'tent-lanczos3-prescale' };

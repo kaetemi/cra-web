@@ -226,6 +226,9 @@ pub enum ScaleMethod {
     IterativeTentVolumeBilinear,
     /// Tent Lanczos3 Constraint: tent-space with Lanczos3-constrained peaks (fully reversible)
     TentLanczos3Constraint,
+    /// Hybrid Lanczos3: separable Lanczos3 for bulk scaling (>=2x), EWA Lanczos3 for final 2x
+    /// Combines speed of separable convolution with EWA quality for the final refinement
+    HybridLanczos3,
 }
 
 impl ScaleMethod {
@@ -262,6 +265,7 @@ impl ScaleMethod {
             ScaleMethod::IterativeTentVolume => cra_wasm::rescale::RescaleMethod::IterativeTentVolume,
             ScaleMethod::IterativeTentVolumeBilinear => cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear,
             ScaleMethod::TentLanczos3Constraint => cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint,
+            ScaleMethod::HybridLanczos3 => cra_wasm::rescale::RescaleMethod::HybridLanczos3,
         }
     }
 }

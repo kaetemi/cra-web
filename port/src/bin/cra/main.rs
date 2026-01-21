@@ -442,6 +442,7 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::IterativeTentVolume => "Iterative Tent Volume (Box)",
             cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear => "Iterative Tent Volume (Bilinear)",
             cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint => "Tent Lanczos3 Constraint",
+            cra_wasm::rescale::RescaleMethod::HybridLanczos3 => "Hybrid Lanczos3 (sep→EWA 2x)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         let ss_note = match tent_mode {

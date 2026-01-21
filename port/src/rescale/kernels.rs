@@ -210,6 +210,8 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::TentLanczos3 => lanczos3(x),
         // 2D methods use EWA/radial kernels, but provide fallback for 1D context
         RescaleMethod::Tent2DLanczos3Jinc => ewa_lanczos(x, 3.0),
+        // Hybrid uses Lanczos3 for separable pass, fallback to lanczos3 for 1D context
+        RescaleMethod::HybridLanczos3 => lanczos3(x),
     }
 }
 
