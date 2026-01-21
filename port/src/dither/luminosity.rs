@@ -230,9 +230,9 @@ fn build_gray_lightness_lut(
 // ============================================================================
 
 trait GrayDitherKernel {
-    const PAD_LEFT: usize;
-    const PAD_RIGHT: usize;
-    const PAD_BOTTOM: usize;
+    /// Maximum distance the kernel diffuses error in any direction.
+    /// This determines both seeding size and overshoot padding.
+    const REACH: usize;
 
     fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
     fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
@@ -241,9 +241,7 @@ trait GrayDitherKernel {
 struct FloydSteinberg;
 
 impl GrayDitherKernel for FloydSteinberg {
-    const PAD_LEFT: usize = 1;
-    const PAD_RIGHT: usize = 1;
-    const PAD_BOTTOM: usize = 1;
+    const REACH: usize = 1;
 
     #[inline]
     fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
@@ -265,9 +263,7 @@ impl GrayDitherKernel for FloydSteinberg {
 struct JarvisJudiceNinke;
 
 impl GrayDitherKernel for JarvisJudiceNinke {
-    const PAD_LEFT: usize = 2;
-    const PAD_RIGHT: usize = 2;
-    const PAD_BOTTOM: usize = 2;
+    const REACH: usize = 2;
 
     #[inline]
     fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
@@ -313,9 +309,7 @@ impl GrayDitherKernel for JarvisJudiceNinke {
 struct NoneKernel;
 
 impl GrayDitherKernel for NoneKernel {
-    const PAD_LEFT: usize = 0;
-    const PAD_RIGHT: usize = 0;
-    const PAD_BOTTOM: usize = 0;
+    const REACH: usize = 0;
 
     #[inline]
     fn apply_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
@@ -333,6 +327,54 @@ fn apply_mixed_kernel(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32, u
         (false, false) => FloydSteinberg::apply_ltr(err, bx, y, err_val),
         (false, true) => FloydSteinberg::apply_rtl(err, bx, y, err_val),
     }
+}
+
+// ============================================================================
+// Buffer creation with edge seeding
+// ============================================================================
+
+/// Create error buffer with edge seeding for normalized dithering at boundaries.
+///
+/// Buffer layout:
+/// - Width: [overshoot][seeding][real image][seeding][overshoot]
+///   overshoot = reach, seeding = reach, so total = reach*4 + width
+/// - Height: [seeding][real image][overshoot]
+///   seeding = reach, overshoot = reach, so total = reach*2 + height
+///
+/// Seeding areas are filled with duplicated edge pixels and ARE processed.
+/// Overshoot areas catch error diffusion and are NOT processed.
+fn create_seeded_error_buffer(reach: usize, width: usize, height: usize) -> Vec<Vec<f32>> {
+    let total_left = reach * 2;  // overshoot + seeding
+    let total_right = reach * 2; // seeding + overshoot
+    let total_top = reach;       // seeding only (no top overshoot needed)
+    let total_bottom = reach;    // overshoot only (no bottom seeding needed)
+    let buf_width = total_left + width + total_right;
+    let buf_height = total_top + height + total_bottom;
+    vec![vec![0.0f32; buf_width]; buf_height]
+}
+
+/// Get grayscale value for seeding coordinates, mapping to edge pixels.
+/// For coordinates in seeding area, returns the nearest edge pixel value.
+#[inline]
+fn get_seeding_gray(gray_channel: &[f32], width: usize, px: usize, py: usize, reach: usize) -> f32 {
+    // Map py (buffer y in processed region) to image y
+    // Processed region starts at y=0, but top seeding rows map to image row 0
+    let img_y = if py < reach { 0 } else { py - reach };
+
+    // Map px (relative to process start, i.e., after left overshoot) to image x
+    // px=0..reach is left seeding (map to image x=0)
+    // px=reach..(reach+width) is real image
+    // px=(reach+width)..(reach*2+width) is right seeding (map to image x=width-1)
+    let img_x = if px < reach {
+        0
+    } else if px >= reach + width {
+        width - 1
+    } else {
+        px - reach
+    };
+
+    let idx = img_y * width + img_x;
+    gray_channel[idx]
 }
 
 // ============================================================================
@@ -418,6 +460,68 @@ fn process_pixel(
     (best_gray, err_val)
 }
 
+/// Process a single grayscale pixel with a direct gray value (for seeding support).
+/// Returns (best_gray, err_val)
+#[inline]
+fn process_pixel_with_gray(
+    ctx: &GrayDitherContext,
+    gray_value: f32,
+    err_buf: &[Vec<f32>],
+    bx: usize,
+    y: usize,
+) -> (u8, f32) {
+    // 1. Convert input to linear
+    let srgb_gray = gray_value / 255.0;
+    let lin_gray_orig = srgb_to_linear_single(srgb_gray);
+
+    // 2. Add accumulated error
+    let lin_gray_adj = lin_gray_orig + err_buf[y][bx];
+
+    // 3. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
+    let lin_gray_clamped = lin_gray_adj.clamp(0.0, 1.0);
+    let srgb_gray_adj = (linear_to_srgb_single(lin_gray_clamped) * 255.0).clamp(0.0, 255.0);
+
+    // 4. Get level index bounds
+    let level_min = ctx.quant.floor_level(srgb_gray_adj.floor() as u8);
+    let level_max = ctx.quant.ceil_level((srgb_gray_adj.ceil() as u8).min(255));
+
+    // 5. Convert target to perceptual lightness
+    let l_target = if is_linear_rgb_space(ctx.space) {
+        lin_gray_adj
+    } else if is_ycbcr_space(ctx.space) {
+        linear_gray_to_ycbcr_y(lin_gray_adj)
+    } else if is_lab_space(ctx.space) {
+        let (l, _, _) = linear_rgb_to_lab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
+    } else {
+        let (l, _, _) = linear_rgb_to_oklab(lin_gray_adj, lin_gray_adj, lin_gray_adj);
+        l
+    };
+
+    // 6. Search candidates using perceptual lightness distance
+    let mut best_level = level_min;
+    let mut best_dist = f32::INFINITY;
+
+    for level in level_min..=level_max {
+        let l_candidate = ctx.lightness_lut[level];
+        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+
+        if dist < best_dist {
+            best_dist = dist;
+            best_level = level;
+        }
+    }
+
+    // 7. Get extended value for output and error calculation
+    let best_gray = ctx.quant.level_to_srgb(best_level);
+
+    // 8. Compute error in linear space
+    let best_lin_gray = ctx.linear_lut[best_gray as usize];
+    let err_val = lin_gray_adj - best_lin_gray;
+
+    (best_gray, err_val)
+}
+
 // ============================================================================
 // Generic scan pattern implementations
 // ============================================================================
@@ -430,20 +534,38 @@ fn dither_standard_gray<K: GrayDitherKernel>(
     out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+    // Process seeding rows + real image rows (no bottom overshoot processing)
+    let process_height = reach + height;
+    // Process left seeding + real image + right seeding
+    let process_width = reach + width + reach;
+    // Buffer x offset: skip left overshoot
+    let bx_start = reach;
 
-            let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-            out[idx] = best_gray;
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+            let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
+
+            // Only write output for real image pixels (not seeding)
+            let in_real_y = y >= reach;
+            let in_real_x = px >= reach && px < reach + width;
+            if in_real_y && in_real_x {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                out[idx] = best_gray;
+            }
+
             K::apply_ltr(err_buf, bx, y, err_val);
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -456,31 +578,55 @@ fn dither_serpentine_gray<K: GrayDitherKernel>(
     out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
-        if y % 2 == 1 {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // RTL scan
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
+
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
+
                 K::apply_rtl(err_buf, bx, y, err_val);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            // LTR scan
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
+
                 K::apply_ltr(err_buf, bx, y, err_val);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -493,24 +639,37 @@ fn dither_mixed_standard_gray(
     out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
 
-            let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-            out[idx] = best_gray;
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+            let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let in_real_y = y >= reach;
+            let in_real_x = px >= reach && px < reach + width;
+            if in_real_y && in_real_x {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                out[idx] = best_gray;
+            }
+
+            let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 != 0;
             apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -523,38 +682,60 @@ fn dither_mixed_serpentine_gray(
     out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         if y % 2 == 1 {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            // RTL scan
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            // LTR scan
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -567,41 +748,61 @@ fn dither_mixed_random_gray(
     out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
         let is_rtl = row_hash & 1 == 1;
 
         if is_rtl {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
 
-                let (best_gray, err_val) = process_pixel(ctx, gray_channel, err_buf, idx, bx, y);
-                out[idx] = best_gray;
+                let in_real_y = y >= reach;
+                let in_real_x = px >= reach && px < reach + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
                 apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -681,14 +882,11 @@ pub fn colorspace_aware_dither_gray_with_mode(
 
     let pixels = width * height;
 
-    // Use JJN padding for all modes
-    let pad_left = JarvisJudiceNinke::PAD_LEFT;
-    let pad_right = JarvisJudiceNinke::PAD_RIGHT;
-    let pad_bottom = JarvisJudiceNinke::PAD_BOTTOM;
-    let buf_width = width + pad_left + pad_right;
+    // Use JJN reach for all modes (largest kernel)
+    let reach = JarvisJudiceNinke::REACH;
 
-    // Error buffer in linear luminosity space
-    let mut err_buf: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; height + pad_bottom];
+    // Error buffer with edge seeding
+    let mut err_buf = create_seeded_error_buffer(reach, width, height);
 
     // Output buffer
     let mut out = vec![0u8; pixels];
@@ -700,49 +898,49 @@ pub fn colorspace_aware_dither_gray_with_mode(
         DitherMode::None => {
             dither_standard_gray::<NoneKernel>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::Standard => {
             dither_standard_gray::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::Serpentine => {
             dither_serpentine_gray::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::JarvisStandard => {
             dither_standard_gray::<JarvisJudiceNinke>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::JarvisSerpentine => {
             dither_serpentine_gray::<JarvisJudiceNinke>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::MixedStandard => {
             dither_mixed_standard_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
         DitherMode::MixedSerpentine => {
             dither_mixed_serpentine_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
         DitherMode::MixedRandom => {
             dither_mixed_random_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
     }

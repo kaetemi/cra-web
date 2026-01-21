@@ -226,6 +226,40 @@ impl LabDitherContext {
 }
 
 // ============================================================================
+// Edge seeding constants and helpers
+// ============================================================================
+
+/// Maximum kernel reach (JJN = 2, FS = 1)
+const REACH: usize = 2;
+
+/// Get Lab values for seeding coordinates, mapping to edge pixels.
+#[inline]
+fn get_seeding_lab(
+    l_channel: &[f32],
+    a_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    px: usize,
+    py: usize,
+    reach: usize,
+) -> (f32, f32, f32) {
+    // Map py (buffer y in processed region) to image y
+    let img_y = if py < reach { 0 } else { py - reach };
+
+    // Map px to image x
+    let img_x = if px < reach {
+        0
+    } else if px >= reach + width {
+        width - 1
+    } else {
+        px - reach
+    };
+
+    let idx = img_y * width + img_x;
+    (l_channel[idx], a_channel[idx], b_channel[idx])
+}
+
+// ============================================================================
 // Error diffusion kernel implementations
 // ============================================================================
 
@@ -529,12 +563,13 @@ pub fn lab_space_dither_with_mode(
     let pixels = width * height;
     let ctx = LabDitherContext::new(params, quant_space, distance_space);
 
-    // Padding for JJN kernel (largest)
-    let pad_left = 2;
-    let pad_right = 2;
-    let pad_bottom = 2;
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
+    // Use REACH for buffer sizing with edge seeding
+    // Buffer layout:
+    // - Width: [overshoot][seeding][real image][seeding][overshoot] = reach*4 + width
+    // - Height: [seeding][real image][overshoot] = reach*2 + height
+    let reach = REACH;
+    let buf_width = reach * 4 + width;
+    let buf_height = reach * 2 + height;
 
     // Error buffers in linear RGB (3 channels, flattened)
     let mut err_bufs: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width * buf_height]; 3];
@@ -552,7 +587,14 @@ pub fn lab_space_dither_with_mode(
     let use_serpentine = matches!(mode, DitherMode::Serpentine | DitherMode::JarvisSerpentine | DitherMode::MixedSerpentine);
     let use_random_dir = matches!(mode, DitherMode::MixedRandom);
 
-    for y in 0..height {
+    // Process seeding rows + real image rows (no bottom overshoot processing)
+    let process_height = reach + height;
+    // Process left seeding + real image + right seeding
+    let process_width = reach + width + reach;
+    // Buffer x offset: skip left overshoot
+    let bx_start = reach;
+
+    for y in 0..process_height {
         // Determine scan direction for this row
         let is_rtl = if use_random_dir {
             wang_hash((y as u32) ^ hashed_seed) & 1 == 1
@@ -562,23 +604,24 @@ pub fn lab_space_dither_with_mode(
             false
         };
 
-        let x_iter: Box<dyn Iterator<Item = usize>> = if is_rtl {
-            Box::new((0..width).rev())
+        let px_iter: Box<dyn Iterator<Item = usize>> = if is_rtl {
+            Box::new((0..process_width).rev())
         } else {
-            Box::new(0..width)
+            Box::new(0..process_width)
         };
 
-        for x in x_iter {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+        for px in px_iter {
+            let bx = bx_start + px;
             let err_idx = y * buf_width + bx;
 
-            // Get input Lab and convert to linear RGB (for error accumulation base)
-            let (r_lin, g_lin, b_lin) = ctx.lab_to_rgb(
-                l_channel[idx],
-                a_channel[idx],
-                b_channel[idx],
+            // Get input Lab values (with seeding mapping for edge pixels)
+            let (l_val, a_val, b_val) = get_seeding_lab(
+                l_channel, a_channel, b_channel,
+                width, px, y, reach,
             );
+
+            // Convert to linear RGB (for error accumulation base)
+            let (r_lin, g_lin, b_lin) = ctx.lab_to_rgb(l_val, a_val, b_val);
 
             // Get accumulated error
             let e_r = err_bufs[0][err_idx];
@@ -589,15 +632,22 @@ pub fn lab_space_dither_with_mode(
             let (out_l, out_a, out_b, new_err_r, new_err_g, new_err_b) =
                 process_pixel_lab(&ctx, r_lin, g_lin, b_lin, e_r, e_g, e_b);
 
-            // Store output (already u8)
-            l_out[idx] = out_l;
-            a_out[idx] = out_a;
-            b_out[idx] = out_b;
+            // Only write output for real image pixels (not seeding)
+            let in_real_y = y >= reach;
+            let in_real_x = px >= reach && px < reach + width;
+            if in_real_y && in_real_x {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                l_out[idx] = out_l;
+                a_out[idx] = out_a;
+                b_out[idx] = out_b;
+            }
 
             // Apply error diffusion kernel
             if use_mixed {
                 // Random kernel selection per pixel
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_pixel = pixel_hash & 1 != 0;
 
                 if use_jjn_pixel {

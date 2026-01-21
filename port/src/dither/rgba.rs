@@ -146,9 +146,10 @@ fn build_perceptual_lut(
 // ============================================================================
 
 trait RgbDitherKernel {
-    const PAD_LEFT: usize;
-    const PAD_RIGHT: usize;
-    const PAD_BOTTOM: usize;
+    /// Maximum reach of this kernel in any direction.
+    /// For Floyd-Steinberg: 1 (diffuses to x+1, y+1)
+    /// For Jarvis-Judice-Ninke: 2 (diffuses to x+2, y+2)
+    const REACH: usize;
 
     fn apply_ltr(
         err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
@@ -169,9 +170,7 @@ trait RgbDitherKernel {
 struct FloydSteinberg;
 
 impl RgbDitherKernel for FloydSteinberg {
-    const PAD_LEFT: usize = 1;
-    const PAD_RIGHT: usize = 1;
-    const PAD_BOTTOM: usize = 1;
+    const REACH: usize = 1;
 
     #[inline]
     fn apply_ltr(
@@ -239,9 +238,7 @@ impl RgbDitherKernel for FloydSteinberg {
 struct JarvisJudiceNinke;
 
 impl RgbDitherKernel for JarvisJudiceNinke {
-    const PAD_LEFT: usize = 2;
-    const PAD_RIGHT: usize = 2;
-    const PAD_BOTTOM: usize = 2;
+    const REACH: usize = 2;
 
     #[inline]
     fn apply_ltr(
@@ -373,9 +370,7 @@ impl RgbDitherKernel for JarvisJudiceNinke {
 struct NoneKernel;
 
 impl RgbDitherKernel for NoneKernel {
-    const PAD_LEFT: usize = 0;
-    const PAD_RIGHT: usize = 0;
-    const PAD_BOTTOM: usize = 0;
+    const REACH: usize = 0;
 
     #[inline]
     fn apply_ltr(
@@ -433,6 +428,52 @@ fn apply_mixed_kernel_per_channel(
     apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
     apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
     apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
+}
+
+// ============================================================================
+// Edge seeding helpers
+// ============================================================================
+
+/// Get RGB values for a processing coordinate, handling seeding area mapping.
+/// For seeding coordinates, returns the corresponding edge pixel values.
+/// For real coordinates, returns the actual pixel values.
+#[inline]
+fn get_seeding_rgba(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    px: usize,  // processing x (0..seeding_width + real_width + seeding_width)
+    py: usize,  // processing y (0..seeding_height + real_height)
+    reach: usize,
+) -> (f32, f32, f32) {
+    // Map processing coordinates to real image coordinates, clamping seeding to edges
+    let img_y = if py < reach { 0 } else { py - reach };
+    let img_x = if px < reach {
+        0  // Left seeding: use first column
+    } else if px >= reach + width {
+        width - 1  // Right seeding: use last column
+    } else {
+        px - reach  // Real column
+    };
+    let idx = img_y * width + img_x;
+    (r_channel[idx], g_channel[idx], b_channel[idx])
+}
+
+/// Get dithered alpha value for edge seeding.
+/// Maps seeding coordinates to edge pixels of the real dithered alpha.
+#[inline]
+fn get_seeding_alpha_dithered(alpha_dithered: &[u8], width: usize, px: usize, py: usize, reach: usize) -> u8 {
+    let img_y = if py < reach { 0 } else { py - reach };
+    let img_x = if px < reach {
+        0
+    } else if px >= reach + width {
+        width - 1
+    } else {
+        px - reach
+    };
+    let idx = img_y * width + img_x;
+    alpha_dithered[idx]
 }
 
 // ============================================================================
@@ -617,6 +658,152 @@ fn process_pixel_rgba(
     (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val)
 }
 
+/// Process a single pixel with pre-fetched RGB and alpha values (for seeding support).
+/// Same as process_pixel_rgba but takes values directly instead of reading from arrays.
+#[inline]
+fn process_pixel_rgba_with_values(
+    ctx: &DitherContextRgba,
+    srgb_r_in: f32,
+    srgb_g_in: f32,
+    srgb_b_in: f32,
+    alpha_dithered_u8: u8,
+    err_r: &[Vec<f32>],
+    err_g: &[Vec<f32>],
+    err_b: &[Vec<f32>],
+    bx: usize,
+    y: usize,
+) -> (u8, u8, u8, f32, f32, f32) {
+    // Get dithered alpha for this pixel (normalized to 0-1)
+    let alpha = alpha_dithered_u8 as f32 / 255.0;
+
+    // 1. Read accumulated error (e_in)
+    let err_r_in = err_r[y][bx];
+    let err_g_in = err_g[y][bx];
+    let err_b_in = err_b[y][bx];
+
+    // 2. Convert input to Linear RGB
+    let srgb_r = srgb_r_in / 255.0;
+    let srgb_g = srgb_g_in / 255.0;
+    let srgb_b = srgb_b_in / 255.0;
+
+    let lin_r_orig = srgb_to_linear_single(srgb_r);
+    let lin_g_orig = srgb_to_linear_single(srgb_g);
+    let lin_b_orig = srgb_to_linear_single(srgb_b);
+
+    // 3. Add accumulated error (skip for fully transparent pixels)
+    let (lin_r_adj, lin_g_adj, lin_b_adj) = if alpha == 0.0 {
+        (lin_r_orig, lin_g_orig, lin_b_orig)
+    } else {
+        (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
+    };
+
+    // 4. Convert back to sRGB for quantization bounds (clamp for valid LUT indices)
+    let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
+    let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
+    let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
+
+    let srgb_r_adj = (linear_to_srgb_single(lin_r_clamped) * 255.0).clamp(0.0, 255.0);
+    let srgb_g_adj = (linear_to_srgb_single(lin_g_clamped) * 255.0).clamp(0.0, 255.0);
+    let srgb_b_adj = (linear_to_srgb_single(lin_b_clamped) * 255.0).clamp(0.0, 255.0);
+
+    // 5. Get level index bounds
+    let r_min = ctx.quant_r.floor_level(srgb_r_adj.floor() as u8);
+    let r_max = ctx.quant_r.ceil_level((srgb_r_adj.ceil() as u8).min(255));
+
+    let g_min = ctx.quant_g.floor_level(srgb_g_adj.floor() as u8);
+    let g_max = ctx.quant_g.ceil_level((srgb_g_adj.ceil() as u8).min(255));
+
+    let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
+    let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
+
+    // 6. Convert target to perceptual space (use unclamped for true distance)
+    let lab_target = if is_srgb_space(ctx.space) {
+        (srgb_r_adj / 255.0, srgb_g_adj / 255.0, srgb_b_adj / 255.0)
+    } else if is_linear_rgb_space(ctx.space) {
+        (lin_r_adj, lin_g_adj, lin_b_adj)
+    } else if is_ycbcr_space(ctx.space) {
+        linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
+    } else if is_lab_space(ctx.space) {
+        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
+    } else {
+        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
+    };
+
+    // 7. Search candidates for best quantization
+    let mut best_r_level = r_min;
+    let mut best_g_level = g_min;
+    let mut best_b_level = b_min;
+    let mut best_dist = f32::INFINITY;
+
+    for r_level in r_min..=r_max {
+        for g_level in g_min..=g_max {
+            for b_level in b_min..=b_max {
+                let lab_candidate = if let Some(lut) = ctx.lab_lut {
+                    let n = ctx.quant_r.num_levels;
+                    let lut_idx = r_level * n * n + g_level * n + b_level;
+                    lut[lut_idx]
+                } else {
+                    let r_ext = ctx.quant_r.level_to_srgb(r_level);
+                    let g_ext = ctx.quant_g.level_to_srgb(g_level);
+                    let b_ext = ctx.quant_b.level_to_srgb(b_level);
+
+                    let r_lin = ctx.linear_lut[r_ext as usize];
+                    let g_lin = ctx.linear_lut[g_ext as usize];
+                    let b_lin = ctx.linear_lut[b_ext as usize];
+
+                    let (l, a, b_ch) = if is_srgb_space(ctx.space) {
+                        (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
+                    } else if is_linear_rgb_space(ctx.space) {
+                        (r_lin, g_lin, b_lin)
+                    } else if is_ycbcr_space(ctx.space) {
+                        linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
+                    } else if is_lab_space(ctx.space) {
+                        linear_rgb_to_lab(r_lin, g_lin, b_lin)
+                    } else {
+                        linear_rgb_to_oklab(r_lin, g_lin, b_lin)
+                    };
+                    LabValue { l, a, b: b_ch }
+                };
+
+                let dist = perceptual_distance_sq(
+                    ctx.space,
+                    lab_target.0, lab_target.1, lab_target.2,
+                    lab_candidate.l, lab_candidate.a, lab_candidate.b,
+                );
+
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_r_level = r_level;
+                    best_g_level = g_level;
+                    best_b_level = b_level;
+                }
+            }
+        }
+    }
+
+    // 8. Get extended values for output
+    let best_r = ctx.quant_r.level_to_srgb(best_r_level);
+    let best_g = ctx.quant_g.level_to_srgb(best_g_level);
+    let best_b = ctx.quant_b.level_to_srgb(best_b_level);
+
+    // 9. Compute quantized linear values
+    let best_lin_r = ctx.linear_lut[best_r as usize];
+    let best_lin_g = ctx.linear_lut[best_g as usize];
+    let best_lin_b = ctx.linear_lut[best_b as usize];
+
+    // 10. Compute alpha-aware error to diffuse
+    let q_err_r = lin_r_adj - best_lin_r;
+    let q_err_g = lin_g_adj - best_lin_g;
+    let q_err_b = lin_b_adj - best_lin_b;
+
+    let one_minus_alpha = 1.0 - alpha;
+    let err_r_val = one_minus_alpha * err_r_in + alpha * q_err_r;
+    let err_g_val = one_minus_alpha * err_g_in + alpha * q_err_g;
+    let err_b_val = one_minus_alpha * err_b_in + alpha * q_err_b;
+
+    (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val)
+}
+
 // ============================================================================
 // Generic scan pattern implementations for RGBA
 // ============================================================================
@@ -635,25 +822,47 @@ fn dither_standard_rgba<K: RgbDitherKernel>(
     b_out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+            } else {
+                let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                (r, g, b, a)
+            };
 
             let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-            r_out[idx] = best_r;
-            g_out[idx] = best_g;
-            b_out[idx] = best_b;
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+            }
 
             K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -672,41 +881,79 @@ fn dither_serpentine_rgba<K: RgbDitherKernel>(
     b_out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         if y % 2 == 1 {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
                 K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
                 K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -725,30 +972,52 @@ fn dither_mixed_standard_rgba(
     b_out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let bx = x + pad_left;
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+            } else {
+                let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                (r, g, b, a)
+            };
 
             let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-            r_out[idx] = best_r;
-            g_out[idx] = best_g;
-            b_out[idx] = best_b;
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+            }
 
-            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_jjn_r = pixel_hash & 1 != 0;
             let use_jjn_g = pixel_hash & 2 != 0;
             let use_jjn_b = pixel_hash & 4 != 0;
             apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -767,50 +1036,88 @@ fn dither_mixed_serpentine_rgba(
     b_out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         if y % 2 == 1 {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_r = pixel_hash & 1 != 0;
                 let use_jjn_g = pixel_hash & 2 != 0;
                 let use_jjn_b = pixel_hash & 4 != 0;
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_r = pixel_hash & 1 != 0;
                 let use_jjn_g = pixel_hash & 2 != 0;
                 let use_jjn_b = pixel_hash & 4 != 0;
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -829,53 +1136,91 @@ fn dither_mixed_random_rgba(
     b_out: &mut [u8],
     width: usize,
     height: usize,
-    pad_left: usize,
+    reach: usize,
     hashed_seed: u32,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
         let is_rtl = row_hash & 1 == 1;
 
         if is_rtl {
-            for x in (0..width).rev() {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_r = pixel_hash & 1 != 0;
                 let use_jjn_g = pixel_hash & 2 != 0;
                 let use_jjn_b = pixel_hash & 4 != 0;
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
             }
         } else {
-            for x in 0..width {
-                let idx = y * width + x;
-                let bx = x + pad_left;
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, alpha_u8) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], ctx.alpha_dithered[idx])
+                } else {
+                    let (r, g, b) = get_seeding_rgba(r_channel, g_channel, b_channel, width, px, y, reach);
+                    let a = get_seeding_alpha_dithered(ctx.alpha_dithered, width, px, y, reach);
+                    (r, g, b, a)
+                };
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_rgba(ctx, r_channel, g_channel, b_channel, err_r, err_g, err_b, idx, bx, y);
+                    process_pixel_rgba_with_values(ctx, r_val, g_val, b_val, alpha_u8, err_r, err_g, err_b, bx, y);
 
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
 
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_r = pixel_hash & 1 != 0;
                 let use_jjn_g = pixel_hash & 2 != 0;
                 let use_jjn_b = pixel_hash & 4 != 0;
                 apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
             }
         }
-        if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 }
@@ -1002,15 +1347,15 @@ pub fn colorspace_aware_dither_rgba_with_mode(
         alpha_dithered: &alpha_dithered,
     };
 
-    // Use JJN padding for all modes
-    let pad_left = JarvisJudiceNinke::PAD_LEFT;
-    let pad_right = JarvisJudiceNinke::PAD_RIGHT;
-    let pad_bottom = JarvisJudiceNinke::PAD_BOTTOM;
-    let buf_width = width + pad_left + pad_right;
+    // Use JJN reach for all modes (largest kernel)
+    // Buffer layout: [overshoot][seeding][real][seeding][overshoot]
+    let reach = JarvisJudiceNinke::REACH;
+    let buf_width = reach * 4 + width;  // overshoot + seeding + real + seeding + overshoot
+    let buf_height = reach * 2 + height;  // seeding + real + overshoot
 
-    let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; height + pad_bottom];
-    let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; height + pad_bottom];
-    let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; height + pad_bottom];
+    let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+    let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+    let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
 
     let mut r_out = vec![0u8; pixels];
     let mut g_out = vec![0u8; pixels];
@@ -1024,7 +1369,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::Standard => {
@@ -1032,7 +1377,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::Serpentine => {
@@ -1040,7 +1385,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::JarvisStandard => {
@@ -1048,7 +1393,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::JarvisSerpentine => {
@@ -1056,7 +1401,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, progress,
+                width, height, reach, progress,
             );
         }
         DitherMode::MixedStandard => {
@@ -1064,7 +1409,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
         DitherMode::MixedSerpentine => {
@@ -1072,7 +1417,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
         DitherMode::MixedRandom => {
@@ -1080,7 +1425,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, pad_left, hashed_seed, progress,
+                width, height, reach, hashed_seed, progress,
             );
         }
     }

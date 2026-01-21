@@ -136,13 +136,17 @@ impl QuantParams {
 
 /// Trait for error diffusion dithering kernels.
 /// Implementations define the kernel shape (padding) and error distribution pattern.
+///
+/// Buffer structure with seeding (to normalize edge dithering):
+/// ```text
+/// [overshoot] [seeding] [real image] [seeding] [overshoot]
+/// ```
+/// - Seeding columns/rows: filled with duplicated edge pixels, ARE processed
+/// - Overshoot: initialized to zero, catches error diffusion, NOT processed
 trait DitherKernel {
-    /// Padding required on the left side of the buffer
-    const PAD_LEFT: usize;
-    /// Padding required on the right side of the buffer
-    const PAD_RIGHT: usize;
-    /// Padding required on the bottom of the buffer
-    const PAD_BOTTOM: usize;
+    /// Kernel reach - how far error diffuses in each direction.
+    /// This determines both seeding size and overshoot size.
+    const REACH: usize;
 
     /// Apply the kernel for left-to-right scanning.
     /// Distributes quantization error to neighboring pixels.
@@ -151,6 +155,18 @@ trait DitherKernel {
     /// Apply the kernel for right-to-left scanning (mirrored).
     /// Used for serpentine scanning on odd rows.
     fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
+
+    // Derived constants for buffer layout
+    /// Total left padding (overshoot + seeding)
+    const TOTAL_LEFT: usize = Self::REACH * 2;
+    /// Total right padding (seeding + overshoot)
+    const TOTAL_RIGHT: usize = Self::REACH * 2;
+    /// Total top padding (seeding only, no overshoot since error flows down)
+    const TOTAL_TOP: usize = Self::REACH;
+    /// Total bottom padding (overshoot only, no seeding since error comes from above)
+    const TOTAL_BOTTOM: usize = Self::REACH;
+    /// Offset from buffer edge to start of seeding area (= overshoot size)
+    const SEED_OFFSET: usize = Self::REACH;
 }
 
 /// Floyd-Steinberg error diffusion kernel.
@@ -162,9 +178,7 @@ trait DitherKernel {
 struct FloydSteinberg;
 
 impl DitherKernel for FloydSteinberg {
-    const PAD_LEFT: usize = 1;
-    const PAD_RIGHT: usize = 1;
-    const PAD_BOTTOM: usize = 1;
+    const REACH: usize = 1;
 
     #[inline]
     fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
@@ -193,9 +207,7 @@ impl DitherKernel for FloydSteinberg {
 struct JarvisJudiceNinke;
 
 impl DitherKernel for JarvisJudiceNinke {
-    const PAD_LEFT: usize = 2;
-    const PAD_RIGHT: usize = 2;
-    const PAD_BOTTOM: usize = 2;
+    const REACH: usize = 2;
 
     #[inline]
     fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
@@ -242,9 +254,7 @@ impl DitherKernel for JarvisJudiceNinke {
 struct NoneKernel;
 
 impl DitherKernel for NoneKernel {
-    const PAD_LEFT: usize = 0;
-    const PAD_RIGHT: usize = 0;
-    const PAD_BOTTOM: usize = 0;
+    const REACH: usize = 0;
 
     #[inline]
     fn apply_ltr(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
@@ -257,35 +267,101 @@ impl DitherKernel for NoneKernel {
 // Buffer helpers
 // ============================================================================
 
-/// Create a padded buffer and copy image data into it.
-/// Padding allows kernel application without bounds checks.
+/// Create a padded buffer with edge seeding for normalized edge dithering.
+///
+/// Buffer structure:
+/// ```text
+/// [overshoot] [seeding] [real image] [seeding] [overshoot]
+/// ```
+///
+/// - Seeding areas are filled with duplicated edge pixels
+/// - Overshoot areas are zeroed (catch error diffusion)
+/// - Real image data is copied to the center
 #[inline]
-fn create_padded_buffer(
+fn create_seeded_buffer(
     img: &[f32],
     width: usize,
     height: usize,
-    pad_left: usize,
-    pad_right: usize,
-    pad_bottom: usize,
+    reach: usize,
 ) -> Vec<Vec<f32>> {
-    let buf_width = width + pad_left + pad_right;
-    let buf_height = height + pad_bottom;
+    // Total padding: overshoot (reach) + seeding (reach) on each side horizontally
+    // Top: seeding only (reach), Bottom: overshoot only (reach)
+    let total_left = reach * 2;
+    let total_right = reach * 2;
+    let total_top = reach;
+    let total_bottom = reach;
+
+    let buf_width = total_left + width + total_right;
+    let buf_height = total_top + height + total_bottom;
     let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
+
+    // Copy real image data
     for y in 0..height {
         for x in 0..width {
-            buf[y][x + pad_left] = img[y * width + x];
+            buf[y + total_top][x + total_left] = img[y * width + x];
         }
     }
+
+    // Fill seeding areas with duplicated edge pixels
+    // Seeding columns start at `reach` (after overshoot) and span `reach` columns
+    let seed_left_start = reach;  // after left overshoot
+    let seed_right_start = total_left + width;  // after real image
+
+    // Fill left seeding columns (duplicate first column of real image)
+    for y in 0..height {
+        let first_col_val = img[y * width];  // first pixel of this row
+        for sx in 0..reach {
+            buf[y + total_top][seed_left_start + sx] = first_col_val;
+        }
+    }
+
+    // Fill right seeding columns (duplicate last column of real image)
+    for y in 0..height {
+        let last_col_val = img[y * width + (width - 1)];  // last pixel of this row
+        for sx in 0..reach {
+            buf[y + total_top][seed_right_start + sx] = last_col_val;
+        }
+    }
+
+    // Fill top seeding rows (duplicate first row, including seeding columns)
+    if reach > 0 {
+        let first_row_left_seed = img[0];  // first pixel of first row
+        let first_row_right_seed = img[width - 1];  // last pixel of first row
+
+        for sy in 0..reach {
+            // Left seeding area of top seeding row
+            for sx in 0..reach {
+                buf[sy][seed_left_start + sx] = first_row_left_seed;
+            }
+            // Real image area of top seeding row (copy first row)
+            for x in 0..width {
+                buf[sy][x + total_left] = img[x];
+            }
+            // Right seeding area of top seeding row
+            for sx in 0..reach {
+                buf[sy][seed_right_start + sx] = first_row_right_seed;
+            }
+        }
+    }
+
     buf
 }
 
-/// Extract real pixels from padded buffer, clamp, and convert to u8.
+/// Extract real pixels from seeded buffer, clamp, and convert to u8.
 #[inline]
-fn extract_result(buf: &[Vec<f32>], width: usize, height: usize, pad_left: usize) -> Vec<u8> {
+fn extract_result_seeded(
+    buf: &[Vec<f32>],
+    width: usize,
+    height: usize,
+    reach: usize,
+) -> Vec<u8> {
+    let total_left = reach * 2;
+    let total_top = reach;
+
     let mut result = Vec::with_capacity(width * height);
     for y in 0..height {
         for x in 0..width {
-            result.push(buf[y][x + pad_left].clamp(0.0, 255.0).round() as u8);
+            result.push(buf[y + total_top][x + total_left].clamp(0.0, 255.0).round() as u8);
         }
     }
     result
@@ -296,7 +372,7 @@ fn extract_result(buf: &[Vec<f32>], width: usize, height: usize, pad_left: usize
 // ============================================================================
 
 /// Generic standard (left-to-right) dithering with any kernel.
-/// Processes all rows left-to-right.
+/// Processes seeding rows/columns plus real image, all left-to-right.
 fn dither_standard<K: DitherKernel>(
     img: &[f32],
     width: usize,
@@ -304,14 +380,17 @@ fn dither_standard<K: DitherKernel>(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let mut buf = create_padded_buffer(
-        img, width, height,
-        K::PAD_LEFT, K::PAD_RIGHT, K::PAD_BOTTOM,
-    );
+    let reach = K::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
 
-    for y in 0..height {
-        for x in 0..width {
-            let bx = x + K::PAD_LEFT;
+    // Processing area: seeding rows + real rows, seeding cols + real cols + seeding cols
+    let process_height = reach + height;  // top seeding + real
+    let process_width = reach + width + reach;  // left seeding + real + right seeding
+    let bx_start = reach;  // skip left overshoot
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
             let old = buf[y][bx];
             let new = quant.quantize(old);
             buf[y][bx] = new;
@@ -319,15 +398,19 @@ fn dither_standard<K: DitherKernel>(
             K::apply_ltr(&mut buf, bx, y, err);
         }
         if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+            // Progress based on real image rows (after seeding)
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 
-    extract_result(&buf, width, height, K::PAD_LEFT)
+    extract_result_seeded(&buf, width, height, reach)
 }
 
 /// Generic serpentine dithering with any kernel.
 /// Alternates scan direction each row to reduce diagonal banding.
+/// Processes seeding rows/columns plus real image.
 fn dither_serpentine<K: DitherKernel>(
     img: &[f32],
     width: usize,
@@ -335,16 +418,19 @@ fn dither_serpentine<K: DitherKernel>(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let mut buf = create_padded_buffer(
-        img, width, height,
-        K::PAD_LEFT, K::PAD_RIGHT, K::PAD_BOTTOM,
-    );
+    let reach = K::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
 
-    for y in 0..height {
+    // Processing area: seeding rows + real rows, seeding cols + real cols + seeding cols
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;  // skip left overshoot
+
+    for y in 0..process_height {
         if y % 2 == 1 {
             // Right-to-left on odd rows
-            for x in (0..width).rev() {
-                let bx = x + K::PAD_LEFT;
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
                 let old = buf[y][bx];
                 let new = quant.quantize(old);
                 buf[y][bx] = new;
@@ -353,8 +439,8 @@ fn dither_serpentine<K: DitherKernel>(
             }
         } else {
             // Left-to-right on even rows
-            for x in 0..width {
-                let bx = x + K::PAD_LEFT;
+            for px in 0..process_width {
+                let bx = bx_start + px;
                 let old = buf[y][bx];
                 let new = quant.quantize(old);
                 buf[y][bx] = new;
@@ -363,11 +449,13 @@ fn dither_serpentine<K: DitherKernel>(
             }
         }
         if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 
-    extract_result(&buf, width, height, K::PAD_LEFT)
+    extract_result_seeded(&buf, width, height, reach)
 }
 
 // ============================================================================
@@ -405,26 +493,34 @@ fn mixed_dither_standard(
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
-    // Use JJN padding (larger) to accommodate both kernels
-    let mut buf = create_padded_buffer(
-        img, width, height,
-        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
-    );
+    // Use JJN reach (larger) to accommodate both kernels
+    let reach = JarvisJudiceNinke::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
 
-    for y in 0..height {
-        for x in 0..width {
-            let bx = x + JarvisJudiceNinke::PAD_LEFT;
+    // Processing area: seeding rows + real rows, seeding cols + real cols + seeding cols
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
             let err = process_pixel(&mut buf, bx, y, &quant);
-            let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            // Use original image coordinates for hash (adjusted for seeding offset)
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 == 1;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
         if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 
-    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+    extract_result_seeded(&buf, width, height, reach)
 }
 
 /// Mixed dithering with serpentine scanning.
@@ -438,37 +534,45 @@ fn mixed_dither_serpentine(
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
-    let mut buf = create_padded_buffer(
-        img, width, height,
-        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
-    );
+    let reach = JarvisJudiceNinke::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
 
-    for y in 0..height {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
         if y % 2 == 1 {
             // Right-to-left on odd rows
-            for x in (0..width).rev() {
-                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
             // Left-to-right on even rows
-            for x in 0..width {
-                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+            for px in 0..process_width {
+                let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
         if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 
-    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+    extract_result_seeded(&buf, width, height, reach)
 }
 
 /// Mixed dithering with random scan direction per row.
@@ -482,38 +586,45 @@ fn mixed_dither_random(
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
-    let mut buf = create_padded_buffer(
-        img, width, height,
-        JarvisJudiceNinke::PAD_LEFT, JarvisJudiceNinke::PAD_RIGHT, JarvisJudiceNinke::PAD_BOTTOM,
-    );
+    let reach = JarvisJudiceNinke::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
 
-    for y in 0..height {
-        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        let img_y = y.saturating_sub(reach);
+        let row_hash = wang_hash((img_y as u32) ^ hashed_seed);
         if row_hash & 1 == 1 {
             // Right-to-left (randomly selected)
-            for x in (0..width).rev() {
-                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let img_x = px.saturating_sub(reach);
+                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
             // Left-to-right (randomly selected)
-            for x in 0..width {
-                let bx = x + JarvisJudiceNinke::PAD_LEFT;
+            for px in 0..process_width {
+                let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let img_x = px.saturating_sub(reach);
+                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
         if let Some(ref mut cb) = progress {
-            cb((y + 1) as f32 / height as f32);
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
         }
     }
 
-    extract_result(&buf, width, height, JarvisJudiceNinke::PAD_LEFT)
+    extract_result_seeded(&buf, width, height, reach)
 }
 
 // ============================================================================
