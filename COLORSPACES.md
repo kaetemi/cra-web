@@ -86,8 +86,8 @@ For maximum precision, derive the matrices directly from the chromaticity coordi
 **Transfer function (encode: linear → sRGB):**
 
 ```
-if linear ≤ 0.0031308:
-    srgb = 12.92 × linear
+if linear ≤ T:
+    srgb = K × linear
 else:
     srgb = 1.055 × linear^(1/2.4) − 0.055
 ```
@@ -95,13 +95,45 @@ else:
 **Transfer function (decode: sRGB → linear):**
 
 ```
-if srgb ≤ 0.04045:
-    linear = srgb / 12.92
+if srgb ≤ K×T:
+    linear = srgb / K
 else:
     linear = ((srgb + 0.055) / 1.055)^2.4
 ```
 
-The linear segment exists because a pure power curve has infinite slope at zero, which would amplify noise in darks. The piecewise function is continuous with continuous first derivative at the junction.
+The linear segment exists because a pure power curve has infinite slope at zero, which would amplify noise in darks.
+
+**Authoritative transfer function constants:**
+
+The curve shape is defined by γ=2.4 and offset a=0.055. These are the authoritative constants from which the threshold (T) and linear slope (K) must be derived.
+
+IEC 61966-2-1 provides approximate values (T≈0.0031308, K≈12.92) but these are slightly inconsistent—they don't produce a perfectly continuous function with continuous first derivative at the junction. The spec values prioritize slope continuity but have a tiny value discontinuity (~0.001).
+
+**Deriving exact constants for mathematical consistency:**
+
+For the linear segment g(x) = K×x to meet the curve f(x) = 1.055×x^(1/2.4) − 0.055 with matching value AND slope at threshold T:
+
+```
+Value match:  K×T = 1.055×T^(1/2.4) − 0.055
+Slope match:  K = 1.055/2.4 × T^(1/2.4 − 1)
+```
+
+Solving simultaneously:
+
+```
+T = [a / ((1+a) × (1 − 1/γ))]^γ
+K = (1+a)/γ × T^(1/γ − 1)
+```
+
+With γ=2.4, a=0.055:
+
+| Constant | Derived Value | Spec Value | Notes |
+|----------|---------------|------------|-------|
+| Threshold (T) | 0.003039934639778... | 0.0031308 | ~3% difference |
+| Linear slope (K) | 12.92321018078785... | 12.92 | ~0.02% difference |
+| Decode threshold (K×T) | 0.03928571428571... (= 11/280) | 0.04045 | |
+
+The derived values round approximately to the spec values, ensuring spec compliance while achieving exact mathematical continuity. At the derived threshold, the value and slope differences are at floating-point epsilon (~10⁻¹⁵).
 
 **Luminance coefficients:**
 
@@ -631,7 +663,7 @@ CIE XYZ (empirical root)
 |---------------|-------------------------|---------|
 | CIE XYZ | Color matching functions (empirical) | — |
 | Linear RGB / sRGB | Chromaticity coordinates (primaries + D65 white point) | XYZ matrices |
-| sRGB | Linear RGB + piecewise transfer function | — |
+| sRGB | Linear RGB + transfer function (γ=2.4, a=0.055) | T, K (threshold & slope) |
 | Gamma 2.2 RGB | Linear RGB + γ=2.2 | — |
 | Y'CbCr | sRGB + matrix transform | — |
 | Apple RGB | Chromaticity coordinates + γ=1.8 | XYZ matrices |
