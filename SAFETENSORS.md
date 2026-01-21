@@ -100,34 +100,36 @@ If an indexed field is absent, the non-indexed field value applies to all images
 
 ## Color Primaries
 
-Color primaries are specified using identifiers derived from CICP (Coding-Independent Code Points) as defined in ITU-T H.273, with extensions for precision-sensitive workflows.
+Color primaries are specified using identifiers derived from CICP (Coding-Independent Code Points) as defined in ITU-T H.273, with extensions for common workflows.
 
 ### Primaries Identifiers
 
 | Identifier | CICP | Description | Native White Point |
 |------------|------|-------------|-------------------|
 | `unspecified` | 2 | Unspecified (image-referred) | N/A |
-| `bt709` | 1 | ITU-R BT.709-6 | `d65_itu` |
-| `srgb` | 1 | IEC 61966-2-1 (matrix-authoritative) | `d65_srgb` |
-| `bt470m` | 4 | ITU-R BT.470-6 System M | `c_fcc` |
-| `bt470bg` | 5 | ITU-R BT.470-6 System B, G | `d65_itu` |
-| `bt601` | 6 | ITU-R BT.601-7 / SMPTE 170M | `d65_itu` |
-| `smpte240` | 7 | SMPTE 240M | `d65_itu` |
-| `generic_film` | 8 | Generic film (Illuminant C) | `c_fcc` |
-| `bt2020` | 9 | ITU-R BT.2020-2 / BT.2100 | `d65_itu` |
+| `bt709` | 1 | ITU-R BT.709-6 / IEC 61966-2-1 | `d65` |
+| `srgb` | 1 | Alias for `bt709` | `d65` |
+| `bt470m` | 4 | ITU-R BT.470-6 System M | `c` |
+| `bt470bg` | 5 | ITU-R BT.470-6 System B, G | `d65` |
+| `bt601` | 6 | ITU-R BT.601-7 / SMPTE 170M | `d65` |
+| `smpte240` | 7 | SMPTE 240M | `d65` |
+| `generic_film` | 8 | Generic film (Illuminant C) | `c` |
+| `bt2020` | 9 | ITU-R BT.2020-2 / BT.2100 | `d65` |
 | `xyz` | 10 | CIE 1931 XYZ (SMPTE ST 428-1) | Required |
 | `smpte431` | 11 | SMPTE RP 431-2 / DCI-P3 | `dci` |
-| `smpte432` | 12 | SMPTE EG 432-1 / Display P3 | `d65_itu` |
-| `ebu3213` | 22 | EBU Tech. 3213-E | `d65_itu` |
+| `smpte432` | 12 | SMPTE EG 432-1 / Display P3 | `d65` |
+| `ebu3213` | 22 | EBU Tech. 3213-E | `d65` |
+| `prophoto` | — | ISO 22028-2 / ROMM RGB | `d50` |
 
-Note: `bt709` and `srgb` share the same CICP code and nominal chromaticity coordinates, but differ in their authoritative definition. `srgb` is defined by the IEC 61966-2-1 RGB↔XYZ matrix, from which the white point `d65_srgb` is derived. `bt709` is defined by chromaticity coordinates with white point `d65_itu`. For most workflows the difference is negligible, but precision-sensitive applications should use the appropriate identifier.
+Note: `srgb` is a convenience alias for `bt709`. Both identifiers refer to the same color space defined by chromaticity coordinates with white point `d65` (0.3127, 0.3290). Implementations must treat them identically.
 
-### Chromaticity Coordinates
+### Chromaticity Coordinates (Authoritative)
+
+All D65 color spaces use white point chromaticity (0.3127, 0.3290) as defined by their respective specifications. Matrices are derived from these chromaticity coordinates.
 
 | Identifier | Red x | Red y | Green x | Green y | Blue x | Blue y |
 |------------|-------|-------|---------|---------|--------|--------|
 | `bt709` | 0.640 | 0.330 | 0.300 | 0.600 | 0.150 | 0.060 |
-| `srgb` | 0.640 | 0.330 | 0.300 | 0.600 | 0.150 | 0.060 |
 | `bt470m` | 0.670 | 0.330 | 0.210 | 0.710 | 0.140 | 0.080 |
 | `bt470bg` | 0.640 | 0.330 | 0.290 | 0.600 | 0.150 | 0.060 |
 | `bt601` | 0.630 | 0.340 | 0.310 | 0.595 | 0.155 | 0.070 |
@@ -138,8 +140,7 @@ Note: `bt709` and `srgb` share the same CICP code and nominal chromaticity coord
 | `smpte431` | 0.680 | 0.320 | 0.265 | 0.690 | 0.150 | 0.060 |
 | `smpte432` | 0.680 | 0.320 | 0.265 | 0.690 | 0.150 | 0.060 |
 | `ebu3213` | 0.630 | 0.340 | 0.295 | 0.605 | 0.155 | 0.077 |
-
-Note: For `srgb`, the chromaticity coordinates are nominal. The RGB↔XYZ matrix defined in IEC 61966-2-1 is authoritative.
+| `prophoto` | 0.7347 | 0.2653 | 0.1596 | 0.8404 | 0.0366 | 0.0001 |
 
 ---
 
@@ -154,6 +155,7 @@ Transfer characteristics specify the opto-electronic transfer function applied t
 | `unspecified` | 2 | Unspecified (image-referred) |
 | `linear` | 8 | Linear (no transfer function) |
 | `srgb` | 13 | IEC 61966-2-1 sRGB |
+| `prophoto` | — | ISO 22028-2 ROMM RGB |
 
 ### Transfer Functions
 
@@ -183,61 +185,73 @@ else:
     linear = ((srgb + 0.055) / 1.055)^2.4
 ```
 
-Note: Storing nonlinear values is discouraged for processing pipelines. The `srgb` transfer is provided for final output compatibility.
+#### prophoto
+
+The ROMM RGB piecewise transfer function (ISO 22028-2).
+
+**Linear to ProPhoto:**
+
+```
+Et = 1/512  (≈0.001953)
+
+if linear < Et:
+    encoded = 16 × linear
+else:
+    encoded = linear^(1/1.8)
+```
+
+**ProPhoto to linear:**
+
+```
+if encoded < 16 × Et:
+    linear = encoded / 16
+else:
+    linear = encoded^1.8
+```
+
+Note: Many implementations approximate this as a pure γ=1.8 power function, which is adequate for most purposes but technically incorrect per ISO 22028-2.
 
 #### unspecified
 
-The `unspecified` value indicates that the color space is unknown or does not correspond to a defined standard. This allows explicit declaration of uncertainty while still requiring the field.
+The `unspecified` value indicates that the transfer function is unknown or does not correspond to a defined standard.
 
 **Semantics:**
 
-- `unspecified` primaries: The RGB primaries are unknown. Implementations should treat the data as device-dependent RGB. For display purposes, assuming sRGB-like primaries is reasonable.
-- `unspecified` transfer: The transfer function is unknown. Implementations should treat the data as image-referred (neither linear light nor a specific gamma). For display purposes, assuming sRGB-like transfer is reasonable.
+- The transfer function is unknown. Implementations should treat the data as image-referred (neither linear light nor a specific gamma).
+- For display purposes, assuming sRGB-like transfer is reasonable.
 
 **Recommendations:**
 
 - Implementations may warn when reading files with `unspecified` values
-- Producers should document the actual color space when known
-- `unspecified` should not be used as a default; prefer explicit color space identification
-- Processing pipelines should avoid converting `unspecified` data to other color spaces, as the conversion would be mathematically undefined
+- Producers should document the actual transfer function when known
+- `unspecified` should not be used as a default; prefer explicit identification
+- Processing pipelines should avoid mathematical operations that assume a specific transfer function
+
+Note: Storing nonlinear values is discouraged for processing pipelines. The `srgb` and `prophoto` transfers are provided for final output compatibility.
 
 ---
 
 ## White Points
 
-When `white_point` is omitted, the native white point of the specified primaries is used. The `white_point` field allows overriding this default or specifying the white point precisely.
+When `white_point` is omitted, the native white point of the specified primaries is used. The `white_point` field allows overriding this default.
 
 ### White Point Identifiers
 
-| Identifier | x | y | Source |
-|------------|---------------------|---------------------|--------|
-| `d65_itu` | 0.3127 | 0.329 | ITU-R BT.709/2020/2100 |
-| `d65_cie` | 0.31272 | 0.32903 | CIE 15:2004 |
-| `d65_srgb` | 0.31271590722158249 | 0.32900148050666228 | Derived from IEC 61966-2-1 matrix |
-| `d50_icc` | 0.3457 | 0.3585 | ICC Profile Connection Space |
-| `d50_cie` | 0.34570 | 0.35850 | CIE 15:2004 |
-| `c_cie` | 0.31006 | 0.31616 | CIE 15:2004 |
-| `c_fcc` | 0.310 | 0.316 | FCC (NTSC 1953) |
-| `dci` | 0.314 | 0.351 | SMPTE RP 431-2 |
-| `e` | 0.33333 | 0.33333 | CIE equal-energy |
+White points for D65 and D50 color spaces are defined by the standards that use them:
 
-### Derived XYZ Values
+| Identifier | Definition | Chromaticity (x, y) | XYZ (Y=1) |
+|------------|------------|---------------------|-----------|
+| `d65` | ITU-R BT.709 / IEC 61966-2-1 | 0.3127, 0.3290 | 0.9504559, 1.0, 1.0890578 |
+| `d50` | ICC.1 / ISO 22028-2 | (derived) | 0.9642, 1.0, 0.8249 |
+| `c` | FCC (NTSC 1953) | 0.310, 0.316 | 0.9810127, 1.0, 1.1835443 |
+| `dci` | SMPTE RP 431-2 | 0.314, 0.351 | 0.8945869, 1.0, 0.9544160 |
+| `e` | CIE equal-energy | 1/3, 1/3 | 1.0, 1.0, 1.0 |
 
-For implementations requiring XYZ tristimulus values (normalized to Y=1):
+**Notes:**
 
-| Identifier | X | Y | Z |
-|------------|---------------------|---------|---------------------|
-| `d65_itu` | 0.95045592705167159 | 1.0 | 1.08905775075987843 |
-| `d65_cie` | 0.95043005197094488 | 1.0 | 1.08880649180925748 |
-| `d65_srgb` | 0.9505 | 1.0 | 1.089 |
-| `d50_icc` | 0.96429567642956771 | 1.0 | 0.82510460251046025 |
-| `d50_cie` | 0.96421566878980891 | 1.0 | 0.82519476628141527 |
-| `c_cie` | 0.98103604395604393 | 1.0 | 1.18354120879120880 |
-| `c_fcc` | 0.98101265822784811 | 1.0 | 1.18354430379746833 |
-| `dci` | 0.89458689458689453 | 1.0 | 0.95441595441595439 |
-| `e` | 1.0 | 1.0 | 1.0 |
-
-Note: `d65_itu` and `d65_cie` differ slightly due to rounding in the chromaticity coordinates. `d65_srgb` is derived from the IEC 61966-2-1 matrix and has exact decimal values.
+- `d65` chromaticity (0.3127, 0.3290) is authoritative. The XYZ values are derived from this chromaticity.
+- `d50` XYZ (0.9642, 1.0, 0.8249) is authoritative as defined by ICC.1 and ISO 22028-2. The chromaticity (approximately 0.3457, 0.3585) is derived from these XYZ values.
+- For CIE colorimetric applications requiring the 5-digit D65 (0.31272, 0.32903) or D50 (0.34567, 0.35850), convert through XYZ with appropriate precision.
 
 ### Usage
 
@@ -280,27 +294,11 @@ This adaptation matrix can be precomposed with RGB↔XYZ matrices for direct RGB
 
 For RGB primaries, the conversion to XYZ is derived from the chromaticity coordinates and white point. The following matrices are provided for common configurations.
 
-#### srgb (IEC 61966-2-1, authoritative)
+All matrices are derived from the authoritative chromaticity coordinates specified in the Color Primaries section, using the native white point for each color space.
 
-```
-RGB → XYZ:
+#### bt709 / srgb (D65)
 
-| X |   | 0.4124  0.3576  0.1805 |   | R |
-| Y | = | 0.2126  0.7152  0.0722 | × | G |
-| Z |   | 0.0193  0.1192  0.9505 |   | B |
-```
-
-```
-XYZ → RGB:
-
-| R |   |  3.2406255 -1.5372080 -0.4986286 |   | X |
-| G | = | -0.9689307  1.8757561  0.0415175 | × | Y |
-| B |   |  0.0557101 -0.2040211  1.0569959 |   | Z |
-```
-
-Note: These matrices are the authoritative definition of the sRGB color space. The white point `d65_srgb` is derived from the matrix row sums.
-
-#### bt709 with d65_itu (derived from chromaticities)
+Derived from primaries (0.640, 0.330), (0.300, 0.600), (0.150, 0.060) and white point (0.3127, 0.3290).
 
 ```
 RGB → XYZ:
@@ -318,7 +316,23 @@ XYZ → RGB:
 | B |   |  0.0556301 -0.2039770  1.0569715 |   | Z |
 ```
 
-#### smpte432 (Display P3) with d65_itu
+**Truncated form (per IEC 61966-2-1):**
+
+For compatibility with the 4-decimal matrices published in IEC 61966-2-1:
+
+```
+RGB → XYZ:
+
+| X |   | 0.4124  0.3576  0.1805 |   | R |
+| Y | = | 0.2126  0.7152  0.0722 | × | G |
+| Z |   | 0.0193  0.1192  0.9505 |   | B |
+```
+
+Note: The truncated matrices are adequate for 8-bit workflows. For higher bit depths, use the full-precision matrices above.
+
+#### smpte432 (Display P3, D65)
+
+Derived from primaries (0.680, 0.320), (0.265, 0.690), (0.150, 0.060) and white point (0.3127, 0.3290).
 
 ```
 RGB → XYZ:
@@ -336,7 +350,9 @@ XYZ → RGB:
 | B |   |  0.0358458 -0.0761724  0.9568845 |   | Z |
 ```
 
-#### bt2020 with d65_itu
+#### bt2020 (D65)
+
+Derived from primaries (0.708, 0.292), (0.170, 0.797), (0.131, 0.046) and white point (0.3127, 0.3290).
 
 ```
 RGB → XYZ:
@@ -352,6 +368,18 @@ XYZ → RGB:
 | R |   |  1.7166512 -0.3556708 -0.2533663 |   | X |
 | G | = | -0.6666844  1.6164812  0.0157685 | × | Y |
 | B |   |  0.0176399 -0.0427706  0.9421031 |   | Z |
+```
+
+#### prophoto (D50)
+
+Per ISO 22028-2, the white point is defined as XYZ (0.9642, 1.0, 0.8249).
+
+```
+XYZ (D50) → RGB:
+
+| R |   |  1.3460  -0.2556  -0.0511 |   | X |
+| G | = | -0.5446   1.5082   0.0205 | × | Y |
+| B |   |  0.0000   0.0000   1.2123 |   | Z |
 ```
 
 ### XYZ Color Space
@@ -376,17 +404,11 @@ These can be precomposed into a single 3×3 matrix.
 
 ### Different White Points
 
-When white points differ, chromatic adaptation is required:
+When white points differ (e.g., D65 to D50), chromatic adaptation is required:
 
 ```
 RGB_source → XYZ_source → adapt(Ws → Wd) → XYZ_dest → RGB_dest
 ```
-
-### Bypassing Adaptation
-
-For workflows where white point precision is not critical, implementations may treat `d65_itu`, `d65_cie`, and `d65_srgb` as equivalent and skip adaptation. This introduces error on the order of 0.00002 in chromaticity.
-
-To explicitly request this behavior, set `white_point` to the same value on both source and destination, which forces the matrices to use a common white point.
 
 ---
 
@@ -439,13 +461,13 @@ metadata = {
 }
 ```
 
-### BT.709 Broadcast (distinct from sRGB)
+### ProPhoto RGB
 
 ```python
 metadata = {
     "format": "sfi",
     "version": "1.0",
-    "primaries": "bt709",
+    "primaries": "prophoto",
     "transfer": "linear",
     "channels": "RGB",
     "dimension_order": "HWC",
@@ -462,7 +484,7 @@ metadata = {
     "transfer": "linear",
     "channels": "RGB",  # XYZ stored as 3 channels
     "dimension_order": "HWC",
-    "white_point": "d65_cie",  # Required for xyz primaries
+    "white_point": "d65",  # Required for xyz primaries
 }
 ```
 
@@ -484,6 +506,10 @@ with safe_open("output.safetensors", framework="pt") as f:
         image = image.permute(1, 2, 0)  # Convert to HWC
     
     primaries = metadata.get("primaries")
+    # Normalize srgb alias to bt709
+    if primaries == "srgb":
+        primaries = "bt709"
+    
     transfer = metadata.get("transfer")
     white_point = metadata.get("white_point")  # None if using default
     
@@ -521,8 +547,8 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 1 (Minimal):**
 - Read and write `F32` tensors
-- Support `unspecified` (assume srgb) and `srgb` primaries
-- Support `unspecified` (assume srgb), `linear`, and `srgb` transfer
+- Support `unspecified`, `bt709`, and `srgb` primaries (treating `srgb` as alias for `bt709`)
+- Support `unspecified`, `linear`, and `srgb` transfer
 - Support `RGB` channels
 - Support `HWC` dimension order
 
@@ -534,7 +560,8 @@ with safe_open("output.safetensors", framework="pt") as f:
 
 **Level 3 (Enhanced):**
 - All Level 2 requirements
-- Support `bt2020`, `smpte432`, and `xyz` primaries
+- Support `bt2020`, `smpte432`, `prophoto`, and `xyz` primaries
+- Support `prophoto` transfer
 - Support all white point identifiers
 - Implement Bradford chromatic adaptation
 
@@ -563,7 +590,7 @@ Implementations should warn but may accept files where:
 
 Future versions may add:
 
-- Additional primaries (ACEScg, ProPhoto RGB, etc.)
+- Additional primaries (ACEScg, Adobe RGB, etc.)
 - Additional transfer functions (PQ, HLG, etc.)
 - Additional white points (D55, D75, illuminant A, etc.)
 - Additional channel configurations (grayscale, arbitrary channel counts)
@@ -585,16 +612,15 @@ The compressed variant of this file format is simply `.safetensors.gz`.
 
 - Safetensors format: https://huggingface.co/docs/safetensors
 - ITU-T H.273: Coding-independent code points for video signal type identification
-- IEC 61966-2-1:1999 (sRGB)
-- ITU-R BT.709-6 (Rec.709)
-- ITU-R BT.470-6 (historical)
-- ITU-R BT.601-7 (Rec.601)
-- ITU-R BT.2020-2 (Rec.2020)
-- ITU-R BT.2100-2 (HDR)
-- SMPTE ST 428-1 (D-Cinema XYZ)
-- SMPTE RP 431-2 (DCI-P3)
-- SMPTE EG 432-1 (Display P3)
-- SMPTE 240M (historical)
-- EBU Tech. 3213-E
-- CIE 15:2004 (Colorimetry)
-- ICC.1:2022 (Color Management)
+- IEC 61966-2-1:1999: Multimedia systems and equipment — Colour measurement and management — Part 2-1: Default RGB colour space — sRGB
+- ITU-R BT.709-6: Parameter values for the HDTV standards for production and international programme exchange
+- ITU-R BT.470-6: Conventional analogue television systems
+- ITU-R BT.601-7: Studio encoding parameters of digital television for standard 4:3 and wide screen 16:9 aspect ratios
+- ITU-R BT.2020-2: Parameter values for ultra-high definition television systems for production and international programme exchange
+- ITU-R BT.2100-2: Image parameter values for high dynamic range television for use in production and international programme exchange
+- ISO 22028-2:2013: Photography and graphic technology — Extended colour encodings for digital image storage, manipulation and interchange — Part 2: Reference output medium metric RGB colour image encoding (ROMM RGB)
+- ICC.1:2022-05: Image technology colour management — Architecture, profile format and data structure
+- SMPTE ST 428-1: D-Cinema Distribution Master — Image Characteristics
+- SMPTE RP 431-2: D-Cinema Quality — Reference Projector and Environment
+- SMPTE EG 432-1: Digital Source Processing — Color Processing for D-Cinema
+- CIE 15:2004: Colorimetry (3rd Edition)
