@@ -411,29 +411,55 @@ fn main() -> io::Result<()> {
     let prophoto_threshold = primary::prophoto_transfer::THRESHOLD_NUMERATOR as f64
         / primary::prophoto_transfer::THRESHOLD_DENOMINATOR as f64;
 
-    // sRGB transfer function: derive THRESHOLD and LINEAR_SLOPE from GAMMA and OFFSET
-    // to ensure continuity of both value AND first derivative at the junction.
+    // sRGB transfer function: derive THRESHOLD from value continuity.
     //
     // The curve is: f(x) = (1+a) * x^(1/γ) - a  where a = OFFSET, γ = GAMMA
-    // The linear segment is: g(x) = K * x  where K = LINEAR_SLOPE
+    // The linear segment is: g(x) = K * x  where K = LINEAR_SLOPE (authoritative = 12.92)
     //
-    // For continuity at threshold T:
-    //   Value match:  K*T = (1+a)*T^(1/γ) - a
-    //   Slope match:  K = (1+a)/γ * T^(1/γ - 1)
+    // For value continuity at threshold T:
+    //   K*T = (1+a)*T^(1/γ) - a
     //
-    // Solving: T = [a / ((1+a) * (1 - 1/γ))]^γ
-    //          K = (1+a)/γ * T^(1/γ - 1)
+    // Rearranging: (1+a)*T^(1/γ) - K*T - a = 0
+    // Solve using Newton's method.
+    //
+    // This keeps K=12.92 exactly (matching most implementations) and accepts
+    // a deliberate slope discontinuity at the junction. This is bit-identical to
+    // the spec at u16 precision.
     let srgb_gamma = primary::srgb_transfer::GAMMA;
     let srgb_offset = primary::srgb_transfer::OFFSET;
     let srgb_scale = 1.0 + srgb_offset; // = 1.055
+    let srgb_linear_slope = primary::srgb_transfer::LINEAR_SLOPE; // = 12.92 (authoritative)
 
-    // Derive threshold: T = [a / ((1+a) * (1 - 1/γ))]^γ
-    let one_minus_inv_gamma = 1.0 - 1.0 / srgb_gamma; // = 7/12 when γ=2.4
-    let t_to_inv_gamma = srgb_offset / (srgb_scale * one_minus_inv_gamma);
-    let srgb_threshold = t_to_inv_gamma.powf(srgb_gamma);
+    // Solve for threshold T where K*T = (1+a)*T^(1/γ) - a
+    // Rearranged: f(T) = (1+a)*T^(1/γ) - K*T - a = 0
+    //
+    // This equation has two roots. The one we want is near 0.00313.
+    // Starting Newton's method at 0.00312 (in the positive region of f)
+    // ensures convergence to the correct root.
+    let inv_gamma = 1.0 / srgb_gamma;
+    let mut t = 0.00312_f64; // Initial guess just below root, where f(t) < 0
+    for _ in 0..50 {
+        let t_pow = t.powf(inv_gamma);
+        let f = srgb_scale * t_pow - srgb_linear_slope * t - srgb_offset;
+        let f_prime = srgb_scale * inv_gamma * t.powf(inv_gamma - 1.0) - srgb_linear_slope;
+        let delta = f / f_prime;
+        t = t - delta;
+        if delta.abs() < 1e-16 {
+            break;
+        }
+    }
+    let srgb_threshold = t;
 
-    // Derive linear slope: K = (1+a)/γ * T^(1/γ - 1)
-    let srgb_linear_slope = srgb_scale / srgb_gamma * srgb_threshold.powf(1.0 / srgb_gamma - 1.0);
+    // Verify: K*T should equal (1+a)*T^(1/γ) - a
+    let linear_value = srgb_linear_slope * srgb_threshold;
+    let curve_value = srgb_scale * srgb_threshold.powf(inv_gamma) - srgb_offset;
+    assert!(
+        (linear_value - curve_value).abs() < 1e-12,
+        "sRGB threshold derivation failed: linear={} curve={} diff={}",
+        linear_value,
+        curve_value,
+        (linear_value - curve_value).abs()
+    );
 
     // Decode threshold is simply K * T (the y-value at the junction)
     let srgb_decode_threshold = srgb_linear_slope * srgb_threshold;
@@ -738,17 +764,18 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "/// sRGB encode threshold (linear space).")?;
-    writeln!(out, "/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.")?;
-    writeln!(out, "/// Spec value is 0.0031308; this derived value rounds to ~0.00304.")?;
+    writeln!(out, "/// Derived from value continuity: K*T = (1+a)*T^(1/γ) - a")?;
+    writeln!(out, "/// With K=12.92 (authoritative), γ=2.4, a=0.055.")?;
+    writeln!(out, "/// Spec value is 0.0031308; this derived value is ~0.00313067.")?;
     writeln!(out, "pub const SRGB_THRESHOLD: f64 = {};", fmt_f64(srgb_threshold))?;
     writeln!(out)?;
-    writeln!(out, "/// sRGB linear segment slope.")?;
-    writeln!(out, "/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.")?;
-    writeln!(out, "/// Spec value is 12.92; this derived value is ~12.9232.")?;
+    writeln!(out, "/// sRGB linear segment slope (authoritative).")?;
+    writeln!(out, "/// The spec value 12.92 is treated as authoritative.")?;
     writeln!(out, "pub const SRGB_LINEAR_SLOPE: f64 = {};", fmt_f64(srgb_linear_slope))?;
     writeln!(out)?;
     writeln!(out, "/// sRGB decode threshold (encoded space).")?;
-    writeln!(out, "/// = SRGB_THRESHOLD * SRGB_LINEAR_SLOPE (the y-value at the junction).")?;
+    writeln!(out, "/// = SRGB_LINEAR_SLOPE * SRGB_THRESHOLD (the y-value at the junction).")?;
+    writeln!(out, "/// Spec value is 0.04045; this derived value is ~0.04044824.")?;
     writeln!(out, "pub const SRGB_DECODE_THRESHOLD: f64 = {};", fmt_f64(srgb_decode_threshold))?;
     writeln!(out)?;
     writeln!(out, "/// Adobe RGB gamma: 563/256")?;
@@ -989,11 +1016,11 @@ fn main() -> io::Result<()> {
     writeln!(out, "    // TRANSFER FUNCTION CONSTANTS")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// sRGB encode threshold (linear space) - derived for continuous value AND slope")?;
+    writeln!(out, "    /// sRGB encode threshold (linear space) - derived from value continuity")?;
     writeln!(out, "    pub const SRGB_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_threshold))?;
     writeln!(out, "    /// sRGB decode threshold (encoded space)")?;
     writeln!(out, "    pub const SRGB_DECODE_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_decode_threshold))?;
-    writeln!(out, "    /// sRGB linear slope - derived for continuous value AND slope")?;
+    writeln!(out, "    /// sRGB linear slope (authoritative)")?;
     writeln!(out, "    pub const SRGB_LINEAR_SLOPE: f32 = {} as f32;", fmt_f64(srgb_linear_slope))?;
     writeln!(out, "    pub const SRGB_GAMMA: f32 = 2.4;")?;
     writeln!(out, "    pub const SRGB_SCALE: f32 = 1.055;")?;

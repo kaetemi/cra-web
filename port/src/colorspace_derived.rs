@@ -391,18 +391,19 @@ pub mod cielab {
 // =============================================================================
 
 /// sRGB encode threshold (linear space).
-/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.
-/// Spec value is 0.0031308; this derived value rounds to ~0.00304.
-pub const SRGB_THRESHOLD: f64 = 0.00303993463977843;
+/// Derived from value continuity: K*T = (1+a)*T^(1/γ) - a
+/// With K=12.92 (authoritative), γ=2.4, a=0.055.
+/// Spec value is 0.0031308; this derived value is ~0.00313067.
+pub const SRGB_THRESHOLD: f64 = 0.00313066844250054;
 
-/// sRGB linear segment slope.
-/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.
-/// Spec value is 12.92; this derived value is ~12.9232.
-pub const SRGB_LINEAR_SLOPE: f64 = 12.92321018078785;
+/// sRGB linear segment slope (authoritative).
+/// The spec value 12.92 is treated as authoritative.
+pub const SRGB_LINEAR_SLOPE: f64 = 12.92;
 
 /// sRGB decode threshold (encoded space).
-/// = SRGB_THRESHOLD * SRGB_LINEAR_SLOPE (the y-value at the junction).
-pub const SRGB_DECODE_THRESHOLD: f64 = 0.03928571428571428;
+/// = SRGB_LINEAR_SLOPE * SRGB_THRESHOLD (the y-value at the junction).
+/// Spec value is 0.04045; this derived value is ~0.04044824.
+pub const SRGB_DECODE_THRESHOLD: f64 = 0.04044823627710703;
 
 /// Adobe RGB gamma: 563/256
 pub const ADOBE_RGB_GAMMA: f64 = 2.19921875;
@@ -704,12 +705,12 @@ pub mod f32 {
     // TRANSFER FUNCTION CONSTANTS
     // -------------------------------------------------------------------------
 
-    /// sRGB encode threshold (linear space) - derived for continuous value AND slope
-    pub const SRGB_THRESHOLD: f32 = 0.00303993463977843 as f32;
+    /// sRGB encode threshold (linear space) - derived from value continuity
+    pub const SRGB_THRESHOLD: f32 = 0.00313066844250054 as f32;
     /// sRGB decode threshold (encoded space)
-    pub const SRGB_DECODE_THRESHOLD: f32 = 0.03928571428571428 as f32;
-    /// sRGB linear slope - derived for continuous value AND slope
-    pub const SRGB_LINEAR_SLOPE: f32 = 12.92321018078785 as f32;
+    pub const SRGB_DECODE_THRESHOLD: f32 = 0.04044823627710703 as f32;
+    /// sRGB linear slope (authoritative)
+    pub const SRGB_LINEAR_SLOPE: f32 = 12.92 as f32;
     pub const SRGB_GAMMA: f32 = 2.4;
     pub const SRGB_SCALE: f32 = 1.055;
     pub const SRGB_OFFSET: f32 = 0.055;

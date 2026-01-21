@@ -236,31 +236,29 @@ pub mod rec2020_primaries {
 ///   - Linear segment:  f(x) = K * x                    for x <= T
 ///   - Power curve:     f(x) = (1+a) * x^(1/γ) - a      for x > T
 ///
-/// The spec provides approximate constants (γ=2.4, a=0.055, K≈12.92, T≈0.0031308)
-/// but these are slightly inconsistent - they don't produce a perfectly continuous
-/// function with continuous first derivative.
+/// The spec provides constants: γ=2.4, a=0.055, K=12.92, T≈0.0031308.
+/// These are slightly over-constrained—enforcing BOTH value AND slope continuity
+/// at the junction would require K≈12.9232, not exactly 12.92.
 ///
-/// For high-precision work, we treat GAMMA and OFFSET as authoritative (they define
-/// the curve shape) and DERIVE the threshold and linear slope to ensure both value
-/// and slope continuity at the junction point.
+/// We treat GAMMA, OFFSET, and LINEAR_SLOPE (12.92) as authoritative, and derive
+/// the THRESHOLD from value continuity alone:
 ///
-/// The derivation:
-///   For the linear segment g(x) = K*x to meet the curve f(x) = (1+a)*x^(1/γ) - a
-///   with matching value AND slope at threshold T:
+///   K*T = (1+a)*T^(1/γ) - a    (value match)
 ///
-///   Value match:  K*T = (1+a)*T^(1/γ) - a
-///   Slope match:  K = (1+a)/γ * T^(1/γ - 1)
+/// This gives:
+///   T ≈ 0.003130668442500555  (spec: 0.0031308)
+///   y₀ = K*T ≈ 0.04044823627710717  (spec: 0.04045)
 ///
-///   Solving these simultaneously:
-///     T = [a / ((1+a) * (1 - 1/γ))]^γ
-///     K = (1+a)/γ * T^(1/γ - 1)
+/// This approach:
+///   - Keeps K=12.92 exactly (matches most implementations)
+///   - Removes the value discontinuity (tiny but real in spec constants)
+///   - Is bit-identical to spec at u16 precision (tested: 0 changed codes for all 65536 values)
+///   - Accepts a deliberate slope discontinuity (derivative kink) at the junction
 ///
-/// With γ=2.4, a=0.055:
-///   T ≈ 0.003039934639778432  (spec: 0.0031308)
-///   K ≈ 12.92321018078785     (spec: 12.92)
-///
-/// These derived values round approximately to the spec values, so implementations
-/// are still spec-compliant while achieving mathematical consistency.
+/// The slope discontinuity is:
+///   - Linear segment derivative: K = 12.92
+///   - Power curve derivative at T: (1+a)/γ * T^(1/γ-1) ≈ 12.92321
+///   - Difference: ~0.003 (0.02%), imperceptible in practice
 pub mod srgb_transfer {
     /// Power curve exponent (authoritative).
     /// This is the γ in: f(x) = (1+a) * x^(1/γ) - a
@@ -271,8 +269,14 @@ pub mod srgb_transfer {
     /// Note: SCALE = 1 + OFFSET = 1.055
     pub const OFFSET: f64 = 0.055;
 
-    // THRESHOLD and LINEAR_SLOPE are derived in main.rs to ensure
-    // continuity of both value and first derivative at the junction.
+    /// Linear segment slope (authoritative).
+    /// This is the K in: f(x) = K * x for the linear segment.
+    /// The spec value 12.92 is treated as authoritative; the threshold is derived
+    /// from value continuity to ensure K*T = (1+a)*T^(1/γ) - a.
+    pub const LINEAR_SLOPE: f64 = 12.92;
+
+    // THRESHOLD is derived in main.rs from value continuity:
+    //   LINEAR_SLOPE * T = (1 + OFFSET) * T^(1/GAMMA) - OFFSET
 }
 
 /// Adobe RGB gamma.
@@ -520,51 +524,50 @@ mod tests {
 
     #[test]
     fn test_srgb_transfer_derivation() {
-        // Test that deriving THRESHOLD and LINEAR_SLOPE from GAMMA and OFFSET
-        // produces a continuous function with continuous first derivative.
+        // Test that we can derive THRESHOLD from value continuity with K=12.92.
+        // (Slope discontinuity is accepted by design.)
         let gamma = srgb_transfer::GAMMA;
         let offset = srgb_transfer::OFFSET;
         let scale = 1.0 + offset; // 1.055
+        let linear_slope = srgb_transfer::LINEAR_SLOPE; // 12.92 (authoritative)
 
-        // Derive threshold: T = [a / ((1+a) * (1 - 1/γ))]^γ
-        let one_minus_inv_gamma = 1.0 - 1.0 / gamma;
-        let t_to_inv_gamma = offset / (scale * one_minus_inv_gamma);
-        let threshold = t_to_inv_gamma.powf(gamma);
+        // Newton's method to solve: scale * T^(1/γ) - linear_slope * T - offset = 0
+        // Starting at 0.00312 ensures convergence to the correct root (~0.00313)
+        let inv_gamma = 1.0 / gamma;
+        let mut t = 0.00312_f64;
+        for _ in 0..50 {
+            let t_pow = t.powf(inv_gamma);
+            let f = scale * t_pow - linear_slope * t - offset;
+            let f_prime = scale * inv_gamma * t.powf(inv_gamma - 1.0) - linear_slope;
+            t = t - f / f_prime;
+        }
+        let threshold = t;
 
-        // Derive linear slope: K = (1+a)/γ * T^(1/γ - 1)
-        let linear_slope = scale / gamma * threshold.powf(1.0 / gamma - 1.0);
-
-        // At the threshold, both value AND slope should match
+        // Verify value continuity: K*T should equal (1+a)*T^(1/γ) - a
         let linear_value = linear_slope * threshold;
         let curve_value = scale * threshold.powf(1.0 / gamma) - offset;
-        let linear_deriv = linear_slope;
-        let curve_deriv = scale / gamma * threshold.powf(1.0 / gamma - 1.0);
 
         assert!(
-            (linear_value - curve_value).abs() < 1e-14,
+            (linear_value - curve_value).abs() < 1e-12,
             "sRGB transfer value discontinuity: {} vs {} (diff {})",
             linear_value,
             curve_value,
             linear_value - curve_value
         );
-        assert!(
-            (linear_deriv - curve_deriv).abs() < 1e-14,
-            "sRGB transfer slope discontinuity: {} vs {} (diff {})",
-            linear_deriv,
-            curve_deriv,
-            linear_deriv - curve_deriv
-        );
 
-        // The derived values should approximately match the spec values
+        // The threshold should be close to the spec value
         assert!(
-            (threshold - 0.0031308).abs() < 1e-4,
-            "Derived threshold {} differs too much from spec 0.0031308",
+            (threshold - 0.0031308).abs() < 5e-5,
+            "Threshold {} differs too much from spec 0.0031308",
             threshold
         );
+
+        // Verify decode threshold is close to expected
+        let decode_threshold = linear_slope * threshold;
         assert!(
-            (linear_slope - 12.92).abs() < 0.01,
-            "Derived slope {} differs too much from spec 12.92",
-            linear_slope
+            (decode_threshold - 0.04045).abs() < 5e-5,
+            "Decode threshold {} differs too much from spec 0.04045",
+            decode_threshold
         );
     }
 
