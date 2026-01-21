@@ -214,15 +214,24 @@ fn compute_ycbcr_matrices(kr: f64, kg: f64, kb: f64) -> (Mat3, Mat3) {
 /// Otherwise use full precision for derived values.
 fn fmt_f64(v: f64) -> String {
     // Try progressively shorter decimal representations
-    for precision in 1..=10 {
+    for precision in 1..=17 {
         let formatted = format!("{:.prec$}", v, prec = precision);
         let parsed: f64 = formatted.parse().unwrap();
-        // If parsing the short representation gives us back the same value, use it
-        if parsed == v {
-            return formatted;
+
+        if precision <= 6 {
+            // For short representations, allow epsilon tolerance to clean up floating point noise
+            let epsilon = 1e-14 * v.abs().max(1.0);
+            if (parsed - v).abs() < epsilon {
+                return formatted;
+            }
+        } else {
+            // For higher precision, require exact round-trip to preserve actual precision
+            if parsed == v {
+                return formatted;
+            }
         }
     }
-    // Fall back to full precision for truly derived values
+    // Fall back to full precision
     format!("{:.17}", v)
 }
 
@@ -756,7 +765,7 @@ fn main() -> io::Result<()> {
     let jpeg_kg = (ntsc_1953_to_xyz[1][1] * 1000.0).round() / 1000.0;
     let jpeg_kb = (ntsc_1953_to_xyz[1][2] * 1000.0).round() / 1000.0;
 
-    // Derived Cb/Cr coefficients
+    // Derived Cb/Cr coefficients (exact math)
     let jpeg_cb_scale = 2.0 * (1.0 - jpeg_kb); // 2 * 0.886 = 1.772
     let jpeg_cr_scale = 2.0 * (1.0 - jpeg_kr); // 2 * 0.701 = 1.402
 
