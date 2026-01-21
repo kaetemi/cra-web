@@ -431,15 +431,17 @@ pub const YCBCR_TO_RGB: [[f64; 3]; 3] = [
 ];
 
 // =============================================================================
-// JPEG / ITU-T T.871 Y'CbCr (LEGACY COEFFICIENTS)
+// BT.601 / ITU-T T.871 Y'CbCr ENCODING
 // =============================================================================
 
-/// JPEG Y'CbCr luma coefficients (ITU-T T.871).
+/// BT.601 Y'CbCr encoding coefficients.
 ///
-/// Derived by rounding the NTSC 1953 / BT.470 matrix Y row to 3 decimal places.
-/// Historically from NTSC 1953, but commonly applied to sRGB data
-/// (which is technically a color space mismatch).
-pub mod jpeg_ycbcr {
+/// Used by BT.601 and JPEG (ITU-T T.871). This is an encoding, not a color space:
+/// it's applied to whatever RGB data you have, regardless of primaries/white point.
+///
+/// Coefficients derived by rounding the NTSC 1953 / BT.470 matrix Y row to 3 decimal places.
+/// Historically from NTSC 1953 with Illuminant C, but commonly applied to sRGB/BT.709 data.
+pub mod bt601_ycbcr {
     /// Kr coefficient (NTSC 1953 Y row rounded to 3 decimal places)
     pub const KR: f64 = 0.299;
     /// Kg coefficient (NTSC 1953 Y row rounded to 3 decimal places)
@@ -834,23 +836,23 @@ pub mod f32 {
     pub const NTSC_1953_KB: f32 = 0.11443572576047262 as f32;
 
     // -------------------------------------------------------------------------
-    // JPEG / ITU-T T.871 Y'CbCr
+    // BT.601 / ITU-T T.871 Y'CbCr ENCODING
     // -------------------------------------------------------------------------
 
-    /// JPEG Y'CbCr coefficients (ITU-T T.871) - rounded legacy values.
-    pub const JPEG_KR: f32 = 0.299 as f32;
-    pub const JPEG_KG: f32 = 0.587 as f32;
-    pub const JPEG_KB: f32 = 0.114 as f32;
-    pub const JPEG_CB_SCALE: f32 = 1.772 as f32;
-    pub const JPEG_CR_SCALE: f32 = 1.402 as f32;
+    /// BT.601 Y'CbCr encoding coefficients (also used by JPEG/ITU-T T.871).
+    pub const BT601_KR: f32 = 0.299 as f32;
+    pub const BT601_KG: f32 = 0.587 as f32;
+    pub const BT601_KB: f32 = 0.114 as f32;
+    pub const BT601_CB_SCALE: f32 = 1.772 as f32;
+    pub const BT601_CR_SCALE: f32 = 1.402 as f32;
     /// Cb row: [CB_R, CB_G, CB_B]
-    pub const JPEG_CB_R: f32 = -0.16873589164785552 as f32;
-    pub const JPEG_CB_G: f32 = -0.3312641083521444 as f32;
-    pub const JPEG_CB_B: f32 = 0.5 as f32;
+    pub const BT601_CB_R: f32 = -0.16873589164785552 as f32;
+    pub const BT601_CB_G: f32 = -0.3312641083521444 as f32;
+    pub const BT601_CB_B: f32 = 0.5 as f32;
     /// Cr row: [CR_R, CR_G, CR_B]
-    pub const JPEG_CR_R: f32 = 0.5 as f32;
-    pub const JPEG_CR_G: f32 = -0.41868758915834514 as f32;
-    pub const JPEG_CR_B: f32 = -0.08131241084165478 as f32;
+    pub const BT601_CR_R: f32 = 0.5 as f32;
+    pub const BT601_CR_G: f32 = -0.41868758915834514 as f32;
+    pub const BT601_CR_B: f32 = -0.08131241084165478 as f32;
 
     // -------------------------------------------------------------------------
     // BIT DEPTH
