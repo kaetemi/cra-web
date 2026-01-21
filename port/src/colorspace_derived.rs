@@ -384,6 +384,14 @@ pub mod cielab {
     /// Threshold in f-space for inverse: f(ε) = δ = 6/29
     /// If f > F_THRESHOLD, use cube; otherwise use linear inverse.
     pub const F_THRESHOLD: f64 = 0.20689655172413793;
+
+    /// Negative threshold: 8ε = 8(6/29)³ = 1728/24389 ≈ 0.0709
+    /// At t = -NEG_EPSILON, the linear segment meets the cube root curve.
+    pub const NEG_EPSILON: f64 = 0.07085161343228505;
+
+    /// Negative f-space threshold: -2δ = -12/29
+    /// f(-NEG_EPSILON) = -cbrt(NEG_EPSILON) = -2δ
+    pub const NEG_F_THRESHOLD: f64 = -0.41379310344827586;
 }
 
 // =============================================================================

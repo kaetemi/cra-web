@@ -394,18 +394,18 @@ fn main() -> io::Result<()> {
     let lab_offset = 4.0 / 29.0; // 4/29 = 16/116
     let lab_f_threshold = delta; // threshold in f-space for inverse
 
-    // Negative epsilon: solve KAPPA * x - cbrt(x) = OFFSET for x > 0
-    // This is where the linear segment meets cbrt on the negative side (at t = -x)
-    // Using Newton's method: g(x) = KAPPA * x - x^(1/3) - OFFSET, g'(x) = KAPPA - 1/(3*x^(2/3))
-    let mut x = 0.07_f64; // Initial guess
-    for _ in 0..20 {
-        let cbrt_x = x.cbrt();
-        let g = lab_kappa * x - cbrt_x - lab_offset;
-        let g_prime = lab_kappa - 1.0 / (3.0 * cbrt_x * cbrt_x);
-        x = x - g / g_prime;
-    }
-    let lab_neg_epsilon = x; // ~0.0709 - threshold magnitude for negative values
-    let lab_neg_f_threshold = -x.cbrt(); // f(-neg_epsilon) = cbrt(-neg_epsilon)
+    // Negative epsilon: where the linear segment meets cbrt on the negative side (at t = -x)
+    //
+    // Equation: KAPPA * x - cbrt(x) - OFFSET = 0
+    // Exact solution: x = 8 * delta^3 = 8 * EPSILON
+    //
+    // Algebraic verification with δ = 6/29:
+    //   κ·(8δ³) = (29/6)²/3 · 8 · (6/29)³ = 16/29
+    //   ∛(8δ³) = 2δ = 12/29
+    //   offset = 4/29
+    //   16/29 - 12/29 - 4/29 = 0 ✓
+    let lab_neg_epsilon = 8.0 * lab_epsilon; // = 8 * (6/29)^3 = 1728/24389
+    let lab_neg_f_threshold = -2.0 * delta;  // = -12/29
 
     // Transfer function derived constants
     let adobe_gamma = primary::adobe_rgb_transfer::GAMMA_NUMERATOR as f64
@@ -776,6 +776,14 @@ fn main() -> io::Result<()> {
     writeln!(out, "    /// Threshold in f-space for inverse: f(ε) = δ = 6/29")?;
     writeln!(out, "    /// If f > F_THRESHOLD, use cube; otherwise use linear inverse.")?;
     writeln!(out, "    pub const F_THRESHOLD: f64 = {};", fmt_f64(lab_f_threshold))?;
+    writeln!(out)?;
+    writeln!(out, "    /// Negative threshold: 8ε = 8(6/29)³ = 1728/24389 ≈ 0.0709")?;
+    writeln!(out, "    /// At t = -NEG_EPSILON, the linear segment meets the cube root curve.")?;
+    writeln!(out, "    pub const NEG_EPSILON: f64 = {};", fmt_f64(lab_neg_epsilon))?;
+    writeln!(out)?;
+    writeln!(out, "    /// Negative f-space threshold: -2δ = -12/29")?;
+    writeln!(out, "    /// f(-NEG_EPSILON) = -cbrt(NEG_EPSILON) = -2δ")?;
+    writeln!(out, "    pub const NEG_F_THRESHOLD: f64 = {};", fmt_f64(lab_neg_f_threshold))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
 
