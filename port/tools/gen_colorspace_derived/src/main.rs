@@ -213,8 +213,10 @@ fn compute_ycbcr_matrices(kr: f64, kg: f64, kb: f64) -> (Mat3, Mat3) {
 /// If the value is very close to a short decimal, use that clean representation.
 /// Otherwise use full precision for derived values.
 fn fmt_f64(v: f64) -> String {
-    // Try progressively shorter decimal representations
-    for precision in 1..=17 {
+    // Try progressively shorter decimal representations.
+    // We go up to 20 digits because some values (like our sRGB threshold) need
+    // 19 digits to round-trip exactly to the same IEEE 754 bit pattern.
+    for precision in 1..=20 {
         let formatted = format!("{:.prec$}", v, prec = precision);
         let parsed: f64 = formatted.parse().unwrap();
 
@@ -225,14 +227,14 @@ fn fmt_f64(v: f64) -> String {
                 return formatted;
             }
         } else {
-            // For higher precision, require exact round-trip to preserve actual precision
-            if parsed == v {
+            // For higher precision, require exact bit-level round-trip
+            if parsed.to_bits() == v.to_bits() {
                 return formatted;
             }
         }
     }
-    // Fall back to full precision
-    format!("{:.17}", v)
+    // Fallback (should never reach here for normal f64 values)
+    format!("{:.20}", v)
 }
 
 /// Format a 3x3 matrix as Rust code.
@@ -434,21 +436,40 @@ fn main() -> io::Result<()> {
     // Rearranged: f(T) = (1+a)*T^(1/γ) - K*T - a = 0
     //
     // This equation has two roots. The one we want is near 0.00313.
-    // Starting Newton's method at 0.00312 (in the positive region of f)
-    // ensures convergence to the correct root.
+    // Starting Newton's method at 0.00312 ensures convergence to the correct root.
     let inv_gamma = 1.0 / srgb_gamma;
-    let mut t = 0.00312_f64; // Initial guess just below root, where f(t) < 0
-    for _ in 0..50 {
+    let f = |t: f64| srgb_scale * t.powf(inv_gamma) - srgb_linear_slope * t - srgb_offset;
+
+    // Newton's method to get close to the root
+    let mut t = 0.00312_f64;
+    for _ in 0..100 {
         let t_pow = t.powf(inv_gamma);
-        let f = srgb_scale * t_pow - srgb_linear_slope * t - srgb_offset;
+        let fval = srgb_scale * t_pow - srgb_linear_slope * t - srgb_offset;
         let f_prime = srgb_scale * inv_gamma * t.powf(inv_gamma - 1.0) - srgb_linear_slope;
-        let delta = f / f_prime;
-        t = t - delta;
-        if delta.abs() < 1e-16 {
-            break;
+        t = t - fval / f_prime;
+    }
+
+    // Due to floating point, many adjacent f64 values satisfy f(t) = 0 exactly.
+    // Find all exact zeros in a range and pick the middle one for robustness.
+    let center_bits = t.to_bits() as i64;
+    let mut exact_zeros: Vec<i64> = Vec::new();
+
+    for offset in -500..=500_i64 {
+        let candidate = f64::from_bits((center_bits + offset) as u64);
+        if f(candidate) == 0.0 {
+            exact_zeros.push(center_bits + offset);
         }
     }
-    let srgb_threshold = t;
+
+    // Pick the median (middle) value
+    let srgb_threshold = if exact_zeros.is_empty() {
+        // Fallback: no exact zeros found, use Newton result
+        t
+    } else {
+        exact_zeros.sort();
+        let mid_idx = exact_zeros.len() / 2;
+        f64::from_bits(exact_zeros[mid_idx] as u64)
+    };
 
     // Verify: K*T should equal (1+a)*T^(1/γ) - a
     let linear_value = srgb_linear_slope * srgb_threshold;
