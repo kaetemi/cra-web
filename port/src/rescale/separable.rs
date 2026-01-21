@@ -5,7 +5,7 @@
 
 use crate::pixel::Pixel4;
 use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
-use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights, precompute_tent_kernel_weights};
+use super::kernels::{KernelWeights, precompute_kernel_weights, precompute_box_weights};
 
 /// Generic 1D resample for Pixel4 row using precomputed weights
 /// Uses SIMD-friendly Pixel4 scalar multiply for better vectorization
@@ -183,18 +183,6 @@ pub fn rescale_kernel_pixels(
             precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
             precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
         ),
-        RescaleMethod::TentBox => (
-            // Tent-space box pipeline as equivalent direct kernel
-            // Pass computed scale for uniform scaling support
-            precompute_tent_kernel_weights(src_width, dst_width, scale_x, RescaleMethod::Box),
-            precompute_tent_kernel_weights(src_height, dst_height, scale_y, RescaleMethod::Box),
-        ),
-        RescaleMethod::TentLanczos3 => (
-            // Tent-space lanczos3 pipeline as equivalent direct kernel
-            // Pass computed scale for uniform scaling support
-            precompute_tent_kernel_weights(src_width, dst_width, scale_x, RescaleMethod::Lanczos3),
-            precompute_tent_kernel_weights(src_height, dst_height, scale_y, RescaleMethod::Lanczos3),
-        ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),
             precompute_kernel_weights(src_height, dst_height, scale_y, filter_scale_y, radius_y, method, tent_mode),
@@ -320,18 +308,6 @@ pub fn rescale_kernel_alpha_pixels(
             // In tent mode, apply the same multiplier for box as other kernels
             precompute_box_weights(src_width, dst_width, scale_x, scale_x * multiplier_x, tent_mode),
             precompute_box_weights(src_height, dst_height, scale_y, scale_y * multiplier_y, tent_mode),
-        ),
-        RescaleMethod::TentBox => (
-            // Tent-space box pipeline as equivalent direct kernel
-            // Pass computed scale for uniform scaling support
-            precompute_tent_kernel_weights(src_width, dst_width, scale_x, RescaleMethod::Box),
-            precompute_tent_kernel_weights(src_height, dst_height, scale_y, RescaleMethod::Box),
-        ),
-        RescaleMethod::TentLanczos3 => (
-            // Tent-space lanczos3 pipeline as equivalent direct kernel
-            // Pass computed scale for uniform scaling support
-            precompute_tent_kernel_weights(src_width, dst_width, scale_x, RescaleMethod::Lanczos3),
-            precompute_tent_kernel_weights(src_height, dst_height, scale_y, RescaleMethod::Lanczos3),
         ),
         _ => (
             precompute_kernel_weights(src_width, dst_width, scale_x, filter_scale_x, radius_x, method, tent_mode),

@@ -12,7 +12,7 @@ mod bilinear;
 mod separable;
 mod scatter;
 mod ewa;
-mod tent_ewa;
+mod iterative;
 
 #[cfg(test)]
 mod tests_basic;
@@ -92,51 +92,10 @@ pub enum RescaleMethod {
     /// Like StochasticJincScatter but also normalizes by total weight received per destination.
     /// Makes brightness equivalent to gather while keeping scatter characteristics.
     StochasticJincScatterNormalized,
-    /// Tent-space Box filter pipeline
-    /// Full tent-space downscaling: box→tent expand, resample with box filter, tent→box contract.
-    /// Produces equivalent direct kernel: [-1, 7, 26, 26, 7, -1]/64 for 2× downscale.
-    /// Better quality than plain box filter due to volume-preserving tent representation.
-    TentBox,
-    /// Tent-space Lanczos3 filter pipeline
-    /// Full tent-space downscaling: box→tent expand, resample with Lanczos3, tent→box contract.
-    /// Combines tent-space's ringing-free surface with Lanczos3's sharpness.
-    TentLanczos3,
-    /// 2D Tent-space Box filter (non-separable)
-    /// Full tent-space pipeline using true 2D box integration (area overlap).
-    /// Unlike separable TentBox, this uses the exact 2D tent-space kernel.
-    /// For 2× downscale, produces 6×6 kernel: sum=4096, negative lobes at corners.
-    Tent2DBox,
-    /// 2D Tent-space EWA Lanczos3 with jinc (non-separable)
-    /// Full tent-space pipeline using EWA Lanczos3-jinc radial kernel.
-    /// Combines tent-space volume preservation with proper 2D radial filtering.
-    Tent2DLanczos3Jinc,
-    /// Iterative Tent-space Box filter (separable)
-    /// For downscaling by factor N, iteratively applies 2× tent-box for each power of 2,
-    /// then applies the remaining factor. E.g., 8× = 2×→2×→2×, 6× = 2×→3×.
-    /// This can produce better quality than a single large-factor kernel.
-    TentBoxIterative,
-    /// Iterative 2D Tent-space Box filter (non-separable)
-    /// Same iterative approach as TentBoxIterative but using the full 2D kernel.
-    Tent2DBoxIterative,
     /// Iterative Bilinear downscaling
     /// For downscaling by factor N, iteratively applies 2× bilinear for each power of 2,
     /// then applies the remaining factor. Useful for mipmap-style quality downscaling.
     BilinearIterative,
-    /// Iterative Tent Volume scaling with explicit supersample steps (box inner filter)
-    /// Each iteration: tent_expand → box scale in tent-space → tent_contract
-    /// This explicitly uses the tent volume representation for each 2× step,
-    /// ensuring volume preservation at every iteration.
-    /// Final step scales to exact target size in tent-space before contracting.
-    IterativeTentVolume,
-    /// Iterative Tent Volume scaling with bilinear inner filter
-    /// Each iteration: tent_expand → bilinear scale in tent-space → tent_contract
-    /// Same as IterativeTentVolume but uses bilinear interpolation in tent-space.
-    IterativeTentVolumeBilinear,
-    /// Tent-space with Lanczos3 kernel constraint (instead of volume constraint)
-    /// Uses tent_expand_lanczos (Lanczos3-constrained peaks) and tent_contract_lanczos.
-    /// Fully reversible: Lanczos3 interpolation at peaks returns original values.
-    /// Inner scaling uses box filter in tent-space.
-    TentLanczos3Constraint,
     /// Hybrid Lanczos3: separable Lanczos3 for bulk scaling, EWA Lanczos3 for final 2x
     /// For scale ratios >= 2x: applies separable Lanczos3 down to 2x final size, then EWA Lanczos3
     /// For scale ratios < 2x: uses EWA Lanczos3 directly
@@ -197,16 +156,7 @@ impl RescaleMethod {
             "stochastic-jinc" | "stochastic_jinc" | "stochasticjinc" | "stochastic" => Some(RescaleMethod::StochasticJinc),
             "stochastic-jinc-scatter" | "stochastic_jinc_scatter" | "stochasticjincscatter" | "stochastic-scatter" | "stochastic_scatter" => Some(RescaleMethod::StochasticJincScatter),
             "stochastic-jinc-scatter-normalized" | "stochastic_jinc_scatter_normalized" | "stochasticjincscatternormalized" | "stochastic-scatter-normalized" | "stochastic_scatter_normalized" => Some(RescaleMethod::StochasticJincScatterNormalized),
-            "tent-box" | "tent_box" | "tentbox" => Some(RescaleMethod::TentBox),
-            "tent-lanczos3" | "tent_lanczos3" | "tentlanczos3" | "tent-lanczos" | "tent_lanczos" | "tentlanczos" => Some(RescaleMethod::TentLanczos3),
-            "tent-2d-box" | "tent_2d_box" | "tent2dbox" | "tent-2d" | "tent_2d" | "tent2d" => Some(RescaleMethod::Tent2DBox),
-            "tent-2d-lanczos3-jinc" | "tent_2d_lanczos3_jinc" | "tent2dlanczos3jinc" | "tent-2d-lanczos" | "tent_2d_lanczos" | "tent2dlanczos" | "tent-2d-jinc" | "tent_2d_jinc" | "tent2djinc" => Some(RescaleMethod::Tent2DLanczos3Jinc),
-            "tent-box-iterative" | "tent_box_iterative" | "tentboxiterative" | "tent-iterative" | "tent_iterative" | "tentiterative" => Some(RescaleMethod::TentBoxIterative),
-            "tent-2d-box-iterative" | "tent_2d_box_iterative" | "tent2dboxiterative" | "tent-2d-iterative" | "tent_2d_iterative" | "tent2diterative" => Some(RescaleMethod::Tent2DBoxIterative),
             "bilinear-iterative" | "bilinear_iterative" | "bilineariterative" | "mipmap" | "mip" => Some(RescaleMethod::BilinearIterative),
-            "iterative-tent-volume" | "iterative_tent_volume" | "iterativetentvolume" | "tent-volume-iterative" | "tent_volume_iterative" | "tentvolume" | "tent-vol" | "tent_vol" | "iterative-tent-volume-box" | "iterative_tent_volume_box" => Some(RescaleMethod::IterativeTentVolume),
-            "iterative-tent-volume-bilinear" | "iterative_tent_volume_bilinear" | "tentvolume-bilinear" | "tent-vol-bilinear" | "tent_vol_bilinear" => Some(RescaleMethod::IterativeTentVolumeBilinear),
-            "tent-lanczos3-constraint" | "tent_lanczos3_constraint" | "tentlanczos3constraint" | "tent-l3c" | "tent_l3c" | "tl3c" => Some(RescaleMethod::TentLanczos3Constraint),
             "hybrid-lanczos3" | "hybrid_lanczos3" | "hybridlanczos3" | "hybrid-lanczos" | "hybrid_lanczos" | "hybrid" => Some(RescaleMethod::HybridLanczos3),
             _ => None,
         }
@@ -222,8 +172,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
             RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
-            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear | RescaleMethod::TentLanczos3Constraint => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
-            RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DLanczos3Jinc => 3.0,  // Uses Lanczos3 internally
+            RescaleMethod::Box => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::HybridLanczos3 => 3.0,  // Uses Lanczos3/EWA Lanczos3
         }
     }
@@ -260,34 +209,15 @@ impl RescaleMethod {
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
-            RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::TentLanczos3Constraint => RescaleMethod::Box,
-            RescaleMethod::IterativeTentVolumeBilinear => RescaleMethod::Bilinear,
-            RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
-            RescaleMethod::Tent2DLanczos3Jinc => RescaleMethod::EWALanczos3,  // Uses jinc-based Lanczos3
             RescaleMethod::BilinearIterative => RescaleMethod::Bilinear,
             RescaleMethod::HybridLanczos3 => RescaleMethod::Lanczos3,  // Primary kernel (also uses EWALanczos3)
             other => *other,
         }
     }
 
-    /// Returns true if this is a tent-space pipeline method
-    pub fn is_tent_pipeline(&self) -> bool {
-        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear | RescaleMethod::TentLanczos3Constraint)
-    }
-
-    /// Returns true if this is a 2D (non-separable) tent-space method
-    pub fn is_tent_2d(&self) -> bool {
-        matches!(self, RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::Tent2DBoxIterative)
-    }
-
-    /// Returns true if this is an iterative tent-space method
-    pub fn is_tent_iterative(&self) -> bool {
-        matches!(self, RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative)
-    }
-
     /// Returns true if this is any iterative downscaling method
     pub fn is_iterative(&self) -> bool {
-        matches!(self, RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::BilinearIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear)
+        matches!(self, RescaleMethod::BilinearIterative)
     }
 
 }
@@ -500,86 +430,9 @@ pub fn rescale_with_progress_tent(
         RescaleMethod::StochasticJincScatterNormalized => {
             ewa::rescale_stochastic_jinc_scatter_normalized_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
-        RescaleMethod::TentBox | RescaleMethod::TentLanczos3 => {
-            // Tent-space pipeline as equivalent direct separable kernel.
-            // The kernel weights are precomputed to incorporate:
-            // 1. Box → Tent expansion (volume-preserving)
-            // 2. Resampling in tent space
-            // 3. Tent → Box contraction
-            // This is more efficient than actually expanding/contracting the image.
-            separable::rescale_kernel_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                method, scale_mode,
-                TentMode::Off,  // Not using tent_mode - weights already handle tent operations
-                progress,
-            )
-        }
-        RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc => {
-            // 2D Tent-space pipeline using non-separable kernel.
-            // Uses precomputed 2D kernel weights that incorporate the full
-            // expand → resample → contract pipeline in a single convolution.
-            tent_ewa::rescale_tent_2d_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                method, scale_mode,
-                progress,
-            )
-        }
-        RescaleMethod::TentBoxIterative => {
-            // Iterative 2× tent-box downscaling using separable kernels.
-            // Applies 2× downscales iteratively, then final factor.
-            tent_ewa::rescale_tent_iterative_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                false,  // separable
-                progress,
-            )
-        }
-        RescaleMethod::Tent2DBoxIterative => {
-            // Iterative 2× tent-box downscaling using 2D kernels.
-            // Applies 2× downscales iteratively, then final factor.
-            tent_ewa::rescale_tent_iterative_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                true,  // 2D
-                progress,
-            )
-        }
         RescaleMethod::BilinearIterative => {
             // Iterative 2× bilinear downscaling (mipmap-style).
-            tent_ewa::rescale_bilinear_iterative_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                progress,
-            )
-        }
-        RescaleMethod::IterativeTentVolume => {
-            // Iterative tent volume scaling with box filter in tent-space.
-            tent_ewa::rescale_iterative_tent_volume_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                false,  // use_bilinear = false (box)
-                progress,
-            )
-        }
-        RescaleMethod::IterativeTentVolumeBilinear => {
-            // Iterative tent volume scaling with bilinear filter in tent-space.
-            tent_ewa::rescale_iterative_tent_volume_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                true,  // use_bilinear = true
-                progress,
-            )
-        }
-        RescaleMethod::TentLanczos3Constraint => {
-            // Tent-space with Lanczos3 constraint (instead of volume constraint).
-            tent_ewa::rescale_tent_lanczos3_constraint_pixels(
+            iterative::rescale_bilinear_iterative_pixels(
                 src, src_width, src_height,
                 dst_width, dst_height,
                 scale_mode,
@@ -731,78 +584,9 @@ pub fn rescale_with_alpha_progress_tent(
         RescaleMethod::StochasticJincScatterNormalized => {
             ewa::rescale_stochastic_jinc_scatter_normalized_alpha_pixels(src, src_width, src_height, dst_width, dst_height, scale_mode, tent_mode, progress)
         }
-        RescaleMethod::TentBox | RescaleMethod::TentLanczos3 => {
-            // Tent-space pipeline as equivalent direct separable kernel (alpha-aware).
-            // The kernel weights incorporate expand → resample → contract operations.
-            separable::rescale_kernel_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                method, scale_mode,
-                TentMode::Off,  // Not using tent_mode - weights already handle tent operations
-                progress,
-            )
-        }
-        RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc => {
-            // 2D Tent-space pipeline using non-separable kernel (alpha-aware).
-            tent_ewa::rescale_tent_2d_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                method, scale_mode,
-                progress,
-            )
-        }
-        RescaleMethod::TentBoxIterative => {
-            // Iterative 2× tent-box downscaling using separable kernels (alpha-aware).
-            tent_ewa::rescale_tent_iterative_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                false,  // separable
-                progress,
-            )
-        }
-        RescaleMethod::Tent2DBoxIterative => {
-            // Iterative 2× tent-box downscaling using 2D kernels (alpha-aware).
-            tent_ewa::rescale_tent_iterative_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                true,  // 2D
-                progress,
-            )
-        }
         RescaleMethod::BilinearIterative => {
             // Iterative 2× bilinear downscaling (alpha-aware).
-            tent_ewa::rescale_bilinear_iterative_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                progress,
-            )
-        }
-        RescaleMethod::IterativeTentVolume => {
-            // Iterative tent volume scaling with box filter (alpha-aware).
-            tent_ewa::rescale_iterative_tent_volume_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                false,  // use_bilinear = false (box)
-                progress,
-            )
-        }
-        RescaleMethod::IterativeTentVolumeBilinear => {
-            // Iterative tent volume scaling with bilinear filter (alpha-aware).
-            tent_ewa::rescale_iterative_tent_volume_alpha_pixels(
-                src, src_width, src_height,
-                dst_width, dst_height,
-                scale_mode,
-                true,  // use_bilinear = true
-                progress,
-            )
-        }
-        RescaleMethod::TentLanczos3Constraint => {
-            // Tent-space with Lanczos3 constraint (alpha-aware).
-            tent_ewa::rescale_tent_lanczos3_constraint_alpha_pixels(
+            iterative::rescale_bilinear_iterative_alpha_pixels(
                 src, src_width, src_height,
                 dst_width, dst_height,
                 scale_mode,

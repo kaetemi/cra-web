@@ -206,26 +206,8 @@ pub enum ScaleMethod {
     StochasticJincScatter,
     /// Stochastic Jinc Scatter Normalized: scatter with destination normalization
     StochasticJincScatterNormalized,
-    /// Tent-space Box filter pipeline: expand to tent, box resample, contract
-    TentBox,
-    /// Tent-space Lanczos3 filter pipeline: expand to tent, lanczos3 resample, contract
-    TentLanczos3,
-    /// Tent-space 2D Box filter: non-separable 2D tent-space box kernel
-    Tent2dBox,
-    /// Tent-space 2D Lanczos3-Jinc filter: non-separable 2D tent-space EWA kernel
-    Tent2dLanczos3Jinc,
-    /// Iterative Tent Box: 2× tent-box passes for power-of-2, then final factor
-    TentBoxIterative,
-    /// Iterative Tent 2D Box: 2× 2D tent-box passes for power-of-2, then final factor
-    Tent2dBoxIterative,
     /// Iterative Bilinear: mipmap-style 2× bilinear passes for power-of-2, then final factor
     BilinearIterative,
-    /// Iterative Tent Volume (Box): explicit tent_expand → box scale → tent_contract per iteration
-    IterativeTentVolume,
-    /// Iterative Tent Volume (Bilinear): explicit tent_expand → bilinear scale → tent_contract per iteration
-    IterativeTentVolumeBilinear,
-    /// Tent Lanczos3 Constraint: tent-space with Lanczos3-constrained peaks (fully reversible)
-    TentLanczos3Constraint,
     /// Hybrid Lanczos3: separable Lanczos3 for bulk scaling (>=2x), EWA Lanczos3 for final 2x
     /// Combines speed of separable convolution with EWA quality for the final refinement
     HybridLanczos3,
@@ -255,16 +237,7 @@ impl ScaleMethod {
             ScaleMethod::StochasticJinc => cra_wasm::rescale::RescaleMethod::StochasticJinc,
             ScaleMethod::StochasticJincScatter => cra_wasm::rescale::RescaleMethod::StochasticJincScatter,
             ScaleMethod::StochasticJincScatterNormalized => cra_wasm::rescale::RescaleMethod::StochasticJincScatterNormalized,
-            ScaleMethod::TentBox => cra_wasm::rescale::RescaleMethod::TentBox,
-            ScaleMethod::TentLanczos3 => cra_wasm::rescale::RescaleMethod::TentLanczos3,
-            ScaleMethod::Tent2dBox => cra_wasm::rescale::RescaleMethod::Tent2DBox,
-            ScaleMethod::Tent2dLanczos3Jinc => cra_wasm::rescale::RescaleMethod::Tent2DLanczos3Jinc,
-            ScaleMethod::TentBoxIterative => cra_wasm::rescale::RescaleMethod::TentBoxIterative,
-            ScaleMethod::Tent2dBoxIterative => cra_wasm::rescale::RescaleMethod::Tent2DBoxIterative,
             ScaleMethod::BilinearIterative => cra_wasm::rescale::RescaleMethod::BilinearIterative,
-            ScaleMethod::IterativeTentVolume => cra_wasm::rescale::RescaleMethod::IterativeTentVolume,
-            ScaleMethod::IterativeTentVolumeBilinear => cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear,
-            ScaleMethod::TentLanczos3Constraint => cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint,
             ScaleMethod::HybridLanczos3 => cra_wasm::rescale::RescaleMethod::HybridLanczos3,
         }
     }
@@ -291,14 +264,6 @@ pub enum Supersample {
     /// final dimensions with integrated contraction. If no resize is specified,
     /// uses box filter to input size. More efficient than TentVolume.
     TentVolumePrescale,
-    /// Lanczos3-constraint supersampling: expands to (2N+1)×(2M+1), adjusts peaks
-    /// so Lanczos3 interpolation at each peak returns the original value.
-    /// Fully reversible with Lanczos3 contraction.
-    TentLanczos3,
-    /// Lanczos3-constraint prescale: expands to tent-space with Lanczos3 constraint,
-    /// then rescales directly to final dimensions with integrated Lanczos3 contraction.
-    /// More efficient than TentLanczos3 for pure resizing.
-    TentLanczos3Prescale,
 }
 
 /// Build ColorCorrectionMethod from CLI arguments

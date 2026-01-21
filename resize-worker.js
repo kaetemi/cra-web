@@ -42,14 +42,10 @@ async function initialize() {
 const SUPERSAMPLE_NONE = 0;
 const SUPERSAMPLE_TENT_VOLUME = 1;
 const SUPERSAMPLE_TENT_VOLUME_PRESCALE = 2;
-const SUPERSAMPLE_TENT_LANCZOS3 = 3;
-const SUPERSAMPLE_TENT_LANCZOS3_PRESCALE = 4;
 
 // Supersample mode helpers
-const isVolumeMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME || mode === SUPERSAMPLE_TENT_VOLUME_PRESCALE;
-const isLanczos3Mode = (mode) => mode === SUPERSAMPLE_TENT_LANCZOS3 || mode === SUPERSAMPLE_TENT_LANCZOS3_PRESCALE;
-const isExplicitMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME || mode === SUPERSAMPLE_TENT_LANCZOS3;
-const isPrescaleMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME_PRESCALE || mode === SUPERSAMPLE_TENT_LANCZOS3_PRESCALE;
+const isExplicitMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME;
+const isPrescaleMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME_PRESCALE;
 const isSupersampling = (mode) => mode !== SUPERSAMPLE_NONE;
 
 // TentMode constants for WASM
@@ -130,16 +126,13 @@ function processResize(params) {
         let finalHeight = dstHeight;
 
         if (isExplicitMode(supersample)) {
-            // Explicit supersampling (Volume or Lanczos3):
+            // Explicit supersampling (Volume):
             // 1. Expand to tent-space (2W+1, 2H+1)
             // 2. Resize to tent-space target (2*dst+1) with tent_mode=SampleToSample
             // 3. Contract back to box-space
 
-            // Expand to tent-space (volume or lanczos3)
-            const expandFn = isLanczos3Mode(supersample)
-                ? craWasm.tent_expand_lanczos_wasm
-                : craWasm.tent_expand_wasm;
-            const expandResult = expandFn(buffer, srcWidth, srcHeight);
+            // Expand to tent-space (volume)
+            const expandResult = craWasm.tent_expand_wasm(buffer, srcWidth, srcHeight);
             buffer = expandResult.buffer;
             srcWidth = expandResult.width;
             srcHeight = expandResult.height;
@@ -183,18 +176,15 @@ function processResize(params) {
 
             sendProgress(76);
 
-            // Contract back to box-space (volume or lanczos3)
-            const contractFn = isLanczos3Mode(supersample)
-                ? craWasm.tent_contract_lanczos_wasm
-                : craWasm.tent_contract_wasm;
-            const contractResult = contractFn(tentResized, tentDstWidth, tentDstHeight);
+            // Contract back to box-space (volume)
+            const contractResult = craWasm.tent_contract_wasm(tentResized, tentDstWidth, tentDstHeight);
             resizedBuffer = contractResult.buffer;
             finalWidth = contractResult.width;
             finalHeight = contractResult.height;
 
             sendProgress(80);
         } else if (isPrescaleMode(supersample)) {
-            // Prescale supersampling (Volume or Lanczos3):
+            // Prescale supersampling (Volume):
             // 1. Expand to tent-space (2W+1, 2H+1)
             // 2. Resize directly to final box-space with tent_mode=Prescale
             //    (the rescale integrates the contract step via coordinate mapping)
@@ -203,17 +193,14 @@ function processResize(params) {
             const originalWidth = srcWidth;
             const originalHeight = srcHeight;
 
-            // Expand to tent-space (volume or lanczos3)
-            const expandFn = isLanczos3Mode(supersample)
-                ? craWasm.tent_expand_lanczos_wasm
-                : craWasm.tent_expand_wasm;
-            const expandResult = expandFn(buffer, srcWidth, srcHeight);
+            // Expand to tent-space (volume)
+            const expandResult = craWasm.tent_expand_wasm(buffer, srcWidth, srcHeight);
             buffer = expandResult.buffer;
             srcWidth = expandResult.width;
             srcHeight = expandResult.height;
 
-            // Default interpolation: box (20) for volume, tent-lanczos3 (32) for lanczos3
-            const defaultInterpolation = isLanczos3Mode(supersample) ? 32 : 20;
+            // Default interpolation: box (20) for volume prescale
+            const defaultInterpolation = 20;
             const effectiveInterpolation = (dstWidth === originalWidth && dstHeight === originalHeight)
                 ? defaultInterpolation
                 : interpolation;
