@@ -21,107 +21,67 @@ Everything else in this document ultimately derives from XYZ.
 
 ---
 
-## Linear RGB
+## sRGB / Linear RGB
 
-No formal standard exists. This is the implicit intermediate state in the sRGB specification (IEC 61966-2-1) before the transfer function is applied. In practice, "Linear RGB" universally means: Rec.709 primaries, D65 white point, linear transfer.
+IEC 61966-2-1:1999. The standard color space for the web and consumer displays.
 
-**Definition (XYZ relationship):**
+**Authoritative definition:**
 
-Per IEC 61966-2-1, these coefficients are considered exact:
+The sRGB specification defines the color space in terms of chromaticity coordinates, not matrices. These are the normative values from which all else is derived:
+
+| Primary | x | y |
+|---------|-------|-------|
+| Red | 0.640 | 0.330 |
+| Green | 0.300 | 0.600 |
+| Blue | 0.150 | 0.060 |
+
+| White Point (D65) | x | y |
+|-------------------|--------|--------|
+| | 0.3127 | 0.3290 |
+
+**Linear RGB** is the intermediate state before the transfer function is applied. It shares these primaries and white point with a linear (identity) transfer function.
+
+**Derived XYZ matrices:**
+
+The RGB↔XYZ matrices are derived from the chromaticity coordinates above through standard colorimetric calculation. The 4-decimal versions in IEC 61966-2-1 are truncated for presentation:
 
 ```
-Linear RGB → XYZ:
+Linear RGB → XYZ (4 decimal, per specification):
 
 | X |   | 0.4124  0.3576  0.1805 |   | R |
 | Y | = | 0.2126  0.7152  0.0722 | × | G |
 | Z |   | 0.0193  0.1192  0.9505 |   | B |
 ```
 
-**White point:** D65 (see below for the distinction between CIE D65 and the sRGB-implied white point)
+The specification explicitly notes these truncated matrices are insufficient for higher bit depths. For N-bit encoding where N > 8, IEC 61966-2-1 Amendment 1 recommends deriving matrices with additional precision from the defining chromaticities.
 
-**Transfer function:** None (identity).
+**Higher precision matrices (7 decimal places):**
 
-**Derived chromaticities:**
+Derived from the authoritative chromaticity coordinates:
 
-Each matrix column gives the XYZ of that primary. Projecting to xy via x = X/(X+Y+Z), y = Y/(X+Y+Z):
+```
+Linear RGB → XYZ:
 
-| Primary | x | y |
-|---------|--------|--------|
-| Red | 0.6401 | 0.3300 |
-| Green | 0.3000 | 0.6000 |
-| Blue | 0.1500 | 0.0600 |
-
-**Derived inverse:**
+| X |   | 0.4123908  0.3575843  0.1804808 |   | R |
+| Y | = | 0.2126390  0.7151687  0.0721923 | × | G |
+| Z |   | 0.0193308  0.1191948  0.9505322 |   | B |
+```
 
 ```
 XYZ → Linear RGB:
 
-| R |   |  3.2406255 -1.5372080 -0.4986286 |   | X |
-| G | = | -0.9689307  1.8757561  0.0415175 | × | Y |
-| B |   |  0.0557101 -0.2040211  1.0569959 |   | Z |
+| R |   |  3.2409699 -1.5373832 -0.4986108 |   | X |
+| G | = | -0.9692436  1.8759675  0.0415551 | × | Y |
+| B |   |  0.0556301 -0.2039770  1.0569715 |   | Z |
 ```
 
-The second row of the forward matrix gives the luminance coefficients: Y = 0.2126R + 0.7152G + 0.0722B.
+For maximum precision, derive the matrices directly from the chromaticity coordinates, carrying full floating-point precision throughout the calculation.
 
----
-
-## D65 Illuminant
-
-The standard daylight white point used by most display-oriented color spaces. Multiple representations exist due to rounding at different stages of standardization.
-
-### D65 (CIE)
-
-The authoritative definition from CIE 15:2004, derived from the D65 spectral power distribution.
-
-**CIE xy chromaticity (5 decimal places):**
-
-| x | y |
-|---------|---------|
-| 0.31272 | 0.32903 |
-
-### D65 (sRGB)
-
-The white point implicitly defined by the sRGB/Rec.709 RGB→XYZ matrix. Since IEC 61966-2-1 treats that matrix as exact, this is the operative D65 for sRGB workflows.
-
-**Derivation:** Sum each column of the Linear RGB → XYZ matrix to get white XYZ, then compute chromaticity.
-
-```
-X = 0.4124 + 0.3576 + 0.1805 = 0.9505
-Y = 0.2126 + 0.7152 + 0.0722 = 1.0000
-Z = 0.0193 + 0.1192 + 0.9505 = 1.0890
-```
-
-**Derived xy chromaticity:**
-
-| x | y |
-|-----------------|-----------------|
-| 0.31271590722158249 | 0.32900148050666228 |
-
-**XYZ (normalized to Y=1):**
+**Derived white point XYZ (normalized to Y=1):**
 
 | X | Y | Z |
 |---------|---------|---------|
-| 0.9505 | 1.0000 | 1.0890 |
-
-### D65 (4-digit)
-
-The rounded values quoted in ITU-R BT.709, sRGB (IEC 61966-2-1), and Adobe RGB (1998). These are the values typically cited in specifications but do not precisely match either the CIE definition or the sRGB-implied white point.
-
-| x | y |
-|--------|--------|
-| 0.3127 | 0.3290 |
-
-**Practical impact:** When deriving matrices for color spaces defined by primaries + "D65 white point" (e.g., Adobe RGB, Apple RGB), the choice of which D65 affects the 5th+ decimal place of the resulting matrices. For round-trip consistency with sRGB, use the sRGB-implied values. Adobe RGB's specification explicitly uses the 4-digit values.
-
----
-
-## sRGB
-
-IEC 61966-2-1:1999. The standard color space for the web and consumer displays.
-
-The formal specification defines sRGB directly in terms of CIE XYZ. However, since Linear RGB already captures the XYZ relationship via the same primaries and white point, we define sRGB here as Linear RGB plus a transfer function. This is equivalent and more practical for implementation.
-
-**Definition:** Linear RGB with the following transfer function.
+| 0.9504559 | 1.0000000 | 1.0890578 |
 
 **Transfer function (encode: linear → sRGB):**
 
@@ -143,13 +103,39 @@ else:
 
 The linear segment exists because a pure power curve has infinite slope at zero, which would amplify noise in darks. The piecewise function is continuous with continuous first derivative at the junction.
 
+**Luminance coefficients:**
+
+The second row of the forward matrix gives the luminance coefficients: Y = 0.2126R + 0.7152G + 0.0722B (or with higher precision as derived).
+
+---
+
+## D65 Illuminant
+
+The standard daylight white point used by most display-oriented color spaces. Multiple representations exist due to rounding at different stages of standardization.
+
+### D65 (CIE)
+
+Derived from the D65 spectral power distribution and CIE color matching functions. Extended-precision calculations yield values like x = 0.31272, y = 0.32903 (or further: 0.3127205252, 0.3290306850), but these are computed from source data with only 4-5 significant digits of precision. The extra decimal places are computational artifacts, not genuine accuracy.
+
+### D65 (sRGB / Rec.709)
+
+The white point defined by IEC 61966-2-1 and ITU-R BT.709:
+
+| x | y |
+|--------|--------|
+| 0.3127 | 0.3290 |
+
+These are the authoritative values for sRGB. Any implementation claiming sRGB conformance must use exactly these coordinates when deriving transformation matrices.
+
+**Practical impact:** Using "more accurate" D65 values from CIE sources (e.g., 0.31272, 0.32903) produces matrices for a subtly different color space—not sRGB. The sRGB standard's declared values take precedence over external references.
+
 ---
 
 ## Gamma 2.2 RGB
 
 No formal standard. Often conflated with sRGB but technically distinct—the same encoded value decodes to slightly different linear values between the two, primarily in darks.
 
-**Definition:** Linear RGB with γ=2.2.
+**Definition:** Linear RGB (sRGB primaries and white point) with γ=2.2.
 
 **Transfer function:**
 
@@ -196,7 +182,7 @@ B'  = Y' + 1.8556 Cb
 
 **On the coefficients:**
 
-The coefficients (0.2126, 0.7152, 0.0722) are the second row of the Linear RGB → XYZ matrix. When applied to Linear RGB, they yield true CIE luminance—the Y in XYZ:
+The coefficients (0.2126, 0.7152, 0.0722) are derived from the second row of the Linear RGB → XYZ matrix. When applied to Linear RGB, they yield true CIE luminance—the Y in XYZ:
 
 ```
 Y = 0.2126 R + 0.7152 G + 0.0722 B
@@ -230,15 +216,17 @@ JPEG (JFIF) always uses BT.601 Y'CbCr for compression—same transform, same coe
 
 A legacy color space from classic Macintosh systems (pre-OS X era). The primaries were based on the phosphors in Macintosh CRT monitors. The γ=1.8 transfer function was chosen to approximate the dot gain of Apple LaserWriter printers.
 
-**Definition:**
+**Authoritative definition:**
 
 | Primary | x | y |
 |---------|--------|--------|
 | Red | 0.6250 | 0.3400 |
 | Green | 0.2800 | 0.5950 |
 | Blue | 0.1550 | 0.0700 |
-| White | D65 | |
-| γ | 1.8 | |
+| White | 0.3127 | 0.3290 |
+
+| γ | 1.8 |
+|---|-----|
 
 **Transfer function:**
 
@@ -247,7 +235,7 @@ encoded = linear^(1/1.8)
 linear = encoded^1.8
 ```
 
-**Derived XYZ conversion:**
+**Derived XYZ matrices:**
 
 ```
 [linearized] Apple RGB → XYZ:
@@ -290,7 +278,7 @@ CIELAB requires a reference white (Xn, Yn, Zn) but does not specify which illumi
 
 Mixing reference whites produces incorrect results.
 
-**Implementation note:** This library uses **D65 (sRGB)** as the Lab reference white—the white point implied by the sRGB matrix (0.9505, 1.0, 1.089). This ensures sRGB neutrals map exactly to a\*=0, b\*=0, which is practical for display-oriented image processing. This differs slightly from CIE's authoritative D65 (0.95043, 1.0, 1.08883) but the difference is imperceptible.
+**Implementation note:** For display-oriented workflows using sRGB, use the white point XYZ derived from the sRGB chromaticity coordinates (approximately 0.9504559, 1.0, 1.0890578). This ensures sRGB neutrals map exactly to a\*=0, b\*=0.
 
 **Definition (XYZ → Lab):**
 
@@ -520,8 +508,8 @@ RT = -sin(2Δθ) × RC
 
 **Derived constants:**
 
-| Expression | Value (maximum precision) |
-|------------|---------------------------|
+| Expression | Value |
+|------------|-------|
 | 25⁷ | 6103515625 (exact) |
 | 275° in formula | 275 (exact, degrees) |
 | 25° in formula | 25 (exact, degrees) |
@@ -630,19 +618,19 @@ CIE XYZ (empirical root)
 
 ## Summary
 
-| Space/Formula | Defined in terms of | Definitional components | Derived |
-|---------------|---------------------|------------------------|---------|
-| CIE XYZ | Empirical | Color matching functions | — |
-| Linear RGB | XYZ | Primaries, white point | XYZ matrices |
-| sRGB | Linear RGB | Piecewise transfer function | — |
-| Gamma 2.2 RGB | Linear RGB | γ=2.2 | — |
-| Y'CbCr | sRGB | Matrix transform | — |
-| Apple RGB | XYZ | Primaries, white point, γ=1.8 | XYZ matrices |
-| CIELAB | XYZ | Transform equations, reference white | — |
-| CIE76 | CIELAB | Euclidean distance | — |
-| CIE94 | CIELAB | kL, kC, kH, K₁=0.045, K₂=0.015 | SC, SH |
-| CIEDE2000 | CIELAB | kL, kC, kH, 25⁷, K₁, K₂, SL midpoint=50, SL offset=20 | G, T, SL, SC, SH, RT |
-| OKLab | Linear RGB | All matrices, cube root | — |
+| Space/Formula | Authoritative Definition | Derived |
+|---------------|-------------------------|---------|
+| CIE XYZ | Color matching functions (empirical) | — |
+| Linear RGB / sRGB | Chromaticity coordinates (primaries + D65 white point) | XYZ matrices |
+| sRGB | Linear RGB + piecewise transfer function | — |
+| Gamma 2.2 RGB | Linear RGB + γ=2.2 | — |
+| Y'CbCr | sRGB + matrix transform | — |
+| Apple RGB | Chromaticity coordinates + γ=1.8 | XYZ matrices |
+| CIELAB | XYZ + transform equations + reference white | — |
+| CIE76 | CIELAB + Euclidean distance | — |
+| CIE94 | CIELAB + kL, kC, kH, K₁=0.045, K₂=0.015 | SC, SH |
+| CIEDE2000 | CIELAB + kL, kC, kH, 25⁷, K₁, K₂, etc. | G, T, SL, SC, SH, RT |
+| OKLab | Linear RGB + defined matrices + cube root | — |
 
 ---
 
