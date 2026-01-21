@@ -399,19 +399,19 @@ pub mod cielab {
 // =============================================================================
 
 /// sRGB encode threshold (linear space).
-/// Derived from value continuity: K*T = (1+a)*T^(1/γ) - a
-/// With K=12.92 (authoritative), γ=2.4, a=0.055.
-/// Spec value is 0.0031308; this derived value is ~0.00313067.
-pub const SRGB_THRESHOLD: f64 = 0.0031306684425005597;
+/// Derived from C¹ continuity: x₀ = y₀/K where y₀ = a/(γ-1) = 11/280.
+/// This is the original 1996 HP/Microsoft derivation, before IEC rounded.
+pub const SRGB_THRESHOLD: f64 = 0.0030399346397784314;
 
-/// sRGB linear segment slope (authoritative).
-/// The spec value 12.92 is treated as authoritative.
-pub const SRGB_LINEAR_SLOPE: f64 = 12.92;
+/// sRGB linear segment slope (C¹ derived).
+/// K = (1+a)^γ × (γ-1)^(γ-1) / (a^(γ-1) × γ^γ)
+/// IEC rounded this to 12.92; the exact C¹ value is ~12.9232.
+pub const SRGB_LINEAR_SLOPE: f64 = 12.923210180787855;
 
 /// sRGB decode threshold (encoded space).
-/// = SRGB_LINEAR_SLOPE * SRGB_THRESHOLD (the y-value at the junction).
-/// Spec value is 0.04045; this derived value is ~0.04044824.
-pub const SRGB_DECODE_THRESHOLD: f64 = 0.04044823627710723;
+/// Exactly a/(γ-1) = 0.055/1.4 = 11/280 (rational).
+/// IEC derived 0.04045 from the rounded K=12.92, not from γ and a.
+pub const SRGB_DECODE_THRESHOLD: f64 = 0.039285714285714285;
 
 /// Adobe RGB gamma: 563/256
 pub const ADOBE_RGB_GAMMA: f64 = 2.19921875;
@@ -713,12 +713,12 @@ pub mod f32 {
     // TRANSFER FUNCTION CONSTANTS
     // -------------------------------------------------------------------------
 
-    /// sRGB encode threshold (linear space) - derived from value continuity
-    pub const SRGB_THRESHOLD: f32 = 0.0031306684425005597 as f32;
-    /// sRGB decode threshold (encoded space)
-    pub const SRGB_DECODE_THRESHOLD: f32 = 0.04044823627710723 as f32;
-    /// sRGB linear slope (authoritative)
-    pub const SRGB_LINEAR_SLOPE: f32 = 12.92 as f32;
+    /// sRGB encode threshold (linear space) - derived from C¹ continuity
+    pub const SRGB_THRESHOLD: f32 = 0.0030399346397784314 as f32;
+    /// sRGB decode threshold (encoded space) = 11/280
+    pub const SRGB_DECODE_THRESHOLD: f32 = 0.039285714285714285 as f32;
+    /// sRGB linear slope (C¹ derived)
+    pub const SRGB_LINEAR_SLOPE: f32 = 12.923210180787855 as f32;
     pub const SRGB_GAMMA: f32 = 2.4;
     pub const SRGB_SCALE: f32 = 1.055;
     pub const SRGB_OFFSET: f32 = 0.055;

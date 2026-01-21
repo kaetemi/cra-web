@@ -413,77 +413,62 @@ fn main() -> io::Result<()> {
     let prophoto_threshold = primary::prophoto_transfer::THRESHOLD_NUMERATOR as f64
         / primary::prophoto_transfer::THRESHOLD_DENOMINATOR as f64;
 
-    // sRGB transfer function: derive THRESHOLD from value continuity.
+    // sRGB transfer function: derive all parameters from C¹ continuity.
     //
     // The curve is: f(x) = (1+a) * x^(1/γ) - a  where a = OFFSET, γ = GAMMA
-    // The linear segment is: g(x) = K * x  where K = LINEAR_SLOPE (authoritative = 12.92)
+    // The linear segment is: g(x) = K * x
     //
-    // For value continuity at threshold T:
-    //   K*T = (1+a)*T^(1/γ) - a
+    // For C¹ continuity (both value AND slope match at junction):
+    //   Value:  K*T = (1+a)*T^(1/γ) - a
+    //   Slope:  K = (1+a)/γ * T^(1/γ-1)
     //
-    // Rearranging: (1+a)*T^(1/γ) - K*T - a = 0
-    // Solve using Newton's method.
+    // Solving simultaneously gives exact formulas:
+    //   K = (1+a)^γ × (γ-1)^(γ-1) / (a^(γ-1) × γ^γ)
+    //   y₀ = a/(γ-1) = 11/280  (exact rational!)
+    //   x₀ = y₀/K
     //
-    // This keeps K=12.92 exactly (matching most implementations) and accepts
-    // a deliberate slope discontinuity at the junction. This is bit-identical to
-    // the spec at u16 precision.
+    // This matches the original 1996 HP/Microsoft mathematical derivation,
+    // before the IEC introduced arbitrary rounded values.
     let srgb_gamma = primary::srgb_transfer::GAMMA;
     let srgb_offset = primary::srgb_transfer::OFFSET;
     let srgb_scale = 1.0 + srgb_offset; // = 1.055
-    let srgb_linear_slope = primary::srgb_transfer::LINEAR_SLOPE; // = 12.92 (authoritative)
 
-    // Solve for threshold T where K*T = (1+a)*T^(1/γ) - a
-    // Rearranged: f(T) = (1+a)*T^(1/γ) - K*T - a = 0
-    //
-    // This equation has two roots. The one we want is near 0.00313.
-    // Starting Newton's method at 0.00312 ensures convergence to the correct root.
+    // Derive linear slope from C¹ continuity formula:
+    // K = (1+a)^γ × (γ-1)^(γ-1) / (a^(γ-1) × γ^γ)
+    let srgb_linear_slope = srgb_scale.powf(srgb_gamma)
+        * (srgb_gamma - 1.0).powf(srgb_gamma - 1.0)
+        / (srgb_offset.powf(srgb_gamma - 1.0) * srgb_gamma.powf(srgb_gamma));
+
+    // Encoded threshold (y-value at junction) is exactly a/(γ-1) = 11/280
+    // Use exact rational form for bit-perfect precision
+    let srgb_decode_threshold = 11.0_f64 / 280.0_f64;
+
+    // Linear threshold (x-value at junction) is y₀/K
+    let srgb_threshold = srgb_decode_threshold / srgb_linear_slope;
+
+    // Verify C¹ continuity: both value AND slope should match
     let inv_gamma = 1.0 / srgb_gamma;
-    let f = |t: f64| srgb_scale * t.powf(inv_gamma) - srgb_linear_slope * t - srgb_offset;
 
-    // Newton's method to get close to the root
-    let mut t = 0.00312_f64;
-    for _ in 0..100 {
-        let t_pow = t.powf(inv_gamma);
-        let fval = srgb_scale * t_pow - srgb_linear_slope * t - srgb_offset;
-        let f_prime = srgb_scale * inv_gamma * t.powf(inv_gamma - 1.0) - srgb_linear_slope;
-        t = t - fval / f_prime;
-    }
-
-    // Due to floating point, many adjacent f64 values satisfy f(t) = 0 exactly.
-    // Find all exact zeros in a range and pick the middle one for robustness.
-    let center_bits = t.to_bits() as i64;
-    let mut exact_zeros: Vec<i64> = Vec::new();
-
-    for offset in -500..=500_i64 {
-        let candidate = f64::from_bits((center_bits + offset) as u64);
-        if f(candidate) == 0.0 {
-            exact_zeros.push(center_bits + offset);
-        }
-    }
-
-    // Pick the median (middle) value
-    let srgb_threshold = if exact_zeros.is_empty() {
-        // Fallback: no exact zeros found, use Newton result
-        t
-    } else {
-        exact_zeros.sort();
-        let mid_idx = exact_zeros.len() / 2;
-        f64::from_bits(exact_zeros[mid_idx] as u64)
-    };
-
-    // Verify: K*T should equal (1+a)*T^(1/γ) - a
+    // Value match: K*T = (1+a)*T^(1/γ) - a
     let linear_value = srgb_linear_slope * srgb_threshold;
     let curve_value = srgb_scale * srgb_threshold.powf(inv_gamma) - srgb_offset;
     assert!(
-        (linear_value - curve_value).abs() < 1e-12,
-        "sRGB threshold derivation failed: linear={} curve={} diff={}",
+        (linear_value - curve_value).abs() < 1e-14,
+        "sRGB C¹ value mismatch: linear={} curve={} diff={}",
         linear_value,
         curve_value,
         (linear_value - curve_value).abs()
     );
 
-    // Decode threshold is simply K * T (the y-value at the junction)
-    let srgb_decode_threshold = srgb_linear_slope * srgb_threshold;
+    // Slope match: K = (1+a)/γ * T^(1/γ-1)
+    let curve_slope = srgb_scale * inv_gamma * srgb_threshold.powf(inv_gamma - 1.0);
+    assert!(
+        (srgb_linear_slope - curve_slope).abs() < 1e-12,
+        "sRGB C¹ slope mismatch: K={} curve_slope={} diff={}",
+        srgb_linear_slope,
+        curve_slope,
+        (srgb_linear_slope - curve_slope).abs()
+    );
 
     // Y'CbCr BT.709 derived matrices
     // The luminance coefficients (KR, KG, KB) are the second row of the sRGB→XYZ matrix.
@@ -793,18 +778,18 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "/// sRGB encode threshold (linear space).")?;
-    writeln!(out, "/// Derived from value continuity: K*T = (1+a)*T^(1/γ) - a")?;
-    writeln!(out, "/// With K=12.92 (authoritative), γ=2.4, a=0.055.")?;
-    writeln!(out, "/// Spec value is 0.0031308; this derived value is ~0.00313067.")?;
+    writeln!(out, "/// Derived from C¹ continuity: x₀ = y₀/K where y₀ = a/(γ-1) = 11/280.")?;
+    writeln!(out, "/// This is the original 1996 HP/Microsoft derivation, before IEC rounded.")?;
     writeln!(out, "pub const SRGB_THRESHOLD: f64 = {};", fmt_f64(srgb_threshold))?;
     writeln!(out)?;
-    writeln!(out, "/// sRGB linear segment slope (authoritative).")?;
-    writeln!(out, "/// The spec value 12.92 is treated as authoritative.")?;
+    writeln!(out, "/// sRGB linear segment slope (C¹ derived).")?;
+    writeln!(out, "/// K = (1+a)^γ × (γ-1)^(γ-1) / (a^(γ-1) × γ^γ)")?;
+    writeln!(out, "/// IEC rounded this to 12.92; the exact C¹ value is ~12.9232.")?;
     writeln!(out, "pub const SRGB_LINEAR_SLOPE: f64 = {};", fmt_f64(srgb_linear_slope))?;
     writeln!(out)?;
     writeln!(out, "/// sRGB decode threshold (encoded space).")?;
-    writeln!(out, "/// = SRGB_LINEAR_SLOPE * SRGB_THRESHOLD (the y-value at the junction).")?;
-    writeln!(out, "/// Spec value is 0.04045; this derived value is ~0.04044824.")?;
+    writeln!(out, "/// Exactly a/(γ-1) = 0.055/1.4 = 11/280 (rational).")?;
+    writeln!(out, "/// IEC derived 0.04045 from the rounded K=12.92, not from γ and a.")?;
     writeln!(out, "pub const SRGB_DECODE_THRESHOLD: f64 = {};", fmt_f64(srgb_decode_threshold))?;
     writeln!(out)?;
     writeln!(out, "/// Adobe RGB gamma: 563/256")?;
@@ -1045,11 +1030,11 @@ fn main() -> io::Result<()> {
     writeln!(out, "    // TRANSFER FUNCTION CONSTANTS")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// sRGB encode threshold (linear space) - derived from value continuity")?;
+    writeln!(out, "    /// sRGB encode threshold (linear space) - derived from C¹ continuity")?;
     writeln!(out, "    pub const SRGB_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_threshold))?;
-    writeln!(out, "    /// sRGB decode threshold (encoded space)")?;
+    writeln!(out, "    /// sRGB decode threshold (encoded space) = 11/280")?;
     writeln!(out, "    pub const SRGB_DECODE_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_decode_threshold))?;
-    writeln!(out, "    /// sRGB linear slope (authoritative)")?;
+    writeln!(out, "    /// sRGB linear slope (C¹ derived)")?;
     writeln!(out, "    pub const SRGB_LINEAR_SLOPE: f32 = {} as f32;", fmt_f64(srgb_linear_slope))?;
     writeln!(out, "    pub const SRGB_GAMMA: f32 = 2.4;")?;
     writeln!(out, "    pub const SRGB_SCALE: f32 = 1.055;")?;

@@ -89,7 +89,7 @@ For maximum precision, derive the matrices directly from the chromaticity coordi
 if linear ≤ T:
     srgb = K × linear
 else:
-    srgb = 1.055 × linear^(1/2.4) − 0.055
+    srgb = (1 + a) × linear^(1/γ) − a
 ```
 
 **Transfer function (decode: sRGB → linear):**
@@ -98,43 +98,40 @@ else:
 if srgb ≤ K×T:
     linear = srgb / K
 else:
-    linear = ((srgb + 0.055) / 1.055)^2.4
+    linear = ((srgb + a) / (1 + a))^γ
 ```
 
 The linear segment exists because a pure power curve has infinite slope at zero, which would amplify noise in darks.
 
-**Authoritative transfer function constants:**
+**Transfer function constants:**
 
-The curve shape is defined by γ=2.4, offset a=0.055, and linear slope K=12.92. These are the authoritative constants from IEC 61966-2-1.
+The curve shape is defined by two primary parameters:
 
-The spec also provides T≈0.0031308, but the four values are slightly over-constrained—enforcing both value AND slope continuity at the junction would require K≈12.9232, not exactly 12.92.
+| Constant | Value | Status |
+|----------|-------|--------|
+| γ (gamma) | 2.4 | Authoritative |
+| a (offset) | 0.055 | Authoritative |
 
-**Deriving the threshold for value continuity:**
+The remaining constants are derived by requiring C¹ continuity (matching both value and slope at the junction between the linear segment and the power curve):
 
-We treat γ, a, and K as authoritative, and derive T from value continuity alone:
+| Constant | Derived Value | Formula |
+|----------|---------------|---------|
+| K (slope) | 12.9232101807... (rounds to 12.92) | (1+a)^γ × (γ−1)^(γ−1) / (a^(γ−1) × γ^γ) |
+| y₀ (encoded threshold) | 11/280 = 0.0392857142857... | a / (γ − 1) — exact rational |
+| T (linear threshold) | 0.00303993463977... | y₀ / K |
 
-```
-K×T = 1.055×T^(1/2.4) − 0.055    (value match)
-```
+**Historical note on the constants:**
 
-Solving numerically (Newton's method):
+The 1996 HP/Microsoft sRGB proposal derived these mathematically correct values, then rounded to K=12.92 and T≈0.03928. This rounding was done because the spec only defines derived constants for 8-bit precision, where such rounding has no practical effect. When IEC standardized sRGB in 1999, they kept the rounded K=12.92 but derived new thresholds (0.04045/0.0031308) from the rounded slope rather than from the authoritative γ and a—compounding the rounding error. This created both a value discontinuity and a slope discontinuity at the junction.
 
-| Constant | Our Value | Spec Value | Notes |
-|----------|-----------|------------|-------|
-| Linear slope (K) | 12.92 (authoritative) | 12.92 | Exact match |
-| Threshold (T) | 0.003130668442500555... | 0.0031308 | ~0.7% difference |
-| Decode threshold (K×T) | 0.04044823627710717... | 0.04045 | ~0.004% difference |
+The IEC standard was explicitly designed for 8-bit encoding, where the rounded constants produce correct results. The standard also provides XYZ matrices rounded to 4 decimal places that don't produce the correct D65 white point, with the note that "the advantages of optimising encoding outweigh the disadvantages of this mismatch."
 
-This approach:
-- Keeps K=12.92 exactly (matches most implementations)
-- Removes the value discontinuity present in the spec constants
-- Is bit-identical to spec at u16 precision (tested: 0 changed codes for all 65536 values)
-- Accepts a deliberate slope discontinuity (derivative kink) at the junction
+For floating-point implementations, we use the mathematically derived constants. These are within specification—a slope of 12.9232 rounds to 12.92, which is the precision the spec defines for derived values. The full-precision values provide:
+- Perfect C¹ continuity (no value or slope discontinuity)
+- Exact invertibility
+- Clean extension to values outside [0, 1]
 
-The slope discontinuity is imperceptible in practice:
-- Linear segment derivative: K = 12.92
-- Power curve derivative at T: 1.055/2.4 × T^(1/2.4 − 1) ≈ 12.92321
-- Difference: ~0.003 (0.02%)
+ICC profiles cannot represent 12.92 exactly anyway—the s15Fixed16 format quantizes 1/K to approximately 1/12.921.
 
 **Luminance coefficients:**
 
@@ -333,13 +330,13 @@ b* = 200 × (f(Y/Yn) − f(Z/Zn))
 where:
 
 ```
-f(t) = t^(1/3)                      if t > (6/29)³
-f(t) = (1/3)(29/6)²t + 4/29         otherwise
+f(t) = t^(1/3)                      if t > δ³
+f(t) = t / (3δ²) + 4/29             otherwise
 ```
 
-The constants:
-- Threshold: (6/29)³ ≈ 0.008856
-- Linear slope: (1/3)(29/6)² ≈ 7.787
+The constant δ = 6/29, giving:
+- Threshold: δ³ = (6/29)³ = 216/24389 ≈ 0.008856
+- Linear slope: 1/(3δ²) = (29/6)²/3 = 841/108 ≈ 7.787
 - Linear offset: 4/29 ≈ 0.137931
 
 **Inverse (Lab → XYZ):**
@@ -353,8 +350,8 @@ Z = Zn × f⁻¹((L* + 16) / 116 − b*/200)
 where:
 
 ```
-f⁻¹(t) = t³                         if t > 6/29
-f⁻¹(t) = 3(6/29)²(t − 4/29)         otherwise
+f⁻¹(t) = t³                         if t > δ
+f⁻¹(t) = 3δ²(t − 4/29)              otherwise
 ```
 
 ---
@@ -664,7 +661,7 @@ CIE XYZ (empirical root)
 |---------------|-------------------------|---------|
 | CIE XYZ | Color matching functions (empirical) | — |
 | Linear RGB / sRGB | Chromaticity coordinates (primaries + D65 white point) | XYZ matrices |
-| sRGB | Linear RGB + transfer function (γ=2.4, a=0.055, K=12.92) | T (threshold) |
+| sRGB | Linear RGB + transfer function (γ=2.4, a=0.055) | K, T (slope and threshold) |
 | Gamma 2.2 RGB | Linear RGB + γ=2.2 | — |
 | Y'CbCr | sRGB + matrix transform | — |
 | Apple RGB | Chromaticity coordinates + γ=1.8 | XYZ matrices |
@@ -676,7 +673,7 @@ CIE XYZ (empirical root)
 
 ---
 
-## Appendix: Bradford Chromatic Adaptation
+## Appendix A: Bradford Chromatic Adaptation
 
 When converting between color spaces with different white points (e.g., ProPhoto RGB at D50 to sRGB at D65), a chromatic adaptation transform is required. The Bradford transform is the industry standard, used by ICC color profiles.
 
@@ -701,3 +698,70 @@ M_adapt = BRADFORD⁻¹ × diag(LMS_Wd / LMS_Ws) × BRADFORD
 Where `LMS_W = BRADFORD × XYZ_W` for each white point.
 
 The resulting 3×3 matrix transforms XYZ coordinates directly from one illuminant to another. This can be precomposed with RGB↔XYZ matrices to create direct RGB-to-RGB conversions between spaces with different white points.
+
+---
+
+## Appendix B: sRGB Transfer Function History
+
+The sRGB transfer function has a complicated standardization history that explains why different constants appear in different sources.
+
+### The Mathematical Derivation
+
+The sRGB transfer function combines a linear segment near black with a power curve for the rest of the range. Given the power curve parameters γ=2.4 and offset a=0.055, the linear segment parameters can be derived by requiring C¹ continuity (continuous value AND continuous slope) at the junction point.
+
+The power curve portion is: f(x) = (1+a)·x^(1/γ) − a
+
+For the linear portion f(x) = K·x to match both value and slope at threshold T:
+
+```
+Value match:    K·T = (1+a)·T^(1/γ) − a
+Slope match:    K = (1+a)/γ · T^(1/γ − 1)
+```
+
+Solving these simultaneously:
+
+```
+K = (1+a)^γ · (γ−1)^(γ−1) / (a^(γ−1) · γ^γ) ≈ 12.9232102...
+y₀ = a / (γ − 1) = 0.055 / 1.4 = 11/280 ≈ 0.0392857...  (encoded threshold, exact rational)
+T = y₀ / K ≈ 0.00303993...  (linear threshold)
+```
+
+### 1996: HP/Microsoft Proposal
+
+The original sRGB proposal used γ=2.4 and a=0.055, derived the mathematically correct values above, then rounded them:
+- K = 12.92 (rounded from 12.9232...)
+- Encoded threshold = 0.03928 (rounded from 0.0392857...)
+
+This rounding was done because the sRGB spec only defines derived constants for 8-bit precision, where such rounding has no practical effect. The rounded values broke exact C¹ continuity but remained internally consistent—0.03928 is approximately where a line with slope 12.92 intersects the power curve.
+
+### 1999: IEC 61966-2-1
+
+The IEC standardized sRGB but made puzzling changes:
+- Kept K = 12.92
+- Changed thresholds to 0.0031308 (linear) and 0.04045 (encoded)
+
+These new thresholds were derived from the rounded K=12.92 using value continuity, rather than from the authoritative γ=2.4 and a=0.055. This compounds the rounding error:
+- 0.0031308 × 12.92 = 0.04044... ≠ 0.04045 (additional rounding error)
+- The values don't satisfy either the value-match or slope-match equations exactly
+
+The result has both a small value discontinuity AND a slope discontinuity at the junction. The IEC spec was designed for 8-bit encoding where the rounded constants produce correct results.
+
+### 2021: W3C WCAG
+
+The W3C accessibility guidelines had used 0.03928 (from the 1996 proposal) in their relative luminance formula. In May 2021, they "corrected" this to 0.04045 to match the IEC standard—replacing a value with clear mathematical provenance with the IEC's arbitrary adjustment.
+
+### ICC Profiles
+
+ICC profiles encode transfer function parameters in s15Fixed16 fixed-point format, which cannot represent 12.92 exactly. The actual stored value corresponds to a slope of approximately 12.921. So "exact compatibility" with ICC profiles is impossible regardless of which constants are chosen.
+
+### Our Choice
+
+For floating-point implementations, we use the mathematically derived constants (K≈12.9232, T≈0.00304). These values are within specification—the spec only defines derived constants to the precision shown (12.92 for the slope), and 12.9232 rounds to 12.92. If a spec defines a square with sides 1.51m and 1.5m, the 1.5m cannot mean exactly 1.50m—it's a square.
+
+The full-precision values provide:
+- Perfect C¹ continuity
+- Exact invertibility
+- Clean behavior for extended-range values
+- Consistency with the original design intent of the transfer function
+
+The IEC standard's rounded constants were pragmatic compromises for 8-bit systems that don't apply to floating-point implementations.
