@@ -115,10 +115,12 @@ pub enum ColorSpace {
     LabCiede2000,
     /// Linear RGB (not recommended, for testing only)
     LinearRgb,
-    /// Y'CbCr (not recommended, for testing only)
+    /// Y'CbCr BT.709 (not recommended, for testing only)
     YCbCr,
     /// sRGB (not recommended, for testing only)
     Srgb,
+    /// Y'CbCr BT.601 legacy (not recommended, for compatibility testing)
+    YCbCrBt601,
 }
 
 impl ColorSpace {
@@ -131,6 +133,7 @@ impl ColorSpace {
             ColorSpace::LinearRgb => PerceptualSpace::LinearRGB,
             ColorSpace::YCbCr => PerceptualSpace::YCbCr,
             ColorSpace::Srgb => PerceptualSpace::Srgb,
+            ColorSpace::YCbCrBt601 => PerceptualSpace::YCbCrBt601,
         }
     }
 }

@@ -93,8 +93,13 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
         // OKLab uses simple Euclidean distance, which reduces to ΔL² for grays
         // LinearRGB also uses simple Euclidean distance in linear space
         // YCbCr uses simple distance in gamma-encoded (sRGB) space
+        // YCbCrBt601 uses simple distance in gamma-encoded (sRGB) space
         // sRGB uses simple distance in gamma-encoded (sRGB) space
-        PerceptualSpace::OkLab | PerceptualSpace::LinearRGB | PerceptualSpace::YCbCr | PerceptualSpace::Srgb => {
+        PerceptualSpace::OkLab
+        | PerceptualSpace::LinearRGB
+        | PerceptualSpace::YCbCr
+        | PerceptualSpace::YCbCrBt601
+        | PerceptualSpace::Srgb => {
             lightness_distance_sq(l1, l2)
         }
     }

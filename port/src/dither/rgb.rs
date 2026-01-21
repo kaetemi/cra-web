@@ -15,11 +15,13 @@
 /// - Random: Random direction per row (mixed modes only)
 
 use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_clamped,
-    linear_to_srgb_single, srgb_to_linear_single,
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_bt601,
+    linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped, linear_to_srgb_single,
+    srgb_to_linear_single,
 };
 use crate::color_distance::{
-    is_lab_space, is_linear_rgb_space, is_srgb_space, is_ycbcr_space, perceptual_distance_sq,
+    is_lab_space, is_linear_rgb_space, is_srgb_space, is_ycbcr_bt601_space, is_ycbcr_space,
+    perceptual_distance_sq,
 };
 
 // Re-export common types for backwards compatibility
@@ -160,8 +162,11 @@ fn build_perceptual_lut(
                     // Store linear RGB values directly (no perceptual conversion)
                     (r_lin, g_lin, b_lin)
                 } else if is_ycbcr_space(space) {
-                    // Y'CbCr conversion (goes through sRGB internally)
+                    // Y'CbCr BT.709 conversion (goes through sRGB internally)
                     linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
+                } else if is_ycbcr_bt601_space(space) {
+                    // Y'CbCr BT.601 (legacy) conversion (goes through sRGB internally)
+                    linear_rgb_to_ycbcr_bt601_clamped(r_lin, g_lin, b_lin)
                 } else if is_lab_space(space) {
                     linear_rgb_to_lab(r_lin, g_lin, b_lin)
                 } else {
@@ -930,8 +935,11 @@ fn process_pixel(
         // Linear RGB mode: use linear values directly
         (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.space) {
-        // Y'CbCr mode: convert through sRGB (unclamped for out-of-gamut)
+        // Y'CbCr BT.709 mode: convert through sRGB (unclamped for out-of-gamut)
         linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
+    } else if is_ycbcr_bt601_space(ctx.space) {
+        // Y'CbCr BT.601 (legacy) mode: convert through sRGB (unclamped for out-of-gamut)
+        linear_rgb_to_ycbcr_bt601(lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_lab_space(ctx.space) {
         linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
     } else {
@@ -969,6 +977,8 @@ fn process_pixel(
                         (r_lin, g_lin, b_lin)
                     } else if is_ycbcr_space(ctx.space) {
                         linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
+                    } else if is_ycbcr_bt601_space(ctx.space) {
+                        linear_rgb_to_ycbcr_bt601_clamped(r_lin, g_lin, b_lin)
                     } else if is_lab_space(ctx.space) {
                         linear_rgb_to_lab(r_lin, g_lin, b_lin)
                     } else {

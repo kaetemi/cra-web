@@ -34,6 +34,11 @@ pub enum PerceptualSpace {
     /// Simple Euclidean distance in gamma-encoded sRGB space.
     /// Not perceptually uniform - provided for testing and comparison purposes only
     Srgb,
+    /// Y'CbCr BT.601 (legacy) with Euclidean distance (NOT RECOMMENDED)
+    /// Luma-chroma separation using legacy BT.601 coefficients (0.299/0.587/0.114).
+    /// This is the JPEG/ITU-T T.871 encoding, historically from NTSC 1953.
+    /// Not perceptually uniform - provided for compatibility testing only
+    YCbCrBt601,
 }
 
 /// Output dithering technique selection

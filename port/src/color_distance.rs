@@ -172,10 +172,15 @@ pub fn perceptual_distance_sq(
         PerceptualSpace::LabCIE76 => lab_distance_cie76_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::LabCIE94 => lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::LabCIEDE2000 => lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2),
-        PerceptualSpace::OkLab | PerceptualSpace::LinearRGB | PerceptualSpace::YCbCr | PerceptualSpace::Srgb => {
+        PerceptualSpace::OkLab
+        | PerceptualSpace::LinearRGB
+        | PerceptualSpace::YCbCr
+        | PerceptualSpace::YCbCrBt601
+        | PerceptualSpace::Srgb => {
             // OkLab uses simple Euclidean distance (it's designed for this)
             // LinearRGB also uses simple Euclidean (l/a/b contain R/G/B in linear space)
             // YCbCr also uses simple Euclidean (l/a/b contain Y'/Cb/Cr values)
+            // YCbCrBt601 also uses simple Euclidean (l/a/b contain Y'/Cb/Cr with BT.601 coefficients)
             // Srgb uses simple Euclidean (l/a/b contain gamma-encoded R/G/B values)
             let dl = l1 - l2;
             let da = a1 - a2;
@@ -201,10 +206,16 @@ pub fn is_linear_rgb_space(space: PerceptualSpace) -> bool {
     matches!(space, PerceptualSpace::LinearRGB)
 }
 
-/// Check if a PerceptualSpace variant uses Y'CbCr
+/// Check if a PerceptualSpace variant uses Y'CbCr (BT.709)
 #[inline]
 pub fn is_ycbcr_space(space: PerceptualSpace) -> bool {
     matches!(space, PerceptualSpace::YCbCr)
+}
+
+/// Check if a PerceptualSpace variant uses Y'CbCr BT.601 (legacy)
+#[inline]
+pub fn is_ycbcr_bt601_space(space: PerceptualSpace) -> bool {
+    matches!(space, PerceptualSpace::YCbCrBt601)
 }
 
 /// Check if a PerceptualSpace variant uses sRGB (gamma-encoded)

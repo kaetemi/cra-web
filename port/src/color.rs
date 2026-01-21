@@ -396,6 +396,53 @@ pub fn linear_rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (y, cb, cr)
 }
 
+// ============== Y'CbCr BT.601 (legacy) color space ==============
+// Y'CbCr using legacy BT.601 coefficients (0.299/0.587/0.114).
+// This is the JPEG/ITU-T T.871 encoding, historically from NTSC 1953.
+// Applied to gamma-encoded (sRGB) values despite coefficient mismatch.
+// Y': 0-1, Cb/Cr: roughly -0.5 to +0.5
+
+/// Convert linear RGB (0-1) to Y'CbCr using BT.601 (legacy) coefficients.
+/// Internally converts to sRGB first, then applies the BT.601 Y'CbCr matrix.
+/// Returns (Y', Cb, Cr) where Y' is 0-1 and Cb,Cr are roughly -0.5 to +0.5
+/// Clamps input to 0-1 range before conversion.
+#[inline]
+pub fn linear_rgb_to_ycbcr_bt601_clamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Convert linear to sRGB (gamma-encoded)
+    let r_srgb = linear_to_srgb_single(r.clamp(0.0, 1.0));
+    let g_srgb = linear_to_srgb_single(g.clamp(0.0, 1.0));
+    let b_srgb = linear_to_srgb_single(b.clamp(0.0, 1.0));
+
+    // Apply RGB to Y'CbCr matrix (BT.601 legacy coefficients)
+    // Y'  = Kr*R' + Kg*G' + Kb*B'
+    // Cb = 0.5*(B'-Y')/(1-Kb)
+    // Cr = 0.5*(R'-Y')/(1-Kr)
+    let y = cs::BT601_KR * r_srgb + cs::BT601_KG * g_srgb + cs::BT601_KB * b_srgb;
+    let cb = cs::BT601_CB_R * r_srgb + cs::BT601_CB_G * g_srgb + cs::BT601_CB_B * b_srgb;
+    let cr = cs::BT601_CR_R * r_srgb + cs::BT601_CR_G * g_srgb + cs::BT601_CR_B * b_srgb;
+
+    (y, cb, cr)
+}
+
+/// Convert linear RGB to Y'CbCr BT.601 (supports out-of-gamut values during dithering).
+///
+/// Uses the sYCC extended gamut transfer function which natively handles
+/// negative values from error accumulation via point-symmetric extension.
+#[inline]
+pub fn linear_rgb_to_ycbcr_bt601(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    // Convert linear to sRGB (sYCC transfer handles negatives natively)
+    let r_srgb = linear_to_srgb_single(r);
+    let g_srgb = linear_to_srgb_single(g);
+    let b_srgb = linear_to_srgb_single(b);
+
+    // Apply RGB to Y'CbCr matrix (BT.601 legacy coefficients)
+    let y = cs::BT601_KR * r_srgb + cs::BT601_KG * g_srgb + cs::BT601_KB * b_srgb;
+    let cb = cs::BT601_CB_R * r_srgb + cs::BT601_CB_G * g_srgb + cs::BT601_CB_B * b_srgb;
+    let cr = cs::BT601_CR_R * r_srgb + cs::BT601_CR_G * g_srgb + cs::BT601_CR_B * b_srgb;
+
+    (y, cb, cr)
+}
+
 // ============== Output utilities ==============
 
 /// Interleave three u8 channels into RGB output

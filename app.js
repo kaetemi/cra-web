@@ -184,7 +184,9 @@ function generateCliCommand() {
         2: 'lab-cie94',
         3: 'lab-ciede2000',
         4: 'linear-rgb',
-        5: 'y-cb-cr'
+        5: 'y-cb-cr',
+        6: 'srgb',
+        7: 'y-cb-cr-bt601'
     };
 
     let cmd = `cra -i input.png -r reference.png -o output.png`;
