@@ -931,11 +931,13 @@ mod tests {
                 let (l1, a1, b1) = linear_rgb_to_lab(lin1, lin1, lin1);
                 let (l2, a2, b2) = linear_rgb_to_lab(lin2, lin2, lin2);
 
-                // Verify a and b are effectively 0 for neutral grays
-                assert!(a1.abs() < 1e-6, "a1 should be ~0 for gray, got {}", a1);
-                assert!(b1.abs() < 1e-6, "b1 should be ~0 for gray, got {}", b1);
-                assert!(a2.abs() < 1e-6, "a2 should be ~0 for gray, got {}", a2);
-                assert!(b2.abs() < 1e-6, "b2 should be ~0 for gray, got {}", b2);
+                // Verify a and b are effectively 0 for neutral grays.
+                // Tolerance is 2e-5 to account for f32 arithmetic: (a+b+c)*k ≠ a*k + b*k + c*k
+                // when computing matrix·RGB / D65. The error is ~200 * f32_epsilon.
+                assert!(a1.abs() < 2e-5, "a1 should be ~0 for gray, got {}", a1);
+                assert!(b1.abs() < 2e-5, "b1 should be ~0 for gray, got {}", b1);
+                assert!(a2.abs() < 2e-5, "a2 should be ~0 for gray, got {}", a2);
+                assert!(b2.abs() < 2e-5, "b2 should be ~0 for gray, got {}", b2);
 
                 // Our simplified distance
                 let simple_dist = lightness_distance_sq(l1, l2);

@@ -34,7 +34,7 @@ fn matrix_column(m: &Mat3, col: usize) -> [f64; 3] {
 /// 3x3 matrix type for convenience
 type Mat3 = [[f64; 3]; 3];
 
-/// Compute RGB→XYZ matrix from primaries and white point.
+/// Compute RGB→XYZ matrix from primaries and white point (xy chromaticity).
 ///
 /// The derivation:
 /// 1. Convert each primary's xy chromaticity to XYZ (with Y=1 each)
@@ -47,13 +47,24 @@ fn compute_rgb_to_xyz_matrix(
     blue_xy: (f64, f64),
     white_xy: (f64, f64),
 ) -> Mat3 {
+    let w_xyz = xy_to_xyz(white_xy.0, white_xy.1);
+    compute_rgb_to_xyz_matrix_with_xyz_white(red_xy, green_xy, blue_xy, w_xyz)
+}
+
+/// Compute RGB→XYZ matrix from primaries and white point (XYZ).
+///
+/// Use this variant when the white point is authoritatively defined as XYZ
+/// (e.g., D50 for ICC PCS and ProPhoto RGB).
+fn compute_rgb_to_xyz_matrix_with_xyz_white(
+    red_xy: (f64, f64),
+    green_xy: (f64, f64),
+    blue_xy: (f64, f64),
+    white_xyz: [f64; 3],
+) -> Mat3 {
     // Convert primaries to XYZ (Y=1 for each)
     let r_xyz = xy_to_xyz(red_xy.0, red_xy.1);
     let g_xyz = xy_to_xyz(green_xy.0, green_xy.1);
     let b_xyz = xy_to_xyz(blue_xy.0, blue_xy.1);
-
-    // White point XYZ
-    let w_xyz = xy_to_xyz(white_xy.0, white_xy.1);
 
     // Matrix P: primaries as columns
     // P = | Xr Xg Xb |
@@ -69,9 +80,9 @@ fn compute_rgb_to_xyz_matrix(
     // S = P^-1 * W
     let p_inv = invert_3x3(p);
     let s = [
-        p_inv[0][0] * w_xyz[0] + p_inv[0][1] * w_xyz[1] + p_inv[0][2] * w_xyz[2],
-        p_inv[1][0] * w_xyz[0] + p_inv[1][1] * w_xyz[1] + p_inv[1][2] * w_xyz[2],
-        p_inv[2][0] * w_xyz[0] + p_inv[2][1] * w_xyz[1] + p_inv[2][2] * w_xyz[2],
+        p_inv[0][0] * white_xyz[0] + p_inv[0][1] * white_xyz[1] + p_inv[0][2] * white_xyz[2],
+        p_inv[1][0] * white_xyz[0] + p_inv[1][1] * white_xyz[1] + p_inv[1][2] * white_xyz[2],
+        p_inv[2][0] * white_xyz[0] + p_inv[2][1] * white_xyz[1] + p_inv[2][2] * white_xyz[2],
     ];
 
     // Final matrix: scale columns of P by S
@@ -231,29 +242,24 @@ fn main() -> io::Result<()> {
 
     // Compute all derived constants
 
-    // D65 variants
-    let d65_cie_xyz = xy_to_xyz(primary::d65_cie::X, primary::d65_cie::Y);
-    let d65_xyz = xy_to_xyz(primary::d65::X, primary::d65::Y); // 4-digit
+    // D65 (4-digit chromaticity is authoritative for all D65 color spaces)
+    let d65_xy = (primary::d65::X, primary::d65::Y);
+    let d65_xyz = xy_to_xyz(d65_xy.0, d65_xy.1);
 
-    // D50
-    let d50_xyz = xy_to_xyz(primary::d50::X, primary::d50::Y);
+    // D50 (XYZ is authoritative for ICC/ProPhoto - use directly, derive chromaticity)
+    let d50_xyz = [primary::d50::XYZ_X, primary::d50::XYZ_Y, primary::d50::XYZ_Z];
+    let d50_xy = xyz_to_xy(d50_xyz);
 
-    // sRGB / Rec.709 matrices - use canonical 4-digit XYZ matrix directly
-    let srgb_to_xyz = primary::srgb_xyz::TO_XYZ;
+    // sRGB / Rec.709 matrices - derived from authoritative chromaticity primaries
+    // Per IEC 61966-2-1, the chromaticity coordinates are the normative definition.
+    // The 4-decimal matrices in the spec are truncated for presentation.
+    let srgb_to_xyz = compute_rgb_to_xyz_matrix(
+        (primary::srgb_primaries::RED_X, primary::srgb_primaries::RED_Y),
+        (primary::srgb_primaries::GREEN_X, primary::srgb_primaries::GREEN_Y),
+        (primary::srgb_primaries::BLUE_X, primary::srgb_primaries::BLUE_Y),
+        d65_xy,
+    );
     let xyz_to_srgb = invert_3x3(srgb_to_xyz);
-
-    // D65 sRGB - derived from matrix row sums (white = R+G+B)
-    let d65_srgb_xyz = [
-        srgb_to_xyz[0][0] + srgb_to_xyz[0][1] + srgb_to_xyz[0][2],
-        srgb_to_xyz[1][0] + srgb_to_xyz[1][1] + srgb_to_xyz[1][2],
-        srgb_to_xyz[2][0] + srgb_to_xyz[2][1] + srgb_to_xyz[2][2],
-    ];
-    let d65_srgb_xy = xyz_to_xy(d65_srgb_xyz);
-
-    // Derive sRGB chromaticities from XYZ matrix columns
-    let srgb_red_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 0));
-    let srgb_green_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 1));
-    let srgb_blue_xy = xyz_to_xy(matrix_column(&srgb_to_xyz, 2));
 
     // Apple RGB matrices
     let apple_to_xyz = compute_rgb_to_xyz_matrix(
@@ -282,12 +288,12 @@ fn main() -> io::Result<()> {
     );
     let xyz_to_adobe = invert_3x3(adobe_to_xyz);
 
-    // ProPhoto RGB matrices (D50 white point)
-    let prophoto_to_xyz = compute_rgb_to_xyz_matrix(
+    // ProPhoto RGB matrices (D50 white point - XYZ is authoritative)
+    let prophoto_to_xyz = compute_rgb_to_xyz_matrix_with_xyz_white(
         (primary::prophoto_rgb_primaries::RED_X, primary::prophoto_rgb_primaries::RED_Y),
         (primary::prophoto_rgb_primaries::GREEN_X, primary::prophoto_rgb_primaries::GREEN_Y),
         (primary::prophoto_rgb_primaries::BLUE_X, primary::prophoto_rgb_primaries::BLUE_Y),
-        (primary::d50::X, primary::d50::Y),
+        d50_xyz,
     );
     let xyz_to_prophoto = invert_3x3(prophoto_to_xyz);
 
@@ -301,41 +307,37 @@ fn main() -> io::Result<()> {
     let xyz_to_rec2020 = invert_3x3(rec2020_to_xyz);
 
     // Bradford chromatic adaptation matrices
-    // All adaptations target D65_SRGB as the canonical working white point
+    // Only needed for D50 ↔ D65 conversion (ProPhoto RGB)
+    // All D65 color spaces share the same white point (0.3127, 0.3290), so no adaptation needed between them.
     let bradford_inv = invert_3x3(primary::bradford::MATRIX);
 
-    // D50 ↔ D65_SRGB (for ProPhoto RGB)
-    let adapt_d50_to_d65_srgb = compute_chromatic_adaptation(d50_xyz, d65_srgb_xyz);
-    let adapt_d65_srgb_to_d50 = compute_chromatic_adaptation(d65_srgb_xyz, d50_xyz);
-
-    // D65 (4-digit) ↔ D65_SRGB (for spaces using spec D65)
-    let adapt_d65_to_d65_srgb = compute_chromatic_adaptation(d65_xyz, d65_srgb_xyz);
-    let adapt_d65_srgb_to_d65 = compute_chromatic_adaptation(d65_srgb_xyz, d65_xyz);
+    // D50 ↔ D65 (for ProPhoto RGB ↔ D65 spaces)
+    let adapt_d50_to_d65 = compute_chromatic_adaptation(d50_xyz, d65_xyz);
+    let adapt_d65_to_d50 = compute_chromatic_adaptation(d65_xyz, d50_xyz);
 
     // Direct RGB ↔ sRGB matrices
-    // For D65 spaces: includes micro-adaptation from D65(4-digit) to D65_SRGB for exactness
-    // For D50 spaces: includes full Bradford adaptation
+    // For D65 spaces: simple matrix multiplication (same white point, no adaptation needed)
+    // For D50 spaces (ProPhoto): includes full Bradford adaptation
 
-    // Apple RGB ↔ sRGB (D65 4-digit → D65 sRGB)
-    // APPLE_TO_SRGB = XYZ_TO_SRGB × ADAPT_D65_TO_D65_SRGB × APPLE_TO_XYZ
-    let apple_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, apple_to_xyz));
-    let srgb_to_apple = mat_mul(xyz_to_apple, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+    // Apple RGB ↔ sRGB (same D65 white point)
+    let apple_to_srgb = mat_mul(xyz_to_srgb, apple_to_xyz);
+    let srgb_to_apple = mat_mul(xyz_to_apple, srgb_to_xyz);
 
-    // Display P3 ↔ sRGB (D65 4-digit → D65 sRGB)
-    let p3_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, p3_to_xyz));
-    let srgb_to_p3 = mat_mul(xyz_to_p3, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+    // Display P3 ↔ sRGB (same D65 white point)
+    let p3_to_srgb = mat_mul(xyz_to_srgb, p3_to_xyz);
+    let srgb_to_p3 = mat_mul(xyz_to_p3, srgb_to_xyz);
 
-    // Adobe RGB ↔ sRGB (D65 4-digit → D65 sRGB)
-    let adobe_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, adobe_to_xyz));
-    let srgb_to_adobe = mat_mul(xyz_to_adobe, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+    // Adobe RGB ↔ sRGB (same D65 white point)
+    let adobe_to_srgb = mat_mul(xyz_to_srgb, adobe_to_xyz);
+    let srgb_to_adobe = mat_mul(xyz_to_adobe, srgb_to_xyz);
 
-    // Rec.2020 ↔ sRGB (D65 4-digit → D65 sRGB)
-    let rec2020_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d65_to_d65_srgb, rec2020_to_xyz));
-    let srgb_to_rec2020 = mat_mul(xyz_to_rec2020, mat_mul(adapt_d65_srgb_to_d65, srgb_to_xyz));
+    // Rec.2020 ↔ sRGB (same D65 white point)
+    let rec2020_to_srgb = mat_mul(xyz_to_srgb, rec2020_to_xyz);
+    let srgb_to_rec2020 = mat_mul(xyz_to_rec2020, srgb_to_xyz);
 
-    // ProPhoto RGB ↔ sRGB (D50 → D65 sRGB, full Bradford adaptation)
-    let prophoto_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d50_to_d65_srgb, prophoto_to_xyz));
-    let srgb_to_prophoto = mat_mul(xyz_to_prophoto, mat_mul(adapt_d65_srgb_to_d50, srgb_to_xyz));
+    // ProPhoto RGB ↔ sRGB (D50 → D65, full Bradford adaptation)
+    let prophoto_to_srgb = mat_mul(xyz_to_srgb, mat_mul(adapt_d50_to_d65, prophoto_to_xyz));
+    let srgb_to_prophoto = mat_mul(xyz_to_prophoto, mat_mul(adapt_d65_to_d50, srgb_to_xyz));
 
     // CIELAB derived constants
     let delta = primary::cielab::DELTA_NUMERATOR as f64 / primary::cielab::DELTA_DENOMINATOR as f64;
@@ -364,14 +366,15 @@ fn main() -> io::Result<()> {
         / primary::prophoto_transfer::THRESHOLD_DENOMINATOR as f64;
     let srgb_decode_threshold = primary::srgb_transfer::THRESHOLD * primary::srgb_transfer::LINEAR_SLOPE;
 
-    // Y'CbCr derived matrices
-    let (ycbcr_forward, ycbcr_inverse) = compute_ycbcr_matrices(
-        primary::ycbcr_bt709::KR,
-        primary::ycbcr_bt709::KG,
-        primary::ycbcr_bt709::KB,
-    );
-    let cb_scale = 2.0 * (1.0 - primary::ycbcr_bt709::KB);
-    let cr_scale = 2.0 * (1.0 - primary::ycbcr_bt709::KR);
+    // Y'CbCr BT.709 derived matrices
+    // The luminance coefficients (KR, KG, KB) are the second row of the sRGB→XYZ matrix.
+    // Using the derived values ensures consistency with our sRGB matrices.
+    let kr = srgb_to_xyz[1][0];
+    let kg = srgb_to_xyz[1][1];
+    let kb = srgb_to_xyz[1][2];
+    let (ycbcr_forward, ycbcr_inverse) = compute_ycbcr_matrices(kr, kg, kb);
+    let cb_scale = 2.0 * (1.0 - kb);
+    let cr_scale = 2.0 * (1.0 - kr);
 
     // Generate the output file
     writeln!(out, "//! Derived color space constants.")?;
@@ -385,36 +388,26 @@ fn main() -> io::Result<()> {
 
     // Illuminant XYZ
     writeln!(out, "// =============================================================================")?;
-    writeln!(out, "// D65 ILLUMINANT VARIANTS")?;
+    writeln!(out, "// D65 ILLUMINANT")?;
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
-    writeln!(out, "/// D65 CIE - authoritative definition from CIE 15:2004.")?;
-    writeln!(out, "/// Derived from xy chromaticity (0.31272, 0.32903).")?;
-    writeln!(out, "pub mod d65_cie {{")?;
-    writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d65_cie::X))?;
-    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d65_cie::Y))?;
-    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_cie_xyz[0]))?;
-    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_cie_xyz[1]))?;
-    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_cie_xyz[2]))?;
-    writeln!(out, "}}")?;
-    writeln!(out)?;
-    writeln!(out, "/// D65 sRGB - derived from the canonical sRGB matrix row sums.")?;
-    writeln!(out, "/// This is the operative white point for sRGB workflows.")?;
-    writeln!(out, "pub mod d65_srgb {{")?;
-    writeln!(out, "    pub const X: f64 = {};", fmt_f64(d65_srgb_xy.0))?;
-    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(d65_srgb_xy.1))?;
-    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_srgb_xyz[0]))?;
-    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_srgb_xyz[1]))?;
-    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_srgb_xyz[2]))?;
-    writeln!(out, "}}")?;
-    writeln!(out)?;
-    writeln!(out, "/// D65 4-digit - rounded values from ITU-R BT.709 / Adobe RGB specs.")?;
-    writeln!(out, "/// Derived from xy chromaticity (0.3127, 0.3290).")?;
+    writeln!(out, "/// D65 (4-digit) - authoritative for sRGB, BT.709, Display P3, Adobe RGB, Rec.2020.")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// Defined by IEC 61966-2-1, ITU-R BT.709-6.")?;
+    writeln!(out, "/// xy chromaticity is authoritative; XYZ is derived.")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// All D65 color spaces use this exact white point. Using \"more accurate\" CIE values")?;
+    writeln!(out, "/// (0.31272, 0.32903) would produce non-conforming matrices.")?;
     writeln!(out, "pub mod d65 {{")?;
+    writeln!(out, "    /// Authoritative chromaticity x coordinate")?;
     writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d65::X))?;
+    writeln!(out, "    /// Authoritative chromaticity y coordinate")?;
     writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d65::Y))?;
+    writeln!(out, "    /// Derived XYZ X (from chromaticity)")?;
     writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d65_xyz[0]))?;
+    writeln!(out, "    /// Derived XYZ Y (normalized to 1.0)")?;
     writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d65_xyz[1]))?;
+    writeln!(out, "    /// Derived XYZ Z (from chromaticity)")?;
     writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d65_xyz[2]))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
@@ -422,14 +415,19 @@ fn main() -> io::Result<()> {
     writeln!(out, "// D50 ILLUMINANT")?;
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
-    writeln!(out, "/// D50 standard illuminant.")?;
-    writeln!(out, "/// Derived from xy chromaticity (0.3457, 0.3585).")?;
+    writeln!(out, "/// D50 - authoritative for ProPhoto RGB (ISO 22028-2) and ICC PCS (ICC.1:2022-05).")?;
+    writeln!(out, "/// XYZ is authoritative; chromaticity is derived.")?;
     writeln!(out, "pub mod d50 {{")?;
-    writeln!(out, "    pub const X: f64 = {};", fmt_f64(primary::d50::X))?;
-    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(primary::d50::Y))?;
+    writeln!(out, "    /// Authoritative XYZ X")?;
     writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(d50_xyz[0]))?;
+    writeln!(out, "    /// Authoritative XYZ Y (normalized to 1.0)")?;
     writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(d50_xyz[1]))?;
+    writeln!(out, "    /// Authoritative XYZ Z")?;
     writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(d50_xyz[2]))?;
+    writeln!(out, "    /// Derived chromaticity x")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(d50_xy.0))?;
+    writeln!(out, "    /// Derived chromaticity y")?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(d50_xy.1))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
 
@@ -439,22 +437,27 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "/// Linear sRGB → XYZ matrix.")?;
-    writeln!(out, "/// These 4-digit coefficients are canonical per IEC 61966-2-1.")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// Derived from authoritative chromaticity primaries (IEC 61966-2-1):")?;
+    writeln!(out, "///   Red: (0.640, 0.330), Green: (0.300, 0.600), Blue: (0.150, 0.060)")?;
+    writeln!(out, "///   White point D65: (0.3127, 0.3290)")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// The 4-decimal matrices in IEC 61966-2-1 are truncated for presentation.")?;
+    writeln!(out, "/// Per Amendment 1, higher precision is recommended for N > 8 bit depths.")?;
     writeln!(out, "/// Row-major: result[row] = dot(matrix[row], rgb)")?;
     writeln!(out, "pub const SRGB_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(srgb_to_xyz, ""))?;
     writeln!(out)?;
-    writeln!(out, "/// XYZ → Linear sRGB matrix (derived inverse).")?;
+    writeln!(out, "/// XYZ → Linear sRGB matrix (inverse of SRGB_TO_XYZ).")?;
     writeln!(out, "pub const XYZ_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_srgb, ""))?;
     writeln!(out)?;
-    writeln!(out, "/// sRGB chromaticities derived from XYZ matrix columns.")?;
-    writeln!(out, "/// x = X/(X+Y+Z), y = Y/(X+Y+Z) for each primary.")?;
-    writeln!(out, "pub mod srgb_chromaticity {{")?;
-    writeln!(out, "    pub const RED_X: f64 = {};", fmt_f64(srgb_red_xy.0))?;
-    writeln!(out, "    pub const RED_Y: f64 = {};", fmt_f64(srgb_red_xy.1))?;
-    writeln!(out, "    pub const GREEN_X: f64 = {};", fmt_f64(srgb_green_xy.0))?;
-    writeln!(out, "    pub const GREEN_Y: f64 = {};", fmt_f64(srgb_green_xy.1))?;
-    writeln!(out, "    pub const BLUE_X: f64 = {};", fmt_f64(srgb_blue_xy.0))?;
-    writeln!(out, "    pub const BLUE_Y: f64 = {};", fmt_f64(srgb_blue_xy.1))?;
+    writeln!(out, "/// sRGB primaries - authoritative chromaticity coordinates from IEC 61966-2-1.")?;
+    writeln!(out, "pub mod srgb_primaries {{")?;
+    writeln!(out, "    pub const RED_X: f64 = {};", fmt_f64(primary::srgb_primaries::RED_X))?;
+    writeln!(out, "    pub const RED_Y: f64 = {};", fmt_f64(primary::srgb_primaries::RED_Y))?;
+    writeln!(out, "    pub const GREEN_X: f64 = {};", fmt_f64(primary::srgb_primaries::GREEN_X))?;
+    writeln!(out, "    pub const GREEN_Y: f64 = {};", fmt_f64(primary::srgb_primaries::GREEN_Y))?;
+    writeln!(out, "    pub const BLUE_X: f64 = {};", fmt_f64(primary::srgb_primaries::BLUE_X))?;
+    writeln!(out, "    pub const BLUE_Y: f64 = {};", fmt_f64(primary::srgb_primaries::BLUE_Y))?;
     writeln!(out, "}}")?;
     writeln!(out)?;
 
@@ -525,7 +528,8 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "// Derived from the Bradford matrix using von Kries adaptation.")?;
-    writeln!(out, "// All adaptations use D65_SRGB (from sRGB matrix) as the canonical working white.")?;
+    writeln!(out, "// Only needed for D50 ↔ D65 conversion (ProPhoto RGB).")?;
+    writeln!(out, "// All D65 color spaces share the same white point, so no adaptation needed between them.")?;
     writeln!(out)?;
     writeln!(out, "/// Bradford matrix: XYZ → LMS (cone-like response).")?;
     writeln!(out, "/// Primary constant from Lam (1985) and Hunt (1994).")?;
@@ -534,18 +538,11 @@ fn main() -> io::Result<()> {
     writeln!(out, "/// Bradford inverse: LMS → XYZ.")?;
     writeln!(out, "pub const BRADFORD_INV: [[f64; 3]; 3] = {};", fmt_matrix(bradford_inv, ""))?;
     writeln!(out)?;
-    writeln!(out, "/// Chromatic adaptation: D50 → D65_SRGB (for ProPhoto RGB).")?;
-    writeln!(out, "pub const ADAPT_D50_TO_D65_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d50_to_d65_srgb, ""))?;
+    writeln!(out, "/// Chromatic adaptation: D50 → D65 (for ProPhoto RGB to D65 spaces).")?;
+    writeln!(out, "pub const ADAPT_D50_TO_D65: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d50_to_d65, ""))?;
     writeln!(out)?;
-    writeln!(out, "/// Chromatic adaptation: D65_SRGB → D50.")?;
-    writeln!(out, "pub const ADAPT_D65_SRGB_TO_D50: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_srgb_to_d50, ""))?;
-    writeln!(out)?;
-    writeln!(out, "/// Chromatic adaptation: D65 (4-digit) → D65_SRGB.")?;
-    writeln!(out, "/// Corrects the micro white point difference between spec D65 and sRGB's implied D65.")?;
-    writeln!(out, "pub const ADAPT_D65_TO_D65_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_to_d65_srgb, ""))?;
-    writeln!(out)?;
-    writeln!(out, "/// Chromatic adaptation: D65_SRGB → D65 (4-digit).")?;
-    writeln!(out, "pub const ADAPT_D65_SRGB_TO_D65: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_srgb_to_d65, ""))?;
+    writeln!(out, "/// Chromatic adaptation: D65 → D50 (for D65 spaces to ProPhoto RGB).")?;
+    writeln!(out, "pub const ADAPT_D65_TO_D50: [[f64; 3]; 3] = {};", fmt_matrix(adapt_d65_to_d50, ""))?;
     writeln!(out)?;
 
     // Direct RGB ↔ sRGB matrices
@@ -554,9 +551,8 @@ fn main() -> io::Result<()> {
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
     writeln!(out, "// These matrices convert directly between linear RGB spaces.")?;
-    writeln!(out, "// All include appropriate chromatic adaptation to D65_SRGB:")?;
-    writeln!(out, "// - D65 spaces: micro-adaptation from D65(4-digit) to D65_SRGB")?;
-    writeln!(out, "// - D50 spaces (ProPhoto): full Bradford adaptation")?;
+    writeln!(out, "// D65 spaces share the same white point as sRGB, so no chromatic adaptation needed.")?;
+    writeln!(out, "// D50 spaces (ProPhoto) include full Bradford D50↔D65 adaptation.")?;
     writeln!(out)?;
     writeln!(out, "/// Linear Apple RGB → Linear sRGB matrix.")?;
     writeln!(out, "pub const APPLE_RGB_TO_SRGB: [[f64; 3]; 3] = {};", fmt_matrix(apple_to_srgb, ""))?;
@@ -665,23 +661,35 @@ fn main() -> io::Result<()> {
     writeln!(out, "pub mod f32 {{")?;
     writeln!(out)?;
 
-    // Illuminant XYZ (4-digit D65)
+    // Illuminant XYZ
+    // For f32, we compute D65 from f32 sRGB matrix row sums for internal consistency.
+    // This ensures that sRGB(1,1,1) → XYZ exactly equals D65 in f32 arithmetic.
+    let srgb_f32: [[f32; 3]; 3] = [
+        [srgb_to_xyz[0][0] as f32, srgb_to_xyz[0][1] as f32, srgb_to_xyz[0][2] as f32],
+        [srgb_to_xyz[1][0] as f32, srgb_to_xyz[1][1] as f32, srgb_to_xyz[1][2] as f32],
+        [srgb_to_xyz[2][0] as f32, srgb_to_xyz[2][1] as f32, srgb_to_xyz[2][2] as f32],
+    ];
+    let d65_f32_x = srgb_f32[0][0] + srgb_f32[0][1] + srgb_f32[0][2];
+    let d65_f32_y = srgb_f32[1][0] + srgb_f32[1][1] + srgb_f32[1][2];
+    let d65_f32_z = srgb_f32[2][0] + srgb_f32[2][1] + srgb_f32[2][2];
+
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out, "    // ILLUMINANT XYZ")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// D65 XYZ (4-digit variant, from specs)")?;
-    writeln!(out, "    pub const D65_X: f32 = {} as f32;", fmt_f64(d65_xyz[0]))?;
-    writeln!(out, "    pub const D65_Y: f32 = {} as f32;", fmt_f64(d65_xyz[1]))?;
-    writeln!(out, "    pub const D65_Z: f32 = {} as f32;", fmt_f64(d65_xyz[2]))?;
+    // Helper to format f32 as valid Rust float literal
+    let fmt_f32 = |v: f32| -> String {
+        let s = format!("{}", v);
+        if s.contains('.') || s.contains('e') { s } else { format!("{}.0", s) }
+    };
+
+    writeln!(out, "    /// D65 XYZ (computed from f32 sRGB matrix row sums for internal consistency)")?;
+    writeln!(out, "    pub const D65_X: f32 = {};", fmt_f32(d65_f32_x))?;
+    writeln!(out, "    pub const D65_Y: f32 = {};", fmt_f32(d65_f32_y))?;
+    writeln!(out, "    pub const D65_Z: f32 = {};", fmt_f32(d65_f32_z))?;
     writeln!(out, "    pub const D65_XYZ: [f32; 3] = [D65_X, D65_Y, D65_Z];")?;
     writeln!(out)?;
-    writeln!(out, "    /// D65 sRGB XYZ (derived from sRGB matrix row sums)")?;
-    writeln!(out, "    pub const D65_SRGB_X: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[0]))?;
-    writeln!(out, "    pub const D65_SRGB_Y: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[1]))?;
-    writeln!(out, "    pub const D65_SRGB_Z: f32 = {} as f32;", fmt_f64(d65_srgb_xyz[2]))?;
-    writeln!(out, "    pub const D65_SRGB_XYZ: [f32; 3] = [D65_SRGB_X, D65_SRGB_Y, D65_SRGB_Z];")?;
-    writeln!(out)?;
+    writeln!(out, "    /// D50 XYZ (authoritative for ICC/ProPhoto)")?;
     writeln!(out, "    pub const D50_X: f32 = {} as f32;", fmt_f64(d50_xyz[0]))?;
     writeln!(out, "    pub const D50_Y: f32 = {} as f32;", fmt_f64(d50_xyz[1]))?;
     writeln!(out, "    pub const D50_Z: f32 = {} as f32;", fmt_f64(d50_xyz[2]))?;
@@ -693,11 +701,12 @@ fn main() -> io::Result<()> {
     writeln!(out, "    // ILLUMINANT CHROMATICITY")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// D65 chromaticity (4-digit variant)")?;
+    writeln!(out, "    /// D65 chromaticity (authoritative for display standards)")?;
     writeln!(out, "    pub const D65_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
         fmt_f64(primary::d65::X), fmt_f64(primary::d65::Y))?;
+    writeln!(out, "    /// D50 chromaticity (derived from authoritative XYZ)")?;
     writeln!(out, "    pub const D50_CHROMATICITY: [f32; 2] = [{} as f32, {} as f32];",
-        fmt_f64(primary::d50::X), fmt_f64(primary::d50::Y))?;
+        fmt_f64(d50_xy.0), fmt_f64(d50_xy.1))?;
     writeln!(out)?;
 
     // RGB↔XYZ matrices
@@ -720,13 +729,13 @@ fn main() -> io::Result<()> {
     write_matrix_f32(&mut out, "SRGB_TO_XYZ", &srgb_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_SRGB", &xyz_to_srgb)?;
     writeln!(out)?;
-    writeln!(out, "    /// sRGB chromaticities (derived from XYZ matrix)")?;
+    writeln!(out, "    /// sRGB primaries (authoritative chromaticity coordinates)")?;
     writeln!(out, "    pub const SRGB_RED_XY: [f32; 2] = [{} as f32, {} as f32];",
-        fmt_f64(srgb_red_xy.0), fmt_f64(srgb_red_xy.1))?;
+        fmt_f64(primary::srgb_primaries::RED_X), fmt_f64(primary::srgb_primaries::RED_Y))?;
     writeln!(out, "    pub const SRGB_GREEN_XY: [f32; 2] = [{} as f32, {} as f32];",
-        fmt_f64(srgb_green_xy.0), fmt_f64(srgb_green_xy.1))?;
+        fmt_f64(primary::srgb_primaries::GREEN_X), fmt_f64(primary::srgb_primaries::GREEN_Y))?;
     writeln!(out, "    pub const SRGB_BLUE_XY: [f32; 2] = [{} as f32, {} as f32];",
-        fmt_f64(srgb_blue_xy.0), fmt_f64(srgb_blue_xy.1))?;
+        fmt_f64(primary::srgb_primaries::BLUE_X), fmt_f64(primary::srgb_primaries::BLUE_Y))?;
     writeln!(out)?;
     write_matrix_f32(&mut out, "APPLE_RGB_TO_XYZ", &apple_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_APPLE_RGB", &xyz_to_apple)?;
@@ -752,11 +761,8 @@ fn main() -> io::Result<()> {
     write_matrix_f32(&mut out, "BRADFORD", &primary::bradford::MATRIX)?;
     write_matrix_f32(&mut out, "BRADFORD_INV", &bradford_inv)?;
     writeln!(out)?;
-    write_matrix_f32(&mut out, "ADAPT_D50_TO_D65_SRGB", &adapt_d50_to_d65_srgb)?;
-    write_matrix_f32(&mut out, "ADAPT_D65_SRGB_TO_D50", &adapt_d65_srgb_to_d50)?;
-    writeln!(out)?;
-    write_matrix_f32(&mut out, "ADAPT_D65_TO_D65_SRGB", &adapt_d65_to_d65_srgb)?;
-    write_matrix_f32(&mut out, "ADAPT_D65_SRGB_TO_D65", &adapt_d65_srgb_to_d65)?;
+    write_matrix_f32(&mut out, "ADAPT_D50_TO_D65", &adapt_d50_to_d65)?;
+    write_matrix_f32(&mut out, "ADAPT_D65_TO_D50", &adapt_d65_to_d50)?;
     writeln!(out)?;
 
     // Direct RGB ↔ sRGB matrices
@@ -910,10 +916,10 @@ fn main() -> io::Result<()> {
     writeln!(out, "    // Y'CbCr CONSTANTS")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// BT.709 luma coefficients")?;
-    writeln!(out, "    pub const YCBCR_KR: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KR))?;
-    writeln!(out, "    pub const YCBCR_KG: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KG))?;
-    writeln!(out, "    pub const YCBCR_KB: f32 = {} as f32;", fmt_f64(primary::ycbcr_bt709::KB))?;
+    writeln!(out, "    /// BT.709 luma coefficients (derived from sRGB matrix)")?;
+    writeln!(out, "    pub const YCBCR_KR: f32 = {} as f32;", fmt_f64(kr))?;
+    writeln!(out, "    pub const YCBCR_KG: f32 = {} as f32;", fmt_f64(kg))?;
+    writeln!(out, "    pub const YCBCR_KB: f32 = {} as f32;", fmt_f64(kb))?;
     writeln!(out, "    pub const YCBCR_CB_SCALE: f32 = {} as f32;", fmt_f64(cb_scale))?;
     writeln!(out, "    pub const YCBCR_CR_SCALE: f32 = {} as f32;", fmt_f64(cr_scale))?;
     writeln!(out)?;
@@ -1025,15 +1031,15 @@ fn main() -> io::Result<()> {
     writeln!(out, "    }}")?;
     writeln!(out)?;
     writeln!(out, "    #[test]")?;
-    writeln!(out, "    fn test_srgb_white_matches_d65_srgb() {{")?;
+    writeln!(out, "    fn test_srgb_white_matches_d65() {{")?;
     writeln!(out, "        // RGB (1,1,1) maps to white XYZ via matrix row sums.")?;
-    writeln!(out, "        // This should exactly match d65_srgb since both are derived from the same matrix.")?;
+    writeln!(out, "        // This should match D65 since sRGB matrices are derived from D65 (0.3127, 0.3290).")?;
     writeln!(out, "        let x = SRGB_TO_XYZ[0][0] + SRGB_TO_XYZ[0][1] + SRGB_TO_XYZ[0][2];")?;
     writeln!(out, "        let y = SRGB_TO_XYZ[1][0] + SRGB_TO_XYZ[1][1] + SRGB_TO_XYZ[1][2];")?;
     writeln!(out, "        let z = SRGB_TO_XYZ[2][0] + SRGB_TO_XYZ[2][1] + SRGB_TO_XYZ[2][2];")?;
-    writeln!(out, "        assert!((x - d65_srgb::XYZ_X).abs() < 1e-14, \"X: {{}} vs {{}}\", x, d65_srgb::XYZ_X);")?;
-    writeln!(out, "        assert!((y - d65_srgb::XYZ_Y).abs() < 1e-14, \"Y: {{}} vs {{}}\", y, d65_srgb::XYZ_Y);")?;
-    writeln!(out, "        assert!((z - d65_srgb::XYZ_Z).abs() < 1e-14, \"Z: {{}} vs {{}}\", z, d65_srgb::XYZ_Z);")?;
+    writeln!(out, "        assert!((x - d65::XYZ_X).abs() < 1e-14, \"X: {{}} vs {{}}\", x, d65::XYZ_X);")?;
+    writeln!(out, "        assert!((y - d65::XYZ_Y).abs() < 1e-14, \"Y: {{}} vs {{}}\", y, d65::XYZ_Y);")?;
+    writeln!(out, "        assert!((z - d65::XYZ_Z).abs() < 1e-14, \"Z: {{}} vs {{}}\", z, d65::XYZ_Z);")?;
     writeln!(out, "    }}")?;
     writeln!(out)?;
     writeln!(out, "    #[test]")?;
@@ -1074,14 +1080,8 @@ fn main() -> io::Result<()> {
     writeln!(out)?;
     writeln!(out, "    #[test]")?;
     writeln!(out, "    fn test_d50_d65_adaptation_roundtrip() {{")?;
-    writeln!(out, "        let product = mat_mul(ADAPT_D50_TO_D65_SRGB, ADAPT_D65_SRGB_TO_D50);")?;
+    writeln!(out, "        let product = mat_mul(ADAPT_D50_TO_D65, ADAPT_D65_TO_D50);")?;
     writeln!(out, "        assert!(is_identity(product, 1e-10), \"D50<->D65 adaptation not inverse\");")?;
-    writeln!(out, "    }}")?;
-    writeln!(out)?;
-    writeln!(out, "    #[test]")?;
-    writeln!(out, "    fn test_d65_d65srgb_adaptation_roundtrip() {{")?;
-    writeln!(out, "        let product = mat_mul(ADAPT_D65_TO_D65_SRGB, ADAPT_D65_SRGB_TO_D65);")?;
-    writeln!(out, "        assert!(is_identity(product, 1e-10), \"D65<->D65_SRGB adaptation not inverse\");")?;
     writeln!(out, "    }}")?;
     writeln!(out, "}}")?;
 

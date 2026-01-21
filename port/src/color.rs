@@ -208,11 +208,11 @@ fn lab_f_inv(t: f32) -> f32 {
 /// Returns (L, a, b) where L is 0-100 and a,b are roughly -127 to +127
 #[inline]
 pub fn linear_rgb_to_lab(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    // RGB -> XYZ, normalized by white point
-    // Use D65_SRGB (from sRGB matrix) to ensure sRGB white maps exactly to L*=100, a*=0, b*=0
-    let x = (cs::SRGB_TO_XYZ[0][0] * r + cs::SRGB_TO_XYZ[0][1] * g + cs::SRGB_TO_XYZ[0][2] * b) / cs::D65_SRGB_X;
-    let y = cs::SRGB_TO_XYZ[1][0] * r + cs::SRGB_TO_XYZ[1][1] * g + cs::SRGB_TO_XYZ[1][2] * b; // D65_SRGB_Y = 1.0
-    let z = (cs::SRGB_TO_XYZ[2][0] * r + cs::SRGB_TO_XYZ[2][1] * g + cs::SRGB_TO_XYZ[2][2] * b) / cs::D65_SRGB_Z;
+    // RGB -> XYZ, normalized by D65 white point
+    // sRGB matrices are derived from D65 (0.3127, 0.3290), so sRGB white maps to D65 XYZ.
+    let x = (cs::SRGB_TO_XYZ[0][0] * r + cs::SRGB_TO_XYZ[0][1] * g + cs::SRGB_TO_XYZ[0][2] * b) / cs::D65_X;
+    let y = cs::SRGB_TO_XYZ[1][0] * r + cs::SRGB_TO_XYZ[1][1] * g + cs::SRGB_TO_XYZ[1][2] * b; // D65_Y = 1.0
+    let z = (cs::SRGB_TO_XYZ[2][0] * r + cs::SRGB_TO_XYZ[2][1] * g + cs::SRGB_TO_XYZ[2][2] * b) / cs::D65_Z;
 
     // Apply f(t)
     let fx = lab_f(x);
@@ -240,10 +240,10 @@ pub fn lab_to_linear_rgb(l: f32, a: f32, b: f32) -> (f32, f32, f32) {
     let y = lab_f_inv(fy);
     let z = lab_f_inv(fz);
 
-    // Denormalize by white point (D65_SRGB to match forward conversion)
-    let x = x * cs::D65_SRGB_X;
-    // y = y * D65_SRGB_Y where D65_SRGB_Y = 1.0
-    let z = z * cs::D65_SRGB_Z;
+    // Denormalize by D65 white point (to match forward conversion)
+    let x = x * cs::D65_X;
+    // y = y * D65_Y where D65_Y = 1.0
+    let z = z * cs::D65_Z;
 
     // XYZ -> linear RGB
     let r = cs::XYZ_TO_SRGB[0][0] * x + cs::XYZ_TO_SRGB[0][1] * y + cs::XYZ_TO_SRGB[0][2] * z;

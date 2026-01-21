@@ -17,46 +17,69 @@
 // ILLUMINANT CHROMATICITY (CIE xy)
 // =============================================================================
 
-/// D65 standard illuminant - CIE authoritative definition.
-/// From CIE 15:2004, derived from the D65 spectral power distribution.
-/// This is the most precise definition but is not directly used by display specs.
-pub mod d65_cie {
-    pub const X: f64 = 0.31272;
-    pub const Y: f64 = 0.32903;
-}
-
-/// D65 standard illuminant - 4-digit rounded values.
-/// From ITU-R BT.709 / IEC 61966-2-1 / Adobe RGB specifications.
-/// Note: D65 sRGB (derived from the sRGB matrix) is in colorspace_derived.rs.
+/// D65 standard illuminant - 4-digit chromaticity values.
+///
+/// Authoritative for: sRGB, BT.709, Display P3, Adobe RGB, Rec.2020.
+/// From IEC 61966-2-1, ITU-R BT.709-6.
+///
+/// These 4-digit values are the authoritative definition for display standards.
+/// Using "more accurate" CIE values (0.31272, 0.32903) would produce matrices
+/// for a subtly different color space—not sRGB/BT.709 compliant.
+///
+/// Note: D65 sRGB XYZ (derived from the sRGB matrix row sums) is in colorspace_derived.rs.
 pub mod d65 {
     pub const X: f64 = 0.3127;
     pub const Y: f64 = 0.3290;
 }
 
-/// D50 standard illuminant - CIE xy chromaticity.
-/// Used by ProPhoto RGB and ICC color profiles.
-/// From CIE 15:2004.
+/// D50 standard illuminant - XYZ values.
+///
+/// Authoritative for: ProPhoto RGB (ISO 22028-2), ICC PCS (ICC.1:2022-05).
+///
+/// Unlike D65 color spaces (where chromaticity is authoritative), D50-based
+/// specifications define the white point directly as XYZ values. The 4-decimal
+/// XYZ values below are the normative definition from which chromaticity is derived.
+///
+/// Per ICC.1:2022-05 Section 7.2.16, these exact values must be used for ICC
+/// profile interoperability. Per ISO 22028-2:2013, these values define ProPhoto RGB.
+///
+/// Note: CIE D50 chromaticity (0.34567, 0.35850) yields slightly different XYZ
+/// (0.9643, 1.0, 0.8251). This difference is irrelevant since no common color
+/// space uses CIE D50 chromaticity as its authoritative definition.
 pub mod d50 {
-    pub const X: f64 = 0.3457;
-    pub const Y: f64 = 0.3585;
+    /// X tristimulus value (authoritative)
+    pub const XYZ_X: f64 = 0.9642;
+    /// Y tristimulus value (authoritative, normalized to 1.0)
+    pub const XYZ_Y: f64 = 1.0;
+    /// Z tristimulus value (authoritative)
+    pub const XYZ_Z: f64 = 0.8249;
 }
 
 // =============================================================================
-// sRGB / LINEAR RGB (XYZ matrix definition)
+// sRGB / LINEAR RGB PRIMARIES
 // =============================================================================
 
-/// sRGB / Rec.709 XYZ conversion matrix.
-/// From IEC 61966-2-1:1999 - these 4-digit coefficients are canonical.
-/// The chromaticities are derived from these, not vice versa.
-/// White point: D65
-pub mod srgb_xyz {
-    /// Linear sRGB → XYZ matrix (row-major).
-    /// These are the exact values from the specification.
-    pub const TO_XYZ: [[f64; 3]; 3] = [
-        [0.4124, 0.3576, 0.1805],
-        [0.2126, 0.7152, 0.0722],
-        [0.0193, 0.1192, 0.9505],
-    ];
+/// sRGB / Rec.709 primaries.
+///
+/// Authoritative for: sRGB (IEC 61966-2-1), Rec.709 (ITU-R BT.709-6).
+///
+/// The sRGB specification defines the color space in terms of chromaticity
+/// coordinates, not matrices. These are the normative values from which all
+/// else is derived. The 4-decimal matrices in IEC 61966-2-1 are truncated
+/// for presentation—the actual matrices should be derived from these
+/// chromaticities at full precision.
+///
+/// Per IEC 61966-2-1 Amendment 1, higher precision matrices derived from
+/// these chromaticities are recommended for N > 8 bit depths.
+///
+/// White point: D65 (0.3127, 0.3290)
+pub mod srgb_primaries {
+    pub const RED_X: f64 = 0.640;
+    pub const RED_Y: f64 = 0.330;
+    pub const GREEN_X: f64 = 0.300;
+    pub const GREEN_Y: f64 = 0.600;
+    pub const BLUE_X: f64 = 0.150;
+    pub const BLUE_Y: f64 = 0.060;
 }
 
 // =============================================================================
@@ -88,9 +111,9 @@ pub mod display_p3_primaries {
 }
 
 /// Adobe RGB (1998) primaries.
-/// From IEC 61966-2-5.
+/// From Adobe RGB (1998) specification.
 /// Note: Red and blue are identical to sRGB; only green differs.
-/// White point: D65
+/// White point: D65 (0.3127, 0.3290)
 pub mod adobe_rgb_primaries {
     pub const RED_X: f64 = 0.6400;
     pub const RED_Y: f64 = 0.3300;
@@ -152,8 +175,8 @@ pub mod srgb_transfer {
 }
 
 /// Adobe RGB gamma.
-/// From IEC 61966-2-5.
-/// Often approximated as 2.2, but the exact value is 563/256.
+/// From Adobe RGB (1998) specification.
+/// Often approximated as 2.2, but the exact value is 563/256 = 2.19921875.
 pub mod adobe_rgb_transfer {
     /// Exact gamma value as specified: 563/256
     pub const GAMMA_NUMERATOR: u32 = 563;
@@ -338,27 +361,18 @@ pub mod bradford {
 }
 
 // =============================================================================
-// Y'CbCr CONSTANTS (BT.709)
+// Y'CbCr CONSTANTS
 // =============================================================================
 
-/// Y'CbCr luma coefficients for Rec.709.
-/// From ITU-R BT.709-6.
-/// These match the second row of the RGB→XYZ matrix (luminance).
-/// Note: Applied to gamma-encoded values, not linear light.
-pub mod ycbcr_bt709 {
-    /// Luma coefficient for R' channel.
-    pub const KR: f64 = 0.2126;
-
-    /// Luma coefficient for G' channel.
-    pub const KG: f64 = 0.7152;
-
-    /// Luma coefficient for B' channel.
-    pub const KB: f64 = 0.0722;
-}
+// Note: BT.709 Y'CbCr coefficients are derived from the sRGB matrix second row
+// in colorspace_derived.rs. The spec values (0.2126, 0.7152, 0.0722) are truncated
+// versions of the full-precision values derived from sRGB chromaticities.
 
 /// Y'CbCr luma coefficients for Rec.601 (NTSC/PAL).
-/// From ITU-R BT.601.
-/// Classic "30/59/11" formula - often incorrectly applied to sRGB content.
+///
+/// From ITU-R BT.601. These are authoritative for BT.601 (different primaries
+/// than sRGB/BT.709). Classic "30/59/11" formula - often incorrectly applied
+/// to sRGB content.
 pub mod ycbcr_bt601 {
     pub const KR: f64 = 0.299;
     pub const KG: f64 = 0.587;
