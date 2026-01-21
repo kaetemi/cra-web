@@ -390,9 +390,19 @@ pub mod cielab {
 // TRANSFER FUNCTION DERIVED CONSTANTS
 // =============================================================================
 
-/// sRGB decode threshold in encoded space.
-/// sRGB specification threshold (0.0031308) * linear_slope (12.92)
-pub const SRGB_DECODE_THRESHOLD: f64 = 0.040449936;
+/// sRGB encode threshold (linear space).
+/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.
+/// Spec value is 0.0031308; this derived value rounds to ~0.00304.
+pub const SRGB_THRESHOLD: f64 = 0.00303993463977843;
+
+/// sRGB linear segment slope.
+/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.
+/// Spec value is 12.92; this derived value is ~12.9232.
+pub const SRGB_LINEAR_SLOPE: f64 = 12.92321018078785;
+
+/// sRGB decode threshold (encoded space).
+/// = SRGB_THRESHOLD * SRGB_LINEAR_SLOPE (the y-value at the junction).
+pub const SRGB_DECODE_THRESHOLD: f64 = 0.03928571428571428;
 
 /// Adobe RGB gamma: 563/256
 pub const ADOBE_RGB_GAMMA: f64 = 2.19921875;
@@ -694,11 +704,12 @@ pub mod f32 {
     // TRANSFER FUNCTION CONSTANTS
     // -------------------------------------------------------------------------
 
-    /// sRGB encode threshold (linear space)
-    pub const SRGB_THRESHOLD: f32 = 0.0031308 as f32;
+    /// sRGB encode threshold (linear space) - derived for continuous value AND slope
+    pub const SRGB_THRESHOLD: f32 = 0.00303993463977843 as f32;
     /// sRGB decode threshold (encoded space)
-    pub const SRGB_DECODE_THRESHOLD: f32 = 0.040449936 as f32;
-    pub const SRGB_LINEAR_SLOPE: f32 = 12.92 as f32;
+    pub const SRGB_DECODE_THRESHOLD: f32 = 0.03928571428571428 as f32;
+    /// sRGB linear slope - derived for continuous value AND slope
+    pub const SRGB_LINEAR_SLOPE: f32 = 12.92321018078785 as f32;
     pub const SRGB_GAMMA: f32 = 2.4;
     pub const SRGB_SCALE: f32 = 1.055;
     pub const SRGB_OFFSET: f32 = 0.055;

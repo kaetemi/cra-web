@@ -410,7 +410,33 @@ fn main() -> io::Result<()> {
         / primary::adobe_rgb_transfer::GAMMA_DENOMINATOR as f64;
     let prophoto_threshold = primary::prophoto_transfer::THRESHOLD_NUMERATOR as f64
         / primary::prophoto_transfer::THRESHOLD_DENOMINATOR as f64;
-    let srgb_decode_threshold = primary::srgb_transfer::THRESHOLD * primary::srgb_transfer::LINEAR_SLOPE;
+
+    // sRGB transfer function: derive THRESHOLD and LINEAR_SLOPE from GAMMA and OFFSET
+    // to ensure continuity of both value AND first derivative at the junction.
+    //
+    // The curve is: f(x) = (1+a) * x^(1/γ) - a  where a = OFFSET, γ = GAMMA
+    // The linear segment is: g(x) = K * x  where K = LINEAR_SLOPE
+    //
+    // For continuity at threshold T:
+    //   Value match:  K*T = (1+a)*T^(1/γ) - a
+    //   Slope match:  K = (1+a)/γ * T^(1/γ - 1)
+    //
+    // Solving: T = [a / ((1+a) * (1 - 1/γ))]^γ
+    //          K = (1+a)/γ * T^(1/γ - 1)
+    let srgb_gamma = primary::srgb_transfer::GAMMA;
+    let srgb_offset = primary::srgb_transfer::OFFSET;
+    let srgb_scale = 1.0 + srgb_offset; // = 1.055
+
+    // Derive threshold: T = [a / ((1+a) * (1 - 1/γ))]^γ
+    let one_minus_inv_gamma = 1.0 - 1.0 / srgb_gamma; // = 7/12 when γ=2.4
+    let t_to_inv_gamma = srgb_offset / (srgb_scale * one_minus_inv_gamma);
+    let srgb_threshold = t_to_inv_gamma.powf(srgb_gamma);
+
+    // Derive linear slope: K = (1+a)/γ * T^(1/γ - 1)
+    let srgb_linear_slope = srgb_scale / srgb_gamma * srgb_threshold.powf(1.0 / srgb_gamma - 1.0);
+
+    // Decode threshold is simply K * T (the y-value at the junction)
+    let srgb_decode_threshold = srgb_linear_slope * srgb_threshold;
 
     // Y'CbCr BT.709 derived matrices
     // The luminance coefficients (KR, KG, KB) are the second row of the sRGB→XYZ matrix.
@@ -711,8 +737,18 @@ fn main() -> io::Result<()> {
     writeln!(out, "// TRANSFER FUNCTION DERIVED CONSTANTS")?;
     writeln!(out, "// =============================================================================")?;
     writeln!(out)?;
-    writeln!(out, "/// sRGB decode threshold in encoded space.")?;
-    writeln!(out, "/// sRGB specification threshold (0.0031308) * linear_slope (12.92)")?;
+    writeln!(out, "/// sRGB encode threshold (linear space).")?;
+    writeln!(out, "/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.")?;
+    writeln!(out, "/// Spec value is 0.0031308; this derived value rounds to ~0.00304.")?;
+    writeln!(out, "pub const SRGB_THRESHOLD: f64 = {};", fmt_f64(srgb_threshold))?;
+    writeln!(out)?;
+    writeln!(out, "/// sRGB linear segment slope.")?;
+    writeln!(out, "/// Derived from γ=2.4 and offset=0.055 for continuous value AND slope.")?;
+    writeln!(out, "/// Spec value is 12.92; this derived value is ~12.9232.")?;
+    writeln!(out, "pub const SRGB_LINEAR_SLOPE: f64 = {};", fmt_f64(srgb_linear_slope))?;
+    writeln!(out)?;
+    writeln!(out, "/// sRGB decode threshold (encoded space).")?;
+    writeln!(out, "/// = SRGB_THRESHOLD * SRGB_LINEAR_SLOPE (the y-value at the junction).")?;
     writeln!(out, "pub const SRGB_DECODE_THRESHOLD: f64 = {};", fmt_f64(srgb_decode_threshold))?;
     writeln!(out)?;
     writeln!(out, "/// Adobe RGB gamma: 563/256")?;
@@ -953,11 +989,12 @@ fn main() -> io::Result<()> {
     writeln!(out, "    // TRANSFER FUNCTION CONSTANTS")?;
     writeln!(out, "    // -------------------------------------------------------------------------")?;
     writeln!(out)?;
-    writeln!(out, "    /// sRGB encode threshold (linear space)")?;
-    writeln!(out, "    pub const SRGB_THRESHOLD: f32 = {} as f32;", fmt_f64(primary::srgb_transfer::THRESHOLD))?;
+    writeln!(out, "    /// sRGB encode threshold (linear space) - derived for continuous value AND slope")?;
+    writeln!(out, "    pub const SRGB_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_threshold))?;
     writeln!(out, "    /// sRGB decode threshold (encoded space)")?;
     writeln!(out, "    pub const SRGB_DECODE_THRESHOLD: f32 = {} as f32;", fmt_f64(srgb_decode_threshold))?;
-    writeln!(out, "    pub const SRGB_LINEAR_SLOPE: f32 = {} as f32;", fmt_f64(primary::srgb_transfer::LINEAR_SLOPE))?;
+    writeln!(out, "    /// sRGB linear slope - derived for continuous value AND slope")?;
+    writeln!(out, "    pub const SRGB_LINEAR_SLOPE: f32 = {} as f32;", fmt_f64(srgb_linear_slope))?;
     writeln!(out, "    pub const SRGB_GAMMA: f32 = 2.4;")?;
     writeln!(out, "    pub const SRGB_SCALE: f32 = 1.055;")?;
     writeln!(out, "    pub const SRGB_OFFSET: f32 = 0.055;")?;

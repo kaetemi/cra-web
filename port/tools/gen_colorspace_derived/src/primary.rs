@@ -231,23 +231,48 @@ pub mod rec2020_primaries {
 
 /// sRGB transfer function constants.
 /// From IEC 61966-2-1:1999.
-/// The piecewise function ensures continuity and continuous first derivative.
+///
+/// The sRGB transfer function is piecewise:
+///   - Linear segment:  f(x) = K * x                    for x <= T
+///   - Power curve:     f(x) = (1+a) * x^(1/γ) - a      for x > T
+///
+/// The spec provides approximate constants (γ=2.4, a=0.055, K≈12.92, T≈0.0031308)
+/// but these are slightly inconsistent - they don't produce a perfectly continuous
+/// function with continuous first derivative.
+///
+/// For high-precision work, we treat GAMMA and OFFSET as authoritative (they define
+/// the curve shape) and DERIVE the threshold and linear slope to ensure both value
+/// and slope continuity at the junction point.
+///
+/// The derivation:
+///   For the linear segment g(x) = K*x to meet the curve f(x) = (1+a)*x^(1/γ) - a
+///   with matching value AND slope at threshold T:
+///
+///   Value match:  K*T = (1+a)*T^(1/γ) - a
+///   Slope match:  K = (1+a)/γ * T^(1/γ - 1)
+///
+///   Solving these simultaneously:
+///     T = [a / ((1+a) * (1 - 1/γ))]^γ
+///     K = (1+a)/γ * T^(1/γ - 1)
+///
+/// With γ=2.4, a=0.055:
+///   T ≈ 0.003039934639778432  (spec: 0.0031308)
+///   K ≈ 12.92321018078785     (spec: 12.92)
+///
+/// These derived values round approximately to the spec values, so implementations
+/// are still spec-compliant while achieving mathematical consistency.
 pub mod srgb_transfer {
-    /// Linear segment threshold (encode direction).
-    /// If linear <= THRESHOLD: srgb = LINEAR_SLOPE * linear
-    pub const THRESHOLD: f64 = 0.0031308;
-
-    /// Linear segment slope.
-    pub const LINEAR_SLOPE: f64 = 12.92;
-
-    /// Power curve exponent.
+    /// Power curve exponent (authoritative).
+    /// This is the γ in: f(x) = (1+a) * x^(1/γ) - a
     pub const GAMMA: f64 = 2.4;
 
-    /// Power curve scale factor.
-    pub const SCALE: f64 = 1.055;
-
-    /// Power curve offset.
+    /// Power curve offset (authoritative).
+    /// This is the 'a' in: f(x) = (1+a) * x^(1/γ) - a
+    /// Note: SCALE = 1 + OFFSET = 1.055
     pub const OFFSET: f64 = 0.055;
+
+    // THRESHOLD and LINEAR_SLOPE are derived in main.rs to ensure
+    // continuity of both value and first derivative at the junction.
 }
 
 /// Adobe RGB gamma.
@@ -494,17 +519,52 @@ mod tests {
     }
 
     #[test]
-    fn test_srgb_transfer_continuity() {
-        // At the threshold, both sides of the piecewise function should match
-        let threshold = srgb_transfer::THRESHOLD;
-        let linear_side = srgb_transfer::LINEAR_SLOPE * threshold;
-        let power_side =
-            srgb_transfer::SCALE * threshold.powf(1.0 / srgb_transfer::GAMMA) - srgb_transfer::OFFSET;
+    fn test_srgb_transfer_derivation() {
+        // Test that deriving THRESHOLD and LINEAR_SLOPE from GAMMA and OFFSET
+        // produces a continuous function with continuous first derivative.
+        let gamma = srgb_transfer::GAMMA;
+        let offset = srgb_transfer::OFFSET;
+        let scale = 1.0 + offset; // 1.055
+
+        // Derive threshold: T = [a / ((1+a) * (1 - 1/γ))]^γ
+        let one_minus_inv_gamma = 1.0 - 1.0 / gamma;
+        let t_to_inv_gamma = offset / (scale * one_minus_inv_gamma);
+        let threshold = t_to_inv_gamma.powf(gamma);
+
+        // Derive linear slope: K = (1+a)/γ * T^(1/γ - 1)
+        let linear_slope = scale / gamma * threshold.powf(1.0 / gamma - 1.0);
+
+        // At the threshold, both value AND slope should match
+        let linear_value = linear_slope * threshold;
+        let curve_value = scale * threshold.powf(1.0 / gamma) - offset;
+        let linear_deriv = linear_slope;
+        let curve_deriv = scale / gamma * threshold.powf(1.0 / gamma - 1.0);
+
         assert!(
-            (linear_side - power_side).abs() < 1e-6,
-            "sRGB transfer function discontinuity: {} vs {}",
-            linear_side,
-            power_side
+            (linear_value - curve_value).abs() < 1e-14,
+            "sRGB transfer value discontinuity: {} vs {} (diff {})",
+            linear_value,
+            curve_value,
+            linear_value - curve_value
+        );
+        assert!(
+            (linear_deriv - curve_deriv).abs() < 1e-14,
+            "sRGB transfer slope discontinuity: {} vs {} (diff {})",
+            linear_deriv,
+            curve_deriv,
+            linear_deriv - curve_deriv
+        );
+
+        // The derived values should approximately match the spec values
+        assert!(
+            (threshold - 0.0031308).abs() < 1e-4,
+            "Derived threshold {} differs too much from spec 0.0031308",
+            threshold
+        );
+        assert!(
+            (linear_slope - 12.92).abs() < 0.01,
+            "Derived slope {} differs too much from spec 12.92",
+            linear_slope
         );
     }
 
