@@ -1,24 +1,24 @@
-# CIE Illuminant C and the Origin of Y'CbCr Coefficients
+# CIE Illuminant C and NTSC 1953
 
-This document traces the origin of the ubiquitous luma coefficients (0.299, 0.587, 0.114) used
-in JPEG, video codecs, and countless image processing implementations.
+This document describes CIE Illuminant C and its use in the NTSC 1953 color space,
+and traces the origin of the ubiquitous luma coefficients (0.299, 0.587, 0.114).
 
 ## Summary
 
-The coefficients **0.299, 0.587, 0.114** originate from **NTSC 1953** (BT.470 System M), which used:
+**NTSC 1953** (BT.470 System M) is defined by:
 - NTSC primaries: R(0.67, 0.33), G(0.21, 0.71), B(0.14, 0.08)
-- CIE Illuminant C white point
+- CIE Illuminant C white point: (0.3101, 0.3162)
 
-**Key finding:** Practical implementations treat the rounded coefficients (0.299, 0.587, 0.114) as
-authoritative, not any specific Illuminant C definition. The integer approximations in JPEG/video
-are derived from these rounded values via `FIX(x) = (int)(x * scale + 0.5)`.
+The RGB→XYZ matrix Y row gives luma coefficients that round to 0.299/0.587/0.114.
 
-**Recommendation:** Define the legacy coefficients and NTSC primaries as authoritative, and derive
-the effective Illuminant C from them. This matches what practical implementations actually do.
+**Key decision:** We use **4-digit chromaticity (0.3101, 0.3162)** for Illuminant C because:
+1. It rounds to the CIE specification (0.310, 0.316)
+2. The resulting matrix coefficients round to 0.299/0.587/0.114
+3. It maintains colorimetric coherence with international standards
 
 ---
 
-## Authoritative Definition
+## Authoritative Definitions
 
 ### NTSC 1953 Primaries (from BT.470 System M)
 
@@ -28,80 +28,106 @@ the effective Illuminant C from them. This matches what practical implementation
 | Green | 0.21 | 0.71 |
 | Blue | 0.14 | 0.08 |
 
-### Legacy Luma Coefficients (authoritative)
-
-| KR | KG | KB |
-|-------|-------|-------|
-| 0.299 | 0.587 | 0.114 |
-
-These coefficients are the authoritative definition. All practical implementations derive from them.
-
-### Effective Illuminant C (derived)
-
-Working backwards from the legacy coefficients, the effective white point that produces values
-closest to 0.299/0.587/0.114 is:
-
-**XYZ (normalized to Y=1):**
-
-| X | Y | Z |
-|------|------|------|
-| 0.98 | 1.00 | 1.18 |
-
-**Derived chromaticity:**
+### CIE Illuminant C (4-digit chromaticity)
 
 | x | y |
-|---------|---------|
-| 0.31013 | 0.31646 |
+|--------|--------|
+| 0.3101 | 0.3162 |
 
-This simple XYZ definition produces:
-- KR = 0.2987 → rounds to **0.299** ✓
-- KG = 0.5871 → rounds to **0.587** ✓
-- KB = 0.1142 → rounds to **0.114** ✓
+This 4-digit chromaticity rounds to the CIE specification (0.310, 0.316).
+
+**Derived XYZ (Y=1):**
+
+| X | Y | Z |
+|--------|------|--------|
+| 0.9807 | 1.00 | 1.1818 |
+
+---
+
+## Matrix-Derived Luma Coefficients
+
+Using NTSC primaries with Illuminant C chromaticity (0.3101, 0.3162):
+
+| Coefficient | Matrix Value | Rounds To |
+|-------------|--------------|-----------|
+| KR | 0.2989... | 0.299 ✓ |
+| KG | 0.5866... | 0.587 ✓ |
+| KB | 0.1144... | 0.114 ✓ |
 
 ---
 
 ## Comparison of Illuminant C Definitions
 
-| Definition | Form | KR | KG | KB | Error vs Legacy |
-|------------|------|-------|-------|-------|-----------------|
-| **XYZ (0.98, 1.0, 1.18)** | XYZ | 0.2987 | 0.5871 | 0.1142 | **6.12×10⁻⁴** |
-| 4-digit chromaticity (0.3101, 0.3162) | xy | 0.2989 | 0.5866 | 0.1144 | 8.71×10⁻⁴ |
-| 5-digit CIE (0.31006, 0.31616) | xy | 0.2989 | 0.5866 | 0.1145 | 9.54×10⁻⁴ |
+| Definition | Chromaticity | Rounds To | KR | KG | KB |
+|------------|--------------|-----------|-------|-------|-------|
+| **4-digit (0.3101, 0.3162)** | (0.3101, 0.3162) | **(0.310, 0.316) ✓** | 0.2989 | 0.5866 | 0.1144 |
+| 5-digit CIE (0.31006, 0.31616) | (0.31006, 0.31616) | (0.310, 0.316) ✓ | 0.2989 | 0.5866 | 0.1145 |
+| XYZ-derived (0.98, 1.0, 1.18) | (0.3105, 0.3168) | **(0.311, 0.317) ✗** | 0.2987 | 0.5871 | 0.1142 |
 
-The XYZ-based definition is **1.4× closer** to practical implementations than chromaticity-based definitions.
+**The 4-digit chromaticity is preferred** because:
+1. It rounds to the CIE specification (0.310, 0.316)
+2. The derived luma coefficients all round correctly to 0.299/0.587/0.114
+3. It maintains colorimetric coherence with international standards
 
-**Critical observation:** Notice that KG from XYZ-based (0.5871) rounds *up* to 0.587, while
-chromaticity-based (0.5866) rounds *down* to 0.587. The XYZ-based value is much closer to the
-target, suggesting the original NTSC derivation used simple XYZ values, not precise CIE chromaticity.
+The XYZ-derived approach (deriving white point from legacy coefficients) produces coefficients
+*closer* to 0.299/0.587/0.114, but the resulting chromaticity (0.311, 0.317) does not match the
+CIE specification—it's out of spec.
 
 ---
 
-## The Derivation Chain
+## The Trade-off
+
+There is an inherent inconsistency in the NTSC specification:
+
+| Approach | Illuminant C Chromaticity | Luma Coefficients |
+|----------|--------------------------|-------------------|
+| **Use CIE-spec chromaticity** | ✓ In spec (0.310, 0.316) | Approximate (rounds correctly) |
+| Derive from legacy coefficients | ✗ Out of spec (0.311, 0.317) | Exact (0.299, 0.587, 0.114) |
+
+**We choose the chromaticity-based approach** because:
+1. Illuminant C should match its CIE definition
+2. The luma coefficients round correctly to the legacy values
+3. Practical implementations use the rounded values anyway
+
+---
+
+## Historical Note: The "30/59/11" Formula
+
+The coefficients 0.299, 0.587, 0.114 (often approximated as 30/59/11) originated from
+NTSC 1953 but have been widely misused:
+
+1. **Original context**: NTSC 1953 with Illuminant C white point
+2. **Common misuse**: Applied to sRGB/BT.709 data (D65 white point, different primaries)
+
+This color space mismatch is pervasive in JPEG and video implementations. The formula
+produces reasonable-looking results because human vision is more sensitive to luminance
+errors than chrominance errors, but it's technically incorrect for modern color spaces.
+
+For proper Y'CbCr conversion:
+- **BT.709/sRGB**: Use coefficients derived from the sRGB matrix (0.2126, 0.7152, 0.0722)
+- **BT.601**: Use coefficients derived from BT.601 primaries with D65
+
+---
+
+## Integer Approximations in Practice
 
 The historical derivation was likely:
 
 ```
-Illuminant C as XYZ (0.98, 1.0, 1.18)
+CIE Illuminant C chromaticity
               ↓
     (matrix derivation from primaries)
               ↓
-True coefficients: 0.2987, 0.5871, 0.1142
+True coefficients: ~0.2989, ~0.5866, ~0.1144
               ↓
     (round to 3 decimal places)
               ↓
-Legacy coefficients: 0.299, 0.587, 0.114  ← AUTHORITATIVE
+Rounded coefficients: 0.299, 0.587, 0.114
               ↓
     (FIX() macro for integer math)
               ↓
 Integer approximations: 19595, 38470, 7471
 ```
-
-The rounding step is where precision is lost. All subsequent implementations derive from the
-rounded values, not from any Illuminant C definition.
-
----
-
-## Integer Approximations in Practice
 
 ### 16-bit Fixed Point (shift 16, scale 65536)
 
@@ -162,56 +188,19 @@ Y = (77 * R + 150 * G + 29 * B + 128) >> 8
 
 ---
 
-## Evidence: Integers Derive from Legacy, Not Illuminant C
+## Evidence: Integers Derive from Rounded Values
 
 Applying `FIX(x) = (int)(x * 65536 + 0.5)` to different coefficient sources:
 
 | Source | FIX(KR) | FIX(KG) | FIX(KB) | Matches Standard? |
 |--------|---------|---------|---------|-------------------|
-| XYZ (0.98, 1.0, 1.18) derived | 19575 | 38474 | 7487 | **0/3** |
 | 4-digit chromaticity derived | 19591 | 38445 | 7500 | **0/3** |
 | 5-digit CIE chromaticity derived | 19589 | 38445 | 7502 | **0/3** |
-| **Legacy (0.299, 0.587, 0.114)** | **19595** | **38470** | **7471** | **3/3** ✓ |
+| XYZ (0.98, 1.0, 1.18) derived | 19575 | 38474 | 7487 | **0/3** |
+| **Rounded (0.299, 0.587, 0.114)** | **19595** | **38470** | **7471** | **3/3** ✓ |
 
-The standard 16-bit integers **exactly match** FIX() applied to the legacy rounded values.
-No Illuminant C definition produces matching integers.
-
----
-
-## Error Analysis: Sources vs Practical Implementations
-
-| Source | vs 16-bit std | vs 16-bit ljpg | vs 15-bit std | vs 8-bit std |
-|--------|---------------|----------------|---------------|--------------|
-| XYZ (0.98, 1.0, 1.18) | 6.04×10⁻⁴ | 6.04×10⁻⁴ | 6.04×10⁻⁴ | 4.17×10⁻³ |
-| 4-digit chromaticity | 8.75×10⁻⁴ | 8.44×10⁻⁴ | 8.75×10⁻⁴ | 3.68×10⁻³ |
-| 5-digit CIE chromaticity | 9.57×10⁻⁴ | 9.27×10⁻⁴ | 9.57×10⁻⁴ | 3.76×10⁻³ |
-| **Legacy rounded** | **1.12×10⁻⁵** | **2.73×10⁻⁵** | **3.05×10⁻⁵** | **3.56×10⁻³** |
-
-The legacy rounded values are **~50-80× closer** to practical implementations than any
-Illuminant C-derived coefficients.
-
-Among Illuminant C definitions, XYZ-based is **1.4× closer** to practice than chromaticity-based.
-
----
-
-## Comparison with D50 and D65
-
-| Illuminant | Authoritative Form | Values | Used By |
-|------------|-------------------|--------|---------|
-| **D65** | Chromaticity (xy) | (0.3127, 0.3290) | sRGB, BT.709, Display P3, Rec.2020 |
-| **D50** | XYZ | (0.9642, 1.0, 0.8249) | ICC PCS, ProPhoto RGB |
-| **C (effective)** | XYZ | (0.98, 1.0, 1.18) | NTSC 1953 (historical) |
-
-D50 sets precedent for defining a white point as XYZ rather than chromaticity.
-The effective Illuminant C follows this pattern.
-
-**CIE reference values (for context only):**
-
-| Illuminant | CIE Chromaticity | Notes |
-|------------|------------------|-------|
-| D65 | (0.31272, 0.32903) | Display standards use 4-digit (0.3127, 0.3290) |
-| D50 | (0.34567, 0.35850) | ICC/ProPhoto use XYZ directly, not this |
-| C | (0.31006, 0.31616) | Does not match practical implementations |
+The standard 16-bit integers **exactly match** FIX() applied to the rounded values.
+No Illuminant C definition produces matching integers directly.
 
 ---
 
@@ -232,22 +221,21 @@ Different rounding conventions produce different results.
 
 ---
 
-## Conclusions
+## Comparison with D50 and D65
 
-1. **The legacy coefficients (0.299, 0.587, 0.114) are authoritative.** All practical
-   implementations derive from these rounded values, not from any Illuminant C definition.
+| Illuminant | Authoritative Form | Values | Used By |
+|------------|-------------------|--------|---------|
+| **D65** | Chromaticity (xy) | (0.3127, 0.3290) | sRGB, BT.709, Display P3, Rec.2020 |
+| **D50** | XYZ | (0.9642, 1.0, 0.8249) | ICC PCS, ProPhoto RGB |
+| **C** | Chromaticity (xy) | (0.3101, 0.3162) | NTSC 1953 |
 
-2. **The effective Illuminant C is XYZ (0.98, 1.0, 1.18).** This simple definition produces
-   coefficients closest to the legacy values, suggesting the original NTSC engineers used
-   rounded XYZ values rather than precise CIE chromaticity.
+**CIE reference values:**
 
-3. **For compatibility:** Use 0.299, 0.587, 0.114 exactly when interoperating with JPEG/video.
-
-4. **For colorimetric accuracy:** Use the effective XYZ-based Illuminant C when computing
-   matrices for NTSC 1953, as it better represents the original intent.
-
-5. **CIE chromaticity values for Illuminant C do not match practice.** Using CIE (0.31006, 0.31616)
-   produces coefficients further from 0.299/0.587/0.114 than the effective XYZ definition.
+| Illuminant | CIE Chromaticity | Notes |
+|------------|------------------|-------|
+| D65 | (0.31272, 0.32903) | Display standards use 4-digit (0.3127, 0.3290) |
+| D50 | (0.34567, 0.35850) | ICC/ProPhoto use XYZ directly |
+| C | (0.31006, 0.31616) | We use 4-digit (0.3101, 0.3162) |
 
 ---
 
@@ -255,7 +243,7 @@ Different rounding conventions produce different results.
 
 - ITU-R BT.470-6 (1998) - NTSC System M primaries
 - CIE 15:2004 - Colorimetry, Third Edition (Illuminant C reference)
-- ITU-R BT.601-7 (2011) - SD video (uses legacy coefficients for Y'CbCr)
+- ITU-R BT.601-7 (2011) - SD video
+- ITU-R BT.709-6 (2015) - HD video
 - JFIF 1.02 specification - JPEG file format
 - libjpeg-turbo source code - jccolor.c
-- ICC.1:2022-05 - ICC profile specification (D50 as XYZ precedent)

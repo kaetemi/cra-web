@@ -83,48 +83,34 @@ pub mod srgb_primaries {
 }
 
 // =============================================================================
-// ILLUMINANT C (EFFECTIVE) - DERIVED AT BUILD TIME
+// ILLUMINANT C - 4-DIGIT CHROMATICITY
 // =============================================================================
 
-// The effective Illuminant C XYZ is DERIVED from:
-// 1. The authoritative legacy Y'CbCr coefficients (below)
-// 2. The NTSC 1953 primaries (below)
-//
-// This derivation happens in main.rs at code generation time.
-// See WHITEPOINT_C.md for the mathematical derivation.
-
-// =============================================================================
-// LEGACY Y'CbCr COEFFICIENTS (AUTHORITATIVE)
-// =============================================================================
-
-/// Legacy Y'CbCr luma coefficients - AUTHORITATIVE for BT.601 Y'CbCr.
+/// CIE Illuminant C - 4-digit chromaticity values.
 ///
-/// These rounded values (0.299, 0.587, 0.114) are the authoritative definition.
-/// All practical JPEG/video implementations derive from these, not from any
-/// Illuminant C definition. The effective Illuminant C above is derived to match
-/// these values, not the other way around.
+/// Authoritative for: NTSC 1953 (BT.470 M/NTSC).
 ///
-/// Origin: NTSC 1953 (BT.470 M/NTSC) with Illuminant C, rounded to 3 decimal places.
-/// Carried forward into BT.601 for backward compatibility.
+/// These 4-digit values round to the CIE specification (0.310, 0.316) while
+/// being more coherent with the NTSC primaries than the 5-digit CIE values.
 ///
-/// See WHITEPOINT_C.md for full history and analysis.
-pub mod legacy_ycbcr {
-    pub const KR: f64 = 0.299;
-    pub const KG: f64 = 0.587;
-    pub const KB: f64 = 0.114;
+/// Note: The legacy Y'CbCr coefficients (0.299, 0.587, 0.114) are separately
+/// authoritative for BT.601 Y'CbCr conversion. They do not derive exactly from
+/// this chromaticity, but rather represent rounded values frozen for compatibility.
+/// See WHITEPOINT_C.md for full analysis.
+pub mod illuminant_c {
+    pub const X: f64 = 0.3101;
+    pub const Y: f64 = 0.3162;
 }
 
 // =============================================================================
-// ORIGINAL NTSC (BT.470 M/NTSC) - SOURCE OF 0.299/0.587/0.114
+// ORIGINAL NTSC (BT.470 M/NTSC)
 // =============================================================================
 
 /// Original NTSC primaries (BT.470 System M).
 ///
 /// From ITU-R BT.470-6. This is the original 1953 NTSC color space.
-/// Combined with the effective Illuminant C XYZ (0.98, 1.0, 1.18), these produce
-/// coefficients that round to the legacy 0.299/0.587/0.114 values.
 ///
-/// White point: Illuminant C (effective XYZ: 0.98, 1.0, 1.18)
+/// White point: Illuminant C (0.3101, 0.3162)
 pub mod ntsc_1953_primaries {
     pub const RED_X: f64 = 0.67;
     pub const RED_Y: f64 = 0.33;
@@ -458,10 +444,9 @@ pub mod bradford {
 // colorspace_derived.rs. The spec values (0.2126, 0.7152, 0.0722) are truncated
 // versions of the full-precision values derived from sRGB chromaticities.
 //
-// BT.601 Y'CbCr coefficients: The traditional "30/59/11" formula (0.299, 0.587, 0.114)
-// is AUTHORITATIVE and defined in legacy_ycbcr module above. These values are NOT
-// derived from any Illuminant C definition - rather, the effective Illuminant C is
-// derived to match these legacy values. See WHITEPOINT_C.md for full analysis.
+// BT.601 Y'CbCr: The traditional "30/59/11" formula (0.299, 0.587, 0.114) originated
+// from NTSC 1953 with Illuminant C, but is commonly applied to sRGB data for legacy
+// compatibility. This is technically a color space mismatch. See WHITEPOINT_C.md.
 //
 // True luminance from BT.601 625-line and 525-line primaries (with D65) are different
 // and computed in colorspace_derived.rs. See COLORSPACESEXT.md for details.
