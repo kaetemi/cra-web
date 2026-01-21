@@ -198,21 +198,22 @@ Y'CbCr exists because video signals were always gamma-encoded for CRT displays, 
 
 **Note on Rec.601 coefficients:**
 
-Older video (NTSC/PAL) uses different primaries than sRGB/BT.709. The classic "30/59/11" formula:
+The classic "30/59/11" formula:
 
 ```
 Y' = 0.299 R' + 0.587 G' + 0.114 B'
 ```
 
-These coefficients are **legacy values** that do not match the true luminance from either BT.601 color space (625-line PAL or 525-line NTSC). The true luminance coefficients derived from the respective RGB→XYZ matrices are quite different:
+These coefficients originate from the **original NTSC 1953 color space** (BT.470 System M) with **Illuminant C** white point—not from modern BT.601 color spaces which use D65.
 
-| Source | KR | KG | KB |
-|--------|--------|--------|--------|
-| BT.601-625 (PAL) | 0.222 | 0.707 | 0.071 |
-| BT.601-525 (NTSC) | 0.212 | 0.701 | 0.087 |
-| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 |
+| Source | KR | KG | KB | White Point |
+|--------|--------|--------|--------|-------------|
+| **NTSC 1953** | 0.299 | 0.586 | 0.115 | Illuminant C |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded) |
+| BT.601-625 (PAL) | 0.222 | 0.707 | 0.071 | D65 |
+| BT.601-525 (NTSC) | 0.212 | 0.701 | 0.087 | D65 |
 
-See COLORSPACESEXT.md for full BT.601 color space definitions and matrices.
+The legacy values were carried forward for backward compatibility, even though BT.601 redefined the primaries and white point. See COLORSPACESEXT.md for full color space definitions.
 
 **Y'CbCr and JPEG:**
 

@@ -324,6 +324,16 @@ fn main() -> io::Result<()> {
     );
     let xyz_to_bt601_525 = invert_3x3(bt601_525_to_xyz);
 
+    // Original NTSC 1953 (BT.470 M/NTSC) - Illuminant C
+    // This is the SOURCE of the 0.299/0.587/0.114 luma coefficients
+    let ntsc_1953_to_xyz = compute_rgb_to_xyz_matrix(
+        (primary::ntsc_1953_primaries::RED_X, primary::ntsc_1953_primaries::RED_Y),
+        (primary::ntsc_1953_primaries::GREEN_X, primary::ntsc_1953_primaries::GREEN_Y),
+        (primary::ntsc_1953_primaries::BLUE_X, primary::ntsc_1953_primaries::BLUE_Y),
+        (primary::illuminant_c::X, primary::illuminant_c::Y),
+    );
+    let xyz_to_ntsc_1953 = invert_3x3(ntsc_1953_to_xyz);
+
     // Bradford chromatic adaptation matrices
     // Only needed for D50 ↔ D65 conversion (ProPhoto RGB)
     // All D65 color spaces share the same white point (0.3127, 0.3290), so no adaptation needed between them.
@@ -550,6 +560,14 @@ fn main() -> io::Result<()> {
     writeln!(out)?;
     writeln!(out, "/// XYZ → Linear BT.601 525-line (NTSC) matrix.")?;
     writeln!(out, "pub const XYZ_TO_BT601_525: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_bt601_525, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Original NTSC 1953 (BT.470 M/NTSC) → XYZ matrix.")?;
+    writeln!(out, "/// White point: Illuminant C (0.310, 0.316).")?;
+    writeln!(out, "/// The Y row gives the original 0.299/0.587/0.114 luma coefficients.")?;
+    writeln!(out, "pub const NTSC_1953_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(ntsc_1953_to_xyz, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// XYZ → Original NTSC 1953 (BT.470 M/NTSC) matrix.")?;
+    writeln!(out, "pub const XYZ_TO_NTSC_1953: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_ntsc_1953, ""))?;
     writeln!(out)?;
 
     // Bradford chromatic adaptation matrices
@@ -788,6 +806,9 @@ fn main() -> io::Result<()> {
     write_matrix_f32(&mut out, "BT601_525_TO_XYZ", &bt601_525_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_BT601_525", &xyz_to_bt601_525)?;
     writeln!(out)?;
+    write_matrix_f32(&mut out, "NTSC_1953_TO_XYZ", &ntsc_1953_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_NTSC_1953", &xyz_to_ntsc_1953)?;
+    writeln!(out)?;
 
     // Chromatic adaptation matrices
     writeln!(out, "    // -------------------------------------------------------------------------")?;
@@ -984,12 +1005,24 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const BT601_525_KB: f32 = {} as f32;", fmt_f64(bt601_525_kb))?;
     writeln!(out)?;
 
-    writeln!(out, "    /// BT.601 legacy Y'CbCr coefficients (0.299/0.587/0.114)")?;
-    writeln!(out, "    /// WARNING: These do NOT match true luminance from either BT.601 color space.")?;
-    writeln!(out, "    /// They are historical values retained for compatibility with existing content.")?;
-    writeln!(out, "    pub const BT601_LEGACY_KR: f32 = 0.299;")?;
-    writeln!(out, "    pub const BT601_LEGACY_KG: f32 = 0.587;")?;
-    writeln!(out, "    pub const BT601_LEGACY_KB: f32 = 0.114;")?;
+    // NTSC 1953 (BT.470 M/NTSC) luma coefficients - THE SOURCE of 0.299/0.587/0.114
+    let ntsc_1953_kr = ntsc_1953_to_xyz[1][0];
+    let ntsc_1953_kg = ntsc_1953_to_xyz[1][1];
+    let ntsc_1953_kb = ntsc_1953_to_xyz[1][2];
+    writeln!(out, "    /// Original NTSC 1953 (BT.470 M/NTSC) luminance coefficients")?;
+    writeln!(out, "    /// Derived from RGB→XYZ matrix with Illuminant C white point.")?;
+    writeln!(out, "    /// These are the TRUE source of 0.299/0.587/0.114 (which rounds to these).")?;
+    writeln!(out, "    pub const NTSC_1953_KR: f32 = {} as f32;", fmt_f64(ntsc_1953_kr))?;
+    writeln!(out, "    pub const NTSC_1953_KG: f32 = {} as f32;", fmt_f64(ntsc_1953_kg))?;
+    writeln!(out, "    pub const NTSC_1953_KB: f32 = {} as f32;", fmt_f64(ntsc_1953_kb))?;
+    writeln!(out)?;
+
+    writeln!(out, "    /// Legacy Y'CbCr coefficients (rounded from NTSC 1953)")?;
+    writeln!(out, "    /// From BT.470 M/NTSC with Illuminant C. Used in BT.601 Y'CbCr for compatibility.")?;
+    writeln!(out, "    /// Note: These do NOT match true luminance for modern D65 color spaces.")?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KR: f32 = 0.299;")?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KG: f32 = 0.587;")?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KB: f32 = 0.114;")?;
     writeln!(out)?;
 
     // Bit depth

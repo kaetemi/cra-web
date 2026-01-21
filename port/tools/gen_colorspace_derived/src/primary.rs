@@ -83,6 +83,39 @@ pub mod srgb_primaries {
 }
 
 // =============================================================================
+// ILLUMINANT C
+// =============================================================================
+
+/// Illuminant C - original NTSC white point.
+///
+/// From CIE standard illuminants. Used by original NTSC (BT.470 M/NTSC).
+/// This is where the 0.299/0.587/0.114 luma coefficients originate.
+pub mod illuminant_c {
+    pub const X: f64 = 0.310;
+    pub const Y: f64 = 0.316;
+}
+
+// =============================================================================
+// ORIGINAL NTSC (BT.470 M/NTSC) - SOURCE OF 0.299/0.587/0.114
+// =============================================================================
+
+/// Original NTSC primaries (BT.470 System M).
+///
+/// From ITU-R BT.470-6. This is the original 1953 NTSC color space.
+/// The famous 0.299/0.587/0.114 luma coefficients are derived from these
+/// primaries with Illuminant C white point.
+///
+/// White point: Illuminant C (0.310, 0.316)
+pub mod ntsc_1953_primaries {
+    pub const RED_X: f64 = 0.67;
+    pub const RED_Y: f64 = 0.33;
+    pub const GREEN_X: f64 = 0.21;
+    pub const GREEN_Y: f64 = 0.71;
+    pub const BLUE_X: f64 = 0.14;
+    pub const BLUE_Y: f64 = 0.08;
+}
+
+// =============================================================================
 // BT.601 PRIMARIES (PAL/SECAM and NTSC)
 // =============================================================================
 

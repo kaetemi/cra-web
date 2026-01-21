@@ -253,23 +253,57 @@ Used for North American and Japanese NTSC broadcast systems.
 |--------|--------|--------|
 | 0.2124 | 0.7011 | 0.0866 |
 
+### Original NTSC 1953 (BT.470 M/NTSC)
+
+The **source** of the 0.299/0.587/0.114 luma coefficients is the original 1953 NTSC color space, defined in ITU-R BT.470 System M.
+
+**Authoritative definition:**
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.67 | 0.33 |
+| Green | 0.21 | 0.71 |
+| Blue | 0.14 | 0.08 |
+| White (Illuminant C) | 0.310 | 0.316 |
+
+**Derived RGB→XYZ matrix:**
+
+```
+[linearized] NTSC 1953 → XYZ:
+
+| X |   | 0.6069928  0.1734485  0.2005713 |   | R |
+| Y | = | 0.2989666  0.5864212  0.1146122 | × | G |
+| Z |   | 0.0000000  0.0660756  1.1174687 |   | B |
+```
+
+**True luminance coefficients (Y row of matrix):**
+
+| KR | KG | KB |
+|--------|--------|--------|
+| 0.2990 | 0.5864 | 0.1146 |
+
+These round to **0.299, 0.586, 0.115** — very close to the traditional 0.299/0.587/0.114.
+
 ### Legacy Y'CbCr Coefficients
 
-**IMPORTANT:** The traditional BT.601 Y'CbCr formula uses:
+The traditional BT.601 Y'CbCr formula uses:
 
 ```
 Y' = 0.299 R' + 0.587 G' + 0.114 B'
 ```
 
-These coefficients (0.299, 0.587, 0.114) are **historical legacy values** that do NOT match the true luminance from either BT.601 color space:
+These coefficients originate from **NTSC 1953 with Illuminant C** (above), not from the modern BT.601 color spaces which use D65.
 
-| Source | KR | KG | KB |
-|--------|--------|--------|--------|
-| BT.601 625-line (true) | 0.2220 | 0.7067 | 0.0713 |
-| BT.601 525-line (true) | 0.2124 | 0.7011 | 0.0866 |
-| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 |
+**Comparison of luminance coefficients:**
 
-The legacy values predate the formal color space definitions and were carried forward for backward compatibility. They do not represent actual luminance for either PAL or NTSC primaries.
+| Source | KR | KG | KB | White Point |
+|--------|--------|--------|--------|-------------|
+| **NTSC 1953** | 0.2990 | 0.5864 | 0.1146 | Illuminant C |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded) |
+| BT.601 625-line (PAL) | 0.2220 | 0.7067 | 0.0713 | D65 |
+| BT.601 525-line (NTSC) | 0.2124 | 0.7011 | 0.0866 | D65 |
+
+The legacy coefficients were carried forward into BT.601 for backward compatibility with existing NTSC equipment, even though BT.601 redefined the primaries and white point to D65.
 
 **When you encounter it:** SD video (DVD, analog broadcast), JPEG compression (which uses BT.601 Y'CbCr regardless of the RGB color space).
 
@@ -472,6 +506,7 @@ The colorant tags are used directly as matrix columns. No additional white point
 | Display P3 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB piecewise |
 | Adobe RGB | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 563/256 |
 | ProPhoto RGB | D50 XYZ (0.9642, 1.0, 0.8249) | Chromaticity | Piecewise 1.8 |
+| NTSC 1953 | Illuminant C (0.310, 0.316) | Chromaticity | γ = 2.2 |
 | BT.601-625 (PAL) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
 | BT.601-525 (NTSC) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
 | Rec.2020 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB (SDR) / PQ,HLG (HDR) |
@@ -484,6 +519,7 @@ The colorant tags are used directly as matrix columns. No additional white point
 | Display P3 | ~25% larger | Apple devices, modern web |
 | Adobe RGB | ~40% larger | Photography, print |
 | ProPhoto RGB | ~90% of visible | Lightroom, archival |
+| NTSC 1953 | Similar to sRGB | Historical (source of Y'CbCr coefficients) |
 | BT.601 (PAL/NTSC) | Similar to sRGB | SD video, DVD, JPEG |
 | Rec.2020 | ~75% of visible | UHD/HDR video |
 | OKLch | Same as sRGB | Hue-preserving ops |
@@ -519,13 +555,13 @@ CIE XYZ (empirical root)
     │
     ├── Adobe RGB (D65)
     │
-    ├── BT.601-625 PAL (D65)
+    ├── NTSC 1953 (Illuminant C)
     │       │
-    │       └── Y'CbCr (legacy 0.299/0.587/0.114)
+    │       └── Y'CbCr (0.299/0.587/0.114 originates here)
+    │
+    ├── BT.601-625 PAL (D65)
     │
     ├── BT.601-525 NTSC (D65)
-    │       │
-    │       └── Y'CbCr (legacy 0.299/0.587/0.114)
     │
     ├── Rec.2020 (D65)
     │       │

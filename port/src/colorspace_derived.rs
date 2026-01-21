@@ -204,6 +204,22 @@ pub const XYZ_TO_BT601_525: [[f64; 3]; 3] = [
     [0.05630659173412770, -0.19697565482077187, 1.04995232821873352],
 ];
 
+/// Original NTSC 1953 (BT.470 M/NTSC) → XYZ matrix.
+/// White point: Illuminant C (0.310, 0.316).
+/// The Y row gives the original 0.299/0.587/0.114 luma coefficients.
+pub const NTSC_1953_TO_XYZ: [[f64; 3]; 3] = [
+    [0.60699283073820975, 0.17344852694074162, 0.20057130054889663],
+    [0.29896661812478986, 0.58642121013298354, 0.11461217174222663],
+    [-0.00000000000000005, 0.06607562931075876, 1.11746867448670950],
+];
+
+/// XYZ → Original NTSC 1953 (BT.470 M/NTSC) matrix.
+pub const XYZ_TO_NTSC_1953: [[f64; 3]; 3] = [
+    [1.90967542503864074, -0.53236476043276681, -0.28816074188562618],
+    [-0.98496488253814474, 1.99977718575926366, -0.02831678372487284],
+    [0.05824071488411074, -0.11824629991622469, 0.89655403518570265],
+];
+
 // =============================================================================
 // BRADFORD CHROMATIC ADAPTATION MATRICES
 // =============================================================================
@@ -517,6 +533,17 @@ pub mod f32 {
         [0.05630659173412770 as f32, -0.19697565482077187 as f32, 1.04995232821873352 as f32],
     ];
 
+    pub const NTSC_1953_TO_XYZ: [[f32; 3]; 3] = [
+        [0.60699283073820975 as f32, 0.17344852694074162 as f32, 0.20057130054889663 as f32],
+        [0.29896661812478986 as f32, 0.58642121013298354 as f32, 0.11461217174222663 as f32],
+        [-0.00000000000000005 as f32, 0.06607562931075876 as f32, 1.11746867448670950 as f32],
+    ];
+    pub const XYZ_TO_NTSC_1953: [[f32; 3]; 3] = [
+        [1.90967542503864074 as f32, -0.53236476043276681 as f32, -0.28816074188562618 as f32],
+        [-0.98496488253814474 as f32, 1.99977718575926366 as f32, -0.02831678372487284 as f32],
+        [0.05824071488411074 as f32, -0.11824629991622469 as f32, 0.89655403518570265 as f32],
+    ];
+
     // -------------------------------------------------------------------------
     // CHROMATIC ADAPTATION MATRICES
     // -------------------------------------------------------------------------
@@ -741,12 +768,19 @@ pub mod f32 {
     pub const BT601_525_KG: f32 = 0.70105985692572292 as f32;
     pub const BT601_525_KB: f32 = 0.08656378236920956 as f32;
 
-    /// BT.601 legacy Y'CbCr coefficients (0.299/0.587/0.114)
-    /// WARNING: These do NOT match true luminance from either BT.601 color space.
-    /// They are historical values retained for compatibility with existing content.
-    pub const BT601_LEGACY_KR: f32 = 0.299;
-    pub const BT601_LEGACY_KG: f32 = 0.587;
-    pub const BT601_LEGACY_KB: f32 = 0.114;
+    /// Original NTSC 1953 (BT.470 M/NTSC) luminance coefficients
+    /// Derived from RGB→XYZ matrix with Illuminant C white point.
+    /// These are the TRUE source of 0.299/0.587/0.114 (which rounds to these).
+    pub const NTSC_1953_KR: f32 = 0.29896661812478986 as f32;
+    pub const NTSC_1953_KG: f32 = 0.58642121013298354 as f32;
+    pub const NTSC_1953_KB: f32 = 0.11461217174222663 as f32;
+
+    /// Legacy Y'CbCr coefficients (rounded from NTSC 1953)
+    /// From BT.470 M/NTSC with Illuminant C. Used in BT.601 Y'CbCr for compatibility.
+    /// Note: These do NOT match true luminance for modern D65 color spaces.
+    pub const YCBCR_LEGACY_KR: f32 = 0.299;
+    pub const YCBCR_LEGACY_KG: f32 = 0.587;
+    pub const YCBCR_LEGACY_KB: f32 = 0.114;
 
     // -------------------------------------------------------------------------
     // BIT DEPTH
