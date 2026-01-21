@@ -2318,17 +2318,6 @@ mod tests {
         assert!(rgb666.is_rgb666());
     }
 
-    /// Helper to create interleaved RGB from separate channels
-    fn interleave(r: &[u8], g: &[u8], b: &[u8]) -> Vec<u8> {
-        let mut result = Vec::with_capacity(r.len() * 3);
-        for i in 0..r.len() {
-            result.push(r[i]);
-            result.push(g[i]);
-            result.push(b[i]);
-        }
-        result
-    }
-
     #[test]
     fn test_rgb666_row_aligned() {
         // Test that partial groups use fill mode correctly

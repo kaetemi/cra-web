@@ -748,10 +748,6 @@ mod tests {
         let img = vec![127.5; 16]; // 4x4 gray image
         let result = dither_with_mode(&img, 4, 4, DitherMode::Serpentine, 0);
         assert_eq!(result.len(), 16);
-        // All values should be valid uint8
-        for &v in &result {
-            assert!(v <= 255);
-        }
     }
 
     #[test]
