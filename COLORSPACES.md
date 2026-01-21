@@ -55,6 +55,10 @@ Linear RGB → XYZ (4 decimal, per specification):
 
 The specification explicitly notes these truncated matrices are insufficient for higher bit depths. For N-bit encoding where N > 8, IEC 61966-2-1 Amendment 1 recommends deriving matrices with additional precision from the defining chromaticities.
 
+**On "exact" values:**
+
+Some sources incorrectly treat the truncated 4-decimal matrices as the authoritative definition of sRGB. The specification defines sRGB by its chromaticity coordinates; the matrices are derived values, truncated for 8-bit workflows. A matrix that doesn't map (1,1,1) to D65 cannot be the definition of a color space whose white point *is* D65.
+
 **Higher precision matrices (7 decimal places):**
 
 Derived from the authoritative chromaticity coordinates:
@@ -74,6 +78,8 @@ XYZ → Linear RGB:
 | G | = | -0.9692436  1.8759675  0.0415551 | × | Y |
 | B |   |  0.0556301 -0.2039770  1.0569715 |   | Z |
 ```
+
+**Note:** The 7-decimal inverse matrix in IEC 61966-2-1 Amendment 1 is the inverse of the truncated 4-decimal forward matrix, intended for 16-bit intermediate calculations in 8-bit workflows. It does not recover the precision lost by truncation. The matrices above are derived directly from the chromaticity coordinates and produce bit-identical results at 8-bit depth.
 
 For maximum precision, derive the matrices directly from the chromaticity coordinates, carrying full floating-point precision throughout the calculation.
 
@@ -645,7 +651,7 @@ CIE XYZ (empirical root)
     │       │
     │       ├── sRGB
     │       │     │
-    │       │     └── Y'CbCr
+    │       │     └── Y'CbCr (Rec.709)
     │       │
     │       ├── Gamma 2.2 RGB
     │       └── OKLab
@@ -663,7 +669,8 @@ CIE XYZ (empirical root)
 | Linear RGB / sRGB | Chromaticity coordinates (primaries + D65 white point) | XYZ matrices |
 | sRGB | Linear RGB + transfer function (γ=2.4, a=0.055) | K, T (slope and threshold) |
 | Gamma 2.2 RGB | Linear RGB + γ=2.2 | — |
-| Y'CbCr | sRGB + matrix transform | — |
+| Y'CbCr (Rec.709) | sRGB + matrix transform | — |
+| sYCC | sRGB + BT.601 matrix (legacy) | — |
 | Apple RGB | Chromaticity coordinates + γ=1.8 | XYZ matrices |
 | CIELAB | XYZ + transform equations + reference white | — |
 | CIE76 | CIELAB + Euclidean distance | — |
