@@ -5,7 +5,6 @@
 /// Width/height are passed as parameters, not stored in buffers.
 
 use wasm_bindgen::prelude::*;
-use js_sys;
 use image::GenericImageView;
 
 pub mod basic_lab;
