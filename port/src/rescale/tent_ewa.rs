@@ -10,8 +10,10 @@
 //! - **TentBoxIterative**: Iterative 2× separable tent-box downscaling
 //! - **Tent2DBoxIterative**: Iterative 2× 2D tent-box downscaling
 //! - **BilinearIterative**: Iterative 2× bilinear downscaling (mipmap-style)
+//! - **IterativeTentVolume**: Iterative scaling with explicit tent_expand/contract steps
 
 use crate::pixel::Pixel4;
+use crate::supersample::{tent_expand, tent_contract};
 use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
 use super::kernels::precompute_tent_2d_kernel_weights;
 use super::separable;
@@ -522,6 +524,305 @@ pub fn rescale_bilinear_iterative_alpha_pixels(
             scale_mode,
             TentMode::Off,
             None,
+        );
+
+        current = next;
+        current_w = next_w;
+        current_h = next_h;
+
+        // Report progress
+        if let Some(ref mut cb) = progress {
+            cb((pass_idx + 1) as f32 / total_passes as f32);
+        }
+    }
+
+    current
+}
+
+// ============================================================================
+// Iterative Tent Volume Scaling (explicit tent_expand/contract)
+// ============================================================================
+
+/// Calculate iterative 2× scaling passes for tent volume method.
+///
+/// Returns a vector of (intermediate_width, intermediate_height) in box-space,
+/// ending with the final target dimensions.
+///
+/// For downscaling, halves dimensions iteratively.
+/// For upscaling, doubles dimensions iteratively.
+fn calculate_iterative_tent_volume_passes(
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+) -> Vec<(usize, usize)> {
+    let mut passes = Vec::new();
+
+    // Use the larger scale factor to determine passes
+    let scale_x = src_width as f32 / dst_width as f32;
+    let scale_y = src_height as f32 / dst_height as f32;
+    let scale = scale_x.max(scale_y);
+
+    if scale > 1.0 {
+        // Downscaling: halve iteratively
+        let num_halves = (scale.log2().floor() as usize).max(0);
+
+        let mut current_w = src_width;
+        let mut current_h = src_height;
+
+        for _ in 0..num_halves {
+            let next_w = (current_w + 1) / 2;
+            let next_h = (current_h + 1) / 2;
+
+            // Stop if we'd overshoot the target
+            if next_w < dst_width || next_h < dst_height {
+                break;
+            }
+
+            passes.push((next_w, next_h));
+            current_w = next_w;
+            current_h = next_h;
+        }
+
+        // Final pass to exact dimensions
+        if current_w != dst_width || current_h != dst_height {
+            passes.push((dst_width, dst_height));
+        }
+    } else if scale < 1.0 {
+        // Upscaling: double iteratively
+        let inverse_scale = 1.0 / scale;
+        let num_doubles = (inverse_scale.log2().floor() as usize).max(0);
+
+        let mut current_w = src_width;
+        let mut current_h = src_height;
+
+        for _ in 0..num_doubles {
+            let next_w = current_w * 2;
+            let next_h = current_h * 2;
+
+            // Stop if we'd overshoot the target
+            if next_w > dst_width || next_h > dst_height {
+                break;
+            }
+
+            passes.push((next_w, next_h));
+            current_w = next_w;
+            current_h = next_h;
+        }
+
+        // Final pass to exact dimensions
+        if current_w != dst_width || current_h != dst_height {
+            passes.push((dst_width, dst_height));
+        }
+    } else {
+        // Identity - just return target
+        if src_width != dst_width || src_height != dst_height {
+            passes.push((dst_width, dst_height));
+        }
+    }
+
+    passes
+}
+
+/// Perform a single tent volume scaling step.
+///
+/// Steps:
+/// 1. tent_expand: box (W, H) → tent (2W+1, 2H+1)
+/// 2. Scale in tent space to target tent dimensions (box or bilinear)
+/// 3. tent_contract: tent (2*dstW+1, 2*dstH+1) → box (dstW, dstH)
+///
+/// `use_bilinear`: if true, use bilinear; if false, use box filter
+fn tent_volume_scale_step(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    use_bilinear: bool,
+) -> Vec<Pixel4> {
+    // Step 1: Expand to tent space
+    let (tent_data, tent_w, tent_h) = tent_expand(src, src_width, src_height);
+
+    // Calculate target tent dimensions
+    let target_tent_w = dst_width * 2 + 1;
+    let target_tent_h = dst_height * 2 + 1;
+
+    // Step 2: Scale in tent space with sample-to-sample mapping (tent-to-tent)
+    let scaled_tent = if use_bilinear {
+        bilinear::rescale_bilinear_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    } else {
+        // Use box filter for tent-to-tent scaling
+        separable::rescale_kernel_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            RescaleMethod::Box,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    };
+
+    // Step 3: Contract back to box space
+    let (result, _, _) = tent_contract(&scaled_tent, target_tent_w, target_tent_h);
+
+    result
+}
+
+/// Alpha-aware single tent volume scaling step.
+fn tent_volume_scale_step_alpha(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    use_bilinear: bool,
+) -> Vec<Pixel4> {
+    // Step 1: Expand to tent space
+    let (tent_data, tent_w, tent_h) = tent_expand(src, src_width, src_height);
+
+    // Calculate target tent dimensions
+    let target_tent_w = dst_width * 2 + 1;
+    let target_tent_h = dst_height * 2 + 1;
+
+    // Step 2: Scale in tent space with sample-to-sample mapping (tent-to-tent)
+    let scaled_tent = if use_bilinear {
+        bilinear::rescale_bilinear_alpha_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    } else {
+        // Use box filter for tent-to-tent scaling (alpha-aware)
+        separable::rescale_kernel_alpha_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            RescaleMethod::Box,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    };
+
+    // Step 3: Contract back to box space
+    let (result, _, _) = tent_contract(&scaled_tent, target_tent_w, target_tent_h);
+
+    result
+}
+
+/// Iterative tent volume scaling for Pixel4 images.
+///
+/// Each iteration explicitly uses:
+/// 1. tent_expand (box → tent)
+/// 2. Scale in tent space (box or bilinear based on `use_bilinear`)
+/// 3. tent_contract (tent → box)
+///
+/// This ensures volume preservation at every step through the tent representation.
+///
+/// `use_bilinear`: if true, use bilinear interpolation; if false, use box filter
+pub fn rescale_iterative_tent_volume_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    use_bilinear: bool,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Calculate the pass schedule
+    let passes = calculate_iterative_tent_volume_passes(src_width, src_height, dst_width, dst_height);
+
+    if passes.is_empty() {
+        // Identity
+        if let Some(ref mut cb) = progress {
+            cb(1.0);
+        }
+        return src.to_vec();
+    }
+
+    let total_passes = passes.len();
+    let mut current = src.to_vec();
+    let mut current_w = src_width;
+    let mut current_h = src_height;
+
+    for (pass_idx, &(next_w, next_h)) in passes.iter().enumerate() {
+        // Skip if dimensions unchanged
+        if next_w == current_w && next_h == current_h {
+            continue;
+        }
+
+        // Apply tent volume scale step
+        let next = tent_volume_scale_step(
+            &current, current_w, current_h,
+            next_w, next_h,
+            scale_mode,
+            use_bilinear,
+        );
+
+        current = next;
+        current_w = next_w;
+        current_h = next_h;
+
+        // Report progress
+        if let Some(ref mut cb) = progress {
+            cb((pass_idx + 1) as f32 / total_passes as f32);
+        }
+    }
+
+    current
+}
+
+/// Alpha-aware iterative tent volume scaling for Pixel4 images.
+///
+/// `use_bilinear`: if true, use bilinear interpolation; if false, use box filter
+pub fn rescale_iterative_tent_volume_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    use_bilinear: bool,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Calculate the pass schedule
+    let passes = calculate_iterative_tent_volume_passes(src_width, src_height, dst_width, dst_height);
+
+    if passes.is_empty() {
+        // Identity
+        if let Some(ref mut cb) = progress {
+            cb(1.0);
+        }
+        return src.to_vec();
+    }
+
+    let total_passes = passes.len();
+    let mut current = src.to_vec();
+    let mut current_w = src_width;
+    let mut current_h = src_height;
+
+    for (pass_idx, &(next_w, next_h)) in passes.iter().enumerate() {
+        // Skip if dimensions unchanged
+        if next_w == current_w && next_h == current_h {
+            continue;
+        }
+
+        // Apply tent volume scale step (alpha-aware)
+        let next = tent_volume_scale_step_alpha(
+            &current, current_w, current_h,
+            next_w, next_h,
+            scale_mode,
+            use_bilinear,
         );
 
         current = next;

@@ -439,6 +439,8 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::TentBoxIterative => "Tent Box Iterative",
             cra_wasm::rescale::RescaleMethod::Tent2DBoxIterative => "Tent 2D Box Iterative",
             cra_wasm::rescale::RescaleMethod::BilinearIterative => "Bilinear Iterative",
+            cra_wasm::rescale::RescaleMethod::IterativeTentVolume => "Iterative Tent Volume (Box)",
+            cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear => "Iterative Tent Volume (Bilinear)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         let ss_note = match tent_mode {

@@ -220,6 +220,10 @@ pub enum ScaleMethod {
     Tent2dBoxIterative,
     /// Iterative Bilinear: mipmap-style 2× bilinear passes for power-of-2, then final factor
     BilinearIterative,
+    /// Iterative Tent Volume (Box): explicit tent_expand → box scale → tent_contract per iteration
+    IterativeTentVolume,
+    /// Iterative Tent Volume (Bilinear): explicit tent_expand → bilinear scale → tent_contract per iteration
+    IterativeTentVolumeBilinear,
 }
 
 impl ScaleMethod {
@@ -253,6 +257,8 @@ impl ScaleMethod {
             ScaleMethod::TentBoxIterative => cra_wasm::rescale::RescaleMethod::TentBoxIterative,
             ScaleMethod::Tent2dBoxIterative => cra_wasm::rescale::RescaleMethod::Tent2DBoxIterative,
             ScaleMethod::BilinearIterative => cra_wasm::rescale::RescaleMethod::BilinearIterative,
+            ScaleMethod::IterativeTentVolume => cra_wasm::rescale::RescaleMethod::IterativeTentVolume,
+            ScaleMethod::IterativeTentVolumeBilinear => cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear,
         }
     }
 }

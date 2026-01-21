@@ -96,6 +96,8 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         27 => rescale::RescaleMethod::TentBoxIterative,
         28 => rescale::RescaleMethod::Tent2DBoxIterative,
         29 => rescale::RescaleMethod::BilinearIterative,
+        30 => rescale::RescaleMethod::IterativeTentVolume,
+        31 => rescale::RescaleMethod::IterativeTentVolumeBilinear,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }
