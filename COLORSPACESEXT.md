@@ -6,23 +6,27 @@ These color spaces are not foundationally distinct but may appear in practical w
 
 ## D50 Illuminant
 
-The standard daylight white point for print-oriented color spaces. Represents ~5000K daylight, intended to match typical indoor viewing conditions with artificial illumination.
+The standard white point for print-oriented color spaces and ICC workflows.
 
-**CIE xy chromaticity:**
+Unlike D65 color spaces (where chromaticity is authoritative), D50-based specifications define the white point directly as XYZ values.
+
+**For ICC PCS and ProPhoto RGB (ISO 22028-2):**
+
+| X | Y | Z |
+|--------|--------|--------|
+| 0.9642 | 1.0000 | 0.8249 |
+
+This is the authoritative definition shared by both specifications. Matrices and conversions must use these XYZ values directly.
+
+**Derived chromaticity:**
 
 | x | y |
 |--------|--------|
 | 0.3457 | 0.3585 |
 
-From CIE 15:2004.
+**CIE D50 reference (for context):**
 
-**Derived XYZ (normalized to Y=1):**
-
-| X | Y | Z |
-|--------|--------|--------|
-| 0.9643 | 1.0000 | 0.8251 |
-
-**Used by:** ProPhoto RGB (ISO 22028-2), ICC color profiles.
+CIE 15:2004 Table T.3 defines D50 via chromaticity (0.34567, 0.35850), which yields slightly different XYZ (0.9643, 1.0, 0.8251). This difference is irrelevant for practical workflows since no common color space uses CIE D50 chromaticity as its authoritative definition.
 
 **Note:** Converting between D50 and D65 color spaces requires chromatic adaptation (Bradford transform). See the main specification for details.
 
@@ -32,18 +36,18 @@ From CIE 15:2004.
 
 Apple's wide-gamut color space, used on modern iPhones, iPads, and Macs since ~2016. Common in photos from iOS devices.
 
-**Definition:** Same structure as sRGB, but with different primaries derived from DCI-P3 cinema standard.
+**Authoritative definition:**
 
 | Primary | x | y |
 |---------|--------|--------|
 | Red | 0.6800 | 0.3200 |
 | Green | 0.2650 | 0.6900 |
 | Blue | 0.1500 | 0.0600 |
-| White | D65 | |
+| White (D65) | 0.3127 | 0.3290 |
 
 **Transfer function:** Identical to sRGB (piecewise).
 
-**Derived XYZ conversion:**
+**Derived XYZ matrices:**
 
 ```
 [linearized] Display P3 → XYZ:
@@ -61,9 +65,15 @@ XYZ → [linearized] Display P3:
 | B |   |  0.0358458 -0.0761724  0.9568845 |   | Z |
 ```
 
+**Derived white point XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|---------|---------|---------|
+| 0.9504559 | 1.0000000 | 1.0890578 |
+
 **When you encounter it:** Images from Apple devices, web content using CSS `color(display-p3 ...)`.
 
-**Relation to sRGB:** Wider gamut. sRGB colors are a subset. Converting P3→sRGB may require gamut clipping.
+**Relation to sRGB:** Wider gamut (~25% larger). sRGB colors are a subset. Converting P3→sRGB may require gamut clipping.
 
 ---
 
@@ -71,15 +81,14 @@ XYZ → [linearized] Display P3:
 
 A wider-gamut space designed for photography and print. Common in professional photo workflows.
 
-**Definition:**
+**Authoritative definition:**
 
 | Primary | x | y |
 |---------|--------|--------|
 | Red | 0.6400 | 0.3300 |
 | Green | 0.2100 | 0.7100 |
 | Blue | 0.1500 | 0.0600 |
-| White | D65 | |
-| γ | 563/256 (≈2.199) | |
+| White (D65) | 0.3127 | 0.3290 |
 
 Red and blue primaries are identical to sRGB. Only green differs (more saturated).
 
@@ -90,9 +99,9 @@ encoded = linear^(256/563)
 linear = encoded^(563/256)
 ```
 
-Note: The gamma is often approximated as 2.2, but the precise value specified in IEC 61966-2-5 is 563/256 = 2.19921875. The difference is small but measurable.
+Note: The gamma is often approximated as 2.2, but the precise value specified by Adobe is 563/256 = 2.19921875. The difference is small but measurable.
 
-**Derived XYZ conversion:**
+**Derived XYZ matrices:**
 
 ```
 [linearized] Adobe RGB → XYZ:
@@ -110,6 +119,12 @@ XYZ → [linearized] Adobe RGB:
 | B |   |  0.0134443 -0.1183624  1.0151750 |   | Z |
 ```
 
+**Derived white point XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|---------|---------|---------|
+| 0.9504559 | 1.0000000 | 1.0890578 |
+
 **When you encounter it:** DSLR cameras, Photoshop workflows, print-oriented photography.
 
 **Trivia:** The green primary reportedly resulted from an accidental use of NTSC primaries adapted to the wrong white point. Adobe kept it because users liked the results.
@@ -120,16 +135,23 @@ XYZ → [linearized] Adobe RGB:
 
 An extremely wide-gamut space used in high-end photography. Encompasses nearly all visible colors but includes imaginary colors that cannot exist physically.
 
-**Definition:**
+Also known as ROMM RGB (Reference Output Medium Metric). Specified in ISO 22028-2:2013.
+
+**Authoritative definition:**
 
 | Primary | x | y |
 |---------|--------|--------|
 | Red | 0.7347 | 0.2653 |
 | Green | 0.1596 | 0.8404 |
 | Blue | 0.0366 | 0.0001 |
-| White | D50 | |
 
-Note the D50 white point—different from the D65 spaces above.
+**White point (D50) — defined as XYZ:**
+
+| X | Y | Z |
+|--------|--------|--------|
+| 0.9642 | 1.0000 | 0.8249 |
+
+Note: Unlike D65 color spaces where chromaticity is authoritative, ProPhoto RGB specifies the white point directly as XYZ values (shared with ICC PCS).
 
 **Transfer function (encode: linear → ProPhoto):**
 
@@ -151,7 +173,17 @@ else:
     linear = encoded^1.8
 ```
 
-Note: The linear segment exists (similar to sRGB) to avoid numerical issues near black. Many implementations approximate this as a pure γ=1.8 power function, which is adequate for most purposes but technically incorrect per ISO 22028-2:2013 (ROMM RGB specification).
+Note: The linear segment exists (similar to sRGB) to avoid numerical issues near black. Many implementations approximate this as a pure γ=1.8 power function, which is adequate for most purposes but technically incorrect per ISO 22028-2:2013.
+
+**Derived XYZ matrix (from ISO 22028-2):**
+
+```
+XYZ (D50) → [linearized] ProPhoto RGB:
+
+| R |   |  1.3460  -0.2556  -0.0511 |   | X |
+| G | = | -0.5446   1.5082   0.0205 | × | Y |
+| B |   |  0.0000   0.0000   1.2123 |   | Z |
+```
 
 **When you encounter it:** Lightroom internal processing, archival photography workflows.
 
@@ -163,16 +195,40 @@ Note: The linear segment exists (similar to sRGB) to avoid numerical issues near
 
 Ultra-wide gamut space for HDR and UHD television. Defined in ITU-R BT.2020.
 
-**Definition:**
+**Authoritative definition:**
 
 | Primary | x | y |
 |---------|--------|--------|
 | Red | 0.7080 | 0.2920 |
 | Green | 0.1700 | 0.7970 |
 | Blue | 0.1310 | 0.0460 |
-| White | D65 | |
+| White (D65) | 0.3127 | 0.3290 |
 
 **Transfer function:** Same as Rec.709/sRGB for SDR content. HDR uses PQ or HLG.
+
+**Derived XYZ matrices:**
+
+```
+[linearized] Rec.2020 → XYZ:
+
+| X |   | 0.6370102  0.1446150  0.1688448 |   | R |
+| Y | = | 0.2627098  0.6779735  0.0593168 | × | G |
+| Z |   | 0.0000000  0.0280834  1.0608196 |   | B |
+```
+
+```
+XYZ → [linearized] Rec.2020:
+
+| R |   |  1.7166512 -0.3556708 -0.2533663 |   | X |
+| G | = | -0.6666844  1.6164812  0.0157685 | × | Y |
+| B |   |  0.0176399 -0.0427706  0.9421031 |   | Z |
+```
+
+**Derived white point XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|---------|---------|---------|
+| 0.9504559 | 1.0000000 | 1.0890578 |
 
 **When you encounter it:** 4K/8K UHD content, HDR video.
 
@@ -249,6 +305,8 @@ The structure is:
 
 **For dithering:** Only relevant if doing HDR. Uses PQ/HLG transfer functions which are outside typical SDR workflows.
 
+---
+
 ## ICC Profiles
 
 ICC profiles are not a color space but a container format for describing color spaces and device characteristics. Defined by the International Color Consortium in ICC.1 (currently ICC.1:2022-05).
@@ -257,26 +315,34 @@ ICC profiles are not a color space but a container format for describing color s
 
 All ICC profiles convert to/from a common intermediate called the Profile Connection Space. The PCS is either CIEXYZ or CIELAB, referenced to the D50 illuminant.
 
-**PCS White Point (D50_ICC):**
+**PCS White Point (D50) — defined as XYZ:**
 
-The ICC specification defines the PCS illuminant as XYZ directly, not chromaticity:
+The ICC specification defines the PCS illuminant directly as XYZ values, not chromaticity:
 
 | X | Y | Z |
 |--------|--------|--------|
 | 0.9642 | 1.0000 | 0.8249 |
 
-This is the normative definition from ICC.1:2022-05 Section 7.2.16. Note that this differs slightly from CIE D50:
+This is the normative definition from ICC.1:2022-05 Section 7.2.16. Per Section 6.3.1, the PCS adopted white chromaticity is "the chromaticity of the D50 illuminant defined in ISO 3664," but the XYZ values above are authoritative for ICC interoperability.
 
-| Source | X | Y | Z |
-|--------|--------|--------|--------|
-| D50_ICC | 0.9642 | 1.0000 | 0.8249 |
-| D50_CIE | 0.9643 | 1.0000 | 0.8251 |
+**Derived chromaticity:**
 
-The difference arises because ICC defines XYZ at 4 decimal places, while CIE D50 chromaticity (0.34567, 0.35850) yields slightly different XYZ when converted. For ICC interoperability, use D50_ICC exactly as specified.
+| x | y |
+|--------|--------|
+| 0.3457 | 0.3585 |
+
+**Comparison with CIE D50:**
+
+| Source | X | Y | Z | Status |
+|--------|--------|--------|--------|--------|
+| ICC PCS / ProPhoto RGB | 0.9642 | 1.0000 | 0.8249 | Authoritative for these specs |
+| CIE D50 (from chromaticity) | 0.9643 | 1.0000 | 0.8251 | Not used by any common color space |
+
+The difference arises because ICC defines XYZ at 4 decimal places independently, rather than deriving from CIE chromaticity. For ICC and ProPhoto RGB workflows, use the ICC values exactly as specified.
 
 **Binary Representation:**
 
-ICC profiles store XYZ values as s15Fixed16Number. The D50 white point encodes as:
+ICC profiles store XYZ values as s15Fixed16Number (signed 16-bit fixed-point with 16 fractional bits). The D50 white point encodes as:
 
 | Component | Hex | Decimal (exact) |
 |-----------|--------|------------------------|
@@ -284,16 +350,18 @@ ICC profiles store XYZ values as s15Fixed16Number. The D50 white point encodes a
 | Y | 0x10000 | 1.0 |
 | Z | 0xD32D | 0.8249053955078125 |
 
+Note: The hex values are the authoritative binary representation. When divided by 65536, they yield values that round to the 4-decimal specification.
+
 ### Conversion Flow
 
 When converting between two color spaces via ICC profiles:
 
 ```
-Source RGB → [Source Profile] → PCS (XYZ D50_ICC) → [Dest Profile] → Dest RGB
+Source RGB → [Source Profile] → PCS (XYZ D50) → [Dest Profile] → Dest RGB
 ```
 
 Each profile contains:
-- **Colorant matrix** (rXYZ, gXYZ, bXYZ tags): RGB→XYZ transform, already adapted to D50_ICC
+- **Colorant matrix** (rXYZ, gXYZ, bXYZ tags): RGB→XYZ transform, already adapted to D50
 - **TRC curves**: Transfer functions for linearization
 - **CHAD tag** (optional): Chromatic adaptation matrix used to adapt the original colorants to D50
 
@@ -305,21 +373,33 @@ Per ICC.1:2022-05 Section F.3, the matrix-based conversion is:
 XYZ_D50 = colorantMatrix × linear_RGB
 ```
 
-The colorant tags are used directly as matrix columns. No additional white point scaling is applied—the adaptation to D50_ICC is already baked into the colorants.
+The colorant tags are used directly as matrix columns. No additional white point scaling is applied—the adaptation to D50 is already baked into the colorants.
 
 ---
 
 ## Summary
 
-| Space | Based on | Gamut vs sRGB | When you encounter it |
-|-------|----------|---------------|----------------------|
-| Display P3 | Linear P3 + sRGB transfer | ~25% larger | Apple devices, modern web |
-| Adobe RGB | XYZ, γ=563/256 | ~40% larger | Photography, print |
-| ProPhoto RGB | XYZ (D50), piecewise 1.8 | ~90% of visible | Lightroom, archival |
-| Rec.2020 | XYZ, sRGB transfer (SDR) | ~75% of visible | UHD/HDR video |
-| OKLch | OKLab (polar coords) | Same as sRGB | Hue-preserving ops |
-| HSL/HSV | sRGB (coordinate transform) | Same as sRGB | UI, color pickers |
-| ICtCp | Rec.2020 + PQ/HLG | Same as Rec.2020 | HDR video |
+### Authoritative Definitions
+
+| Space | White Point Definition | Primaries | Transfer |
+|-------|------------------------|-----------|----------|
+| Display P3 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB piecewise |
+| Adobe RGB | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 563/256 |
+| ProPhoto RGB | D50 XYZ (0.9642, 1.0, 0.8249) | Chromaticity | Piecewise 1.8 |
+| Rec.2020 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB (SDR) / PQ,HLG (HDR) |
+| ICC PCS | D50 XYZ (0.9642, 1.0, 0.8249) | N/A | N/A |
+
+### Gamut Comparison
+
+| Space | Gamut vs sRGB | When you encounter it |
+|-------|---------------|----------------------|
+| Display P3 | ~25% larger | Apple devices, modern web |
+| Adobe RGB | ~40% larger | Photography, print |
+| ProPhoto RGB | ~90% of visible | Lightroom, archival |
+| Rec.2020 | ~75% of visible | UHD/HDR video |
+| OKLch | Same as sRGB | Hue-preserving ops |
+| HSL/HSV | Same as sRGB | UI, color pickers |
+| ICtCp | Same as Rec.2020 | HDR video |
 
 ---
 
@@ -332,7 +412,7 @@ CIE XYZ (empirical root)
     │
     ├── CIELAB
     │
-    ├── Linear RGB
+    ├── Linear RGB (D65)
     │       │
     │       ├── sRGB
     │       │     │
@@ -346,19 +426,19 @@ CIE XYZ (empirical root)
     │             │
     │             └── OKLch
     │
-    ├── Display P3
+    ├── Display P3 (D65)
     │
-    ├── Adobe RGB
+    ├── Adobe RGB (D65)
     │
-    ├── ProPhoto RGB (D50)
-    │
-    ├── Rec.2020
+    ├── Rec.2020 (D65)
     │       │
     │       └── ICtCp
     │
-    ├── Apple RGB
+    ├── Apple RGB (D65)
     │
-    └── ICC PCS (D50_ICC)
+    ├── ProPhoto RGB (D50)
+    │
+    └── ICC PCS (D50)
           │
           └── [all ICC-profiled spaces]
 ```
