@@ -261,6 +261,263 @@ fn add4_pixels(a: &Pixel4, b: &Pixel4, c: &Pixel4, d: &Pixel4) -> Pixel4 {
     )
 }
 
+// ============================================================================
+// Lanczos3-constrained tent expansion/contraction
+// ============================================================================
+
+/// Lanczos3 kernel: sinc(x) * sinc(x/3) for |x| < 3
+fn lanczos3(x: f32) -> f32 {
+    let x = x.abs();
+    if x < 1e-8 {
+        1.0
+    } else if x >= 3.0 {
+        0.0
+    } else {
+        let pi_x = std::f32::consts::PI * x;
+        let pi_x_3 = pi_x / 3.0;
+        (pi_x.sin() / pi_x) * (pi_x_3.sin() / pi_x_3)
+    }
+}
+
+/// Expand a box-space image into tent-space using Lanczos3 constraint.
+///
+/// Like `tent_expand`, but instead of adjusting centers for volume preservation,
+/// adjusts them so that Lanczos3 interpolation at each peak returns the original value.
+///
+/// This is fully reversible: `tent_contract_lanczos(tent_expand_lanczos(img)) = img`
+pub fn tent_expand_lanczos(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+) -> (Vec<Pixel4>, usize, usize) {
+    let dst_width = src_width * 2 + 1;
+    let dst_height = src_height * 2 + 1;
+    let mut dst = vec![Pixel4::new(0.0, 0.0, 0.0, 0.0); dst_width * dst_height];
+
+    // Clamp-to-edge boundary condition for source lookups
+    let get_src = |x: isize, y: isize| -> Pixel4 {
+        let cx = x.clamp(0, (src_width - 1) as isize) as usize;
+        let cy = y.clamp(0, (src_height - 1) as isize) as usize;
+        src[cy * src_width + cx]
+    };
+
+    // =========================================================================
+    // PASS 1: Compute all grid points via linear interpolation (same as volume)
+    // =========================================================================
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            let idx = dy * dst_width + dx;
+
+            let x_odd = dx % 2 == 1;
+            let y_odd = dy % 2 == 1;
+
+            if x_odd && y_odd {
+                // Pixel center: directly maps to a source pixel
+                let sx = (dx - 1) / 2;
+                let sy = (dy - 1) / 2;
+                dst[idx] = get_src(sx as isize, sy as isize);
+            } else if x_odd && !y_odd {
+                // Horizontal edge: interpolate between pixels above and below
+                let sx = (dx - 1) / 2;
+                let sy_above = (dy as isize / 2) - 1;
+                let sy_below = dy as isize / 2;
+
+                let p_above = get_src(sx as isize, sy_above);
+                let p_below = get_src(sx as isize, sy_below);
+
+                dst[idx] = lerp_pixel(&p_above, &p_below, 0.5);
+            } else if !x_odd && y_odd {
+                // Vertical edge: interpolate between pixels left and right
+                let sy = (dy - 1) / 2;
+                let sx_left = (dx as isize / 2) - 1;
+                let sx_right = dx as isize / 2;
+
+                let p_left = get_src(sx_left, sy as isize);
+                let p_right = get_src(sx_right, sy as isize);
+
+                dst[idx] = lerp_pixel(&p_left, &p_right, 0.5);
+            } else {
+                // Corner: bilinear interpolation from 4 surrounding pixels
+                let sx_left = (dx as isize / 2) - 1;
+                let sx_right = dx as isize / 2;
+                let sy_above = (dy as isize / 2) - 1;
+                let sy_below = dy as isize / 2;
+
+                let p_tl = get_src(sx_left, sy_above);
+                let p_tr = get_src(sx_right, sy_above);
+                let p_bl = get_src(sx_left, sy_below);
+                let p_br = get_src(sx_right, sy_below);
+
+                let top = lerp_pixel(&p_tl, &p_tr, 0.5);
+                let bottom = lerp_pixel(&p_bl, &p_br, 0.5);
+                dst[idx] = lerp_pixel(&top, &bottom, 0.5);
+            }
+        }
+    }
+
+    // =========================================================================
+    // PASS 2: Adjust center values for Lanczos3 constraint
+    // =========================================================================
+    //
+    // The constraint: Lanczos3 interpolation at each peak must equal the original value.
+    //
+    // Lanczos3 interpolation formula (normalized):
+    //   result = Σ(samples * weights) / Σ(weights)
+    //
+    // At a peak position, Lanczos3(integer offset) = 0 for non-zero integers,
+    // so other peaks don't contribute - only edges and corners do.
+    //
+    // We need: V = (M * 1 + contrib) / total_weight
+    // Solving: M = V * total_weight - contrib
+
+    // Get tent-space value with boundary handling
+    let get_tent = |dst: &[Pixel4], dx: isize, dy: isize| -> Pixel4 {
+        let cx = dx.clamp(0, (dst_width - 1) as isize) as usize;
+        let cy = dy.clamp(0, (dst_height - 1) as isize) as usize;
+        dst[cy * dst_width + cx]
+    };
+
+    for sy in 0..src_height {
+        for sx in 0..src_width {
+            // Map source pixel (sx, sy) to its center in tent space
+            let dx = (sx * 2 + 1) as isize;
+            let dy = (sy * 2 + 1) as isize;
+            let mid_idx = dy as usize * dst_width + dx as usize;
+
+            let original_value = src[sy * src_width + sx];
+
+            // Accumulate Lanczos3-weighted contributions from neighbors
+            // Support is ±3 in original coords = ±6 in tent coords
+            let mut contrib = Pixel4::new(0.0, 0.0, 0.0, 0.0);
+            let mut neighbor_weight_sum = 0.0f32;
+
+            // Iterate over all tent positions within Lanczos3 support (excluding center)
+            for oy in -6isize..=6 {
+                for ox in -6isize..=6 {
+                    if ox == 0 && oy == 0 {
+                        continue; // Skip the center (that's what we're solving for)
+                    }
+
+                    let tx = dx + ox;
+                    let ty = dy + oy;
+
+                    // Convert tent offset to original-space offset (divide by 2)
+                    let orig_ox = ox as f32 / 2.0;
+                    let orig_oy = oy as f32 / 2.0;
+
+                    let w = lanczos3(orig_ox) * lanczos3(orig_oy);
+                    if w.abs() < 1e-10 {
+                        continue;
+                    }
+
+                    let neighbor = get_tent(&dst, tx, ty);
+                    contrib = Pixel4::new(
+                        contrib[0] + neighbor[0] * w,
+                        contrib[1] + neighbor[1] * w,
+                        contrib[2] + neighbor[2] * w,
+                        contrib[3] + neighbor[3] * w,
+                    );
+                    neighbor_weight_sum += w;
+                }
+            }
+
+            // Total weight includes the center weight of 1
+            let total_weight = 1.0 + neighbor_weight_sum;
+
+            // Solve for adjusted center: V = (M + contrib) / total_weight
+            // Therefore: M = V * total_weight - contrib
+            let adjusted = Pixel4::new(
+                original_value[0] * total_weight - contrib[0],
+                original_value[1] * total_weight - contrib[1],
+                original_value[2] * total_weight - contrib[2],
+                original_value[3] * total_weight - contrib[3],
+            );
+
+            dst[mid_idx] = adjusted;
+        }
+    }
+
+    (dst, dst_width, dst_height)
+}
+
+/// Contract a tent-space image back to box-space using Lanczos3 interpolation.
+///
+/// This applies Lanczos3 interpolation centered at each peak position,
+/// recovering the original box values exactly when applied after `tent_expand_lanczos`.
+///
+/// The transformation is (2W+1, 2H+1) -> (W, H).
+pub fn tent_contract_lanczos(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+) -> (Vec<Pixel4>, usize, usize) {
+    debug_assert!(src_width % 2 == 1, "Source width must be odd (2N+1)");
+    debug_assert!(src_height % 2 == 1, "Source height must be odd (2M+1)");
+
+    let dst_width = (src_width - 1) / 2;
+    let dst_height = (src_height - 1) / 2;
+    let mut dst = vec![Pixel4::new(0.0, 0.0, 0.0, 0.0); dst_width * dst_height];
+
+    // Get tent-space value with boundary handling
+    let get_tent = |tx: isize, ty: isize| -> Pixel4 {
+        let cx = tx.clamp(0, (src_width - 1) as isize) as usize;
+        let cy = ty.clamp(0, (src_height - 1) as isize) as usize;
+        src[cy * src_width + cx]
+    };
+
+    // For each output pixel, apply Lanczos3 interpolation at its peak position
+    for dy in 0..dst_height {
+        for dx in 0..dst_width {
+            // Map output pixel (dx, dy) to tent-space center (peak position)
+            let tx = (dx * 2 + 1) as isize;
+            let ty = (dy * 2 + 1) as isize;
+
+            // Apply Lanczos3 interpolation
+            // Support is ±3 in original coords = ±6 in tent coords
+            let mut sum = Pixel4::new(0.0, 0.0, 0.0, 0.0);
+            let mut weight_sum = 0.0f32;
+
+            for oy in -6isize..=6 {
+                for ox in -6isize..=6 {
+                    let px = tx + ox;
+                    let py = ty + oy;
+
+                    // Convert tent offset to original-space offset (divide by 2)
+                    let orig_ox = ox as f32 / 2.0;
+                    let orig_oy = oy as f32 / 2.0;
+
+                    let w = lanczos3(orig_ox) * lanczos3(orig_oy);
+                    if w.abs() < 1e-10 {
+                        continue;
+                    }
+
+                    let pixel = get_tent(px, py);
+                    sum = Pixel4::new(
+                        sum[0] + pixel[0] * w,
+                        sum[1] + pixel[1] * w,
+                        sum[2] + pixel[2] * w,
+                        sum[3] + pixel[3] * w,
+                    );
+                    weight_sum += w;
+                }
+            }
+
+            // Normalize (should be ~1.0 but normalize for edge handling)
+            if weight_sum.abs() > 1e-8 {
+                let inv_w = 1.0 / weight_sum;
+                dst[dy * dst_width + dx] = Pixel4::new(
+                    sum[0] * inv_w,
+                    sum[1] * inv_w,
+                    sum[2] * inv_w,
+                    sum[3] * inv_w,
+                );
+            }
+        }
+    }
+
+    (dst, dst_width, dst_height)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -351,5 +608,91 @@ mod tests {
     fn test_supersample_target() {
         assert_eq!(supersample_target_dimensions(100, 50), (201, 101));
         assert_eq!(supersample_target_dimensions(1, 1), (3, 3));
+    }
+
+    // Lanczos3 constraint tests
+
+    #[test]
+    fn test_lanczos3_expand_dimensions() {
+        let src = vec![Pixel4::new(1.0, 1.0, 1.0, 1.0); 4];
+        let (dst, w, h) = tent_expand_lanczos(&src, 2, 2);
+        assert_eq!(w, 5);
+        assert_eq!(h, 5);
+        assert_eq!(dst.len(), 25);
+    }
+
+    #[test]
+    fn test_lanczos3_contract_dimensions() {
+        let src = vec![Pixel4::new(1.0, 1.0, 1.0, 1.0); 25];
+        let (dst, w, h) = tent_contract_lanczos(&src, 5, 5);
+        assert_eq!(w, 2);
+        assert_eq!(h, 2);
+        assert_eq!(dst.len(), 4);
+    }
+
+    #[test]
+    fn test_lanczos3_roundtrip_uniform() {
+        // Uniform image should roundtrip exactly
+        let value = 0.5;
+        let src = vec![Pixel4::new(value, value, value, 1.0); 9];
+        let (expanded, w, h) = tent_expand_lanczos(&src, 3, 3);
+        let (result, rw, rh) = tent_contract_lanczos(&expanded, w, h);
+
+        assert_eq!(rw, 3);
+        assert_eq!(rh, 3);
+        for p in &result {
+            assert!((p[0] - value).abs() < 1e-4, "Expected {}, got {}", value, p[0]);
+        }
+    }
+
+    #[test]
+    fn test_lanczos3_roundtrip_nonuniform() {
+        // Non-uniform image should roundtrip exactly (per-pixel check)
+        let src = vec![
+            Pixel4::new(0.1, 0.2, 0.3, 1.0),
+            Pixel4::new(0.9, 0.1, 0.5, 1.0),
+            Pixel4::new(0.3, 0.8, 0.2, 1.0),
+            Pixel4::new(0.6, 0.4, 0.7, 1.0),
+        ];
+
+        let (expanded, w, h) = tent_expand_lanczos(&src, 2, 2);
+        let (result, _, _) = tent_contract_lanczos(&expanded, w, h);
+
+        for i in 0..4 {
+            for c in 0..4 {
+                assert!(
+                    (result[i][c] - src[i][c]).abs() < 1e-4,
+                    "Pixel {} channel {} mismatch: expected {}, got {}",
+                    i, c, src[i][c], result[i][c]
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_lanczos3_roundtrip_larger() {
+        // Test with a larger image
+        let src: Vec<Pixel4> = (0..16)
+            .map(|i| {
+                let v = (i as f32) / 16.0;
+                Pixel4::new(v, 1.0 - v, v * 0.5, 1.0)
+            })
+            .collect();
+
+        let (expanded, w, h) = tent_expand_lanczos(&src, 4, 4);
+        let (result, rw, rh) = tent_contract_lanczos(&expanded, w, h);
+
+        assert_eq!(rw, 4);
+        assert_eq!(rh, 4);
+
+        for i in 0..16 {
+            for c in 0..4 {
+                assert!(
+                    (result[i][c] - src[i][c]).abs() < 1e-4,
+                    "Pixel {} channel {} mismatch: expected {}, got {}",
+                    i, c, src[i][c], result[i][c]
+                );
+            }
+        }
     }
 }

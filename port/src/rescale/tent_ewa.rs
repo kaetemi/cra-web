@@ -13,7 +13,7 @@
 //! - **IterativeTentVolume**: Iterative scaling with explicit tent_expand/contract steps
 
 use crate::pixel::Pixel4;
-use crate::supersample::{tent_expand, tent_contract};
+use crate::supersample::{tent_expand, tent_contract, tent_expand_lanczos, tent_contract_lanczos};
 use super::{RescaleMethod, ScaleMode, TentMode, calculate_scales};
 use super::kernels::precompute_tent_2d_kernel_weights;
 use super::separable;
@@ -836,4 +836,114 @@ pub fn rescale_iterative_tent_volume_alpha_pixels(
     }
 
     current
+}
+
+// ============================================================================
+// Tent-space with Lanczos3 Constraint
+// ============================================================================
+
+/// Tent-space rescaling with Lanczos3 constraint for Pixel4 images.
+///
+/// Uses Lanczos3-constrained tent expansion/contraction instead of volume-preserving:
+/// - `tent_expand_lanczos`: peaks adjusted so Lanczos3 interpolation returns original value
+/// - `tent_contract_lanczos`: applies Lanczos3 interpolation at each peak
+///
+/// This is fully reversible: contract(expand(img)) = img
+///
+/// The inner scaling uses box filter in tent-space with sample-to-sample mapping.
+pub fn rescale_tent_lanczos3_constraint_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Step 1: Expand to tent space with Lanczos3 constraint
+    let (tent_data, tent_w, tent_h) = tent_expand_lanczos(src, src_width, src_height);
+
+    if let Some(ref mut cb) = progress {
+        cb(0.25);
+    }
+
+    // Calculate target tent dimensions
+    let target_tent_w = dst_width * 2 + 1;
+    let target_tent_h = dst_height * 2 + 1;
+
+    // Step 2: Scale in tent space with sample-to-sample mapping
+    let scaled_tent = if tent_w == target_tent_w && tent_h == target_tent_h {
+        tent_data
+    } else {
+        separable::rescale_kernel_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            RescaleMethod::Box,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    };
+
+    if let Some(ref mut cb) = progress {
+        cb(0.75);
+    }
+
+    // Step 3: Contract back to box space with Lanczos3 interpolation
+    let (result, _, _) = tent_contract_lanczos(&scaled_tent, target_tent_w, target_tent_h);
+
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
+    result
+}
+
+/// Alpha-aware tent-space rescaling with Lanczos3 constraint for Pixel4 images.
+pub fn rescale_tent_lanczos3_constraint_alpha_pixels(
+    src: &[Pixel4],
+    src_width: usize,
+    src_height: usize,
+    dst_width: usize,
+    dst_height: usize,
+    scale_mode: ScaleMode,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<Pixel4> {
+    // Step 1: Expand to tent space with Lanczos3 constraint
+    let (tent_data, tent_w, tent_h) = tent_expand_lanczos(src, src_width, src_height);
+
+    if let Some(ref mut cb) = progress {
+        cb(0.25);
+    }
+
+    // Calculate target tent dimensions
+    let target_tent_w = dst_width * 2 + 1;
+    let target_tent_h = dst_height * 2 + 1;
+
+    // Step 2: Scale in tent space with sample-to-sample mapping (alpha-aware)
+    let scaled_tent = if tent_w == target_tent_w && tent_h == target_tent_h {
+        tent_data
+    } else {
+        separable::rescale_kernel_alpha_pixels(
+            &tent_data, tent_w, tent_h,
+            target_tent_w, target_tent_h,
+            RescaleMethod::Box,
+            scale_mode,
+            TentMode::SampleToSample,
+            None,
+        )
+    };
+
+    if let Some(ref mut cb) = progress {
+        cb(0.75);
+    }
+
+    // Step 3: Contract back to box space with Lanczos3 interpolation
+    let (result, _, _) = tent_contract_lanczos(&scaled_tent, target_tent_w, target_tent_h);
+
+    if let Some(ref mut cb) = progress {
+        cb(1.0);
+    }
+
+    result
 }

@@ -224,6 +224,8 @@ pub enum ScaleMethod {
     IterativeTentVolume,
     /// Iterative Tent Volume (Bilinear): explicit tent_expand → bilinear scale → tent_contract per iteration
     IterativeTentVolumeBilinear,
+    /// Tent Lanczos3 Constraint: tent-space with Lanczos3-constrained peaks (fully reversible)
+    TentLanczos3Constraint,
 }
 
 impl ScaleMethod {
@@ -259,6 +261,7 @@ impl ScaleMethod {
             ScaleMethod::BilinearIterative => cra_wasm::rescale::RescaleMethod::BilinearIterative,
             ScaleMethod::IterativeTentVolume => cra_wasm::rescale::RescaleMethod::IterativeTentVolume,
             ScaleMethod::IterativeTentVolumeBilinear => cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear,
+            ScaleMethod::TentLanczos3Constraint => cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint,
         }
     }
 }
@@ -284,6 +287,14 @@ pub enum Supersample {
     /// final dimensions with integrated contraction. If no resize is specified,
     /// uses box filter to input size. More efficient than TentVolume.
     TentVolumePrescale,
+    /// Lanczos3-constraint supersampling: expands to (2N+1)×(2M+1), adjusts peaks
+    /// so Lanczos3 interpolation at each peak returns the original value.
+    /// Fully reversible with Lanczos3 contraction.
+    TentLanczos3,
+    /// Lanczos3-constraint prescale: expands to tent-space with Lanczos3 constraint,
+    /// then rescales directly to final dimensions with integrated Lanczos3 contraction.
+    /// More efficient than TentLanczos3 for pure resizing.
+    TentLanczos3Prescale,
 }
 
 /// Build ColorCorrectionMethod from CLI arguments

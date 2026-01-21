@@ -132,6 +132,11 @@ pub enum RescaleMethod {
     /// Each iteration: tent_expand → bilinear scale in tent-space → tent_contract
     /// Same as IterativeTentVolume but uses bilinear interpolation in tent-space.
     IterativeTentVolumeBilinear,
+    /// Tent-space with Lanczos3 kernel constraint (instead of volume constraint)
+    /// Uses tent_expand_lanczos (Lanczos3-constrained peaks) and tent_contract_lanczos.
+    /// Fully reversible: Lanczos3 interpolation at peaks returns original values.
+    /// Inner scaling uses box filter in tent-space.
+    TentLanczos3Constraint,
 }
 
 /// Scale mode for aspect ratio preservation
@@ -196,6 +201,7 @@ impl RescaleMethod {
             "bilinear-iterative" | "bilinear_iterative" | "bilineariterative" | "mipmap" | "mip" => Some(RescaleMethod::BilinearIterative),
             "iterative-tent-volume" | "iterative_tent_volume" | "iterativetentvolume" | "tent-volume-iterative" | "tent_volume_iterative" | "tentvolume" | "tent-vol" | "tent_vol" | "iterative-tent-volume-box" | "iterative_tent_volume_box" => Some(RescaleMethod::IterativeTentVolume),
             "iterative-tent-volume-bilinear" | "iterative_tent_volume_bilinear" | "tentvolume-bilinear" | "tent-vol-bilinear" | "tent_vol_bilinear" => Some(RescaleMethod::IterativeTentVolumeBilinear),
+            "tent-lanczos3-constraint" | "tent_lanczos3_constraint" | "tentlanczos3constraint" | "tent-l3c" | "tent_l3c" | "tl3c" => Some(RescaleMethod::TentLanczos3Constraint),
             _ => None,
         }
     }
@@ -210,7 +216,7 @@ impl RescaleMethod {
             RescaleMethod::Lanczos3 | RescaleMethod::Lanczos3Scatter | RescaleMethod::EWASincLanczos3 | RescaleMethod::EWALanczos3 | RescaleMethod::EWALanczos3Sharp => 3.0,
             RescaleMethod::EWALanczos4Sharpest => 4.0,
             RescaleMethod::Sinc | RescaleMethod::SincScatter | RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => 0.0, // Special: uses full image extent
-            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
+            RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear | RescaleMethod::TentLanczos3Constraint => 1.0,  // Not used; Box has its own precompute that calculates radius from scale
             RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DLanczos3Jinc => 3.0,  // Uses Lanczos3 internally
         }
     }
@@ -247,7 +253,7 @@ impl RescaleMethod {
             RescaleMethod::EWAMitchell => RescaleMethod::Mitchell,
             RescaleMethod::EWACatmullRom => RescaleMethod::CatmullRom,
             RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized => RescaleMethod::Jinc,
-            RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume => RescaleMethod::Box,
+            RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::TentLanczos3Constraint => RescaleMethod::Box,
             RescaleMethod::IterativeTentVolumeBilinear => RescaleMethod::Bilinear,
             RescaleMethod::TentLanczos3 => RescaleMethod::Lanczos3,
             RescaleMethod::Tent2DLanczos3Jinc => RescaleMethod::EWALanczos3,  // Uses jinc-based Lanczos3
@@ -258,7 +264,7 @@ impl RescaleMethod {
 
     /// Returns true if this is a tent-space pipeline method
     pub fn is_tent_pipeline(&self) -> bool {
-        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear)
+        matches!(self, RescaleMethod::TentBox | RescaleMethod::TentLanczos3 | RescaleMethod::Tent2DBox | RescaleMethod::Tent2DLanczos3Jinc | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::IterativeTentVolumeBilinear | RescaleMethod::TentLanczos3Constraint)
     }
 
     /// Returns true if this is a 2D (non-separable) tent-space method
@@ -563,6 +569,15 @@ pub fn rescale_with_progress_tent(
                 progress,
             )
         }
+        RescaleMethod::TentLanczos3Constraint => {
+            // Tent-space with Lanczos3 constraint (instead of volume constraint).
+            tent_ewa::rescale_tent_lanczos3_constraint_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
+                progress,
+            )
+        }
     }
 }
 
@@ -715,6 +730,15 @@ pub fn rescale_with_alpha_progress_tent(
                 dst_width, dst_height,
                 scale_mode,
                 true,  // use_bilinear = true
+                progress,
+            )
+        }
+        RescaleMethod::TentLanczos3Constraint => {
+            // Tent-space with Lanczos3 constraint (alpha-aware).
+            tent_ewa::rescale_tent_lanczos3_constraint_alpha_pixels(
+                src, src_width, src_height,
+                dst_width, dst_height,
+                scale_mode,
                 progress,
             )
         }

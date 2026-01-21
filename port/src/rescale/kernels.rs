@@ -202,7 +202,7 @@ pub fn eval_kernel(method: RescaleMethod, x: f32) -> f32 {
         RescaleMethod::Sinc | RescaleMethod::SincScatter => sinc(x),
         RescaleMethod::Jinc | RescaleMethod::StochasticJinc | RescaleMethod::StochasticJincScatter | RescaleMethod::StochasticJincScatterNormalized |
         RescaleMethod::EWALanczos3Sharp | RescaleMethod::EWALanczos4Sharpest => jinc(x),  // 2D radial, but fallback for 1D context
-        RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume => box_filter(x),
+        RescaleMethod::Box | RescaleMethod::TentBox | RescaleMethod::Tent2DBox | RescaleMethod::TentBoxIterative | RescaleMethod::Tent2DBoxIterative | RescaleMethod::IterativeTentVolume | RescaleMethod::TentLanczos3Constraint => box_filter(x),
         RescaleMethod::IterativeTentVolumeBilinear => {
             let x = x.abs();
             if x < 1.0 { 1.0 - x } else { 0.0 }

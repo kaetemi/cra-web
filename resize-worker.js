@@ -42,6 +42,15 @@ async function initialize() {
 const SUPERSAMPLE_NONE = 0;
 const SUPERSAMPLE_TENT_VOLUME = 1;
 const SUPERSAMPLE_TENT_VOLUME_PRESCALE = 2;
+const SUPERSAMPLE_TENT_LANCZOS3 = 3;
+const SUPERSAMPLE_TENT_LANCZOS3_PRESCALE = 4;
+
+// Supersample mode helpers
+const isVolumeMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME || mode === SUPERSAMPLE_TENT_VOLUME_PRESCALE;
+const isLanczos3Mode = (mode) => mode === SUPERSAMPLE_TENT_LANCZOS3 || mode === SUPERSAMPLE_TENT_LANCZOS3_PRESCALE;
+const isExplicitMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME || mode === SUPERSAMPLE_TENT_LANCZOS3;
+const isPrescaleMode = (mode) => mode === SUPERSAMPLE_TENT_VOLUME_PRESCALE || mode === SUPERSAMPLE_TENT_LANCZOS3_PRESCALE;
+const isSupersampling = (mode) => mode !== SUPERSAMPLE_NONE;
 
 // TentMode constants for WASM
 const TENT_MODE_OFF = 0;
@@ -120,14 +129,17 @@ function processResize(params) {
         let finalWidth = dstWidth;
         let finalHeight = dstHeight;
 
-        if (supersample === SUPERSAMPLE_TENT_VOLUME) {
-            // Tent-volume supersampling:
+        if (isExplicitMode(supersample)) {
+            // Explicit supersampling (Volume or Lanczos3):
             // 1. Expand to tent-space (2W+1, 2H+1)
             // 2. Resize to tent-space target (2*dst+1) with tent_mode=SampleToSample
             // 3. Contract back to box-space
 
-            // Expand to tent-space
-            const expandResult = craWasm.tent_expand_wasm(buffer, srcWidth, srcHeight);
+            // Expand to tent-space (volume or lanczos3)
+            const expandFn = isLanczos3Mode(supersample)
+                ? craWasm.tent_expand_lanczos_wasm
+                : craWasm.tent_expand_wasm;
+            const expandResult = expandFn(buffer, srcWidth, srcHeight);
             buffer = expandResult.buffer;
             srcWidth = expandResult.width;
             srcHeight = expandResult.height;
@@ -146,7 +158,7 @@ function processResize(params) {
                     interpolation,
                     scaleMode,
                     TENT_MODE_SAMPLE_TO_SAMPLE,
-                    (progress) => sendProgress(Math.round(progress * 70))  // 0-70% for resize
+                    (progress) => sendProgress(Math.round(progress * 70))
                 )
                 : craWasm.rescale_rgb_tent_with_progress_wasm(
                     buffer,
@@ -155,7 +167,7 @@ function processResize(params) {
                     interpolation,
                     scaleMode,
                     TENT_MODE_SAMPLE_TO_SAMPLE,
-                    (progress) => sendProgress(Math.round(progress * 70))  // 0-70% for resize
+                    (progress) => sendProgress(Math.round(progress * 70))
                 );
 
             sendProgress(72);
@@ -171,32 +183,40 @@ function processResize(params) {
 
             sendProgress(76);
 
-            // Contract back to box-space
-            const contractResult = craWasm.tent_contract_wasm(tentResized, tentDstWidth, tentDstHeight);
+            // Contract back to box-space (volume or lanczos3)
+            const contractFn = isLanczos3Mode(supersample)
+                ? craWasm.tent_contract_lanczos_wasm
+                : craWasm.tent_contract_wasm;
+            const contractResult = contractFn(tentResized, tentDstWidth, tentDstHeight);
             resizedBuffer = contractResult.buffer;
             finalWidth = contractResult.width;
             finalHeight = contractResult.height;
 
             sendProgress(80);
-        } else if (supersample === SUPERSAMPLE_TENT_VOLUME_PRESCALE) {
-            // Tent-volume prescale supersampling:
+        } else if (isPrescaleMode(supersample)) {
+            // Prescale supersampling (Volume or Lanczos3):
             // 1. Expand to tent-space (2W+1, 2H+1)
-            // 2. Resize directly to final box-space dimensions with tent_mode=Prescale
+            // 2. Resize directly to final box-space with tent_mode=Prescale
             //    (the rescale integrates the contract step via coordinate mapping)
-            // If no rescale selected, default to box filter at input size
 
             // Store original dimensions for default behavior
             const originalWidth = srcWidth;
             const originalHeight = srcHeight;
 
-            // Expand to tent-space
-            const expandResult = craWasm.tent_expand_wasm(buffer, srcWidth, srcHeight);
+            // Expand to tent-space (volume or lanczos3)
+            const expandFn = isLanczos3Mode(supersample)
+                ? craWasm.tent_expand_lanczos_wasm
+                : craWasm.tent_expand_wasm;
+            const expandResult = expandFn(buffer, srcWidth, srcHeight);
             buffer = expandResult.buffer;
             srcWidth = expandResult.width;
             srcHeight = expandResult.height;
 
-            // Use box filter (20) if rescaling to same size as input
-            const effectiveInterpolation = (dstWidth === originalWidth && dstHeight === originalHeight) ? 20 : interpolation;
+            // Default interpolation: box (20) for volume, tent-lanczos3 (32) for lanczos3
+            const defaultInterpolation = isLanczos3Mode(supersample) ? 32 : 20;
+            const effectiveInterpolation = (dstWidth === originalWidth && dstHeight === originalHeight)
+                ? defaultInterpolation
+                : interpolation;
 
             // Resize directly from tent-space to final box-space with Prescale mode
             resizedBuffer = hasAlpha
@@ -207,7 +227,7 @@ function processResize(params) {
                     effectiveInterpolation,
                     scaleMode,
                     TENT_MODE_PRESCALE,
-                    (progress) => sendProgress(Math.round(progress * 75))  // 0-75% for resize
+                    (progress) => sendProgress(Math.round(progress * 75))
                 )
                 : craWasm.rescale_rgb_tent_with_progress_wasm(
                     buffer,
@@ -216,7 +236,7 @@ function processResize(params) {
                     effectiveInterpolation,
                     scaleMode,
                     TENT_MODE_PRESCALE,
-                    (progress) => sendProgress(Math.round(progress * 75))  // 0-75% for resize
+                    (progress) => sendProgress(Math.round(progress * 75))
                 );
 
             sendProgress(78);
@@ -254,8 +274,8 @@ function processResize(params) {
 
         sendProgress(82);
 
-        // Step 5: Apply tonemapping (if enabled and not supersampling - supersampling does it in tent-space)
-        if (supersample !== SUPERSAMPLE_TENT_VOLUME) {
+        // Step 5: Apply tonemapping (if enabled and not supersampling - supersampling modes handle it in their pipelines)
+        if (!isSupersampling(supersample)) {
             if (tonemapping === 'aces') {
                 sendProgress(84, 'Applying tonemapping (ACES)...');
                 craWasm.tonemap_aces_wasm(resizedBuffer);

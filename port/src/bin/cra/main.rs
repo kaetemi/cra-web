@@ -38,7 +38,7 @@ use cra_wasm::dither::common::{DitherMode, OutputTechnique, PerceptualSpace};
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
 use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
-use cra_wasm::supersample::{tent_expand, tent_contract, supersample_target_dimensions};
+use cra_wasm::supersample::{tent_expand, tent_contract, tent_expand_lanczos, tent_contract_lanczos, supersample_target_dimensions};
 
 // ============================================================================
 // Progress Bar
@@ -441,6 +441,7 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::BilinearIterative => "Bilinear Iterative",
             cra_wasm::rescale::RescaleMethod::IterativeTentVolume => "Iterative Tent Volume (Box)",
             cra_wasm::rescale::RescaleMethod::IterativeTentVolumeBilinear => "Iterative Tent Volume (Bilinear)",
+            cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint => "Tent Lanczos3 Constraint",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
         let ss_note = match tent_mode {
@@ -1358,20 +1359,29 @@ fn main() -> Result<(), String> {
         let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
 
         // Determine supersampling mode
-        let (tent_mode, needs_expansion) = match args.supersample {
-            Supersample::TentVolume if needs_resize => (cra_wasm::rescale::TentMode::SampleToSample, true),
-            Supersample::TentVolumePrescale => (cra_wasm::rescale::TentMode::Prescale, true),
-            _ => (cra_wasm::rescale::TentMode::Off, false),
+        // use_lanczos3_prescale triggers the TentLanczos3Constraint rescale method instead of explicit expand/contract
+        let (tent_mode, needs_expansion, use_lanczos3_constraint, use_lanczos3_prescale) = match args.supersample {
+            Supersample::TentVolume if needs_resize => (cra_wasm::rescale::TentMode::SampleToSample, true, false, false),
+            Supersample::TentVolumePrescale => (cra_wasm::rescale::TentMode::Prescale, true, false, false),
+            Supersample::TentLanczos3 if needs_resize => (cra_wasm::rescale::TentMode::SampleToSample, true, true, false),
+            Supersample::TentLanczos3Prescale => (cra_wasm::rescale::TentMode::Off, false, false, true),
+            _ => (cra_wasm::rescale::TentMode::Off, false, false, false),
         };
 
-        // Apply tent-volume expansion before input tonemapping (if enabled)
+        // Apply tent-space expansion before input tonemapping (if enabled)
         let (input_pixels, expanded_width, expanded_height) = if needs_expansion {
             if args.verbose {
-                eprintln!("Tent-volume supersampling: expanding {}x{} -> {}x{}",
-                    src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
+                let constraint_name = if use_lanczos3_constraint { "Lanczos3-constraint" } else { "volume" };
+                eprintln!("Tent-space supersampling ({}): expanding {}x{} -> {}x{}",
+                    constraint_name, src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
             }
-            let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
-            (expanded, w as u32, h as u32)
+            if use_lanczos3_constraint {
+                let (expanded, w, h) = tent_expand_lanczos(&input_pixels, src_width as usize, src_height as usize);
+                (expanded, w as u32, h as u32)
+            } else {
+                let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
+                (expanded, w as u32, h as u32)
+            }
         } else {
             (input_pixels, src_width, src_height)
         };
@@ -1399,12 +1409,18 @@ fn main() -> Result<(), String> {
         };
 
         // Resize in linear RGB space (use alpha-aware rescaling if image has alpha)
+        // For Lanczos3 prescale mode, use TentLanczos3Constraint which does expand→scale→contract in one step
+        let effective_method = if use_lanczos3_prescale {
+            cra_wasm::rescale::RescaleMethod::TentLanczos3Constraint
+        } else {
+            args.scale_method.to_rescale_method()
+        };
         let mut resize_progress = |p: f32| print_progress("Resize", p);
         let (input_pixels, width, height) = resize_linear(
             &input_pixels,
             expanded_width, expanded_height,
             args.width, args.height,
-            args.scale_method.to_rescale_method(),
+            effective_method,
             original_has_alpha,
             args.non_uniform,
             tent_mode,
@@ -1482,19 +1498,24 @@ fn main() -> Result<(), String> {
                 linear_gray
             };
 
-            // Step 5: Apply tent-volume contraction after tonemapping (only for SampleToSample mode)
+            // Step 5: Apply tent-space contraction after tonemapping (only for SampleToSample mode)
             // Prescale mode integrates contraction into rescale, so no explicit contract needed
             let (linear_gray, alpha, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
                 if args.verbose {
-                    eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
-                        width, height, (width - 1) / 2, (height - 1) / 2);
+                    let constraint_name = if use_lanczos3_constraint { "Lanczos3-constraint" } else { "volume" };
+                    eprintln!("Tent-space supersampling ({}): contracting {}x{} -> {}x{}",
+                        constraint_name, width, height, (width - 1) / 2, (height - 1) / 2);
                 }
                 // Contract grayscale by reconstructing as single-channel Pixel4
                 let gray_pixels: Vec<Pixel4> = linear_gray.iter()
                     .zip(alpha.as_ref().map(|a| a.iter()).into_iter().flatten().chain(std::iter::repeat(&1.0f32)))
                     .map(|(&l, &a)| Pixel4::new(l, l, l, a))
                     .collect();
-                let (contracted, w, h) = tent_contract(&gray_pixels, width_usize, height_usize);
+                let (contracted, w, h) = if use_lanczos3_constraint {
+                    tent_contract_lanczos(&gray_pixels, width_usize, height_usize)
+                } else {
+                    tent_contract(&gray_pixels, width_usize, height_usize)
+                };
                 let new_gray: Vec<f32> = contracted.iter().map(|p| p[0]).collect();
                 let new_alpha: Option<Vec<f32>> = if alpha.is_some() {
                     Some(contracted.iter().map(|p| p[3]).collect())
@@ -1581,14 +1602,19 @@ fn main() -> Result<(), String> {
                 pixels_to_dither
             };
 
-            // Step 3: Apply tent-volume contraction after tonemapping (only for SampleToSample mode)
+            // Step 3: Apply tent-space contraction after tonemapping (only for SampleToSample mode)
             // Prescale mode integrates contraction into rescale, so no explicit contract needed
             let (pixels_to_dither, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
                 if args.verbose {
-                    eprintln!("Tent-volume supersampling: contracting {}x{} -> {}x{}",
-                        width, height, (width - 1) / 2, (height - 1) / 2);
+                    let constraint_name = if use_lanczos3_constraint { "Lanczos3-constraint" } else { "volume" };
+                    eprintln!("Tent-space supersampling ({}): contracting {}x{} -> {}x{}",
+                        constraint_name, width, height, (width - 1) / 2, (height - 1) / 2);
                 }
-                let (contracted, w, h) = tent_contract(&pixels_to_dither, width_usize, height_usize);
+                let (contracted, w, h) = if use_lanczos3_constraint {
+                    tent_contract_lanczos(&pixels_to_dither, width_usize, height_usize)
+                } else {
+                    tent_contract(&pixels_to_dither, width_usize, height_usize)
+                };
                 (contracted, w as u32, h as u32)
             } else {
                 (pixels_to_dither, width, height)

@@ -98,6 +98,7 @@ fn rescale_method_from_u8(method: u8) -> rescale::RescaleMethod {
         29 => rescale::RescaleMethod::BilinearIterative,
         30 => rescale::RescaleMethod::IterativeTentVolume,
         31 => rescale::RescaleMethod::IterativeTentVolumeBilinear,
+        32 => rescale::RescaleMethod::TentLanczos3Constraint,
         _ => rescale::RescaleMethod::Bilinear,
     }
 }
@@ -1032,6 +1033,40 @@ impl TentContractResult {
 pub fn supersample_target_dimensions_wasm(width: u32, height: u32) -> Vec<u32> {
     let (w, h) = supersample::supersample_target_dimensions(width as usize, height as usize);
     vec![w as u32, h as u32]
+}
+
+/// Expand box-space image to tent-space using Lanczos3 constraint
+/// Peaks are adjusted so that Lanczos3 interpolation at each peak returns the original value.
+/// Returns expanded buffer and new dimensions.
+#[wasm_bindgen]
+pub fn tent_expand_lanczos_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+) -> TentExpandResult {
+    let (expanded, new_width, new_height) = supersample::tent_expand_lanczos(buf.as_slice(), width, height);
+    TentExpandResult {
+        buffer: BufferF32x4::new(expanded),
+        width: new_width as u32,
+        height: new_height as u32,
+    }
+}
+
+/// Contract tent-space image back to box-space using Lanczos3 interpolation
+/// Applies Lanczos3 at each peak position to recover original values.
+/// Use with tent_expand_lanczos_wasm for a fully reversible pipeline.
+#[wasm_bindgen]
+pub fn tent_contract_lanczos_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+) -> TentContractResult {
+    let (contracted, new_width, new_height) = supersample::tent_contract_lanczos(buf.as_slice(), width, height);
+    TentContractResult {
+        buffer: BufferF32x4::new(contracted),
+        width: new_width as u32,
+        height: new_height as u32,
+    }
 }
 
 // ============================================================================
