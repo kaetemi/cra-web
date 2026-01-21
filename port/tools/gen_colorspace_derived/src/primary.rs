@@ -83,6 +83,44 @@ pub mod srgb_primaries {
 }
 
 // =============================================================================
+// BT.601 PRIMARIES (PAL/SECAM and NTSC)
+// =============================================================================
+
+/// BT.601 625-line (PAL/SECAM) primaries.
+///
+/// From ITU-R BT.601-7 Table 1. Used for PAL and SECAM video systems.
+/// White point: D65 (0.3127, 0.3290)
+///
+/// Note: The traditional Y'CbCr coefficients (0.299, 0.587, 0.114) are legacy
+/// values, NOT derived from these primaries. The true luminance coefficients
+/// (derived from the RGB→XYZ matrix) are different.
+pub mod bt601_625_primaries {
+    pub const RED_X: f64 = 0.640;
+    pub const RED_Y: f64 = 0.330;
+    pub const GREEN_X: f64 = 0.290;
+    pub const GREEN_Y: f64 = 0.600;
+    pub const BLUE_X: f64 = 0.150;
+    pub const BLUE_Y: f64 = 0.060;
+}
+
+/// BT.601 525-line (NTSC) primaries.
+///
+/// From ITU-R BT.601-7 Table 1. Used for NTSC video systems.
+/// White point: D65 (0.3127, 0.3290)
+///
+/// Note: The traditional Y'CbCr coefficients (0.299, 0.587, 0.114) are legacy
+/// values, NOT derived from these primaries. The true luminance coefficients
+/// (derived from the RGB→XYZ matrix) are different.
+pub mod bt601_525_primaries {
+    pub const RED_X: f64 = 0.630;
+    pub const RED_Y: f64 = 0.340;
+    pub const GREEN_X: f64 = 0.310;
+    pub const GREEN_Y: f64 = 0.595;
+    pub const BLUE_X: f64 = 0.155;
+    pub const BLUE_Y: f64 = 0.070;
+}
+
+// =============================================================================
 // COLOR SPACE PRIMARIES (CIE xy chromaticity)
 // =============================================================================
 
@@ -361,23 +399,17 @@ pub mod bradford {
 }
 
 // =============================================================================
-// Y'CbCr CONSTANTS
+// Y'CbCr NOTES
 // =============================================================================
 
-// Note: BT.709 Y'CbCr coefficients are derived from the sRGB matrix second row
-// in colorspace_derived.rs. The spec values (0.2126, 0.7152, 0.0722) are truncated
+// BT.709 Y'CbCr coefficients are derived from the sRGB matrix second row in
+// colorspace_derived.rs. The spec values (0.2126, 0.7152, 0.0722) are truncated
 // versions of the full-precision values derived from sRGB chromaticities.
-
-/// Y'CbCr luma coefficients for Rec.601 (NTSC/PAL).
-///
-/// From ITU-R BT.601. These are authoritative for BT.601 (different primaries
-/// than sRGB/BT.709). Classic "30/59/11" formula - often incorrectly applied
-/// to sRGB content.
-pub mod ycbcr_bt601 {
-    pub const KR: f64 = 0.299;
-    pub const KG: f64 = 0.587;
-    pub const KB: f64 = 0.114;
-}
+//
+// BT.601 Y'CbCr coefficients are derived from the BT.601 625-line and 525-line
+// matrices in colorspace_derived.rs. The traditional "30/59/11" formula
+// (0.299, 0.587, 0.114) is a LEGACY value that does not match true luminance
+// from either BT.601 color space. See COLORSPACESEXT.md for details.
 
 // =============================================================================
 // BIT DEPTH CONSTANTS

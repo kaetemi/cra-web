@@ -306,6 +306,24 @@ fn main() -> io::Result<()> {
     );
     let xyz_to_rec2020 = invert_3x3(rec2020_to_xyz);
 
+    // BT.601 625-line (PAL/SECAM) matrices
+    let bt601_625_to_xyz = compute_rgb_to_xyz_matrix(
+        (primary::bt601_625_primaries::RED_X, primary::bt601_625_primaries::RED_Y),
+        (primary::bt601_625_primaries::GREEN_X, primary::bt601_625_primaries::GREEN_Y),
+        (primary::bt601_625_primaries::BLUE_X, primary::bt601_625_primaries::BLUE_Y),
+        (primary::d65::X, primary::d65::Y),
+    );
+    let xyz_to_bt601_625 = invert_3x3(bt601_625_to_xyz);
+
+    // BT.601 525-line (NTSC) matrices
+    let bt601_525_to_xyz = compute_rgb_to_xyz_matrix(
+        (primary::bt601_525_primaries::RED_X, primary::bt601_525_primaries::RED_Y),
+        (primary::bt601_525_primaries::GREEN_X, primary::bt601_525_primaries::GREEN_Y),
+        (primary::bt601_525_primaries::BLUE_X, primary::bt601_525_primaries::BLUE_Y),
+        (primary::d65::X, primary::d65::Y),
+    );
+    let xyz_to_bt601_525 = invert_3x3(bt601_525_to_xyz);
+
     // Bradford chromatic adaptation matrices
     // Only needed for D50 ↔ D65 conversion (ProPhoto RGB)
     // All D65 color spaces share the same white point (0.3127, 0.3290), so no adaptation needed between them.
@@ -520,6 +538,18 @@ fn main() -> io::Result<()> {
     writeln!(out)?;
     writeln!(out, "/// XYZ → Linear Rec.2020 matrix.")?;
     writeln!(out, "pub const XYZ_TO_REC2020: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_rec2020, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear BT.601 625-line (PAL/SECAM) → XYZ matrix.")?;
+    writeln!(out, "pub const BT601_625_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(bt601_625_to_xyz, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// XYZ → Linear BT.601 625-line (PAL/SECAM) matrix.")?;
+    writeln!(out, "pub const XYZ_TO_BT601_625: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_bt601_625, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// Linear BT.601 525-line (NTSC) → XYZ matrix.")?;
+    writeln!(out, "pub const BT601_525_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(bt601_525_to_xyz, ""))?;
+    writeln!(out)?;
+    writeln!(out, "/// XYZ → Linear BT.601 525-line (NTSC) matrix.")?;
+    writeln!(out, "pub const XYZ_TO_BT601_525: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_bt601_525, ""))?;
     writeln!(out)?;
 
     // Bradford chromatic adaptation matrices
@@ -752,6 +782,12 @@ fn main() -> io::Result<()> {
     write_matrix_f32(&mut out, "REC2020_TO_XYZ", &rec2020_to_xyz)?;
     write_matrix_f32(&mut out, "XYZ_TO_REC2020", &xyz_to_rec2020)?;
     writeln!(out)?;
+    write_matrix_f32(&mut out, "BT601_625_TO_XYZ", &bt601_625_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_BT601_625", &xyz_to_bt601_625)?;
+    writeln!(out)?;
+    write_matrix_f32(&mut out, "BT601_525_TO_XYZ", &bt601_525_to_xyz)?;
+    write_matrix_f32(&mut out, "XYZ_TO_BT601_525", &xyz_to_bt601_525)?;
+    writeln!(out)?;
 
     // Chromatic adaptation matrices
     writeln!(out, "    // -------------------------------------------------------------------------")?;
@@ -926,10 +962,34 @@ fn main() -> io::Result<()> {
     write_matrix_f32(&mut out, "RGB_TO_YCBCR", &ycbcr_forward)?;
     write_matrix_f32(&mut out, "YCBCR_TO_RGB", &ycbcr_inverse)?;
     writeln!(out)?;
-    writeln!(out, "    /// BT.601 luma coefficients")?;
-    writeln!(out, "    pub const YCBCR_601_KR: f32 = 0.299;")?;
-    writeln!(out, "    pub const YCBCR_601_KG: f32 = 0.587;")?;
-    writeln!(out, "    pub const YCBCR_601_KB: f32 = 0.114;")?;
+    // BT.601 625-line (PAL/SECAM) luma coefficients - derived from RGB→XYZ matrix Y row
+    let bt601_625_kr = bt601_625_to_xyz[1][0];
+    let bt601_625_kg = bt601_625_to_xyz[1][1];
+    let bt601_625_kb = bt601_625_to_xyz[1][2];
+    writeln!(out, "    /// BT.601 625-line (PAL/SECAM) true luminance coefficients")?;
+    writeln!(out, "    /// Derived from RGB→XYZ matrix. NOT the legacy 0.299/0.587/0.114 values.")?;
+    writeln!(out, "    pub const BT601_625_KR: f32 = {} as f32;", fmt_f64(bt601_625_kr))?;
+    writeln!(out, "    pub const BT601_625_KG: f32 = {} as f32;", fmt_f64(bt601_625_kg))?;
+    writeln!(out, "    pub const BT601_625_KB: f32 = {} as f32;", fmt_f64(bt601_625_kb))?;
+    writeln!(out)?;
+
+    // BT.601 525-line (NTSC) luma coefficients - derived from RGB→XYZ matrix Y row
+    let bt601_525_kr = bt601_525_to_xyz[1][0];
+    let bt601_525_kg = bt601_525_to_xyz[1][1];
+    let bt601_525_kb = bt601_525_to_xyz[1][2];
+    writeln!(out, "    /// BT.601 525-line (NTSC) true luminance coefficients")?;
+    writeln!(out, "    /// Derived from RGB→XYZ matrix. NOT the legacy 0.299/0.587/0.114 values.")?;
+    writeln!(out, "    pub const BT601_525_KR: f32 = {} as f32;", fmt_f64(bt601_525_kr))?;
+    writeln!(out, "    pub const BT601_525_KG: f32 = {} as f32;", fmt_f64(bt601_525_kg))?;
+    writeln!(out, "    pub const BT601_525_KB: f32 = {} as f32;", fmt_f64(bt601_525_kb))?;
+    writeln!(out)?;
+
+    writeln!(out, "    /// BT.601 legacy Y'CbCr coefficients (0.299/0.587/0.114)")?;
+    writeln!(out, "    /// WARNING: These do NOT match true luminance from either BT.601 color space.")?;
+    writeln!(out, "    /// They are historical values retained for compatibility with existing content.")?;
+    writeln!(out, "    pub const BT601_LEGACY_KR: f32 = 0.299;")?;
+    writeln!(out, "    pub const BT601_LEGACY_KG: f32 = 0.587;")?;
+    writeln!(out, "    pub const BT601_LEGACY_KB: f32 = 0.114;")?;
     writeln!(out)?;
 
     // Bit depth

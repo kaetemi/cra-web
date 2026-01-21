@@ -191,6 +191,92 @@ XYZ (D50) → [linearized] ProPhoto RGB:
 
 ---
 
+## BT.601 (Rec.601)
+
+Standard-definition video color spaces. Defined in ITU-R BT.601-7. Two variants exist for different broadcast systems.
+
+### BT.601 625-line (PAL/SECAM)
+
+Used for European and other PAL/SECAM broadcast systems.
+
+**Authoritative definition:**
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.640 | 0.330 |
+| Green | 0.290 | 0.600 |
+| Blue | 0.150 | 0.060 |
+| White (D65) | 0.3127 | 0.3290 |
+
+**Derived XYZ matrices:**
+
+```
+[linearized] BT.601-625 → XYZ:
+
+| X |   | 0.4305538  0.3415498  0.1783523 |   | R |
+| Y | = | 0.2220043  0.7066548  0.0713409 | × | G |
+| Z |   | 0.0201822  0.1295534  0.9393222 |   | B |
+```
+
+**True luminance coefficients (Y row of matrix):**
+
+| KR | KG | KB |
+|--------|--------|--------|
+| 0.2220 | 0.7067 | 0.0713 |
+
+### BT.601 525-line (NTSC)
+
+Used for North American and Japanese NTSC broadcast systems.
+
+**Authoritative definition:**
+
+| Primary | x | y |
+|---------|--------|--------|
+| Red | 0.630 | 0.340 |
+| Green | 0.310 | 0.595 |
+| Blue | 0.155 | 0.070 |
+| White (D65) | 0.3127 | 0.3290 |
+
+**Derived XYZ matrices:**
+
+```
+[linearized] BT.601-525 → XYZ:
+
+| X |   | 0.3935209  0.3652581  0.1916769 |   | R |
+| Y | = | 0.2123764  0.7010599  0.0865638 | × | G |
+| Z |   | 0.0187391  0.1119339  0.9583847 |   | B |
+```
+
+**True luminance coefficients (Y row of matrix):**
+
+| KR | KG | KB |
+|--------|--------|--------|
+| 0.2124 | 0.7011 | 0.0866 |
+
+### Legacy Y'CbCr Coefficients
+
+**IMPORTANT:** The traditional BT.601 Y'CbCr formula uses:
+
+```
+Y' = 0.299 R' + 0.587 G' + 0.114 B'
+```
+
+These coefficients (0.299, 0.587, 0.114) are **historical legacy values** that do NOT match the true luminance from either BT.601 color space:
+
+| Source | KR | KG | KB |
+|--------|--------|--------|--------|
+| BT.601 625-line (true) | 0.2220 | 0.7067 | 0.0713 |
+| BT.601 525-line (true) | 0.2124 | 0.7011 | 0.0866 |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 |
+
+The legacy values predate the formal color space definitions and were carried forward for backward compatibility. They do not represent actual luminance for either PAL or NTSC primaries.
+
+**When you encounter it:** SD video (DVD, analog broadcast), JPEG compression (which uses BT.601 Y'CbCr regardless of the RGB color space).
+
+**Note:** JPEG always uses the legacy 0.299/0.587/0.114 coefficients for Y'CbCr, even when the underlying RGB is sRGB. This creates a mathematical inconsistency—the Y' channel doesn't represent true luminance in any color space.
+
+---
+
 ## Rec.2020
 
 Ultra-wide gamut space for HDR and UHD television. Defined in ITU-R BT.2020.
@@ -386,6 +472,8 @@ The colorant tags are used directly as matrix columns. No additional white point
 | Display P3 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB piecewise |
 | Adobe RGB | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 563/256 |
 | ProPhoto RGB | D50 XYZ (0.9642, 1.0, 0.8249) | Chromaticity | Piecewise 1.8 |
+| BT.601-625 (PAL) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
+| BT.601-525 (NTSC) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
 | Rec.2020 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB (SDR) / PQ,HLG (HDR) |
 | ICC PCS | D50 XYZ (0.9642, 1.0, 0.8249) | N/A | N/A |
 
@@ -396,6 +484,7 @@ The colorant tags are used directly as matrix columns. No additional white point
 | Display P3 | ~25% larger | Apple devices, modern web |
 | Adobe RGB | ~40% larger | Photography, print |
 | ProPhoto RGB | ~90% of visible | Lightroom, archival |
+| BT.601 (PAL/NTSC) | Similar to sRGB | SD video, DVD, JPEG |
 | Rec.2020 | ~75% of visible | UHD/HDR video |
 | OKLch | Same as sRGB | Hue-preserving ops |
 | HSL/HSV | Same as sRGB | UI, color pickers |
@@ -416,7 +505,7 @@ CIE XYZ (empirical root)
     │       │
     │       ├── sRGB
     │       │     │
-    │       │     ├── Y'CbCr
+    │       │     ├── Y'CbCr (BT.709)
     │       │     ├── HSL
     │       │     └── HSV
     │       │
@@ -429,6 +518,14 @@ CIE XYZ (empirical root)
     ├── Display P3 (D65)
     │
     ├── Adobe RGB (D65)
+    │
+    ├── BT.601-625 PAL (D65)
+    │       │
+    │       └── Y'CbCr (legacy 0.299/0.587/0.114)
+    │
+    ├── BT.601-525 NTSC (D65)
+    │       │
+    │       └── Y'CbCr (legacy 0.299/0.587/0.114)
     │
     ├── Rec.2020 (D65)
     │       │

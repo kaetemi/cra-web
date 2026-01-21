@@ -198,13 +198,21 @@ Y'CbCr exists because video signals were always gamma-encoded for CRT displays, 
 
 **Note on Rec.601 coefficients:**
 
-Older video (NTSC/PAL) uses different coefficients based on different primaries:
+Older video (NTSC/PAL) uses different primaries than sRGB/BT.709. The classic "30/59/11" formula:
 
 ```
 Y' = 0.299 R' + 0.587 G' + 0.114 B'
 ```
 
-This is the classic "30/59/11" formula. It is frequently misapplied to sRGB content.
+These coefficients are **legacy values** that do not match the true luminance from either BT.601 color space (625-line PAL or 525-line NTSC). The true luminance coefficients derived from the respective RGB→XYZ matrices are quite different:
+
+| Source | KR | KG | KB |
+|--------|--------|--------|--------|
+| BT.601-625 (PAL) | 0.222 | 0.707 | 0.071 |
+| BT.601-525 (NTSC) | 0.212 | 0.701 | 0.087 |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 |
+
+See COLORSPACESEXT.md for full BT.601 color space definitions and matrices.
 
 **Y'CbCr and JPEG:**
 
