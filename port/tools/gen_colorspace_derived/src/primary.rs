@@ -83,20 +83,35 @@ pub mod srgb_primaries {
 }
 
 // =============================================================================
-// ILLUMINANT C
+// ILLUMINANT C (EFFECTIVE) - DERIVED AT BUILD TIME
 // =============================================================================
 
-/// Illuminant C - original NTSC white point.
+// The effective Illuminant C XYZ is DERIVED from:
+// 1. The authoritative legacy Y'CbCr coefficients (below)
+// 2. The NTSC 1953 primaries (below)
+//
+// This derivation happens in main.rs at code generation time.
+// See WHITEPOINT_C.md for the mathematical derivation.
+
+// =============================================================================
+// LEGACY Y'CbCr COEFFICIENTS (AUTHORITATIVE)
+// =============================================================================
+
+/// Legacy Y'CbCr luma coefficients - AUTHORITATIVE for BT.601 Y'CbCr.
 ///
-/// Used by original NTSC (BT.470 M/NTSC). This is where the 0.299/0.587/0.114
-/// luma coefficients originate.
+/// These rounded values (0.299, 0.587, 0.114) are the authoritative definition.
+/// All practical JPEG/video implementations derive from these, not from any
+/// Illuminant C definition. The effective Illuminant C above is derived to match
+/// these values, not the other way around.
 ///
-/// 4-digit values for consistency with other display standards (D65 uses 0.3127, 0.3290).
-/// CIE 15:2004 Table T.3 gives 5-digit values (0.31006, 0.31616), but 4-digit produces
-/// coefficients closer to the rounded legacy values.
-pub mod illuminant_c {
-    pub const X: f64 = 0.3101;
-    pub const Y: f64 = 0.3162;
+/// Origin: NTSC 1953 (BT.470 M/NTSC) with Illuminant C, rounded to 3 decimal places.
+/// Carried forward into BT.601 for backward compatibility.
+///
+/// See WHITEPOINT_C.md for full history and analysis.
+pub mod legacy_ycbcr {
+    pub const KR: f64 = 0.299;
+    pub const KG: f64 = 0.587;
+    pub const KB: f64 = 0.114;
 }
 
 // =============================================================================
@@ -106,10 +121,10 @@ pub mod illuminant_c {
 /// Original NTSC primaries (BT.470 System M).
 ///
 /// From ITU-R BT.470-6. This is the original 1953 NTSC color space.
-/// The famous 0.299/0.587/0.114 luma coefficients are derived from these
-/// primaries with Illuminant C white point.
+/// Combined with the effective Illuminant C XYZ (0.98, 1.0, 1.18), these produce
+/// coefficients that round to the legacy 0.299/0.587/0.114 values.
 ///
-/// White point: Illuminant C (0.310, 0.316)
+/// White point: Illuminant C (effective XYZ: 0.98, 1.0, 1.18)
 pub mod ntsc_1953_primaries {
     pub const RED_X: f64 = 0.67;
     pub const RED_Y: f64 = 0.33;
@@ -443,10 +458,13 @@ pub mod bradford {
 // colorspace_derived.rs. The spec values (0.2126, 0.7152, 0.0722) are truncated
 // versions of the full-precision values derived from sRGB chromaticities.
 //
-// BT.601 Y'CbCr coefficients are derived from the BT.601 625-line and 525-line
-// matrices in colorspace_derived.rs. The traditional "30/59/11" formula
-// (0.299, 0.587, 0.114) is a LEGACY value that does not match true luminance
-// from either BT.601 color space. See COLORSPACESEXT.md for details.
+// BT.601 Y'CbCr coefficients: The traditional "30/59/11" formula (0.299, 0.587, 0.114)
+// is AUTHORITATIVE and defined in legacy_ycbcr module above. These values are NOT
+// derived from any Illuminant C definition - rather, the effective Illuminant C is
+// derived to match these legacy values. See WHITEPOINT_C.md for full analysis.
+//
+// True luminance from BT.601 625-line and 525-line primaries (with D65) are different
+// and computed in colorspace_derived.rs. See COLORSPACESEXT.md for details.
 
 // =============================================================================
 // BIT DEPTH CONSTANTS

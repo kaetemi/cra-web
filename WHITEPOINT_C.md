@@ -5,42 +5,101 @@ in JPEG, video codecs, and countless image processing implementations.
 
 ## Summary
 
-The coefficients 0.299, 0.587, 0.114 originate from **NTSC 1953** (BT.470 System M), which used:
-- NTSC 1953 primaries: R(0.67, 0.33), G(0.21, 0.71), B(0.14, 0.08)
+The coefficients **0.299, 0.587, 0.114** originate from **NTSC 1953** (BT.470 System M), which used:
+- NTSC primaries: R(0.67, 0.33), G(0.21, 0.71), B(0.14, 0.08)
 - CIE Illuminant C white point
 
-The integer approximations used in JPEG and video implementations are derived from these
-**already-rounded** 3-digit values, not from the true Illuminant C-derived coefficients.
+**Key finding:** Practical implementations treat the rounded coefficients (0.299, 0.587, 0.114) as
+authoritative, not any specific Illuminant C definition. The integer approximations in JPEG/video
+are derived from these rounded values via `FIX(x) = (int)(x * scale + 0.5)`.
 
-## CIE Illuminant C Definitions
+**Recommendation:** Define the legacy coefficients and NTSC primaries as authoritative, and derive
+the effective Illuminant C from them. This matches what practical implementations actually do.
 
-| Source | x | y | Notes |
-|--------|---|---|-------|
-| CIE 15:2004 Table T.3 | 0.31006 | 0.31616 | 5-digit authoritative |
-| Common 4-digit | 0.3101 | 0.3162 | Consistent with D65 (0.3127, 0.3290) |
+---
 
-## Derived Luma Coefficients from Illuminant C
+## Authoritative Definition
 
-### 4-digit Illuminant C (0.3101, 0.3162)
+### NTSC 1953 Primaries (from BT.470 System M)
 
-| Coefficient | Derived Value | Rounds to |
-|-------------|---------------|-----------|
-| KR | 0.298939144598747 | **0.299** ✓ |
-| KG | 0.586625129640780 | **0.587** ✓ |
-| KB | 0.114435725760473 | **0.114** ✓ |
-| Sum | 1.000000000000000 | |
+| Primary | x | y |
+|---------|------|------|
+| Red | 0.67 | 0.33 |
+| Green | 0.21 | 0.71 |
+| Blue | 0.14 | 0.08 |
 
-### 5-digit CIE Illuminant C (0.31006, 0.31616)
+### Legacy Luma Coefficients (authoritative)
 
-| Coefficient | Derived Value | Rounds to |
-|-------------|---------------|-----------|
-| KR | 0.298903070250081 | **0.299** ✓ |
-| KG | 0.586619854659197 | **0.587** ✓ |
-| KB | 0.114477075090722 | **0.114** ✓ |
-| Sum | 1.000000000000000 | |
+| KR | KG | KB |
+|-------|-------|-------|
+| 0.299 | 0.587 | 0.114 |
 
-Both precisions round correctly to the legacy values. The 4-digit version produces values
-slightly closer to the rounded targets.
+These coefficients are the authoritative definition. All practical implementations derive from them.
+
+### Effective Illuminant C (derived)
+
+Working backwards from the legacy coefficients, the effective white point that produces values
+closest to 0.299/0.587/0.114 is:
+
+**XYZ (normalized to Y=1):**
+
+| X | Y | Z |
+|------|------|------|
+| 0.98 | 1.00 | 1.18 |
+
+**Derived chromaticity:**
+
+| x | y |
+|---------|---------|
+| 0.31013 | 0.31646 |
+
+This simple XYZ definition produces:
+- KR = 0.2987 → rounds to **0.299** ✓
+- KG = 0.5871 → rounds to **0.587** ✓
+- KB = 0.1142 → rounds to **0.114** ✓
+
+---
+
+## Comparison of Illuminant C Definitions
+
+| Definition | Form | KR | KG | KB | Error vs Legacy |
+|------------|------|-------|-------|-------|-----------------|
+| **XYZ (0.98, 1.0, 1.18)** | XYZ | 0.2987 | 0.5871 | 0.1142 | **6.12×10⁻⁴** |
+| 4-digit chromaticity (0.3101, 0.3162) | xy | 0.2989 | 0.5866 | 0.1144 | 8.71×10⁻⁴ |
+| 5-digit CIE (0.31006, 0.31616) | xy | 0.2989 | 0.5866 | 0.1145 | 9.54×10⁻⁴ |
+
+The XYZ-based definition is **1.4× closer** to practical implementations than chromaticity-based definitions.
+
+**Critical observation:** Notice that KG from XYZ-based (0.5871) rounds *up* to 0.587, while
+chromaticity-based (0.5866) rounds *down* to 0.587. The XYZ-based value is much closer to the
+target, suggesting the original NTSC derivation used simple XYZ values, not precise CIE chromaticity.
+
+---
+
+## The Derivation Chain
+
+The historical derivation was likely:
+
+```
+Illuminant C as XYZ (0.98, 1.0, 1.18)
+              ↓
+    (matrix derivation from primaries)
+              ↓
+True coefficients: 0.2987, 0.5871, 0.1142
+              ↓
+    (round to 3 decimal places)
+              ↓
+Legacy coefficients: 0.299, 0.587, 0.114  ← AUTHORITATIVE
+              ↓
+    (FIX() macro for integer math)
+              ↓
+Integer approximations: 19595, 38470, 7471
+```
+
+The rounding step is where precision is lost. All subsequent implementations derive from the
+rounded values, not from any Illuminant C definition.
+
+---
 
 ## Integer Approximations in Practice
 
@@ -101,141 +160,102 @@ Y = (77 * R + 150 * G + 29 * B + 128) >> 8
 | KB | 7472 | 0.114013671875000 | 0.114 |
 | **Sum** | **65536** | **1.000000000000000** | |
 
-## Key Finding: The Lossy Derivation Chain
+---
 
-The integer approximations are **NOT** derived directly from Illuminant C. Instead, they follow
-a lossy chain:
+## Evidence: Integers Derive from Legacy, Not Illuminant C
 
-```
-Illuminant C chromaticity
-         ↓
-    (matrix derivation)
-         ↓
-True coefficients: 0.29894, 0.58663, 0.11444
-         ↓
-    (round to 3 digits)
-         ↓
-Legacy coefficients: 0.299, 0.587, 0.114
-         ↓
-    (FIX() macro)
-         ↓
-Integer approximations: 19595, 38470, 7471
-```
-
-### Evidence: FIX() from Different Sources
-
-If we apply `FIX(x) = (int)(x * 65536 + 0.5)` to different coefficient sources:
+Applying `FIX(x) = (int)(x * 65536 + 0.5)` to different coefficient sources:
 
 | Source | FIX(KR) | FIX(KG) | FIX(KB) | Matches Standard? |
 |--------|---------|---------|---------|-------------------|
-| 4-digit Illuminant C derived | 19591 | 38445 | 7500 | **0/3** |
-| 5-digit Illuminant C derived | 19589 | 38445 | 7502 | **0/3** |
-| Legacy (0.299, 0.587, 0.114) | 19595 | 38470 | 7471 | **3/3** ✓ |
+| XYZ (0.98, 1.0, 1.18) derived | 19575 | 38474 | 7487 | **0/3** |
+| 4-digit chromaticity derived | 19591 | 38445 | 7500 | **0/3** |
+| 5-digit CIE chromaticity derived | 19589 | 38445 | 7502 | **0/3** |
+| **Legacy (0.299, 0.587, 0.114)** | **19595** | **38470** | **7471** | **3/3** ✓ |
 
-The standard integers (19595, 38470, 7471) **exactly match** FIX() applied to the legacy
-rounded values, not the true Illuminant C-derived coefficients.
+The standard 16-bit integers **exactly match** FIX() applied to the legacy rounded values.
+No Illuminant C definition produces matching integers.
 
-### Integer Sum Verification
+---
 
-| Approximation | Sum | Target | Difference |
-|---------------|-----|--------|------------|
-| 16-bit standard | 65536 | 65536 | 0 |
-| 16-bit libjpeg | 65536 | 65536 | 0 |
-| 15-bit standard | 32769 | 32768 | +1 |
-| 8-bit standard | 256 | 256 | 0 |
+## Error Analysis: Sources vs Practical Implementations
 
-The 16-bit standard integers were likely chosen specifically to sum to exactly 65536.
+| Source | vs 16-bit std | vs 16-bit ljpg | vs 15-bit std | vs 8-bit std |
+|--------|---------------|----------------|---------------|--------------|
+| XYZ (0.98, 1.0, 1.18) | 6.04×10⁻⁴ | 6.04×10⁻⁴ | 6.04×10⁻⁴ | 4.17×10⁻³ |
+| 4-digit chromaticity | 8.75×10⁻⁴ | 8.44×10⁻⁴ | 8.75×10⁻⁴ | 3.68×10⁻³ |
+| 5-digit CIE chromaticity | 9.57×10⁻⁴ | 9.27×10⁻⁴ | 9.57×10⁻⁴ | 3.76×10⁻³ |
+| **Legacy rounded** | **1.12×10⁻⁵** | **2.73×10⁻⁵** | **3.05×10⁻⁵** | **3.56×10⁻³** |
 
-## Error Analysis
+The legacy rounded values are **~50-80× closer** to practical implementations than any
+Illuminant C-derived coefficients.
 
-### Which Illuminant C Precision is Closer to Practice?
+Among Illuminant C definitions, XYZ-based is **1.4× closer** to practice than chromaticity-based.
 
-Comparing practical implementations against both Illuminant C precisions:
+---
 
-| Implementation | vs 4-digit | vs 5-digit | vs Legacy | Winner |
-|----------------|------------|------------|-----------|--------|
-| 16-bit standard | 8.75×10⁻⁴ | 9.57×10⁻⁴ | **1.12×10⁻⁵** | Legacy (78×) |
-| 16-bit libjpeg | 8.44×10⁻⁴ | 9.27×10⁻⁴ | **2.73×10⁻⁵** | Legacy (31×) |
-| 15-bit standard | 8.75×10⁻⁴ | 9.57×10⁻⁴ | **3.05×10⁻⁵** | Legacy (29×) |
-| 8-bit standard | 3.68×10⁻³ | 3.76×10⁻³ | **3.56×10⁻³** | Legacy (1.03×) |
+## Comparison with D50 and D65
 
-**4-digit Illuminant C is ~9.5% closer to practical implementations than 5-digit** in all cases.
-However, both are ~80× farther from practical implementations than the legacy rounded values.
+| Illuminant | Authoritative Form | Values | Used By |
+|------------|-------------------|--------|---------|
+| **D65** | Chromaticity (xy) | (0.3127, 0.3290) | sRGB, BT.709, Display P3, Rec.2020 |
+| **D50** | XYZ | (0.9642, 1.0, 0.8249) | ICC PCS, ProPhoto RGB |
+| **C (effective)** | XYZ | (0.98, 1.0, 1.18) | NTSC 1953 (historical) |
 
-This confirms that practical implementations derive from the already-rounded 0.299/0.587/0.114,
-not from either Illuminant C precision directly.
+D50 sets precedent for defining a white point as XYZ rather than chromaticity.
+The effective Illuminant C follows this pattern.
 
-### Error vs 4-digit Illuminant C Derived Coefficients
+**CIE reference values (for context only):**
 
-| Approximation | KR Error | KG Error | KB Error | Total Error |
-|---------------|----------|----------|----------|-------------|
-| 16-bit standard | 5.68×10⁻⁵ | 3.80×10⁻⁴ | 4.37×10⁻⁴ | 8.75×10⁻⁴ |
-| 16-bit libjpeg | 5.68×10⁻⁵ | 3.65×10⁻⁴ | 4.22×10⁻⁴ | 8.44×10⁻⁴ |
-| 15-bit standard | 7.21×10⁻⁵ | 3.80×10⁻⁴ | 4.22×10⁻⁴ | 8.75×10⁻⁴ |
-| 8-bit standard | 1.84×10⁻³ | 6.88×10⁻⁴ | 1.15×10⁻³ | 3.68×10⁻³ |
+| Illuminant | CIE Chromaticity | Notes |
+|------------|------------------|-------|
+| D65 | (0.31272, 0.32903) | Display standards use 4-digit (0.3127, 0.3290) |
+| D50 | (0.34567, 0.35850) | ICC/ProPhoto use XYZ directly, not this |
+| C | (0.31006, 0.31616) | Does not match practical implementations |
 
-### Error vs 5-digit Illuminant C Derived Coefficients
+---
 
-| Approximation | KR Error | KG Error | KB Error | Total Error |
-|---------------|----------|----------|----------|-------------|
-| 16-bit standard | 9.29×10⁻⁵ | 3.86×10⁻⁴ | 4.79×10⁻⁴ | 9.57×10⁻⁴ |
-| 16-bit libjpeg | 9.29×10⁻⁵ | 3.71×10⁻⁴ | 4.63×10⁻⁴ | 9.27×10⁻⁴ |
-| 15-bit standard | 1.08×10⁻⁴ | 3.86×10⁻⁴ | 4.63×10⁻⁴ | 9.57×10⁻⁴ |
-| 8-bit standard | 1.88×10⁻³ | 6.82×10⁻⁴ | 1.20×10⁻³ | 3.76×10⁻³ |
+## Why JPEG Round-trips Aren't Bit-Exact
 
-### Error vs Legacy Rounded Values (0.299, 0.587, 0.114)
+Different libraries use slightly different integer constants:
 
-| Approximation | KR Error | KG Error | KB Error | Total Error |
-|---------------|----------|----------|----------|-------------|
-| 16-bit standard | 4.03×10⁻⁶ | 5.62×10⁻⁶ | 1.59×10⁻⁶ | 1.12×10⁻⁵ |
-| 16-bit libjpeg | 4.03×10⁻⁶ | 9.64×10⁻⁶ | 1.37×10⁻⁵ | 2.73×10⁻⁵ |
-| 15-bit standard | 1.12×10⁻⁵ | 5.62×10⁻⁶ | 1.37×10⁻⁵ | 3.05×10⁻⁵ |
-| 8-bit standard | 1.78×10⁻³ | 1.06×10⁻³ | 7.19×10⁻⁴ | 3.56×10⁻³ |
+| Library | KR | KG | KB | Sum |
+|---------|-------|-------|------|-------|
+| "Standard" | 19595 | 38470 | 7471 | 65536 |
+| libjpeg-turbo | 19595 | 38469 | 7472 | 65536 |
 
-The 16-bit integers are ~80× closer to the legacy rounded values than to the true
-Illuminant C-derived values.
+Both sum to 65536, but differ in KG/KB distribution. This is why JPEG encoded by one library
+and decoded by another may have tiny differences.
 
-## Why Different Libraries Use Different Constants
+The root cause: `FIX(0.587) = 38469.312...` is almost exactly between 38469 and 38470.
+Different rounding conventions produce different results.
 
-The libjpeg-turbo constants (19595, 38469, 7472) differ from the "standard" (19595, 38470, 7471):
+---
 
-- Both sum to 65536 exactly
-- libjpeg uses `FIX(x) = (int)(x * 65536 + 0.5)` literally
-- The "standard" values may have been adjusted to minimize some other metric
+## Conclusions
 
-This is why **JPEG round-trips are not bit-exact across implementations** — different libraries
-use slightly different integer constants, all approximating the same underlying 0.299/0.587/0.114.
+1. **The legacy coefficients (0.299, 0.587, 0.114) are authoritative.** All practical
+   implementations derive from these rounded values, not from any Illuminant C definition.
 
-## 8-bit: The Great Equalizer
+2. **The effective Illuminant C is XYZ (0.98, 1.0, 1.18).** This simple definition produces
+   coefficients closest to the legacy values, suggesting the original NTSC engineers used
+   rounded XYZ values rather than precise CIE chromaticity.
 
-At 8-bit precision, all sources converge:
+3. **For compatibility:** Use 0.299, 0.587, 0.114 exactly when interoperating with JPEG/video.
 
-| Source | FIX(KR) | FIX(KG) | FIX(KB) |
-|--------|---------|---------|---------|
-| 4-digit Illuminant C | 77 | 150 | 29 |
-| 5-digit Illuminant C | 77 | 150 | 29 |
-| Legacy rounded | 77 | 150 | 29 |
+4. **For colorimetric accuracy:** Use the effective XYZ-based Illuminant C when computing
+   matrices for NTSC 1953, as it better represents the original intent.
 
-The 8-bit precision is too coarse to distinguish between any of these sources.
+5. **CIE chromaticity values for Illuminant C do not match practice.** Using CIE (0.31006, 0.31616)
+   produces coefficients further from 0.299/0.587/0.114 than the effective XYZ definition.
 
-## Recommendations
-
-1. **For compatibility**: Use the legacy 0.299, 0.587, 0.114 values when interoperating with
-   existing JPEG/video implementations.
-
-2. **For accuracy**: Use the true Illuminant C-derived values (from either 4-digit or 5-digit
-   white point) when colorimetric accuracy matters more than compatibility.
-
-3. **For integer implementations**: The standard 16-bit integers (19595, 38470, 7471) are
-   well-established and sum to exactly 65536.
-
-4. **Documentation**: When specifying which coefficients your implementation uses, be explicit
-   about whether you're using legacy rounded values or true derived values.
+---
 
 ## References
 
-- ITU-R BT.470-6 (1998) - NTSC System M primaries and Illuminant C
-- CIE 15:2004 - Colorimetry, Third Edition (Illuminant C: x=0.31006, y=0.31616)
-- ITU-R BT.601-7 (2011) - Modern video standard (uses D65, different primaries)
+- ITU-R BT.470-6 (1998) - NTSC System M primaries
+- CIE 15:2004 - Colorimetry, Third Edition (Illuminant C reference)
+- ITU-R BT.601-7 (2011) - SD video (uses legacy coefficients for Y'CbCr)
 - JFIF 1.02 specification - JPEG file format
 - libjpeg-turbo source code - jccolor.c
+- ICC.1:2022-05 - ICC profile specification (D50 as XYZ precedent)

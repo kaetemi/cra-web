@@ -175,6 +175,36 @@ fn compute_chromatic_adaptation(src_xyz: [f64; 3], dst_xyz: [f64; 3]) -> Mat3 {
     mat_mul(bradford_inv, temp)
 }
 
+/// Derive white point XYZ from primaries and desired luma coefficients.
+///
+/// Given RGB primaries and target luma coefficients (KR, KG, KB),
+/// this computes the white point XYZ that produces those exact coefficients.
+///
+/// Math: The Y row of the RGB→XYZ matrix equals [Sr, Sg, Sb] where S are the
+/// scaling factors and S = P^(-1) * W. Since the primary Y values are all 1,
+/// [KR, KG, KB] = [Sr, Sg, Sb]. Therefore W = P * [KR, KG, KB]^T.
+fn derive_white_from_luma_coefficients(
+    red_xy: (f64, f64),
+    green_xy: (f64, f64),
+    blue_xy: (f64, f64),
+    kr: f64,
+    kg: f64,
+    kb: f64,
+) -> [f64; 3] {
+    // Convert primaries to XYZ (Y=1 for each)
+    let r_xyz = xy_to_xyz(red_xy.0, red_xy.1);
+    let g_xyz = xy_to_xyz(green_xy.0, green_xy.1);
+    let b_xyz = xy_to_xyz(blue_xy.0, blue_xy.1);
+
+    // Matrix P: primaries as columns
+    // W = P * [KR, KG, KB]^T
+    [
+        r_xyz[0] * kr + g_xyz[0] * kg + b_xyz[0] * kb,
+        r_xyz[1] * kr + g_xyz[1] * kg + b_xyz[1] * kb, // This equals kr + kg + kb = 1.0
+        r_xyz[2] * kr + g_xyz[2] * kg + b_xyz[2] * kb,
+    ]
+}
+
 /// Compute Y'CbCr matrices from luma coefficients.
 fn compute_ycbcr_matrices(kr: f64, kg: f64, kb: f64) -> (Mat3, Mat3) {
     // Cb and Cr scaling factors
@@ -324,13 +354,29 @@ fn main() -> io::Result<()> {
     );
     let xyz_to_bt601_525 = invert_3x3(bt601_525_to_xyz);
 
-    // Original NTSC 1953 (BT.470 M/NTSC) - Illuminant C
-    // This is the SOURCE of the 0.299/0.587/0.114 luma coefficients
-    let ntsc_1953_to_xyz = compute_rgb_to_xyz_matrix(
+    // Original NTSC 1953 (BT.470 M/NTSC) - Effective Illuminant C
+    //
+    // The legacy coefficients (0.299, 0.587, 0.114) and NTSC primaries are AUTHORITATIVE.
+    // We DERIVE the effective Illuminant C white point from them.
+    //
+    // Math: The Y row of the RGB→XYZ matrix equals [Sr, Sg, Sb] where S = P^(-1) * W.
+    // Therefore W = P * [KR, KG, KB]^T gives us the white point.
+    let illuminant_c_xyz = derive_white_from_luma_coefficients(
         (primary::ntsc_1953_primaries::RED_X, primary::ntsc_1953_primaries::RED_Y),
         (primary::ntsc_1953_primaries::GREEN_X, primary::ntsc_1953_primaries::GREEN_Y),
         (primary::ntsc_1953_primaries::BLUE_X, primary::ntsc_1953_primaries::BLUE_Y),
-        (primary::illuminant_c::X, primary::illuminant_c::Y),
+        primary::legacy_ycbcr::KR,
+        primary::legacy_ycbcr::KG,
+        primary::legacy_ycbcr::KB,
+    );
+    let illuminant_c_xy = xyz_to_xy(illuminant_c_xyz);
+
+    // Now compute the NTSC 1953 matrix using the derived white point
+    let ntsc_1953_to_xyz = compute_rgb_to_xyz_matrix_with_xyz_white(
+        (primary::ntsc_1953_primaries::RED_X, primary::ntsc_1953_primaries::RED_Y),
+        (primary::ntsc_1953_primaries::GREEN_X, primary::ntsc_1953_primaries::GREEN_Y),
+        (primary::ntsc_1953_primaries::BLUE_X, primary::ntsc_1953_primaries::BLUE_Y),
+        illuminant_c_xyz,
     );
     let xyz_to_ntsc_1953 = invert_3x3(ntsc_1953_to_xyz);
 
@@ -459,6 +505,42 @@ fn main() -> io::Result<()> {
     writeln!(out, "}}")?;
     writeln!(out)?;
 
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out, "// ILLUMINANT C (EFFECTIVE) - DERIVED FROM LEGACY COEFFICIENTS")?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out)?;
+    writeln!(out, "/// Illuminant C (effective) - DERIVED from legacy Y'CbCr coefficients and NTSC primaries.")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// The legacy coefficients (0.299, 0.587, 0.114) and NTSC 1953 primaries are AUTHORITATIVE.")?;
+    writeln!(out, "/// This XYZ white point is mathematically derived to produce those exact coefficients:")?;
+    writeln!(out, "///   W = P × [KR, KG, KB]^T  where P is the primary matrix")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// See WHITEPOINT_C.md for full derivation and rationale.")?;
+    writeln!(out, "pub mod illuminant_c {{")?;
+    writeln!(out, "    /// Derived XYZ X")?;
+    writeln!(out, "    pub const XYZ_X: f64 = {};", fmt_f64(illuminant_c_xyz[0]))?;
+    writeln!(out, "    /// Derived XYZ Y (equals KR + KG + KB = 1.0)")?;
+    writeln!(out, "    pub const XYZ_Y: f64 = {};", fmt_f64(illuminant_c_xyz[1]))?;
+    writeln!(out, "    /// Derived XYZ Z")?;
+    writeln!(out, "    pub const XYZ_Z: f64 = {};", fmt_f64(illuminant_c_xyz[2]))?;
+    writeln!(out, "    /// Derived chromaticity x")?;
+    writeln!(out, "    pub const X: f64 = {};", fmt_f64(illuminant_c_xy.0))?;
+    writeln!(out, "    /// Derived chromaticity y")?;
+    writeln!(out, "    pub const Y: f64 = {};", fmt_f64(illuminant_c_xy.1))?;
+    writeln!(out, "}}")?;
+    writeln!(out)?;
+
+    writeln!(out, "/// Legacy Y'CbCr coefficients - AUTHORITATIVE for BT.601 Y'CbCr.")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// These are the authoritative definition from which Illuminant C is derived.")?;
+    writeln!(out, "/// All JPEG/video implementations derive their integer approximations from these.")?;
+    writeln!(out, "pub mod legacy_ycbcr {{")?;
+    writeln!(out, "    pub const KR: f64 = {};", fmt_f64(primary::legacy_ycbcr::KR))?;
+    writeln!(out, "    pub const KG: f64 = {};", fmt_f64(primary::legacy_ycbcr::KG))?;
+    writeln!(out, "    pub const KB: f64 = {};", fmt_f64(primary::legacy_ycbcr::KB))?;
+    writeln!(out, "}}")?;
+    writeln!(out)?;
+
     // sRGB matrices
     writeln!(out, "// =============================================================================")?;
     writeln!(out, "// sRGB / Rec.709 MATRICES")?;
@@ -562,8 +644,9 @@ fn main() -> io::Result<()> {
     writeln!(out, "pub const XYZ_TO_BT601_525: [[f64; 3]; 3] = {};", fmt_matrix(xyz_to_bt601_525, ""))?;
     writeln!(out)?;
     writeln!(out, "/// Original NTSC 1953 (BT.470 M/NTSC) → XYZ matrix.")?;
-    writeln!(out, "/// White point: Illuminant C (0.310, 0.316).")?;
-    writeln!(out, "/// The Y row gives the original 0.299/0.587/0.114 luma coefficients.")?;
+    writeln!(out, "/// White point: Illuminant C (derived), XYZ ({:.6}, {:.6}, {:.6}), xy ({:.5}, {:.5}).",
+        illuminant_c_xyz[0], illuminant_c_xyz[1], illuminant_c_xyz[2], illuminant_c_xy.0, illuminant_c_xy.1)?;
+    writeln!(out, "/// The Y row equals the authoritative legacy coefficients (0.299, 0.587, 0.114) exactly.")?;
     writeln!(out, "pub const NTSC_1953_TO_XYZ: [[f64; 3]; 3] = {};", fmt_matrix(ntsc_1953_to_xyz, ""))?;
     writeln!(out)?;
     writeln!(out, "/// XYZ → Original NTSC 1953 (BT.470 M/NTSC) matrix.")?;
@@ -1005,24 +1088,25 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const BT601_525_KB: f32 = {} as f32;", fmt_f64(bt601_525_kb))?;
     writeln!(out)?;
 
-    // NTSC 1953 (BT.470 M/NTSC) luma coefficients - THE SOURCE of 0.299/0.587/0.114
+    // NTSC 1953 - The Y row should exactly equal the legacy coefficients since
+    // Illuminant C was derived to produce them.
     let ntsc_1953_kr = ntsc_1953_to_xyz[1][0];
     let ntsc_1953_kg = ntsc_1953_to_xyz[1][1];
     let ntsc_1953_kb = ntsc_1953_to_xyz[1][2];
-    writeln!(out, "    /// Original NTSC 1953 (BT.470 M/NTSC) luminance coefficients")?;
-    writeln!(out, "    /// Derived from RGB→XYZ matrix with Illuminant C white point.")?;
-    writeln!(out, "    /// These are the TRUE source of 0.299/0.587/0.114 (which rounds to these).")?;
+    writeln!(out, "    /// NTSC 1953 luma coefficients (Y row of RGB→XYZ matrix).")?;
+    writeln!(out, "    /// These equal the legacy coefficients exactly since Illuminant C was derived from them.")?;
     writeln!(out, "    pub const NTSC_1953_KR: f32 = {} as f32;", fmt_f64(ntsc_1953_kr))?;
     writeln!(out, "    pub const NTSC_1953_KG: f32 = {} as f32;", fmt_f64(ntsc_1953_kg))?;
     writeln!(out, "    pub const NTSC_1953_KB: f32 = {} as f32;", fmt_f64(ntsc_1953_kb))?;
     writeln!(out)?;
 
-    writeln!(out, "    /// Legacy Y'CbCr coefficients (rounded from NTSC 1953)")?;
-    writeln!(out, "    /// From BT.470 M/NTSC with Illuminant C. Used in BT.601 Y'CbCr for compatibility.")?;
+    writeln!(out, "    /// Legacy Y'CbCr coefficients - AUTHORITATIVE for BT.601 Y'CbCr.")?;
+    writeln!(out, "    /// These are the authoritative definition from which Illuminant C is derived.")?;
+    writeln!(out, "    /// All JPEG/video implementations derive their integer approximations from these.")?;
     writeln!(out, "    /// Note: These do NOT match true luminance for modern D65 color spaces.")?;
-    writeln!(out, "    pub const YCBCR_LEGACY_KR: f32 = 0.299;")?;
-    writeln!(out, "    pub const YCBCR_LEGACY_KG: f32 = 0.587;")?;
-    writeln!(out, "    pub const YCBCR_LEGACY_KB: f32 = 0.114;")?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KR: f32 = {} as f32;", fmt_f64(primary::legacy_ycbcr::KR))?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KG: f32 = {} as f32;", fmt_f64(primary::legacy_ycbcr::KG))?;
+    writeln!(out, "    pub const YCBCR_LEGACY_KB: f32 = {} as f32;", fmt_f64(primary::legacy_ycbcr::KB))?;
     writeln!(out)?;
 
     // Bit depth

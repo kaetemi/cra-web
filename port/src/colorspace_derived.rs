@@ -50,6 +50,40 @@ pub mod d50 {
 }
 
 // =============================================================================
+// ILLUMINANT C (EFFECTIVE) - DERIVED FROM LEGACY COEFFICIENTS
+// =============================================================================
+
+/// Illuminant C (effective) - DERIVED from legacy Y'CbCr coefficients and NTSC primaries.
+///
+/// The legacy coefficients (0.299, 0.587, 0.114) and NTSC 1953 primaries are AUTHORITATIVE.
+/// This XYZ white point is mathematically derived to produce those exact coefficients:
+///   W = P × [KR, KG, KB]^T  where P is the primary matrix
+///
+/// See WHITEPOINT_C.md for full derivation and rationale.
+pub mod illuminant_c {
+    /// Derived XYZ X
+    pub const XYZ_X: f64 = 0.98018032437046521;
+    /// Derived XYZ Y (equals KR + KG + KB = 1.0)
+    pub const XYZ_Y: f64 = 0.99999999999999989;
+    /// Derived XYZ Z
+    pub const XYZ_Z: f64 = 1.17764084507042255;
+    /// Derived chromaticity x
+    pub const X: f64 = 0.31039766718139156;
+    /// Derived chromaticity y
+    pub const Y: f64 = 0.31667404401404287;
+}
+
+/// Legacy Y'CbCr coefficients - AUTHORITATIVE for BT.601 Y'CbCr.
+///
+/// These are the authoritative definition from which Illuminant C is derived.
+/// All JPEG/video implementations derive their integer approximations from these.
+pub mod legacy_ycbcr {
+    pub const KR: f64 = 0.299;
+    pub const KG: f64 = 0.587;
+    pub const KB: f64 = 0.114;
+}
+
+// =============================================================================
 // sRGB / Rec.709 MATRICES
 // =============================================================================
 
@@ -205,19 +239,19 @@ pub const XYZ_TO_BT601_525: [[f64; 3]; 3] = [
 ];
 
 /// Original NTSC 1953 (BT.470 M/NTSC) → XYZ matrix.
-/// White point: Illuminant C (0.310, 0.316).
-/// The Y row gives the original 0.299/0.587/0.114 luma coefficients.
+/// White point: Illuminant C (derived), XYZ (0.980180, 1.000000, 1.177641), xy (0.31040, 0.31667).
+/// The Y row equals the authoritative legacy coefficients (0.299, 0.587, 0.114) exactly.
 pub const NTSC_1953_TO_XYZ: [[f64; 3]; 3] = [
-    [0.60693705115503227, 0.17350884116135754, 0.20026252008082709],
-    [0.29893914459874726, 0.58662512964078029, 0.11443572576047262],
-    [-0.00000000000000005, 0.06609860615670769, 1.11574832616460795],
+    [0.60706060606060619, 0.17361971830985917, 0.19950000000000007],
+    [0.29900000000000004, 0.58700000000000008, 0.11400000000000002],
+    [-0.00000000000000005, 0.06614084507042260, 1.11150000000000015],
 ];
 
 /// XYZ → Original NTSC 1953 (BT.470 M/NTSC) matrix.
 pub const XYZ_TO_NTSC_1953: [[f64; 3]; 3] = [
-    [1.90985093071754131, -0.53241368656831711, -0.28818722483973136],
-    [-0.98462249428388215, 1.99908203384909400, -0.02830694039510768],
-    [0.05833051498847057, -0.11842862134022794, 0.89793641254978696],
+    [1.90946221919673209, -0.53230532453310431, -0.28812857016012083],
+    [-0.98399369396339131, 1.99780537865294616, -0.02828886299661653],
+    [0.05855346330427854, -0.11888127398141383, 0.90136846541131588],
 ];
 
 // =============================================================================
@@ -534,14 +568,14 @@ pub mod f32 {
     ];
 
     pub const NTSC_1953_TO_XYZ: [[f32; 3]; 3] = [
-        [0.60693705115503227 as f32, 0.17350884116135754 as f32, 0.20026252008082709 as f32],
-        [0.29893914459874726 as f32, 0.58662512964078029 as f32, 0.11443572576047262 as f32],
-        [-0.00000000000000005 as f32, 0.06609860615670769 as f32, 1.11574832616460795 as f32],
+        [0.60706060606060619 as f32, 0.17361971830985917 as f32, 0.19950000000000007 as f32],
+        [0.29900000000000004 as f32, 0.58700000000000008 as f32, 0.11400000000000002 as f32],
+        [-0.00000000000000005 as f32, 0.06614084507042260 as f32, 1.11150000000000015 as f32],
     ];
     pub const XYZ_TO_NTSC_1953: [[f32; 3]; 3] = [
-        [1.90985093071754131 as f32, -0.53241368656831711 as f32, -0.28818722483973136 as f32],
-        [-0.98462249428388215 as f32, 1.99908203384909400 as f32, -0.02830694039510768 as f32],
-        [0.05833051498847057 as f32, -0.11842862134022794 as f32, 0.89793641254978696 as f32],
+        [1.90946221919673209 as f32, -0.53230532453310431 as f32, -0.28812857016012083 as f32],
+        [-0.98399369396339131 as f32, 1.99780537865294616 as f32, -0.02828886299661653 as f32],
+        [0.05855346330427854 as f32, -0.11888127398141383 as f32, 0.90136846541131588 as f32],
     ];
 
     // -------------------------------------------------------------------------
@@ -768,19 +802,19 @@ pub mod f32 {
     pub const BT601_525_KG: f32 = 0.70105985692572292 as f32;
     pub const BT601_525_KB: f32 = 0.08656378236920956 as f32;
 
-    /// Original NTSC 1953 (BT.470 M/NTSC) luminance coefficients
-    /// Derived from RGB→XYZ matrix with Illuminant C white point.
-    /// These are the TRUE source of 0.299/0.587/0.114 (which rounds to these).
-    pub const NTSC_1953_KR: f32 = 0.29893914459874726 as f32;
-    pub const NTSC_1953_KG: f32 = 0.58662512964078029 as f32;
-    pub const NTSC_1953_KB: f32 = 0.11443572576047262 as f32;
+    /// NTSC 1953 luma coefficients (Y row of RGB→XYZ matrix).
+    /// These equal the legacy coefficients exactly since Illuminant C was derived from them.
+    pub const NTSC_1953_KR: f32 = 0.29900000000000004 as f32;
+    pub const NTSC_1953_KG: f32 = 0.58700000000000008 as f32;
+    pub const NTSC_1953_KB: f32 = 0.11400000000000002 as f32;
 
-    /// Legacy Y'CbCr coefficients (rounded from NTSC 1953)
-    /// From BT.470 M/NTSC with Illuminant C. Used in BT.601 Y'CbCr for compatibility.
+    /// Legacy Y'CbCr coefficients - AUTHORITATIVE for BT.601 Y'CbCr.
+    /// These are the authoritative definition from which Illuminant C is derived.
+    /// All JPEG/video implementations derive their integer approximations from these.
     /// Note: These do NOT match true luminance for modern D65 color spaces.
-    pub const YCBCR_LEGACY_KR: f32 = 0.299;
-    pub const YCBCR_LEGACY_KG: f32 = 0.587;
-    pub const YCBCR_LEGACY_KB: f32 = 0.114;
+    pub const YCBCR_LEGACY_KR: f32 = 0.299 as f32;
+    pub const YCBCR_LEGACY_KG: f32 = 0.587 as f32;
+    pub const YCBCR_LEGACY_KB: f32 = 0.114 as f32;
 
     // -------------------------------------------------------------------------
     // BIT DEPTH
