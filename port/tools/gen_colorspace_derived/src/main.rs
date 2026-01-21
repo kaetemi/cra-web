@@ -213,10 +213,10 @@ fn compute_ycbcr_matrices(kr: f64, kg: f64, kb: f64) -> (Mat3, Mat3) {
 /// If the value is very close to a short decimal, use that clean representation.
 /// Otherwise use full precision for derived values.
 fn fmt_f64(v: f64) -> String {
-    // Try progressively shorter decimal representations.
-    // We go up to 20 digits because some values (like our sRGB threshold) need
-    // 19 digits to round-trip exactly to the same IEEE 754 bit pattern.
-    for precision in 1..=20 {
+    // Try progressively shorter decimal representations until we find one
+    // that round-trips to the exact same IEEE 754 bit pattern.
+    // 30 decimal places covers values down to ~1e-13 with margin to spare.
+    for precision in 1..=30 {
         let formatted = format!("{:.prec$}", v, prec = precision);
         let parsed: f64 = formatted.parse().unwrap();
 
@@ -233,8 +233,8 @@ fn fmt_f64(v: f64) -> String {
             }
         }
     }
-    // Fallback (should never reach here for normal f64 values)
-    format!("{:.20}", v)
+    // Fallback for extreme values (subnormals, etc.)
+    format!("{:.30}", v)
 }
 
 /// Format a 3x3 matrix as Rust code.
