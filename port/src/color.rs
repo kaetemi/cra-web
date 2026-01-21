@@ -517,6 +517,192 @@ mod tests {
         }
     }
 
+    // ============== sRGB Transfer Function Tests ==============
+    //
+    // The sRGB transfer function constants (THRESHOLD, LINEAR_SLOPE) are derived
+    // from the authoritative curve parameters (γ=2.4, offset=0.055) to ensure
+    // both value AND slope continuity at the junction. These tests verify that
+    // the derived constants produce a mathematically consistent, fully reversible
+    // transfer function.
+
+    #[test]
+    fn test_srgb_black_white_exact() {
+        // Black and white must round-trip exactly (no floating point error)
+        assert_eq!(srgb_to_linear_single(0.0), 0.0, "sRGB 0 should decode to linear 0");
+        assert_eq!(linear_to_srgb_single(0.0), 0.0, "linear 0 should encode to sRGB 0");
+
+        // White: 1.0 should round-trip within f32 epsilon
+        let white_linear = srgb_to_linear_single(1.0);
+        let white_back = linear_to_srgb_single(white_linear);
+        assert!(
+            (1.0 - white_back).abs() < 1e-6,
+            "white round-trip failed: 1.0 -> {} -> {}",
+            white_linear, white_back
+        );
+
+        let white_srgb = linear_to_srgb_single(1.0);
+        let white_linear_back = srgb_to_linear_single(white_srgb);
+        assert!(
+            (1.0 - white_linear_back).abs() < 1e-6,
+            "white round-trip failed: 1.0 -> {} -> {}",
+            white_srgb, white_linear_back
+        );
+    }
+
+    #[test]
+    fn test_srgb_threshold_continuity() {
+        // The transfer function should be continuous at the threshold.
+        // With derived constants, both value AND slope should match.
+        let t = cs::SRGB_THRESHOLD;
+        let epsilon = 1e-6_f32;
+
+        // Value just below threshold (linear segment)
+        let below = t - epsilon;
+        let f_below = linear_to_srgb_single(below);
+
+        // Value at threshold
+        let f_at = linear_to_srgb_single(t);
+
+        // Value just above threshold (power curve)
+        let above = t + epsilon;
+        let f_above = linear_to_srgb_single(above);
+
+        // Check continuity: f(t-ε) ≈ f(t) ≈ f(t+ε)
+        assert!(
+            (f_below - f_at).abs() < 1e-4,
+            "sRGB transfer discontinuity below threshold: f({}) = {}, f({}) = {}",
+            below, f_below, t, f_at
+        );
+        assert!(
+            (f_above - f_at).abs() < 1e-4,
+            "sRGB transfer discontinuity above threshold: f({}) = {}, f({}) = {}",
+            t, f_at, above, f_above
+        );
+
+        // Check that the function is monotonically increasing
+        assert!(f_below < f_at, "sRGB transfer not monotonic at threshold");
+        assert!(f_at < f_above, "sRGB transfer not monotonic at threshold");
+    }
+
+    #[test]
+    fn test_srgb_decode_threshold_continuity() {
+        // Same test but for the decode direction
+        let t = cs::SRGB_DECODE_THRESHOLD;
+        let epsilon = 1e-6_f32;
+
+        let below = t - epsilon;
+        let f_below = srgb_to_linear_single(below);
+
+        let f_at = srgb_to_linear_single(t);
+
+        let above = t + epsilon;
+        let f_above = srgb_to_linear_single(above);
+
+        assert!(
+            (f_below - f_at).abs() < 1e-4,
+            "sRGB decode discontinuity below threshold: f({}) = {}, f({}) = {}",
+            below, f_below, t, f_at
+        );
+        assert!(
+            (f_above - f_at).abs() < 1e-4,
+            "sRGB decode discontinuity above threshold: f({}) = {}, f({}) = {}",
+            t, f_at, above, f_above
+        );
+
+        assert!(f_below < f_at, "sRGB decode not monotonic at threshold");
+        assert!(f_at < f_above, "sRGB decode not monotonic at threshold");
+    }
+
+    #[test]
+    fn test_srgb_full_range_roundtrip() {
+        // Test round-trip across the full [0, 1] range with fine granularity
+        // Direction 1: linear -> sRGB -> linear
+        let mut max_error_linear = 0.0_f32;
+        for i in 0..=1000 {
+            let linear = i as f32 / 1000.0;
+            let srgb = linear_to_srgb_single(linear);
+            let back = srgb_to_linear_single(srgb);
+            let error = (linear - back).abs();
+            max_error_linear = max_error_linear.max(error);
+        }
+        assert!(
+            max_error_linear < 1e-5,
+            "linear->sRGB->linear max error too large: {}",
+            max_error_linear
+        );
+
+        // Direction 2: sRGB -> linear -> sRGB
+        let mut max_error_srgb = 0.0_f32;
+        for i in 0..=1000 {
+            let srgb = i as f32 / 1000.0;
+            let linear = srgb_to_linear_single(srgb);
+            let back = linear_to_srgb_single(linear);
+            let error = (srgb - back).abs();
+            max_error_srgb = max_error_srgb.max(error);
+        }
+        assert!(
+            max_error_srgb < 1e-5,
+            "sRGB->linear->sRGB max error too large: {}",
+            max_error_srgb
+        );
+    }
+
+    #[test]
+    fn test_srgb_threshold_roundtrip() {
+        // The threshold itself should round-trip exactly (this is the critical point)
+        let t = cs::SRGB_THRESHOLD;
+        let srgb = linear_to_srgb_single(t);
+        let back = srgb_to_linear_single(srgb);
+        assert!(
+            (t - back).abs() < 1e-6,
+            "threshold round-trip failed: {} -> {} -> {} (error {})",
+            t, srgb, back, (t - back).abs()
+        );
+
+        // The decode threshold should also round-trip
+        let dt = cs::SRGB_DECODE_THRESHOLD;
+        let linear = srgb_to_linear_single(dt);
+        let back = linear_to_srgb_single(linear);
+        assert!(
+            (dt - back).abs() < 1e-6,
+            "decode threshold round-trip failed: {} -> {} -> {} (error {})",
+            dt, linear, back, (dt - back).abs()
+        );
+
+        // Verify DECODE_THRESHOLD ≈ THRESHOLD * LINEAR_SLOPE
+        let expected_dt = cs::SRGB_THRESHOLD * cs::SRGB_LINEAR_SLOPE;
+        assert!(
+            (dt - expected_dt).abs() < 1e-6,
+            "DECODE_THRESHOLD ({}) != THRESHOLD * LINEAR_SLOPE ({})",
+            dt, expected_dt
+        );
+    }
+
+    #[test]
+    fn test_srgb_constants_approximate_spec() {
+        // Verify our derived constants round approximately to the IEC 61966-2-1 spec values
+        // Spec: threshold ≈ 0.0031308, slope ≈ 12.92
+
+        // Threshold should be within ~10% of spec (we derive ~0.00304 vs spec 0.0031308)
+        assert!(
+            (cs::SRGB_THRESHOLD - 0.0031308).abs() < 0.001,
+            "SRGB_THRESHOLD {} differs too much from spec 0.0031308",
+            cs::SRGB_THRESHOLD
+        );
+
+        // Slope should be very close to spec (we derive ~12.923 vs spec 12.92)
+        assert!(
+            (cs::SRGB_LINEAR_SLOPE - 12.92).abs() < 0.01,
+            "SRGB_LINEAR_SLOPE {} differs too much from spec 12.92",
+            cs::SRGB_LINEAR_SLOPE
+        );
+
+        // Gamma, scale, offset should be exact spec values
+        assert_eq!(cs::SRGB_GAMMA, 2.4, "SRGB_GAMMA should be exactly 2.4");
+        assert_eq!(cs::SRGB_SCALE, 1.055, "SRGB_SCALE should be exactly 1.055");
+        assert_eq!(cs::SRGB_OFFSET, 0.055, "SRGB_OFFSET should be exactly 0.055");
+    }
+
     #[test]
     fn test_lab_roundtrip() {
         let test_rgb = [(0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.5, 0.3, 0.7)];
