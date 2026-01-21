@@ -142,7 +142,6 @@ function generateCliCommand() {
     const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
     const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
-    const supersample = parseInt(document.getElementById('supersample-select')?.value || '0', 10);
 
     // Map method values to CLI method names
     const methodMap = {
@@ -246,11 +245,6 @@ function generateCliCommand() {
             // Add distance space only if non-default (1 = Oklab)
             cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
         }
-    }
-
-    // Add supersampling (only if not none)
-    if (supersample === 1) {
-        cmd += ' --supersample tent-volume';
     }
 
     return cmd;
@@ -414,21 +408,6 @@ const HISTOGRAM_MODE_DESCRIPTIONS = {
     '1': 'F32 sort-based quantile matching with endpoint alignment. Rank 0 maps to ref[0], rank n-1 maps to ref[m-1]. Preserves reference extremes.',
     '2': 'F32 sort-based quantile matching with midpoint alignment. Statistically correct quantile sampling, avoids color expansion bias at extremes.'
 };
-
-// Supersampling descriptions
-const SUPERSAMPLE_DESCRIPTIONS = {
-    '0': 'No supersampling. Process images at their original resolution.',
-    '1': 'Tent-volume supersampling: Expands images to bilinear tent-space before histogram matching, then contracts back. Redistributes color information and can improve matching quality for certain images.'
-};
-
-// Update supersampling description
-function updateSupersampleDescription() {
-    const supersample = document.getElementById('supersample-select').value;
-    const description = document.getElementById('supersample-description');
-    if (description) {
-        description.textContent = SUPERSAMPLE_DESCRIPTIONS[supersample] || SUPERSAMPLE_DESCRIPTIONS['0'];
-    }
-}
 
 // Update histogram mode description and show/hide histogram dither section
 function updateHistogramModeDescription() {
@@ -620,8 +599,6 @@ function processImages() {
     const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
     const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
-    // Supersampling: 0 = none, 1 = tent-volume
-    const supersample = parseInt(document.getElementById('supersample-select')?.value || '0', 10);
 
     // Store timestamp when processing starts
     processTimestamp = Date.now();
@@ -662,8 +639,7 @@ function processImages() {
         colorAwareHistogram: colorAwareHistogram,
         histogramDistanceSpace: histogramDistanceSpace,
         colorAwareOutput: colorAwareOutput,
-        outputDistanceSpace: outputDistanceSpace,
-        supersample: supersample
+        outputDistanceSpace: outputDistanceSpace
     });
 }
 
@@ -689,7 +665,6 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('histogram-dither-select').addEventListener('change', updateHistogramDitherDescription);
     document.getElementById('color-aware-histogram').addEventListener('change', updateColorAwareHistogramToggle);
     document.getElementById('color-aware-output').addEventListener('change', updateColorAwareOutputToggle);
-    document.getElementById('supersample-select').addEventListener('change', updateSupersampleDescription);
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Initialize histogram dither visibility based on initial histogram mode state

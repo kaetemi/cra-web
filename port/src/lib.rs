@@ -62,6 +62,7 @@ fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
         4 => PerceptualSpace::LinearRGB,
         5 => PerceptualSpace::YCbCr,
         6 => PerceptualSpace::Srgb,
+        7 => PerceptualSpace::YCbCrBt601,
         _ => PerceptualSpace::OkLab, // 1 or any other value defaults to OkLab
     }
 }
