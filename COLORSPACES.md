@@ -208,8 +208,8 @@ These coefficients originate from the **original NTSC 1953 color space** (BT.470
 
 | Source | KR | KG | KB | White Point |
 |--------|--------|--------|--------|-------------|
-| **NTSC 1953** | 0.299 | 0.586 | 0.115 | Illuminant C |
-| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded) |
+| **NTSC 1953** | 0.2989 | 0.5866 | 0.1144 | Illuminant C |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded from above) |
 | BT.601-625 (PAL) | 0.222 | 0.707 | 0.071 | D65 |
 | BT.601-525 (NTSC) | 0.212 | 0.701 | 0.087 | D65 |
 

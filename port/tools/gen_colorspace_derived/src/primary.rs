@@ -88,11 +88,15 @@ pub mod srgb_primaries {
 
 /// Illuminant C - original NTSC white point.
 ///
-/// From CIE standard illuminants. Used by original NTSC (BT.470 M/NTSC).
-/// This is where the 0.299/0.587/0.114 luma coefficients originate.
+/// Used by original NTSC (BT.470 M/NTSC). This is where the 0.299/0.587/0.114
+/// luma coefficients originate.
+///
+/// 4-digit values for consistency with other display standards (D65 uses 0.3127, 0.3290).
+/// CIE 15:2004 Table T.3 gives 5-digit values (0.31006, 0.31616), but 4-digit produces
+/// coefficients closer to the rounded legacy values.
 pub mod illuminant_c {
-    pub const X: f64 = 0.310;
-    pub const Y: f64 = 0.316;
+    pub const X: f64 = 0.3101;
+    pub const Y: f64 = 0.3162;
 }
 
 // =============================================================================

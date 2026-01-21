@@ -264,25 +264,25 @@ The **source** of the 0.299/0.587/0.114 luma coefficients is the original 1953 N
 | Red | 0.67 | 0.33 |
 | Green | 0.21 | 0.71 |
 | Blue | 0.14 | 0.08 |
-| White (Illuminant C) | 0.310 | 0.316 |
+| White (Illuminant C) | 0.3101 | 0.3162 |
 
 **Derived RGB→XYZ matrix:**
 
 ```
 [linearized] NTSC 1953 → XYZ:
 
-| X |   | 0.6069928  0.1734485  0.2005713 |   | R |
-| Y | = | 0.2989666  0.5864212  0.1146122 | × | G |
-| Z |   | 0.0000000  0.0660756  1.1174687 |   | B |
+| X |   | 0.6067225  0.1736120  0.2006781 |   | R |
+| Y | = | 0.2989391  0.5866251  0.1144357 | × | G |
+| Z |   | 0.0000000  0.0660948  1.1172925 |   | B |
 ```
 
 **True luminance coefficients (Y row of matrix):**
 
 | KR | KG | KB |
 |--------|--------|--------|
-| 0.2990 | 0.5864 | 0.1146 |
+| 0.2989 | 0.5866 | 0.1144 |
 
-These round to **0.299, 0.586, 0.115** — very close to the traditional 0.299/0.587/0.114.
+These round exactly to **0.299, 0.587, 0.114** — the legacy Y'CbCr coefficients.
 
 ### Legacy Y'CbCr Coefficients
 
@@ -298,8 +298,8 @@ These coefficients originate from **NTSC 1953 with Illuminant C** (above), not f
 
 | Source | KR | KG | KB | White Point |
 |--------|--------|--------|--------|-------------|
-| **NTSC 1953** | 0.2990 | 0.5864 | 0.1146 | Illuminant C |
-| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded) |
+| **NTSC 1953** | 0.2989 | 0.5866 | 0.1144 | Illuminant C |
+| Legacy Y'CbCr | 0.299 | 0.587 | 0.114 | (rounded from above) |
 | BT.601 625-line (PAL) | 0.2220 | 0.7067 | 0.0713 | D65 |
 | BT.601 525-line (NTSC) | 0.2124 | 0.7011 | 0.0866 | D65 |
 
@@ -506,7 +506,7 @@ The colorant tags are used directly as matrix columns. No additional white point
 | Display P3 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB piecewise |
 | Adobe RGB | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 563/256 |
 | ProPhoto RGB | D50 XYZ (0.9642, 1.0, 0.8249) | Chromaticity | Piecewise 1.8 |
-| NTSC 1953 | Illuminant C (0.310, 0.316) | Chromaticity | γ = 2.2 |
+| NTSC 1953 | Illuminant C (0.3101, 0.3162) | Chromaticity | γ = 2.2 |
 | BT.601-625 (PAL) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
 | BT.601-525 (NTSC) | D65 chromaticity (0.3127, 0.3290) | Chromaticity | γ = 2.2 (approx) |
 | Rec.2020 | D65 chromaticity (0.3127, 0.3290) | Chromaticity | sRGB (SDR) / PQ,HLG (HDR) |
