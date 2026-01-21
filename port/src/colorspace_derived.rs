@@ -57,9 +57,9 @@ pub mod d50 {
 ///
 /// Authoritative for: NTSC 1953 (BT.470 M/NTSC).
 ///
-/// These 4-digit values (0.3101, 0.3162) round to the CIE specification (0.310, 0.316)
-/// while being coherent with the NTSC primaries. The resulting NTSC 1953 matrix
-/// produces luma coefficients that round to the legacy 0.299/0.587/0.114 values.
+/// These 4-digit values (0.3101, 0.3162) round to the BT.470 specification (0.310, 0.316).
+/// CIE 15:2004 gives 5-digit values (0.31006, 0.31616).
+/// The resulting NTSC 1953 matrix produces luma coefficients that round to 0.299/0.587/0.114.
 ///
 /// See WHITEPOINT_C.md for full analysis.
 pub mod illuminant_c {

@@ -12,7 +12,7 @@ and traces the origin of the ubiquitous luma coefficients (0.299, 0.587, 0.114).
 The RGB→XYZ matrix Y row gives luma coefficients that round to 0.299/0.587/0.114.
 
 **Key decision:** We use **4-digit chromaticity (0.3101, 0.3162)** for Illuminant C because:
-1. It rounds to the CIE specification (0.310, 0.316)
+1. It rounds to the BT.470 specification (0.310, 0.316)
 2. The resulting matrix coefficients round to 0.299/0.587/0.114
 3. It maintains colorimetric coherence with international standards
 
@@ -34,7 +34,7 @@ The RGB→XYZ matrix Y row gives luma coefficients that round to 0.299/0.587/0.1
 |--------|--------|
 | 0.3101 | 0.3162 |
 
-This 4-digit chromaticity rounds to the CIE specification (0.310, 0.316).
+This 4-digit chromaticity rounds to the BT.470 specification (0.310, 0.316).
 
 **Derived XYZ (Y=1):**
 
@@ -65,7 +65,7 @@ Using NTSC primaries with Illuminant C chromaticity (0.3101, 0.3162):
 | XYZ-derived (0.98, 1.0, 1.18) | (0.3105, 0.3168) | **(0.311, 0.317) ✗** | 0.2987 | 0.5871 | 0.1142 |
 
 **The 4-digit chromaticity is preferred** because:
-1. It rounds to the CIE specification (0.310, 0.316)
+1. It rounds to the BT.470 specification (0.310, 0.316)
 2. The derived luma coefficients all round correctly to 0.299/0.587/0.114
 3. It maintains colorimetric coherence with international standards
 

@@ -90,8 +90,8 @@ pub mod srgb_primaries {
 ///
 /// Authoritative for: NTSC 1953 (BT.470 M/NTSC).
 ///
-/// These 4-digit values round to the CIE specification (0.310, 0.316) while
-/// being more coherent with the NTSC primaries than the 5-digit CIE values.
+/// These 4-digit values round to the BT.470 specification (0.310, 0.316).
+/// CIE 15:2004 gives 5-digit values (0.31006, 0.31616).
 ///
 /// Note: The legacy Y'CbCr coefficients (0.299, 0.587, 0.114) are separately
 /// authoritative for BT.601 Y'CbCr conversion. They do not derive exactly from

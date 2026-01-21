@@ -485,9 +485,9 @@ fn main() -> io::Result<()> {
     writeln!(out, "///")?;
     writeln!(out, "/// Authoritative for: NTSC 1953 (BT.470 M/NTSC).")?;
     writeln!(out, "///")?;
-    writeln!(out, "/// These 4-digit values (0.3101, 0.3162) round to the CIE specification (0.310, 0.316)")?;
-    writeln!(out, "/// while being coherent with the NTSC primaries. The resulting NTSC 1953 matrix")?;
-    writeln!(out, "/// produces luma coefficients that round to the legacy 0.299/0.587/0.114 values.")?;
+    writeln!(out, "/// These 4-digit values (0.3101, 0.3162) round to the BT.470 specification (0.310, 0.316).")?;
+    writeln!(out, "/// CIE 15:2004 gives 5-digit values (0.31006, 0.31616).")?;
+    writeln!(out, "/// The resulting NTSC 1953 matrix produces luma coefficients that round to 0.299/0.587/0.114.")?;
     writeln!(out, "///")?;
     writeln!(out, "/// See WHITEPOINT_C.md for full analysis.")?;
     writeln!(out, "pub mod illuminant_c {{")?;
