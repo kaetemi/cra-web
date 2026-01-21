@@ -3,23 +3,39 @@
 use crate::colorspace_derived::f32 as cs;
 use crate::pixel::Pixel4;
 
-/// Convert sRGB value (0-1) to linear RGB
+/// Convert sRGB value to linear RGB.
+///
+/// Supports the full sYCC extended gamut (IEC 61966-2-1 Amendment 1) with
+/// point-symmetric handling of negative values for out-of-gamut colors.
 #[inline]
 pub fn srgb_to_linear_single(srgb: f32) -> f32 {
-    if srgb <= cs::SRGB_DECODE_THRESHOLD {
+    if srgb < -cs::SRGB_DECODE_THRESHOLD {
+        // Negative power curve region (sYCC extended gamut)
+        -((-srgb + cs::SRGB_OFFSET) / cs::SRGB_SCALE).powf(cs::SRGB_GAMMA)
+    } else if srgb <= cs::SRGB_DECODE_THRESHOLD {
+        // Linear region (handles both positive and negative near zero)
         srgb / cs::SRGB_LINEAR_SLOPE
     } else {
+        // Positive power curve region
         ((srgb + cs::SRGB_OFFSET) / cs::SRGB_SCALE).powf(cs::SRGB_GAMMA)
     }
 }
 
-/// Convert linear RGB value (0-1) to sRGB
+/// Convert linear RGB value to sRGB.
+///
+/// Supports the full sYCC extended gamut (IEC 61966-2-1 Amendment 1) with
+/// point-symmetric handling of negative values for out-of-gamut colors.
 #[inline]
 pub fn linear_to_srgb_single(linear: f32) -> f32 {
-    if linear <= cs::SRGB_THRESHOLD {
+    if linear < -cs::SRGB_THRESHOLD {
+        // Negative power curve region (sYCC extended gamut)
+        -cs::SRGB_SCALE * (-linear).powf(1.0 / cs::SRGB_GAMMA) + cs::SRGB_OFFSET
+    } else if linear <= cs::SRGB_THRESHOLD {
+        // Linear region (handles both positive and negative near zero)
         linear * cs::SRGB_LINEAR_SLOPE
     } else {
-        cs::SRGB_SCALE * linear.max(0.0).powf(1.0 / cs::SRGB_GAMMA) - cs::SRGB_OFFSET
+        // Positive power curve region
+        cs::SRGB_SCALE * linear.powf(1.0 / cs::SRGB_GAMMA) - cs::SRGB_OFFSET
     }
 }
 
@@ -361,14 +377,16 @@ pub fn linear_rgb_to_ycbcr_clamped(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     (y, cb, cr)
 }
 
-/// Convert linear RGB to Y'CbCr (for out-of-gamut values during dithering)
-/// Uses signed sRGB conversion to handle negative values from error accumulation.
+/// Convert linear RGB to Y'CbCr (supports out-of-gamut values during dithering).
+///
+/// Uses the sYCC extended gamut transfer function which natively handles
+/// negative values from error accumulation via point-symmetric extension.
 #[inline]
 pub fn linear_rgb_to_ycbcr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
-    // Convert linear to sRGB, preserving sign for out-of-gamut values
-    let r_srgb = if r >= 0.0 { linear_to_srgb_single(r) } else { -linear_to_srgb_single(-r) };
-    let g_srgb = if g >= 0.0 { linear_to_srgb_single(g) } else { -linear_to_srgb_single(-g) };
-    let b_srgb = if b >= 0.0 { linear_to_srgb_single(b) } else { -linear_to_srgb_single(-b) };
+    // Convert linear to sRGB (sYCC transfer handles negatives natively)
+    let r_srgb = linear_to_srgb_single(r);
+    let g_srgb = linear_to_srgb_single(g);
+    let b_srgb = linear_to_srgb_single(b);
 
     // Apply RGB to Y'CbCr matrix (BT.709)
     let y = cs::RGB_TO_YCBCR[0][0] * r_srgb + cs::RGB_TO_YCBCR[0][1] * g_srgb + cs::RGB_TO_YCBCR[0][2] * b_srgb;
@@ -1014,6 +1032,147 @@ mod tests {
             max_delta, 0,
             "Smooth decode -> standard encode roundtrip fails: {} codes differ, max delta = {}, first diff: {:?}",
             diff_count, max_delta, first_diff
+        );
+    }
+
+    // ============== sYCC Extended Gamut (Negative Value) Tests ==============
+    //
+    // IEC 61966-2-1 Amendment 1 defines point-symmetric extension of the sRGB
+    // transfer function for negative values, enabling representation of colors
+    // outside the sRGB triangle but still within XYZ gamut.
+
+    #[test]
+    fn test_srgb_negative_symmetry() {
+        // The transfer function should be point-symmetric around (0, 0).
+        // f(-x) = -f(x) for all x
+        let test_values = [0.001, 0.003, 0.01, 0.1, 0.5, 1.0, 2.0];
+
+        for &x in &test_values {
+            let pos = linear_to_srgb_single(x);
+            let neg = linear_to_srgb_single(-x);
+            assert!(
+                (neg + pos).abs() < 1e-6,
+                "Encode not point-symmetric: f({}) = {}, f({}) = {}, sum = {}",
+                x, pos, -x, neg, neg + pos
+            );
+        }
+
+        // Same for decode
+        let encoded_values = [0.01, 0.04, 0.1, 0.5, 1.0];
+        for &u in &encoded_values {
+            let pos = srgb_to_linear_single(u);
+            let neg = srgb_to_linear_single(-u);
+            assert!(
+                (neg + pos).abs() < 1e-6,
+                "Decode not point-symmetric: f({}) = {}, f({}) = {}, sum = {}",
+                u, pos, -u, neg, neg + pos
+            );
+        }
+    }
+
+    #[test]
+    fn test_srgb_negative_roundtrip() {
+        // Negative values should round-trip just like positive values
+        let test_values = [-2.0, -1.0, -0.5, -0.1, -0.01, -0.001, -0.0001];
+
+        for &linear in &test_values {
+            let encoded = linear_to_srgb_single(linear);
+            let back = srgb_to_linear_single(encoded);
+            assert!(
+                (linear - back).abs() < 1e-5,
+                "Negative roundtrip failed: {} -> {} -> {} (error {})",
+                linear, encoded, back, (linear - back).abs()
+            );
+        }
+
+        // And encoded negative values
+        let encoded_values = [-1.5, -1.0, -0.5, -0.1, -0.04, -0.01];
+        for &encoded in &encoded_values {
+            let linear = srgb_to_linear_single(encoded);
+            let back = linear_to_srgb_single(linear);
+            assert!(
+                (encoded - back).abs() < 1e-5,
+                "Negative encoded roundtrip failed: {} -> {} -> {} (error {})",
+                encoded, linear, back, (encoded - back).abs()
+            );
+        }
+    }
+
+    #[test]
+    fn test_srgb_negative_threshold_continuity() {
+        // The negative threshold should also have continuous value and slope.
+        // Test continuity at -SRGB_THRESHOLD (linear space)
+        let t = -cs::SRGB_THRESHOLD;
+        let epsilon = 1e-6_f32;
+
+        let f_below = linear_to_srgb_single(t - epsilon);
+        let f_at = linear_to_srgb_single(t);
+        let f_above = linear_to_srgb_single(t + epsilon);
+
+        assert!(
+            (f_below - f_at).abs() < 1e-4,
+            "Negative threshold discontinuity below: f({}) = {}, f({}) = {}",
+            t - epsilon, f_below, t, f_at
+        );
+        assert!(
+            (f_above - f_at).abs() < 1e-4,
+            "Negative threshold discontinuity above: f({}) = {}, f({}) = {}",
+            t, f_at, t + epsilon, f_above
+        );
+
+        // Monotonicity (should be increasing even for negatives)
+        assert!(f_below < f_at, "Not monotonic below negative threshold");
+        assert!(f_at < f_above, "Not monotonic above negative threshold");
+    }
+
+    #[test]
+    fn test_srgb_negative_decode_threshold_continuity() {
+        // Test continuity at -SRGB_DECODE_THRESHOLD (encoded space)
+        let t = -cs::SRGB_DECODE_THRESHOLD;
+        let epsilon = 1e-6_f32;
+
+        let f_below = srgb_to_linear_single(t - epsilon);
+        let f_at = srgb_to_linear_single(t);
+        let f_above = srgb_to_linear_single(t + epsilon);
+
+        assert!(
+            (f_below - f_at).abs() < 1e-4,
+            "Negative decode threshold discontinuity below: f({}) = {}, f({}) = {}",
+            t - epsilon, f_below, t, f_at
+        );
+        assert!(
+            (f_above - f_at).abs() < 1e-4,
+            "Negative decode threshold discontinuity above: f({}) = {}, f({}) = {}",
+            t, f_at, t + epsilon, f_above
+        );
+
+        // Monotonicity
+        assert!(f_below < f_at, "Not monotonic below negative decode threshold");
+        assert!(f_at < f_above, "Not monotonic above negative decode threshold");
+    }
+
+    #[test]
+    fn test_srgb_extended_range_full_roundtrip() {
+        // Test round-trip across the full extended range [-2, 2] with fine granularity
+        // This covers well beyond the standard sRGB gamut
+        let mut max_error = 0.0_f32;
+        let mut worst_value = 0.0_f32;
+
+        for i in -2000..=2000 {
+            let linear = i as f32 / 1000.0;
+            let encoded = linear_to_srgb_single(linear);
+            let back = srgb_to_linear_single(encoded);
+            let error = (linear - back).abs();
+            if error > max_error {
+                max_error = error;
+                worst_value = linear;
+            }
+        }
+
+        assert!(
+            max_error < 1e-5,
+            "Extended range roundtrip max error too large: {} at value {}",
+            max_error, worst_value
         );
     }
 
