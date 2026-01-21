@@ -737,6 +737,63 @@ fn main() -> io::Result<()> {
     writeln!(out, "pub const YCBCR_TO_RGB: [[f64; 3]; 3] = {};", fmt_matrix(ycbcr_inverse, ""))?;
     writeln!(out)?;
 
+    // JPEG / ITU-T T.871 Y'CbCr coefficients
+    // These use the rounded legacy coefficients (0.299, 0.587, 0.114) directly,
+    // NOT derived from any color space matrix. This is the standard for JPEG.
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out, "// JPEG / ITU-T T.871 Y'CbCr (LEGACY COEFFICIENTS)")?;
+    writeln!(out, "// =============================================================================")?;
+    writeln!(out)?;
+    writeln!(out, "/// JPEG Y'CbCr luma coefficients (ITU-T T.871).")?;
+    writeln!(out, "///")?;
+    writeln!(out, "/// Derived by rounding the NTSC 1953 / BT.470 matrix Y row to 3 decimal places.")?;
+    writeln!(out, "/// Historically from NTSC 1953, but commonly applied to sRGB data")?;
+    writeln!(out, "/// (which is technically a color space mismatch).")?;
+    writeln!(out, "pub mod jpeg_ycbcr {{")?;
+
+    // Round the NTSC 1953 / BT.470 matrix coefficients to 3 decimal places
+    let jpeg_kr = (ntsc_1953_to_xyz[1][0] * 1000.0).round() / 1000.0;
+    let jpeg_kg = (ntsc_1953_to_xyz[1][1] * 1000.0).round() / 1000.0;
+    let jpeg_kb = (ntsc_1953_to_xyz[1][2] * 1000.0).round() / 1000.0;
+
+    // Derived Cb/Cr coefficients
+    let jpeg_cb_scale = 2.0 * (1.0 - jpeg_kb); // 2 * 0.886 = 1.772
+    let jpeg_cr_scale = 2.0 * (1.0 - jpeg_kr); // 2 * 0.701 = 1.402
+
+    // Cb row: [-Kr/(2(1-Kb)), -Kg/(2(1-Kb)), 0.5]
+    let jpeg_cb_r = -jpeg_kr / jpeg_cb_scale;
+    let jpeg_cb_g = -jpeg_kg / jpeg_cb_scale;
+    let jpeg_cb_b = 0.5;
+
+    // Cr row: [0.5, -Kg/(2(1-Kr)), -Kb/(2(1-Kr))]
+    let jpeg_cr_r = 0.5;
+    let jpeg_cr_g = -jpeg_kg / jpeg_cr_scale;
+    let jpeg_cr_b = -jpeg_kb / jpeg_cr_scale;
+
+    writeln!(out, "    /// Kr coefficient (NTSC 1953 Y row rounded to 3 decimal places)")?;
+    writeln!(out, "    pub const KR: f64 = {};", fmt_f64(jpeg_kr))?;
+    writeln!(out, "    /// Kg coefficient (NTSC 1953 Y row rounded to 3 decimal places)")?;
+    writeln!(out, "    pub const KG: f64 = {};", fmt_f64(jpeg_kg))?;
+    writeln!(out, "    /// Kb coefficient (NTSC 1953 Y row rounded to 3 decimal places)")?;
+    writeln!(out, "    pub const KB: f64 = {};", fmt_f64(jpeg_kb))?;
+    writeln!(out)?;
+    writeln!(out, "    /// Cb channel scaling factor: 2(1-Kb) = {}", fmt_f64(jpeg_cb_scale))?;
+    writeln!(out, "    pub const CB_SCALE: f64 = {};", fmt_f64(jpeg_cb_scale))?;
+    writeln!(out, "    /// Cr channel scaling factor: 2(1-Kr) = {}", fmt_f64(jpeg_cr_scale))?;
+    writeln!(out, "    pub const CR_SCALE: f64 = {};", fmt_f64(jpeg_cr_scale))?;
+    writeln!(out)?;
+    writeln!(out, "    // Cb row coefficients: Cb = {}·R + {}·G + {}·B", fmt_f64(jpeg_cb_r), fmt_f64(jpeg_cb_g), fmt_f64(jpeg_cb_b))?;
+    writeln!(out, "    pub const CB_R: f64 = {};", fmt_f64(jpeg_cb_r))?;
+    writeln!(out, "    pub const CB_G: f64 = {};", fmt_f64(jpeg_cb_g))?;
+    writeln!(out, "    pub const CB_B: f64 = {};", fmt_f64(jpeg_cb_b))?;
+    writeln!(out)?;
+    writeln!(out, "    // Cr row coefficients: Cr = {}·R + {}·G + {}·B", fmt_f64(jpeg_cr_r), fmt_f64(jpeg_cr_g), fmt_f64(jpeg_cr_b))?;
+    writeln!(out, "    pub const CR_R: f64 = {};", fmt_f64(jpeg_cr_r))?;
+    writeln!(out, "    pub const CR_G: f64 = {};", fmt_f64(jpeg_cr_g))?;
+    writeln!(out, "    pub const CR_B: f64 = {};", fmt_f64(jpeg_cr_b))?;
+    writeln!(out, "}}")?;
+    writeln!(out)?;
+
     // f32 versions for runtime use
     writeln!(out, "// =============================================================================")?;
     writeln!(out, "// f32 VERSIONS FOR RUNTIME USE")?;
@@ -1051,6 +1108,27 @@ fn main() -> io::Result<()> {
     writeln!(out, "    pub const NTSC_1953_KR: f32 = {} as f32;", fmt_f64(ntsc_1953_kr))?;
     writeln!(out, "    pub const NTSC_1953_KG: f32 = {} as f32;", fmt_f64(ntsc_1953_kg))?;
     writeln!(out, "    pub const NTSC_1953_KB: f32 = {} as f32;", fmt_f64(ntsc_1953_kb))?;
+    writeln!(out)?;
+
+    // JPEG / ITU-T T.871 Y'CbCr (f32)
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out, "    // JPEG / ITU-T T.871 Y'CbCr")?;
+    writeln!(out, "    // -------------------------------------------------------------------------")?;
+    writeln!(out)?;
+    writeln!(out, "    /// JPEG Y'CbCr coefficients (ITU-T T.871) - rounded legacy values.")?;
+    writeln!(out, "    pub const JPEG_KR: f32 = {} as f32;", fmt_f64(jpeg_kr))?;
+    writeln!(out, "    pub const JPEG_KG: f32 = {} as f32;", fmt_f64(jpeg_kg))?;
+    writeln!(out, "    pub const JPEG_KB: f32 = {} as f32;", fmt_f64(jpeg_kb))?;
+    writeln!(out, "    pub const JPEG_CB_SCALE: f32 = {} as f32;", fmt_f64(jpeg_cb_scale))?;
+    writeln!(out, "    pub const JPEG_CR_SCALE: f32 = {} as f32;", fmt_f64(jpeg_cr_scale))?;
+    writeln!(out, "    /// Cb row: [CB_R, CB_G, CB_B]")?;
+    writeln!(out, "    pub const JPEG_CB_R: f32 = {} as f32;", fmt_f64(jpeg_cb_r))?;
+    writeln!(out, "    pub const JPEG_CB_G: f32 = {} as f32;", fmt_f64(jpeg_cb_g))?;
+    writeln!(out, "    pub const JPEG_CB_B: f32 = {} as f32;", fmt_f64(jpeg_cb_b))?;
+    writeln!(out, "    /// Cr row: [CR_R, CR_G, CR_B]")?;
+    writeln!(out, "    pub const JPEG_CR_R: f32 = {} as f32;", fmt_f64(jpeg_cr_r))?;
+    writeln!(out, "    pub const JPEG_CR_G: f32 = {} as f32;", fmt_f64(jpeg_cr_g))?;
+    writeln!(out, "    pub const JPEG_CR_B: f32 = {} as f32;", fmt_f64(jpeg_cr_b))?;
     writeln!(out)?;
 
     // Bit depth

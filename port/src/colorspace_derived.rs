@@ -431,6 +431,39 @@ pub const YCBCR_TO_RGB: [[f64; 3]; 3] = [
 ];
 
 // =============================================================================
+// JPEG / ITU-T T.871 Y'CbCr (LEGACY COEFFICIENTS)
+// =============================================================================
+
+/// JPEG Y'CbCr luma coefficients (ITU-T T.871).
+///
+/// Derived by rounding the NTSC 1953 / BT.470 matrix Y row to 3 decimal places.
+/// Historically from NTSC 1953, but commonly applied to sRGB data
+/// (which is technically a color space mismatch).
+pub mod jpeg_ycbcr {
+    /// Kr coefficient (NTSC 1953 Y row rounded to 3 decimal places)
+    pub const KR: f64 = 0.299;
+    /// Kg coefficient (NTSC 1953 Y row rounded to 3 decimal places)
+    pub const KG: f64 = 0.587;
+    /// Kb coefficient (NTSC 1953 Y row rounded to 3 decimal places)
+    pub const KB: f64 = 0.114;
+
+    /// Cb channel scaling factor: 2(1-Kb) = 1.772
+    pub const CB_SCALE: f64 = 1.772;
+    /// Cr channel scaling factor: 2(1-Kr) = 1.40200000000000014
+    pub const CR_SCALE: f64 = 1.40200000000000014;
+
+    // Cb row coefficients: Cb = -0.16873589164785552·R + -0.33126410835214443·G + 0.5·B
+    pub const CB_R: f64 = -0.16873589164785552;
+    pub const CB_G: f64 = -0.33126410835214443;
+    pub const CB_B: f64 = 0.5;
+
+    // Cr row coefficients: Cr = 0.5·R + -0.41868758915834514·G + -0.08131241084165478·B
+    pub const CR_R: f64 = 0.5;
+    pub const CR_G: f64 = -0.41868758915834514;
+    pub const CR_B: f64 = -0.08131241084165478;
+}
+
+// =============================================================================
 // f32 VERSIONS FOR RUNTIME USE
 // =============================================================================
 
@@ -799,6 +832,25 @@ pub mod f32 {
     pub const NTSC_1953_KR: f32 = 0.29893914459874726 as f32;
     pub const NTSC_1953_KG: f32 = 0.58662512964078029 as f32;
     pub const NTSC_1953_KB: f32 = 0.11443572576047262 as f32;
+
+    // -------------------------------------------------------------------------
+    // JPEG / ITU-T T.871 Y'CbCr
+    // -------------------------------------------------------------------------
+
+    /// JPEG Y'CbCr coefficients (ITU-T T.871) - rounded legacy values.
+    pub const JPEG_KR: f32 = 0.299 as f32;
+    pub const JPEG_KG: f32 = 0.587 as f32;
+    pub const JPEG_KB: f32 = 0.114 as f32;
+    pub const JPEG_CB_SCALE: f32 = 1.772 as f32;
+    pub const JPEG_CR_SCALE: f32 = 1.40200000000000014 as f32;
+    /// Cb row: [CB_R, CB_G, CB_B]
+    pub const JPEG_CB_R: f32 = -0.16873589164785552 as f32;
+    pub const JPEG_CB_G: f32 = -0.33126410835214443 as f32;
+    pub const JPEG_CB_B: f32 = 0.5 as f32;
+    /// Cr row: [CR_R, CR_G, CR_B]
+    pub const JPEG_CR_R: f32 = 0.5 as f32;
+    pub const JPEG_CR_G: f32 = -0.41868758915834514 as f32;
+    pub const JPEG_CR_B: f32 = -0.08131241084165478 as f32;
 
     // -------------------------------------------------------------------------
     // BIT DEPTH
