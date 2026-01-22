@@ -22,7 +22,7 @@ use super::common::{
 // ============================================================================
 
 /// A single palette entry with precomputed values for efficient distance calculation.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 struct PaletteEntry {
     /// sRGB output values (0-255)
     r: u8,
@@ -41,6 +41,7 @@ struct PaletteEntry {
 }
 
 /// Precomputed palette for efficient dithering.
+#[derive(Clone, Debug)]
 pub struct DitherPalette {
     entries: Vec<PaletteEntry>,
     space: PerceptualSpace,
@@ -107,6 +108,29 @@ impl DitherPalette {
             .iter()
             .map(|e| [e.lin_r, e.lin_g, e.lin_b])
             .collect()
+    }
+
+    /// Get sRGB values for a palette entry by index.
+    pub fn get_srgb(&self, idx: usize) -> (u8, u8, u8, u8) {
+        let e = &self.entries[idx];
+        (e.r, e.g, e.b, e.a)
+    }
+
+    /// Get linear RGB values for a palette entry by index.
+    pub fn get_linear_rgb(&self, idx: usize) -> (f32, f32, f32, f32) {
+        let e = &self.entries[idx];
+        (e.lin_r, e.lin_g, e.lin_b, e.lin_a)
+    }
+
+    /// Get perceptual space coordinates for a palette entry by index.
+    pub fn get_perceptual(&self, idx: usize) -> (f32, f32, f32) {
+        let e = &self.entries[idx];
+        (e.perc_l, e.perc_a, e.perc_b)
+    }
+
+    /// Get the perceptual space used by this palette.
+    pub fn space(&self) -> PerceptualSpace {
+        self.space
     }
 }
 
