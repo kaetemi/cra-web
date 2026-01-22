@@ -79,6 +79,8 @@ enum PaletteFormat {
     Cga5153,
     /// CGA BIOS/EGA canonical palette (16 colors, the "fake" standard palette)
     CgaBios,
+    /// CGA Mode 5 palette (4 colors: black, cyan, magenta, white)
+    CgaMode5,
 }
 
 impl PaletteFormat {
@@ -88,6 +90,7 @@ impl PaletteFormat {
             "PALETTE_WEBSAFE" => Some(PaletteFormat::WebSafe),
             "PALETTE_CGA_5153" => Some(PaletteFormat::Cga5153),
             "PALETTE_CGA_BIOS" => Some(PaletteFormat::CgaBios),
+            "PALETTE_CGA_MODE5" => Some(PaletteFormat::CgaMode5),
             _ => None,
         }
     }
@@ -98,6 +101,7 @@ impl PaletteFormat {
             PaletteFormat::WebSafe => "PALETTE_WEBSAFE",
             PaletteFormat::Cga5153 => "PALETTE_CGA_5153",
             PaletteFormat::CgaBios => "PALETTE_CGA_BIOS",
+            PaletteFormat::CgaMode5 => "PALETTE_CGA_MODE5",
         }
     }
 
@@ -107,6 +111,7 @@ impl PaletteFormat {
             PaletteFormat::WebSafe => 216,
             PaletteFormat::Cga5153 => 16,
             PaletteFormat::CgaBios => 16,
+            PaletteFormat::CgaMode5 => 4,
         }
     }
 }
@@ -171,6 +176,17 @@ fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
         (0xFF, 0x55, 0xFF, 255), // 13: Light magenta
         (0xFF, 0xFF, 0x55, 255), // 14: Yellow
         (0xFF, 0xFF, 0xFF, 255), // 15: White
+    ]
+}
+
+/// Generate the CGA Mode 5 palette (4 colors)
+/// The cyan/magenta high-intensity palette used in CGA graphics mode 5.
+fn generate_cga_mode5_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 0: Black
+        (0x00, 0xFF, 0xFF, 255), // 1: Cyan
+        (0xFF, 0x00, 0xFF, 255), // 2: Magenta
+        (0xFF, 0xFF, 0xFF, 255), // 3: White
     ]
 }
 
@@ -746,6 +762,7 @@ fn dither_pixels_paletted(
         PaletteFormat::WebSafe => generate_websafe_palette(),
         PaletteFormat::Cga5153 => generate_cga_5153_palette(),
         PaletteFormat::CgaBios => generate_cga_bios_palette(),
+        PaletteFormat::CgaMode5 => generate_cga_mode5_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates
@@ -799,6 +816,7 @@ fn dither_pixels_srgb_paletted(
         PaletteFormat::WebSafe => generate_websafe_palette(),
         PaletteFormat::Cga5153 => generate_cga_5153_palette(),
         PaletteFormat::CgaBios => generate_cga_bios_palette(),
+        PaletteFormat::CgaMode5 => generate_cga_mode5_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates

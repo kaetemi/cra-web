@@ -1514,12 +1514,24 @@ fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
     ]
 }
 
+/// Generate the CGA Mode 5 palette (4 colors)
+/// The cyan/magenta high-intensity palette used in CGA graphics mode 5
+fn generate_cga_mode5_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 0: Black
+        (0x00, 0xFF, 0xFF, 255), // 1: Cyan
+        (0xFF, 0x00, 0xFF, 255), // 2: Magenta
+        (0xFF, 0xFF, 0xFF, 255), // 3: White
+    ]
+}
+
 /// Generate palette colors based on palette type
-/// 0 = WebSafe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
+/// 0 = WebSafe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors), 3 = CGA Mode 5 (4 colors)
 fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
     match palette_type {
         1 => generate_cga_5153_palette(),
         2 => generate_cga_bios_palette(),
+        3 => generate_cga_mode5_palette(),
         _ => generate_websafe_palette(), // Default to web-safe
     }
 }

@@ -854,6 +854,7 @@
                     <option value="palette-websafe">Paletted Web-Safe (216 colors)</option>
                     <option value="palette-cga-5153">Paletted CGA 5153 (16 colors)</option>
                     <option value="palette-cga-bios">Paletted CGA BIOS (16 colors)</option>
+                    <option value="palette-cga-mode5">Paletted CGA Mode 5 (4 colors)</option>
                 </select>
             </div>
 
@@ -1336,8 +1337,8 @@
             const outputMode = document.getElementById('output-mode').value;
             const isGrayscale = outputMode === 'grayscale';
             const isPaletted = outputMode.startsWith('palette-');
-            // Palette type: 0=websafe, 1=cga-5153, 2=cga-bios
-            const paletteType = outputMode === 'palette-cga-5153' ? 1 : outputMode === 'palette-cga-bios' ? 2 : 0;
+            // Palette type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
+            const paletteType = outputMode === 'palette-cga-5153' ? 1 : outputMode === 'palette-cga-bios' ? 2 : outputMode === 'palette-cga-mode5' ? 3 : 0;
             const doDownscale = document.getElementById('downscale-toggle').checked;
             const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
@@ -1406,6 +1407,8 @@
                 return 'PALETTE_CGA_5153';
             } else if (outputMode === 'palette-cga-bios') {
                 return 'PALETTE_CGA_BIOS';
+            } else if (outputMode === 'palette-cga-mode5') {
+                return 'PALETTE_CGA_MODE5';
             } else if (outputMode === 'grayscale') {
                 const bitsL = parseInt(document.getElementById('bits-gray').value);
                 const bitsA = parseInt(document.getElementById('bits-gray-alpha').value);
@@ -1537,7 +1540,8 @@
                 const paletteFormatMap = {
                     'palette-websafe': 'PALETTE_WEBSAFE',
                     'palette-cga-5153': 'PALETTE_CGA_5153',
-                    'palette-cga-bios': 'PALETTE_CGA_BIOS'
+                    'palette-cga-bios': 'PALETTE_CGA_BIOS',
+                    'palette-cga-mode5': 'PALETTE_CGA_MODE5'
                 };
                 cmd += ` --format ${paletteFormatMap[outputMode] || 'PALETTE_WEBSAFE'}`;
             } else if (isGrayscale) {

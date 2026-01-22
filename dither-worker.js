@@ -59,7 +59,7 @@ function processDither(params) {
             inputIsLinear,  // True if input is already linear (normal maps, data textures)
             isGrayscale,
             isPaletted = false,  // True for paletted mode
-            paletteType = 0,  // 0=websafe, 1=cga-5153, 2=cga-bios
+            paletteType = 0,  // 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
             doDownscale,
             processWidth,
             processHeight,
@@ -296,7 +296,7 @@ function processDither(params) {
                 craWasm.denormalize_clamped_wasm(buffer);
 
                 sendProgress(70, 'Dithering with palette...');
-                // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios
+                // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
                 // use_ghost_entries: true (gamut mapping with ghost entries for better boundary handling)
                 const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
                     buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true,
@@ -405,7 +405,7 @@ function processDither(params) {
             if (isPaletted) {
                 // PALETTED PATH (sRGB-direct): paletted dither
                 sendProgress(50, 'Dithering with palette...');
-                // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios
+                // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
                 // use_ghost_entries: true (gamut mapping with ghost entries for better boundary handling)
                 const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
                     buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true,
