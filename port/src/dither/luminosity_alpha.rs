@@ -26,16 +26,12 @@ use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
-use crate::colorspace_derived::f32 as cs;
 use super::basic::dither_with_mode_bits;
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, wang_hash, DitherMode, FloydSteinberg,
-    JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
+    apply_single_channel_kernel, bit_replicate, perceptual_lightness_distance_sq, wang_hash,
+    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
+    SingleChannelKernel,
 };
-
-// ============================================================================
-// Optimized Grayscale Distance (same as luminosity.rs)
-// ============================================================================
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
 /// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
@@ -47,45 +43,6 @@ fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
         linear_to_srgb_single(lin_gray)
     } else {
         -linear_to_srgb_single(-lin_gray)
-    }
-}
-
-/// For grayscale with CIE76/CIE94/OKLab, distance reduces to simple ΔL²
-/// because a* = b* = 0 for neutral grays.
-#[inline]
-fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
-    let dl = l1 - l2;
-    dl * dl
-}
-
-/// CIEDE2000 lightness distance for grayscale.
-/// Unlike CIE76/CIE94, CIEDE2000 uses a lightness weighting factor SL
-/// that depends on the average lightness of the two colors.
-#[inline]
-fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
-    let dl = l1 - l2;
-    let l_bar = (l1 + l2) / 2.0;
-    let l_bar_minus_mid = l_bar - cs::CIEDE2000_SL_L_MIDPOINT;
-    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
-    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_mid_sq) / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
-    let dl_term = dl / sl;
-    dl_term * dl_term
-}
-
-/// Compute grayscale perceptual distance based on the selected space/metric
-#[inline]
-fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) -> f32 {
-    match space {
-        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
-        PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
-        PerceptualSpace::OkLab
-        | PerceptualSpace::OkLabLr
-        | PerceptualSpace::LinearRGB
-        | PerceptualSpace::YCbCr
-        | PerceptualSpace::YCbCrBt601
-        | PerceptualSpace::Srgb => {
-            lightness_distance_sq(l1, l2)
-        }
     }
 }
 

@@ -34,10 +34,10 @@ use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
-use crate::colorspace_derived::f32 as cs;
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, wang_hash, DitherMode, FloydSteinberg,
-    JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
+    apply_single_channel_kernel, bit_replicate, perceptual_lightness_distance_sq, wang_hash,
+    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
+    SingleChannelKernel,
 };
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
@@ -50,63 +50,6 @@ fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
         linear_to_srgb_single(lin_gray)
     } else {
         -linear_to_srgb_single(-lin_gray)
-    }
-}
-
-// ============================================================================
-// Optimized Grayscale Distance
-// ============================================================================
-
-/// For grayscale with CIE76/CIE94/OKLab, distance reduces to simple ΔL²
-/// because a* = b* = 0 for neutral grays.
-#[inline]
-fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
-    let dl = l1 - l2;
-    dl * dl
-}
-
-/// CIEDE2000 lightness distance for grayscale.
-/// Unlike CIE76/CIE94, CIEDE2000 uses a lightness weighting factor SL
-/// that depends on the average lightness of the two colors.
-/// This compensates for reduced human sensitivity in dark/light regions.
-///
-/// Formula: ΔE² = (ΔL / SL)²
-/// Where: SL = 1 + (K2 × (L̄ - 50)²) / √(20 + (L̄ - 50)²)
-///        L̄ = (L1 + L2) / 2
-///        K2 = 0.015 (from CIE94, shared with CIEDE2000)
-#[inline]
-fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
-    let dl = l1 - l2;
-    let l_bar = (l1 + l2) / 2.0;
-    let l_bar_minus_mid = l_bar - cs::CIEDE2000_SL_L_MIDPOINT;
-    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
-    let sl = 1.0 + (cs::CIE94_K2 * l_bar_minus_mid_sq) / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
-    let dl_term = dl / sl;
-    dl_term * dl_term
-}
-
-/// Compute grayscale perceptual distance based on the selected space/metric
-#[inline]
-fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) -> f32 {
-    match space {
-        // CIE76 and CIE94 reduce to simple ΔL² for neutral grays (a=b=0)
-        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
-        // CIEDE2000 uses SL weighting based on average lightness
-        PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
-        // OKLab uses simple Euclidean distance, which reduces to ΔL² for grays
-        // OKLabLr uses revised lightness but same distance formula
-        // LinearRGB also uses simple Euclidean distance in linear space
-        // YCbCr uses simple distance in gamma-encoded (sRGB) space
-        // YCbCrBt601 uses simple distance in gamma-encoded (sRGB) space
-        // sRGB uses simple distance in gamma-encoded (sRGB) space
-        PerceptualSpace::OkLab
-        | PerceptualSpace::OkLabLr
-        | PerceptualSpace::LinearRGB
-        | PerceptualSpace::YCbCr
-        | PerceptualSpace::YCbCrBt601
-        | PerceptualSpace::Srgb => {
-            lightness_distance_sq(l1, l2)
-        }
     }
 }
 

@@ -189,6 +189,16 @@ pub fn perceptual_distance_sq(
             let db = b1 - b2;
             dl * dl + da * da + db * db
         }
+        PerceptualSpace::OkLabHeavyChroma => {
+            // OkLab with heavy chroma weighting (×4) for dithering
+            // This penalizes chromatic differences more heavily, encouraging
+            // neutral oscillations rather than complementary color oscillations.
+            // Roughly matches CIE76's L:ab ratio of ~1:2.5
+            let dl = l1 - l2;
+            let da = a1 - a2;
+            let db = b1 - b2;
+            dl * dl + 4.0 * (da * da + db * db)
+        }
     }
 }
 

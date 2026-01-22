@@ -12,6 +12,7 @@ use crate::color::{
     linear_rgb_to_ycbcr_bt601, linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped,
     linear_to_srgb_single,
 };
+use crate::colorspace_derived::f32 as cs;
 
 /// Perceptual color space and distance metric for candidate selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -33,6 +34,11 @@ pub enum PerceptualSpace {
     /// Uses Ottosson's Lr formula which expands dark values compared to standard L
     /// Better for palettes where dark colors should stay distinct from grays
     OkLabLr,
+    /// OKLab with heavy chroma weighting (×4) for dithering
+    /// Penalizes chromatic differences more heavily, encouraging neutral (light/dark)
+    /// oscillations rather than chromatic (complementary color) oscillations.
+    /// Useful for limited palettes where CIE76-style chroma weighting works better.
+    OkLabHeavyChroma,
     /// Linear RGB with Euclidean distance (NOT RECOMMENDED)
     /// Simple Euclidean distance in linear RGB space - not perceptually uniform,
     /// provided for testing and comparison purposes only
@@ -259,7 +265,7 @@ pub fn linear_rgb_to_perceptual(space: PerceptualSpace, r: f32, g: f32, b: f32) 
         PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000 => {
             linear_rgb_to_lab(r, g, b)
         }
-        PerceptualSpace::OkLab => linear_rgb_to_oklab(r, g, b),
+        PerceptualSpace::OkLab | PerceptualSpace::OkLabHeavyChroma => linear_rgb_to_oklab(r, g, b),
         PerceptualSpace::OkLabLr => linear_rgb_to_oklab_lr(r, g, b),
     }
 }
@@ -295,8 +301,66 @@ pub fn linear_rgb_to_perceptual_clamped(
         PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000 => {
             linear_rgb_to_lab(r_clamped, g_clamped, b_clamped)
         }
-        PerceptualSpace::OkLab => linear_rgb_to_oklab(r_clamped, g_clamped, b_clamped),
+        PerceptualSpace::OkLab | PerceptualSpace::OkLabHeavyChroma => {
+            linear_rgb_to_oklab(r_clamped, g_clamped, b_clamped)
+        }
         PerceptualSpace::OkLabLr => linear_rgb_to_oklab_lr(r_clamped, g_clamped, b_clamped),
+    }
+}
+
+// ============================================================================
+// Lightness distance functions (for grayscale dithering)
+// ============================================================================
+
+/// Simple lightness distance squared (ΔL²).
+/// For grayscale with CIE76/CIE94/OKLab, distance reduces to this
+/// because a* = b* = 0 for neutral grays.
+#[inline]
+pub fn lightness_distance_sq(l1: f32, l2: f32) -> f32 {
+    let dl = l1 - l2;
+    dl * dl
+}
+
+/// CIEDE2000 lightness distance for grayscale.
+/// Unlike CIE76/CIE94, CIEDE2000 uses a lightness weighting factor SL
+/// that depends on the average lightness of the two colors.
+/// This compensates for reduced human sensitivity in dark/light regions.
+///
+/// Formula: ΔE² = (ΔL / SL)²
+/// Where: SL = 1 + (K2 × (L̄ - 50)²) / √(20 + (L̄ - 50)²)
+///        L̄ = (L1 + L2) / 2
+///        K2 = 0.015 (from CIE94, shared with CIEDE2000)
+#[inline]
+pub fn lightness_distance_ciede2000_sq(l1: f32, l2: f32) -> f32 {
+    let dl = l1 - l2;
+    let l_bar = (l1 + l2) / 2.0;
+    let l_bar_minus_mid = l_bar - cs::CIEDE2000_SL_L_MIDPOINT;
+    let l_bar_minus_mid_sq = l_bar_minus_mid * l_bar_minus_mid;
+    let sl = 1.0
+        + (cs::CIE94_K2 * l_bar_minus_mid_sq)
+            / (cs::CIEDE2000_SL_DENOM_OFFSET + l_bar_minus_mid_sq).sqrt();
+    let dl_term = dl / sl;
+    dl_term * dl_term
+}
+
+/// Compute grayscale perceptual distance based on the selected space/metric.
+/// For grayscale, chroma components are zero so distance reduces to lightness only.
+#[inline]
+pub fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) -> f32 {
+    match space {
+        // CIE76 and CIE94 reduce to simple ΔL² for neutral grays (a=b=0)
+        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
+        // CIEDE2000 uses SL weighting based on average lightness
+        PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
+        // All other spaces use simple Euclidean distance, which reduces to ΔL² for grays
+        // OkLabHeavyChroma also reduces to ΔL² since there's no chroma component
+        PerceptualSpace::OkLab
+        | PerceptualSpace::OkLabLr
+        | PerceptualSpace::OkLabHeavyChroma
+        | PerceptualSpace::LinearRGB
+        | PerceptualSpace::YCbCr
+        | PerceptualSpace::YCbCrBt601
+        | PerceptualSpace::Srgb => lightness_distance_sq(l1, l2),
     }
 }
 
