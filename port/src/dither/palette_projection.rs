@@ -218,12 +218,42 @@ impl ExtendedPalette {
     }
 
     /// (1c) Find the nearest real palette entry for a linear RGB point.
-    /// If the initial nearest is a ghost, redirects to real entries on that surface.
+    ///
+    /// Strategy to handle perceptual/linear space mismatch:
+    /// 1. Search in perceptual space first
+    /// 2. If we hit a ghost, try linear RGB space instead
+    /// 3. If linear also hits a ghost, use that ghost's surface for redirection
+    ///
+    /// This avoids premature ghost redirection when the perceptual space
+    /// doesn't align well with the linear RGB convex hull.
     pub fn find_nearest_real(&self, lin_rgb: [f32; 3]) -> usize {
         // First, find nearest entry (real or ghost) in perceptual space
         let (l, a, b) = linear_rgb_to_perceptual_clamped(self.space, lin_rgb[0], lin_rgb[1], lin_rgb[2]);
         let target_perc = [l, a, b];
 
+        let perceptual_nearest = self.find_nearest_entry_perceptual(target_perc);
+
+        // If perceptual search found a real entry, we're done
+        if let ExtendedEntry::Real(real_idx) = &self.entries[perceptual_nearest] {
+            return *real_idx;
+        }
+
+        // Perceptual hit a ghost - try linear RGB space instead
+        // The hull is defined in linear space, so linear distance aligns better with hull geometry
+        let linear_nearest = self.find_nearest_entry_linear(lin_rgb);
+
+        match &self.entries[linear_nearest] {
+            ExtendedEntry::Real(real_idx) => *real_idx,
+            ExtendedEntry::Ghost(ghost) => {
+                // Both perceptual and linear hit ghosts - use linear ghost's surface
+                // since it aligns with the hull geometry
+                self.find_nearest_on_surface(target_perc, ghost.plane_idx)
+            }
+        }
+    }
+
+    /// Find nearest entry (real or ghost) in perceptual space.
+    fn find_nearest_entry_perceptual(&self, target_perc: [f32; 3]) -> usize {
         let mut best_idx = 0;
         let mut best_dist = f32::INFINITY;
 
@@ -239,14 +269,23 @@ impl ExtendedPalette {
             }
         }
 
-        // If it's a real entry, we're done
-        match &self.entries[best_idx] {
-            ExtendedEntry::Real(real_idx) => *real_idx,
-            ExtendedEntry::Ghost(ghost) => {
-                // Redirect to real entries on this hull surface
-                self.find_nearest_on_surface(target_perc, ghost.plane_idx)
+        best_idx
+    }
+
+    /// Find nearest entry (real or ghost) in linear RGB space.
+    fn find_nearest_entry_linear(&self, target_lin: [f32; 3]) -> usize {
+        let mut best_idx = 0;
+        let mut best_dist = f32::INFINITY;
+
+        for (idx, pos) in self.positions.iter().enumerate() {
+            let d = distance_sq(target_lin, *pos);
+            if d < best_dist {
+                best_dist = d;
+                best_idx = idx;
             }
         }
+
+        best_idx
     }
 
     /// Find nearest real entry among those on a specific hull surface.
