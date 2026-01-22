@@ -110,11 +110,7 @@ pub use palette_hull::{
 };
 
 // Re-export palette projection types
-pub use palette_projection::{
-    ExtendedEntry,
-    ExtendedPalette,
-    GhostEntry,
-};
+pub use palette_projection::ExtendedPalette;
 
 // Re-export FP16 dithering
 pub use fp16::{
