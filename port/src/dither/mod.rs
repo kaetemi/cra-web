@@ -11,6 +11,7 @@
 //! - `luminosity_alpha`: Grayscale with alpha colorspace-aware dithering
 //! - `rgb`: Colorspace-aware RGB dithering
 //! - `rgba`: Colorspace-aware RGBA dithering
+//! - `paletted`: Palette-based RGBA dithering with integrated alpha-RGB distance
 //! - `fp16`: FP16 (half-precision float) dithering
 //! - `bf16`: BF16 (brain float) dithering
 
@@ -21,6 +22,7 @@ pub mod luminosity;
 pub mod luminosity_alpha;
 pub mod rgb;
 pub mod rgba;
+pub mod paletted;
 pub mod fp16;
 pub mod bf16;
 
@@ -81,6 +83,16 @@ pub use rgba::{
     colorspace_aware_dither_rgba_channels,
     colorspace_aware_dither_rgba_interleaved,
     colorspace_aware_dither_rgba_with_mode,
+};
+
+// Re-export paletted dithering
+pub use paletted::{
+    paletted_dither_rgba,
+    paletted_dither_rgba_channels,
+    paletted_dither_rgba_interleaved,
+    paletted_dither_rgba_with_mode,
+    paletted_dither_to_indices,
+    DitherPalette,
 };
 
 // Re-export FP16 dithering
