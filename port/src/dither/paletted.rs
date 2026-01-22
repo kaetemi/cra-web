@@ -99,6 +99,15 @@ impl DitherPalette {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+
+    /// Extract linear RGB points from palette entries.
+    /// Used for convex hull computation.
+    pub fn linear_rgb_points(&self) -> Vec<[f32; 3]> {
+        self.entries
+            .iter()
+            .map(|e| [e.lin_r, e.lin_g, e.lin_b])
+            .collect()
+    }
 }
 
 // ============================================================================
