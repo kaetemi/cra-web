@@ -79,6 +79,7 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
         PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 => lightness_distance_sq(l1, l2),
         PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
         PerceptualSpace::OkLab
+        | PerceptualSpace::OkLabLr
         | PerceptualSpace::LinearRGB
         | PerceptualSpace::YCbCr
         | PerceptualSpace::YCbCrBt601

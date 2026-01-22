@@ -8,8 +8,9 @@
 /// - `wang_hash`: Deterministic hash for random number generation
 
 use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_bt601,
-    linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped, linear_to_srgb_single,
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_oklab_lr, linear_rgb_to_ycbcr,
+    linear_rgb_to_ycbcr_bt601, linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped,
+    linear_to_srgb_single,
 };
 
 /// Perceptual color space and distance metric for candidate selection
@@ -28,6 +29,10 @@ pub enum PerceptualSpace {
     /// Designed so Euclidean distance is perceptually uniform
     #[default]
     OkLab,
+    /// OKLab with revised lightness (Lr) for better Munsell Value matching
+    /// Uses Ottosson's Lr formula which expands dark values compared to standard L
+    /// Better for palettes where dark colors should stay distinct from grays
+    OkLabLr,
     /// Linear RGB with Euclidean distance (NOT RECOMMENDED)
     /// Simple Euclidean distance in linear RGB space - not perceptually uniform,
     /// provided for testing and comparison purposes only
@@ -255,6 +260,7 @@ pub fn linear_rgb_to_perceptual(space: PerceptualSpace, r: f32, g: f32, b: f32) 
             linear_rgb_to_lab(r, g, b)
         }
         PerceptualSpace::OkLab => linear_rgb_to_oklab(r, g, b),
+        PerceptualSpace::OkLabLr => linear_rgb_to_oklab_lr(r, g, b),
     }
 }
 
@@ -290,6 +296,7 @@ pub fn linear_rgb_to_perceptual_clamped(
             linear_rgb_to_lab(r_clamped, g_clamped, b_clamped)
         }
         PerceptualSpace::OkLab => linear_rgb_to_oklab(r_clamped, g_clamped, b_clamped),
+        PerceptualSpace::OkLabLr => linear_rgb_to_oklab_lr(r_clamped, g_clamped, b_clamped),
     }
 }
 

@@ -107,6 +107,8 @@ pub enum ColorSpace {
     /// OKLab (perceptually uniform, recommended)
     #[default]
     Oklab,
+    /// OKLab with revised lightness Lr (better for dark colors)
+    OklabLr,
     /// CIELAB with CIE76 (simple Euclidean distance)
     LabCie76,
     /// CIELAB with CIE94 (weighted distance)
@@ -127,6 +129,7 @@ impl ColorSpace {
     pub fn to_perceptual_space(self) -> PerceptualSpace {
         match self {
             ColorSpace::Oklab => PerceptualSpace::OkLab,
+            ColorSpace::OklabLr => PerceptualSpace::OkLabLr,
             ColorSpace::LabCie76 => PerceptualSpace::LabCIE76,
             ColorSpace::LabCie94 => PerceptualSpace::LabCIE94,
             ColorSpace::LabCiede2000 => PerceptualSpace::LabCIEDE2000,

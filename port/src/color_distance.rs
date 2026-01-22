@@ -173,11 +173,13 @@ pub fn perceptual_distance_sq(
         PerceptualSpace::LabCIE94 => lab_distance_cie94_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::LabCIEDE2000 => lab_distance_ciede2000_sq(l1, a1, b1, l2, a2, b2),
         PerceptualSpace::OkLab
+        | PerceptualSpace::OkLabLr
         | PerceptualSpace::LinearRGB
         | PerceptualSpace::YCbCr
         | PerceptualSpace::YCbCrBt601
         | PerceptualSpace::Srgb => {
             // OkLab uses simple Euclidean distance (it's designed for this)
+            // OkLabLr uses Ottosson's revised lightness but still Euclidean distance
             // LinearRGB also uses simple Euclidean (l/a/b contain R/G/B in linear space)
             // YCbCr also uses simple Euclidean (l/a/b contain Y'/Cb/Cr values)
             // YCbCrBt601 also uses simple Euclidean (l/a/b contain Y'/Cb/Cr with BT.601 coefficients)

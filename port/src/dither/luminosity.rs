@@ -94,11 +94,13 @@ fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32) ->
         // CIEDE2000 uses SL weighting based on average lightness
         PerceptualSpace::LabCIEDE2000 => lightness_distance_ciede2000_sq(l1, l2),
         // OKLab uses simple Euclidean distance, which reduces to ΔL² for grays
+        // OKLabLr uses revised lightness but same distance formula
         // LinearRGB also uses simple Euclidean distance in linear space
         // YCbCr uses simple distance in gamma-encoded (sRGB) space
         // YCbCrBt601 uses simple distance in gamma-encoded (sRGB) space
         // sRGB uses simple distance in gamma-encoded (sRGB) space
         PerceptualSpace::OkLab
+        | PerceptualSpace::OkLabLr
         | PerceptualSpace::LinearRGB
         | PerceptualSpace::YCbCr
         | PerceptualSpace::YCbCrBt601

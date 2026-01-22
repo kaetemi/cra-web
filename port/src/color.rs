@@ -353,6 +353,32 @@ pub fn oklab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
     Pixel4::new(r, g, b, p[3])
 }
 
+/// Convert OkLab L to revised lightness Lr (Ottosson's formula)
+/// Lr better matches Munsell Value and expands dark values compared to L.
+/// This helps dark colors stay distinct from grays in distance calculations.
+///
+/// Formula: Lr = 0.5 * (k3*L - k1 + sqrt((k3*L - k1)² + 4*k2*k3*L))
+/// where k1 = 0.206, k2 = 0.03, k3 = (1+k1)/(1+k2)
+#[inline]
+pub fn oklab_L_to_Lr(l: f32) -> f32 {
+    const K1: f32 = 0.206;
+    const K2: f32 = 0.03;
+    const K3: f32 = (1.0 + K1) / (1.0 + K2); // ≈ 1.170873786
+
+    let k3l = K3 * l;
+    let k3l_minus_k1 = k3l - K1;
+
+    0.5 * (k3l_minus_k1 + (k3l_minus_k1 * k3l_minus_k1 + 4.0 * K2 * k3l).sqrt())
+}
+
+/// Convert linear RGB to OkLab with revised lightness (Lr, a, b)
+/// Uses Ottosson's Lr formula for lightness instead of standard L.
+#[inline]
+pub fn linear_rgb_to_oklab_lr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    let (l, a, b_ch) = linear_rgb_to_oklab(r, g, b);
+    (oklab_L_to_Lr(l), a, b_ch)
+}
+
 // ============== Y'CbCr color space ==============
 // Y'CbCr is a luma-chroma separation, traditionally applied to gamma-encoded (sRGB) values.
 // BT.709 coefficients are used (matching sRGB primaries).

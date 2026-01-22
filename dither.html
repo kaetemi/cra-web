@@ -773,6 +773,7 @@
                 <label for="perceptual-space">Distance Metric:</label>
                 <select id="perceptual-space">
                     <option value="1" selected>* OKLab</option>
+                    <option value="8">OKLab Lr (better for dark colors)</option>
                     <option value="3">CIELAB (CIEDE2000)</option>
                     <option value="2">* CIELAB (CIE94)</option>
                     <option value="0">CIELAB (CIE76)</option>
@@ -854,7 +855,7 @@
                     <option value="palette-websafe">Paletted Web-Safe (216 colors)</option>
                     <option value="palette-cga-5153">Paletted CGA 5153 (16 colors)</option>
                     <option value="palette-cga-bios">Paletted CGA BIOS (16 colors)</option>
-                    <option value="palette-cga-mode5">Paletted CGA Mode 5 (4 colors)</option>
+                    <option value="palette-cga-mode5">Paletted CGA Mode 5 (4 colors) (recommend Y'CbCr BT.709 or CIELAB CIE76 as distance metric)</option>
                 </select>
             </div>
 
@@ -1656,7 +1657,7 @@
             const fillNames = ['Black', 'Repeat'];
             const modeNames = ['FsStandard', 'FsSerpentine', 'JjnStandard', 'JjnSerpentine',
                                'MixedStandard', 'MixedSerpentine', 'MixedRandom', 'None'];
-            const spaceNames = ['LabCie76', 'Oklab', 'LabCie94', 'LabCiede2000', 'LinearRgb', 'YCbCr', 'Srgb', 'YCbCrBt601'];
+            const spaceNames = ['LabCie76', 'Oklab', 'LabCie94', 'LabCiede2000', 'LinearRgb', 'YCbCr', 'Srgb', 'YCbCrBt601', 'OklabLr'];
 
             // Name matches output filename (without extension)
             const ts = processTimestamp || Date.now();

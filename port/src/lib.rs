@@ -63,6 +63,7 @@ fn perceptual_space_from_u8(space: u8) -> PerceptualSpace {
         5 => PerceptualSpace::YCbCr,
         6 => PerceptualSpace::Srgb,
         7 => PerceptualSpace::YCbCrBt601,
+        8 => PerceptualSpace::OkLabLr,
         _ => PerceptualSpace::OkLab, // 1 or any other value defaults to OkLab
     }
 }
