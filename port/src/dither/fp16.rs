@@ -10,14 +10,12 @@
 
 use half::f16;
 
-use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_clamped,
-    linear_to_srgb_single, srgb_to_linear_single,
+use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
+use crate::color_distance::perceptual_distance_sq;
+use super::common::{
+    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash, DitherMode,
+    PerceptualSpace,
 };
-use crate::color_distance::{
-    is_lab_space, is_linear_rgb_space, is_ycbcr_space, perceptual_distance_sq,
-};
-use super::common::{wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
 // Working space enum
@@ -786,16 +784,8 @@ fn process_pixel_f16_with_values(
     let (g_floor, g_ceil) = get_f16_bounds(ws_g_adj);
     let (b_floor, b_ceil) = get_f16_bounds(ws_b_adj);
 
-    // 6. Convert target to perceptual space (use linear adjusted values)
-    let lab_target = if is_linear_rgb_space(space) {
-        (lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_ycbcr_space(space) {
-        linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_lab_space(space) {
-        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else {
-        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
-    };
+    // 6. Convert target to perceptual space (unclamped for true distance)
+    let lab_target = linear_rgb_to_perceptual(space, lin_r_adj, lin_g_adj, lin_b_adj);
 
     // 7. Search all 8 candidate combinations for best quantization
     let r_candidates = [r_floor, r_ceil];
@@ -815,16 +805,8 @@ fn process_pixel_f16_with_values(
                 let g_lin = f16_to_linear(g_cand, working_space);
                 let b_lin = f16_to_linear(b_cand, working_space);
 
-                // Convert to perceptual space
-                let lab_cand = if is_linear_rgb_space(space) {
-                    (r_lin, g_lin, b_lin)
-                } else if is_ycbcr_space(space) {
-                    linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
-                } else if is_lab_space(space) {
-                    linear_rgb_to_lab(r_lin, g_lin, b_lin)
-                } else {
-                    linear_rgb_to_oklab(r_lin, g_lin, b_lin)
-                };
+                // Convert to perceptual space (clamped for candidate)
+                let lab_cand = linear_rgb_to_perceptual_clamped(space, r_lin, g_lin, b_lin);
 
                 let dist = perceptual_distance_sq(
                     space,

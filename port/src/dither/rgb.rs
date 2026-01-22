@@ -14,15 +14,9 @@
 /// - Serpentine: Alternating direction each row
 /// - Random: Random direction per row (mixed modes only)
 
-use crate::color::{
-    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_bt601,
-    linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped, linear_to_srgb_single,
-    srgb_to_linear_single,
-};
-use crate::color_distance::{
-    is_lab_space, is_linear_rgb_space, is_srgb_space, is_ycbcr_bt601_space, is_ycbcr_space,
-    perceptual_distance_sq,
-};
+use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
+use crate::color_distance::perceptual_distance_sq;
+use super::common::{linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped};
 
 // Re-export common types for backwards compatibility
 #[allow(unused_imports)]
@@ -155,23 +149,7 @@ fn build_perceptual_lut(
                 let b_ext = quant.level_values[b_level];
                 let b_lin = linear_lut[b_ext as usize];
 
-                let (l, a, b_ch) = if is_srgb_space(space) {
-                    // Store gamma-encoded sRGB values directly (normalized to 0-1)
-                    (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
-                } else if is_linear_rgb_space(space) {
-                    // Store linear RGB values directly (no perceptual conversion)
-                    (r_lin, g_lin, b_lin)
-                } else if is_ycbcr_space(space) {
-                    // Y'CbCr BT.709 conversion (goes through sRGB internally)
-                    linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
-                } else if is_ycbcr_bt601_space(space) {
-                    // Y'CbCr BT.601 (legacy) conversion (goes through sRGB internally)
-                    linear_rgb_to_ycbcr_bt601_clamped(r_lin, g_lin, b_lin)
-                } else if is_lab_space(space) {
-                    linear_rgb_to_lab(r_lin, g_lin, b_lin)
-                } else {
-                    linear_rgb_to_oklab(r_lin, g_lin, b_lin)
-                };
+                let (l, a, b_ch) = linear_rgb_to_perceptual_clamped(space, r_lin, g_lin, b_lin);
 
                 let idx = r_level * n * n + g_level * n + b_level;
                 lut[idx] = LabValue { l, a, b: b_ch };
@@ -662,20 +640,8 @@ fn process_pixel_with_rgb(
     let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to perceptual space
-    let lab_target = if is_srgb_space(ctx.space) {
-        (srgb_r_adj / 255.0, srgb_g_adj / 255.0, srgb_b_adj / 255.0)
-    } else if is_linear_rgb_space(ctx.space) {
-        (lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_ycbcr_space(ctx.space) {
-        linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_ycbcr_bt601_space(ctx.space) {
-        linear_rgb_to_ycbcr_bt601(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_lab_space(ctx.space) {
-        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else {
-        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
-    };
+    // 5. Convert target to perceptual space (unclamped for true distance)
+    let lab_target = linear_rgb_to_perceptual(ctx.space, lin_r_adj, lin_g_adj, lin_b_adj);
 
     // 6. Search candidates
     let mut best_r_level = r_min;
@@ -699,19 +665,8 @@ fn process_pixel_with_rgb(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = if is_srgb_space(ctx.space) {
-                        (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
-                    } else if is_linear_rgb_space(ctx.space) {
-                        (r_lin, g_lin, b_lin)
-                    } else if is_ycbcr_space(ctx.space) {
-                        linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
-                    } else if is_ycbcr_bt601_space(ctx.space) {
-                        linear_rgb_to_ycbcr_bt601_clamped(r_lin, g_lin, b_lin)
-                    } else if is_lab_space(ctx.space) {
-                        linear_rgb_to_lab(r_lin, g_lin, b_lin)
-                    } else {
-                        linear_rgb_to_oklab(r_lin, g_lin, b_lin)
-                    };
+                    let (l, a, b_ch) =
+                        linear_rgb_to_perceptual_clamped(ctx.space, r_lin, g_lin, b_lin);
                     LabValue { l, a, b: b_ch }
                 };
 
@@ -1205,25 +1160,8 @@ fn process_pixel(
     let b_min = ctx.quant_b.floor_level(srgb_b_adj.floor() as u8);
     let b_max = ctx.quant_b.ceil_level((srgb_b_adj.ceil() as u8).min(255));
 
-    // 5. Convert target to Lab/OkLab/LinearRGB/YCbCr/sRGB (use unclamped for true distance)
-    let lab_target = if is_srgb_space(ctx.space) {
-        // sRGB mode: use gamma-encoded values directly (normalized 0-1)
-        // Convert linear back to sRGB for comparison (clamped for valid range)
-        (srgb_r_adj / 255.0, srgb_g_adj / 255.0, srgb_b_adj / 255.0)
-    } else if is_linear_rgb_space(ctx.space) {
-        // Linear RGB mode: use linear values directly
-        (lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_ycbcr_space(ctx.space) {
-        // Y'CbCr BT.709 mode: convert through sRGB (unclamped for out-of-gamut)
-        linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_ycbcr_bt601_space(ctx.space) {
-        // Y'CbCr BT.601 (legacy) mode: convert through sRGB (unclamped for out-of-gamut)
-        linear_rgb_to_ycbcr_bt601(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else if is_lab_space(ctx.space) {
-        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
-    } else {
-        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
-    };
+    // 5. Convert target to perceptual space (unclamped for true distance)
+    let lab_target = linear_rgb_to_perceptual(ctx.space, lin_r_adj, lin_g_adj, lin_b_adj);
 
     // 6. Search candidates
     let mut best_r_level = r_min;
@@ -1249,20 +1187,8 @@ fn process_pixel(
                     let g_lin = ctx.linear_lut[g_ext as usize];
                     let b_lin = ctx.linear_lut[b_ext as usize];
 
-                    let (l, a, b_ch) = if is_srgb_space(ctx.space) {
-                        // sRGB mode: use gamma-encoded values (normalized 0-1)
-                        (r_ext as f32 / 255.0, g_ext as f32 / 255.0, b_ext as f32 / 255.0)
-                    } else if is_linear_rgb_space(ctx.space) {
-                        (r_lin, g_lin, b_lin)
-                    } else if is_ycbcr_space(ctx.space) {
-                        linear_rgb_to_ycbcr_clamped(r_lin, g_lin, b_lin)
-                    } else if is_ycbcr_bt601_space(ctx.space) {
-                        linear_rgb_to_ycbcr_bt601_clamped(r_lin, g_lin, b_lin)
-                    } else if is_lab_space(ctx.space) {
-                        linear_rgb_to_lab(r_lin, g_lin, b_lin)
-                    } else {
-                        linear_rgb_to_oklab(r_lin, g_lin, b_lin)
-                    };
+                    let (l, a, b_ch) =
+                        linear_rgb_to_perceptual_clamped(ctx.space, r_lin, g_lin, b_lin);
                     LabValue { l, a, b: b_ch }
                 };
 

@@ -3,8 +3,14 @@
 /// Provides:
 /// - `PerceptualSpace`: Enum for selecting color space and distance metric
 /// - `DitherMode`: Enum for selecting dithering algorithm and scanning mode
+/// - `linear_rgb_to_perceptual`: Convert linear RGB to perceptual space coordinates
 /// - `bit_replicate`: Extend n-bit values to 8 bits
 /// - `wang_hash`: Deterministic hash for random number generation
+
+use crate::color::{
+    linear_rgb_to_lab, linear_rgb_to_oklab, linear_rgb_to_ycbcr, linear_rgb_to_ycbcr_bt601,
+    linear_rgb_to_ycbcr_bt601_clamped, linear_rgb_to_ycbcr_clamped, linear_to_srgb_single,
+};
 
 /// Perceptual color space and distance metric for candidate selection
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -215,4 +221,74 @@ pub fn bit_replicate(value: u8, bits: u8) -> u8 {
         }
     }
     result as u8
+}
+
+// ============================================================================
+// Perceptual space conversion helpers
+// ============================================================================
+
+/// Convert linear RGB to perceptual space coordinates (unclamped).
+///
+/// Use this for distance calculation where out-of-gamut values should be
+/// preserved for accurate error measurement. Values outside [0,1] are passed
+/// through to the conversion functions (except sRGB which requires clamping).
+///
+/// Returns (L/Y/R, a/Cb/G, b/Cr/B) depending on the color space.
+#[inline]
+pub fn linear_rgb_to_perceptual(space: PerceptualSpace, r: f32, g: f32, b: f32) -> (f32, f32, f32) {
+    match space {
+        PerceptualSpace::Srgb => {
+            // sRGB requires clamping for valid gamma conversion
+            let r_clamped = r.clamp(0.0, 1.0);
+            let g_clamped = g.clamp(0.0, 1.0);
+            let b_clamped = b.clamp(0.0, 1.0);
+            (
+                linear_to_srgb_single(r_clamped),
+                linear_to_srgb_single(g_clamped),
+                linear_to_srgb_single(b_clamped),
+            )
+        }
+        PerceptualSpace::LinearRGB => (r, g, b),
+        PerceptualSpace::YCbCr => linear_rgb_to_ycbcr(r, g, b),
+        PerceptualSpace::YCbCrBt601 => linear_rgb_to_ycbcr_bt601(r, g, b),
+        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000 => {
+            linear_rgb_to_lab(r, g, b)
+        }
+        PerceptualSpace::OkLab => linear_rgb_to_oklab(r, g, b),
+    }
+}
+
+/// Convert linear RGB to perceptual space coordinates (clamped).
+///
+/// Use this for building LUTs or when the input must be valid (in-gamut).
+/// All inputs are clamped to [0,1] before conversion.
+///
+/// Returns (L/Y/R, a/Cb/G, b/Cr/B) depending on the color space.
+#[inline]
+pub fn linear_rgb_to_perceptual_clamped(
+    space: PerceptualSpace,
+    r: f32,
+    g: f32,
+    b: f32,
+) -> (f32, f32, f32) {
+    let r_clamped = r.clamp(0.0, 1.0);
+    let g_clamped = g.clamp(0.0, 1.0);
+    let b_clamped = b.clamp(0.0, 1.0);
+
+    match space {
+        PerceptualSpace::Srgb => (
+            linear_to_srgb_single(r_clamped),
+            linear_to_srgb_single(g_clamped),
+            linear_to_srgb_single(b_clamped),
+        ),
+        PerceptualSpace::LinearRGB => (r_clamped, g_clamped, b_clamped),
+        PerceptualSpace::YCbCr => linear_rgb_to_ycbcr_clamped(r_clamped, g_clamped, b_clamped),
+        PerceptualSpace::YCbCrBt601 => {
+            linear_rgb_to_ycbcr_bt601_clamped(r_clamped, g_clamped, b_clamped)
+        }
+        PerceptualSpace::LabCIE76 | PerceptualSpace::LabCIE94 | PerceptualSpace::LabCIEDE2000 => {
+            linear_rgb_to_lab(r_clamped, g_clamped, b_clamped)
+        }
+        PerceptualSpace::OkLab => linear_rgb_to_oklab(r_clamped, g_clamped, b_clamped),
+    }
 }
