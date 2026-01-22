@@ -559,25 +559,27 @@ fn process_pixel_paletted(
     };
 
     // 4. Convert to perceptual space for distance calculation
-    // Clamp for valid color space conversion
-    let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
-    let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
-    let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
+    // Use unclamped values for true distance (matching RGB/RGBA behavior)
+    // Only clamp alpha since it's used as a weighting factor
     let alpha_clamped = alpha_adj.clamp(0.0, 1.0);
 
     let (target_perc_l, target_perc_a, target_perc_b) = if is_srgb_space(ctx.palette.space) {
+        // sRGB requires clamping for valid gamma conversion
+        let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
+        let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
+        let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
         let srgb_r_adj = linear_to_srgb_single(lin_r_clamped);
         let srgb_g_adj = linear_to_srgb_single(lin_g_clamped);
         let srgb_b_adj = linear_to_srgb_single(lin_b_clamped);
         (srgb_r_adj, srgb_g_adj, srgb_b_adj)
     } else if is_linear_rgb_space(ctx.palette.space) {
-        (lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.palette.space) {
         linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_lab_space(ctx.palette.space) {
-        linear_rgb_to_lab(lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
     } else {
-        linear_rgb_to_oklab(lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
     };
 
     // 5. Find best palette entry using integrated distance
@@ -1488,24 +1490,26 @@ fn process_pixel_paletted_index(
         (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
     };
 
-    let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
-    let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
-    let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
+    // Use unclamped values for true distance (matching RGB/RGBA behavior)
     let alpha_clamped = alpha_adj.clamp(0.0, 1.0);
 
     let (target_perc_l, target_perc_a, target_perc_b) = if is_srgb_space(ctx.palette.space) {
+        // sRGB requires clamping for valid gamma conversion
+        let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
+        let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
+        let lin_b_clamped = lin_b_adj.clamp(0.0, 1.0);
         let srgb_r_adj = linear_to_srgb_single(lin_r_clamped);
         let srgb_g_adj = linear_to_srgb_single(lin_g_clamped);
         let srgb_b_adj = linear_to_srgb_single(lin_b_clamped);
         (srgb_r_adj, srgb_g_adj, srgb_b_adj)
     } else if is_linear_rgb_space(ctx.palette.space) {
-        (lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        (lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_ycbcr_space(ctx.palette.space) {
         linear_rgb_to_ycbcr(lin_r_adj, lin_g_adj, lin_b_adj)
     } else if is_lab_space(ctx.palette.space) {
-        linear_rgb_to_lab(lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        linear_rgb_to_lab(lin_r_adj, lin_g_adj, lin_b_adj)
     } else {
-        linear_rgb_to_oklab(lin_r_clamped, lin_g_clamped, lin_b_clamped)
+        linear_rgb_to_oklab(lin_r_adj, lin_g_adj, lin_b_adj)
     };
 
     let mut best_idx = 0u8;
