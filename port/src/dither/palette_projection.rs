@@ -448,4 +448,127 @@ mod tests {
         // (but hull is triangulated so might be different)
         assert!(total_surface_entries > 0);
     }
+
+    #[test]
+    fn test_surface_entries_complete() {
+        // Test with 8-corner cube: verify each vertex appears on exactly 3 logical faces
+        let palette = make_test_palette();
+        let extended = ExtendedPalette::new(palette, PerceptualSpace::OkLab);
+
+        let num_planes = extended.hull().planes.len();
+        let num_real = extended.real_count();
+
+        // Count how many surfaces each vertex is on
+        let mut vertex_surface_count = vec![0usize; num_real];
+        for surface_entries in &extended.surface_real_entries {
+            for &vertex_idx in surface_entries {
+                vertex_surface_count[vertex_idx] += 1;
+            }
+        }
+
+        // For a cube, we expect either 6 planes (if merged) or 12 planes (if triangulated)
+        // Each vertex should be on at least 3 surfaces (the 3 faces meeting at that corner)
+        // With triangulation, each vertex might be on 6 surfaces (2 triangles per face × 3 faces)
+        for (idx, &count) in vertex_surface_count.iter().enumerate() {
+            assert!(
+                count >= 3,
+                "Vertex {} is only on {} surfaces, expected at least 3",
+                idx, count
+            );
+        }
+
+        // Also verify that each surface has at least 3 entries (the triangle vertices)
+        for (plane_idx, surface_entries) in extended.surface_real_entries.iter().enumerate() {
+            assert!(
+                surface_entries.len() >= 3,
+                "Surface {} has only {} entries, expected at least 3",
+                plane_idx, surface_entries.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_tetrahedron_surface_entries() {
+        // Test with 4-color palette forming a tetrahedron
+        // This is similar to CGA Mode 5: black, cyan, magenta, white
+        let colors = vec![
+            (0, 0, 0, 255),       // Black (0,0,0)
+            (0, 255, 255, 255),   // Cyan (0,1,1)
+            (255, 0, 255, 255),   // Magenta (1,0,1)
+            (255, 255, 255, 255), // White (1,1,1)
+        ];
+        let palette = DitherPalette::new(&colors, PerceptualSpace::OkLab);
+        let extended = ExtendedPalette::new(palette, PerceptualSpace::OkLab);
+
+        let num_planes = extended.hull().planes.len();
+
+        // A tetrahedron has 4 triangular faces
+        assert_eq!(num_planes, 4, "Tetrahedron should have 4 faces");
+
+        // Each vertex is on exactly 3 faces
+        let mut vertex_surface_count = vec![0usize; 4];
+        for surface_entries in &extended.surface_real_entries {
+            for &vertex_idx in surface_entries {
+                vertex_surface_count[vertex_idx] += 1;
+            }
+        }
+
+        for (idx, &count) in vertex_surface_count.iter().enumerate() {
+            assert_eq!(
+                count, 3,
+                "Vertex {} is on {} surfaces, expected exactly 3",
+                idx, count
+            );
+        }
+
+        // Each face should have exactly 3 vertices
+        for (plane_idx, surface_entries) in extended.surface_real_entries.iter().enumerate() {
+            assert_eq!(
+                surface_entries.len(), 3,
+                "Surface {} has {} entries, expected exactly 3",
+                plane_idx, surface_entries.len()
+            );
+        }
+    }
+
+    #[test]
+    fn test_cga_mode5_surface_entries() {
+        // CGA Mode 5: Black, Cyan, Magenta, White - forms a tetrahedron
+        let colors = vec![
+            (0, 0, 0, 255),       // Black
+            (0, 255, 255, 255),   // Cyan
+            (255, 0, 255, 255),   // Magenta
+            (255, 255, 255, 255), // White
+        ];
+        let palette = DitherPalette::new(&colors, PerceptualSpace::OkLab);
+        let extended = ExtendedPalette::new(palette, PerceptualSpace::OkLab);
+
+        // Verify all 4 vertices are correctly assigned to surfaces
+        let num_planes = extended.hull().planes.len();
+        assert_eq!(num_planes, 4, "CGA Mode 5 tetrahedron should have 4 faces");
+
+        // Verify each surface has exactly 3 entries
+        for (i, entries) in extended.surface_real_entries.iter().enumerate() {
+            assert_eq!(
+                entries.len(), 3,
+                "Surface {} should have 3 vertices, has {}",
+                i, entries.len()
+            );
+        }
+
+        // Verify each vertex is on exactly 3 surfaces
+        let mut counts = [0usize; 4];
+        for entries in &extended.surface_real_entries {
+            for &idx in entries {
+                counts[idx] += 1;
+            }
+        }
+        for (i, &c) in counts.iter().enumerate() {
+            assert_eq!(c, 3, "Vertex {} should be on 3 surfaces, is on {}", i, c);
+        }
+
+        // Verify the total: 4 faces × 3 vertices = 12 total entries
+        let total: usize = extended.surface_real_entries.iter().map(|v| v.len()).sum();
+        assert_eq!(total, 12, "Total surface entries should be 12");
+    }
 }
