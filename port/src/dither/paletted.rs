@@ -546,10 +546,17 @@ fn process_pixel_paletted(
     let lin_b_orig = srgb_to_linear_single(srgb_b);
 
     // 3. Add accumulated error
-    let lin_r_adj = lin_r_orig + err_r_in;
-    let lin_g_adj = lin_g_orig + err_g_in;
-    let lin_b_adj = lin_b_orig + err_b_in;
+    // Alpha always gets error applied
     let alpha_adj = alpha + err_a_in;
+
+    // For RGB, skip error application for fully transparent pixels.
+    // This produces cleaner RGB output (useful if alpha is later stripped).
+    // Error diffusion still works since the error term is alpha-weighted anyway.
+    let (lin_r_adj, lin_g_adj, lin_b_adj) = if alpha_adj <= 0.0 {
+        (lin_r_orig, lin_g_orig, lin_b_orig)
+    } else {
+        (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
+    };
 
     // 4. Convert to perceptual space for distance calculation
     // Clamp for valid color space conversion
@@ -592,10 +599,23 @@ fn process_pixel_paletted(
 
     let best = &ctx.palette.entries[best_idx];
 
-    // 6. Compute error in linear space
-    let err_r_val = lin_r_adj - best.lin_r;
-    let err_g_val = lin_g_adj - best.lin_g;
-    let err_b_val = lin_b_adj - best.lin_b;
+    // 6. Compute alpha-aware error to diffuse
+    // For RGB: error = (1 - α) × e_in + α × q_err
+    // This ensures:
+    //   - Fully transparent pixels (α=0) pass all accumulated error to neighbors
+    //   - Fully opaque pixels (α=1) pass only quantization error
+    //   - Semi-transparent pixels blend proportionally
+    let q_err_r = lin_r_adj - best.lin_r;
+    let q_err_g = lin_g_adj - best.lin_g;
+    let q_err_b = lin_b_adj - best.lin_b;
+
+    let alpha_factor = alpha_clamped;
+    let one_minus_alpha = 1.0 - alpha_factor;
+    let err_r_val = one_minus_alpha * err_r_in + alpha_factor * q_err_r;
+    let err_g_val = one_minus_alpha * err_g_in + alpha_factor * q_err_g;
+    let err_b_val = one_minus_alpha * err_b_in + alpha_factor * q_err_b;
+
+    // Alpha uses simple quantization error (no visibility weighting for alpha itself)
     let err_a_val = alpha_adj - best.lin_a;
 
     (best.r, best.g, best.b, best.a, err_r_val, err_g_val, err_b_val, err_a_val)
@@ -1458,10 +1478,15 @@ fn process_pixel_paletted_index(
     let lin_g_orig = srgb_to_linear_single(srgb_g);
     let lin_b_orig = srgb_to_linear_single(srgb_b);
 
-    let lin_r_adj = lin_r_orig + err_r_in;
-    let lin_g_adj = lin_g_orig + err_g_in;
-    let lin_b_adj = lin_b_orig + err_b_in;
+    // Alpha always gets error applied
     let alpha_adj = alpha + err_a_in;
+
+    // For RGB, skip error application for fully transparent pixels
+    let (lin_r_adj, lin_g_adj, lin_b_adj) = if alpha_adj <= 0.0 {
+        (lin_r_orig, lin_g_orig, lin_b_orig)
+    } else {
+        (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
+    };
 
     let lin_r_clamped = lin_r_adj.clamp(0.0, 1.0);
     let lin_g_clamped = lin_g_adj.clamp(0.0, 1.0);
@@ -1501,9 +1526,17 @@ fn process_pixel_paletted_index(
 
     let best = &ctx.palette.entries[best_idx as usize];
 
-    let err_r_val = lin_r_adj - best.lin_r;
-    let err_g_val = lin_g_adj - best.lin_g;
-    let err_b_val = lin_b_adj - best.lin_b;
+    // Compute alpha-aware error to diffuse
+    let q_err_r = lin_r_adj - best.lin_r;
+    let q_err_g = lin_g_adj - best.lin_g;
+    let q_err_b = lin_b_adj - best.lin_b;
+
+    let alpha_factor = alpha_clamped;
+    let one_minus_alpha = 1.0 - alpha_factor;
+    let err_r_val = one_minus_alpha * err_r_in + alpha_factor * q_err_r;
+    let err_g_val = one_minus_alpha * err_g_in + alpha_factor * q_err_g;
+    let err_b_val = one_minus_alpha * err_b_in + alpha_factor * q_err_b;
+
     let err_a_val = alpha_adj - best.lin_a;
 
     (best_idx, err_r_val, err_g_val, err_b_val, err_a_val)
