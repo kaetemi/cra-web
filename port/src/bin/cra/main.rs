@@ -21,6 +21,7 @@ use cra_wasm::binary_format::{
     encode_palettized_png, encode_rgb_row_aligned_stride,
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
+use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
 use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
@@ -63,6 +64,56 @@ fn print_progress(label: &str, progress: f32) {
 fn clear_progress() {
     eprint!("\r{}\r", " ".repeat(60));
     let _ = std::io::stderr().flush();
+}
+
+// ============================================================================
+// Palette Format Support
+// ============================================================================
+
+/// Known palette-based formats
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PaletteFormat {
+    /// Web-safe 216-color palette (6×6×6 RGB cube)
+    WebSafe,
+}
+
+impl PaletteFormat {
+    /// Try to parse a format string as a palette format
+    fn parse(format: &str) -> Option<Self> {
+        match format.to_uppercase().as_str() {
+            "PALETTE_WEBSAFE" => Some(PaletteFormat::WebSafe),
+            _ => None,
+        }
+    }
+
+    /// Get display name
+    fn name(&self) -> &'static str {
+        match self {
+            PaletteFormat::WebSafe => "PALETTE_WEBSAFE",
+        }
+    }
+
+    /// Get number of colors in the palette
+    fn color_count(&self) -> usize {
+        match self {
+            PaletteFormat::WebSafe => 216,
+        }
+    }
+}
+
+/// Generate the web-safe 216-color palette (6×6×6 RGB cube)
+/// Values are: 0, 51, 102, 153, 204, 255 (hex: 00, 33, 66, 99, CC, FF)
+fn generate_websafe_palette() -> Vec<(u8, u8, u8, u8)> {
+    const LEVELS: [u8; 6] = [0, 51, 102, 153, 204, 255];
+    let mut colors = Vec::with_capacity(216);
+    for &r in &LEVELS {
+        for &g in &LEVELS {
+            for &b in &LEVELS {
+                colors.push((r, g, b, 255)); // All opaque
+            }
+        }
+    }
+    colors
 }
 
 // ============================================================================
@@ -610,6 +661,110 @@ fn dither_pixels_srgb_rgb(
     }
 }
 
+/// Dither pixels using palette-based dithering with integrated alpha-RGB distance metric.
+/// Takes linear RGB pixels and dithers to a fixed palette.
+#[allow(clippy::too_many_arguments)]
+fn dither_pixels_paletted(
+    pixels: Vec<Pixel4>,
+    width: usize,
+    height: usize,
+    palette_format: PaletteFormat,
+    colorspace: PerceptualSpace,
+    dither_mode: DitherMode,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> DitherResult {
+    use cra_wasm::color::interleave_rgba_u8;
+
+    let mut linear_pixels = pixels;
+
+    // Convert linear RGB to sRGB 0-255 (alpha stays linear 0-1, will be scaled)
+    linear_to_srgb_inplace(&mut linear_pixels);
+    denormalize_inplace_clamped(&mut linear_pixels);
+
+    // Generate the palette based on format type
+    let palette_colors = match palette_format {
+        PaletteFormat::WebSafe => generate_websafe_palette(),
+    };
+
+    // Create the dither palette with precomputed perceptual coordinates
+    let palette = DitherPalette::new(&palette_colors, colorspace);
+
+    // Extract channels from Pixel4
+    let r_channel: Vec<f32> = linear_pixels.iter().map(|p| p[0]).collect();
+    let g_channel: Vec<f32> = linear_pixels.iter().map(|p| p[1]).collect();
+    let b_channel: Vec<f32> = linear_pixels.iter().map(|p| p[2]).collect();
+    let a_channel: Vec<f32> = linear_pixels.iter().map(|p| p[3]).collect();
+
+    // Perform paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+        &r_channel, &g_channel, &b_channel, &a_channel,
+        width, height,
+        &palette,
+        dither_mode,
+        seed,
+        progress,
+    );
+
+    // Interleave to RGBA
+    let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
+
+    DitherResult {
+        interleaved,
+        is_grayscale: false,
+        has_alpha: true, // Palette formats always output RGBA
+    }
+}
+
+/// Dither sRGB pixels (0-255 range) using palette-based dithering.
+/// Use when no color correction, resize, or grayscale conversion is needed.
+#[allow(clippy::too_many_arguments)]
+fn dither_pixels_srgb_paletted(
+    pixels: Vec<Pixel4>,
+    width: usize,
+    height: usize,
+    palette_format: PaletteFormat,
+    colorspace: PerceptualSpace,
+    dither_mode: DitherMode,
+    seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> DitherResult {
+    use cra_wasm::color::interleave_rgba_u8;
+
+    // Generate the palette based on format type
+    let palette_colors = match palette_format {
+        PaletteFormat::WebSafe => generate_websafe_palette(),
+    };
+
+    // Create the dither palette with precomputed perceptual coordinates
+    let palette = DitherPalette::new(&palette_colors, colorspace);
+
+    // Extract channels from Pixel4 (already sRGB 0-255)
+    let r_channel: Vec<f32> = pixels.iter().map(|p| p[0]).collect();
+    let g_channel: Vec<f32> = pixels.iter().map(|p| p[1]).collect();
+    let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
+    let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
+
+    // Perform paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+        &r_channel, &g_channel, &b_channel, &a_channel,
+        width, height,
+        &palette,
+        dither_mode,
+        seed,
+        progress,
+    );
+
+    // Interleave to RGBA
+    let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
+
+    DitherResult {
+        interleaved,
+        is_grayscale: false,
+        has_alpha: true, // Palette formats always output RGBA
+    }
+}
+
 /// Encode dithered pixels to binary format (always row-aligned)
 /// Each row is byte-aligned at minimum, with optional stride padding for hardware alignment.
 /// There is no use case for "packed" encoding where rows continue from the previous row
@@ -1107,10 +1262,18 @@ fn write_safetensors_output(
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    // Parse format string if explicitly provided; otherwise defer to apply alpha-aware default later
+    // Check for palette-based formats first (e.g., PALETTE_WEBSAFE)
+    let palette_format = args.format.as_ref().and_then(|f| PaletteFormat::parse(f));
+
+    // Parse format string if explicitly provided and not a palette format
     // If user specified a format, parse it now to detect grayscale for needs_linear
-    let explicit_format = args.format.as_ref().map(|f| ColorFormat::parse(f)).transpose()?;
+    let explicit_format = if palette_format.is_some() {
+        None // Palette formats don't use ColorFormat
+    } else {
+        args.format.as_ref().map(|f| ColorFormat::parse(f)).transpose()?
+    };
     // For needs_linear calculation: assume non-grayscale if format not specified (default is RGB/ARGB)
+    // Palette formats are always RGB (not grayscale)
     let is_grayscale_format = explicit_format.as_ref().map(|f| f.is_grayscale).unwrap_or(false);
 
     // Determine histogram method: user-specified, or default based on whether reference is provided
@@ -1214,19 +1377,29 @@ fn main() -> Result<(), String> {
     );
 
     // Finalize format: use explicit format if provided, otherwise apply alpha-aware default
-    let format = match explicit_format {
-        Some(f) => f,
-        None => {
-            // Default: ARGB8888 if input has alpha, RGB888 otherwise
-            let default_format = if input_image_has_alpha { "ARGB8888" } else { "RGB888" };
-            if args.verbose {
-                eprintln!("  Format: {} (default, based on input alpha)", default_format);
+    // For palette formats, we create a synthetic RGBA8888 format for output handling
+    let format = if let Some(pf) = palette_format {
+        if args.verbose {
+            eprintln!("  Palette format: {} ({} colors)", pf.name(), pf.color_count());
+        }
+        // Palette formats output as RGBA8888
+        ColorFormat::parse("ARGB8888").expect("ARGB8888 should always parse")
+    } else {
+        match explicit_format {
+            Some(f) => f,
+            None => {
+                // Default: ARGB8888 if input has alpha, RGB888 otherwise
+                let default_format = if input_image_has_alpha { "ARGB8888" } else { "RGB888" };
+                if args.verbose {
+                    eprintln!("  Format: {} (default, based on input alpha)", default_format);
+                }
+                ColorFormat::parse(default_format).expect("Default format should always parse")
             }
-            ColorFormat::parse(default_format).expect("Default format should always parse")
         }
     };
 
     // Determine output colorspace for dithering
+    // Palette formats always use colorspace-aware dithering (required for distance metric)
     let output_colorspace = args.output_distance_space.unwrap_or(if format.is_grayscale {
         ColorSpace::LabCie94
     } else {
@@ -1234,7 +1407,7 @@ fn main() -> Result<(), String> {
     });
 
     // Now perform format-dependent validation
-    if args.verbose && args.format.is_some() {
+    if args.verbose && args.format.is_some() && palette_format.is_none() {
         eprintln!("Format: {} ({} bits/pixel)", format.name, format.total_bits);
         if format.is_grayscale {
             eprintln!("  Grayscale: {} bits", format.bits_r);
@@ -1251,8 +1424,27 @@ fn main() -> Result<(), String> {
         }
     }
 
-    // Check binary output compatibility
-    if args.output_raw.is_some() && !format.supports_binary() {
+    // Palette format validation
+    if palette_format.is_some() {
+        // Palette formats don't support raw binary output (use PNG instead)
+        if args.output_raw.is_some() {
+            return Err("Palette formats do not support --output-raw. Use --output for PNG output.".to_string());
+        }
+        // Palette formats don't support channel outputs
+        if args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some() || args.output_raw_a.is_some() {
+            return Err("Palette formats do not support separate channel outputs.".to_string());
+        }
+        // Warn about ignored options
+        if args.no_colorspace_aware_output {
+            eprintln!("Warning: --no-colorspace-aware-output is ignored for palette formats (always uses colorspace-aware dithering)");
+        }
+        if args.output_alpha_dither.is_some() {
+            eprintln!("Warning: --output-alpha-dither is ignored for palette formats (alpha is integrated into main dithering)");
+        }
+    }
+
+    // Check binary output compatibility (non-palette formats)
+    if palette_format.is_none() && args.output_raw.is_some() && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
             format.name, format.total_bits
@@ -1286,7 +1478,9 @@ fn main() -> Result<(), String> {
         }
         eprintln!("Output dither: {:?}", args.output_dither);
         if let Some(alpha_dither) = args.output_alpha_dither {
-            eprintln!("Output alpha dither: {:?}", alpha_dither);
+            if palette_format.is_none() {
+                eprintln!("Output alpha dither: {:?}", alpha_dither);
+            }
         }
         eprintln!(
             "Output distance space: {:?}{}",
@@ -1604,22 +1798,37 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 5: Dither RGB
+            // Step 5: Dither RGB (or palette)
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
-                let result = dither_pixels_rgb(
-                    pixels_to_dither,
-                    width_usize,
-                    height_usize,
-                    &format,
-                    !args.no_colorspace_aware_output,
-                    output_dither_mode,
-                    output_alpha_mode,
-                    output_colorspace.to_perceptual_space(),
-                    args.seed,
-                    input_has_alpha,
-                    if args.progress { Some(&mut dither_progress) } else { None },
-                );
+                let result = if let Some(pf) = palette_format {
+                    // Palette dithering with integrated alpha-RGB distance
+                    dither_pixels_paletted(
+                        pixels_to_dither,
+                        width_usize,
+                        height_usize,
+                        pf,
+                        output_colorspace.to_perceptual_space(),
+                        args.output_dither.to_dither_mode(),
+                        args.seed,
+                        if args.progress { Some(&mut dither_progress) } else { None },
+                    )
+                } else {
+                    // Standard RGB dithering
+                    dither_pixels_rgb(
+                        pixels_to_dither,
+                        width_usize,
+                        height_usize,
+                        &format,
+                        !args.no_colorspace_aware_output,
+                        output_dither_mode,
+                        output_alpha_mode,
+                        output_colorspace.to_perceptual_space(),
+                        args.seed,
+                        input_has_alpha,
+                        if args.progress { Some(&mut dither_progress) } else { None },
+                    )
+                };
                 if args.progress {
                     clear_progress();
                 }
@@ -1657,19 +1866,34 @@ fn main() -> Result<(), String> {
         // Only perform dithering if integer output is needed
         let result = if has_integer_output {
             let mut dither_progress = |p: f32| print_progress("Dither", p);
-            let result = dither_pixels_srgb_rgb(
-                input_pixels,
-                width as usize,
-                height as usize,
-                &format,
-                !args.no_colorspace_aware_output,
-                output_dither_mode,
-                output_alpha_mode,
-                output_colorspace.to_perceptual_space(),
-                args.seed,
-                input_has_alpha,
-                if args.progress { Some(&mut dither_progress) } else { None },
-            );
+            let result = if let Some(pf) = palette_format {
+                // Palette dithering with integrated alpha-RGB distance
+                dither_pixels_srgb_paletted(
+                    input_pixels,
+                    width as usize,
+                    height as usize,
+                    pf,
+                    output_colorspace.to_perceptual_space(),
+                    args.output_dither.to_dither_mode(),
+                    args.seed,
+                    if args.progress { Some(&mut dither_progress) } else { None },
+                )
+            } else {
+                // Standard RGB dithering
+                dither_pixels_srgb_rgb(
+                    input_pixels,
+                    width as usize,
+                    height as usize,
+                    &format,
+                    !args.no_colorspace_aware_output,
+                    output_dither_mode,
+                    output_alpha_mode,
+                    output_colorspace.to_perceptual_space(),
+                    args.seed,
+                    input_has_alpha,
+                    if args.progress { Some(&mut dither_progress) } else { None },
+                )
+            };
             if args.progress {
                 clear_progress();
             }
