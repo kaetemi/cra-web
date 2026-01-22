@@ -16,6 +16,7 @@ use super::common::{
     wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
     RgbaKernel,
 };
+use super::palette_projection::ExtendedPalette;
 
 // ============================================================================
 // Palette structures
@@ -170,6 +171,13 @@ struct DitherContextPaletted<'a> {
     palette: &'a DitherPalette,
 }
 
+/// Extended context for paletted dithering with gamut mapping.
+/// Supports hull clamping and optional ghost entry redirection.
+struct ExtendedDitherContext<'a> {
+    extended: &'a ExtendedPalette,
+    use_ghost_entries: bool,
+}
+
 /// Compute the integrated alpha-RGB distance for palette matching.
 ///
 /// The distance metric is: sqrt(alpha_distance² + (rgb_perceptual_distance × alpha_factor)²)
@@ -300,6 +308,133 @@ fn process_pixel_paletted(
     let err_a_val = alpha_adj - best.lin_a;
 
     (best.r, best.g, best.b, best.a, err_r_val, err_g_val, err_b_val, err_a_val)
+}
+
+/// Process a single pixel with extended palette (hull clamping + optional ghost redirection).
+///
+/// Returns (best_r, best_g, best_b, best_a, err_r, err_g, err_b, err_a)
+#[inline]
+fn process_pixel_paletted_extended(
+    ctx: &ExtendedDitherContext,
+    srgb_r_in: f32,
+    srgb_g_in: f32,
+    srgb_b_in: f32,
+    alpha_in: f32,
+    err_r: &[Vec<f32>],
+    err_g: &[Vec<f32>],
+    err_b: &[Vec<f32>],
+    err_a: &[Vec<f32>],
+    bx: usize,
+    y: usize,
+) -> (u8, u8, u8, u8, f32, f32, f32, f32) {
+    let palette = ctx.extended.palette();
+    let space = palette.space();
+
+    // 1. Read accumulated error
+    let err_r_in = err_r[y][bx];
+    let err_g_in = err_g[y][bx];
+    let err_b_in = err_b[y][bx];
+    let err_a_in = err_a[y][bx];
+
+    // 2. Convert input to linear space
+    let srgb_r = srgb_r_in / 255.0;
+    let srgb_g = srgb_g_in / 255.0;
+    let srgb_b = srgb_b_in / 255.0;
+    let alpha = alpha_in / 255.0;
+
+    let lin_r_orig = srgb_to_linear_single(srgb_r);
+    let lin_g_orig = srgb_to_linear_single(srgb_g);
+    let lin_b_orig = srgb_to_linear_single(srgb_b);
+
+    // 3. Add accumulated error
+    let alpha_adj = alpha + err_a_in;
+
+    let (lin_r_adj, lin_g_adj, lin_b_adj) = if alpha_adj <= 0.0 {
+        (lin_r_orig, lin_g_orig, lin_b_orig)
+    } else {
+        (lin_r_orig + err_r_in, lin_g_orig + err_g_in, lin_b_orig + err_b_in)
+    };
+
+    // 4. ALWAYS clamp to hull (gamut mapping)
+    let [lin_r_clamped, lin_g_clamped, lin_b_clamped] =
+        ctx.extended.clamp_to_hull([lin_r_adj, lin_g_adj, lin_b_adj]);
+
+    // 5. Convert to perceptual space for distance calculation
+    let alpha_clamped = alpha_adj.clamp(0.0, 1.0);
+    let (target_perc_l, target_perc_a, target_perc_b) =
+        linear_rgb_to_perceptual(space, lin_r_clamped, lin_g_clamped, lin_b_clamped);
+
+    // 6. Find best palette entry
+    let best_idx = if ctx.use_ghost_entries {
+        // Use ghost entry redirection for boundary colors
+        ctx.extended.find_nearest_real([lin_r_clamped, lin_g_clamped, lin_b_clamped])
+    } else {
+        // Direct search on real palette entries only
+        find_nearest_palette_entry(
+            palette, space,
+            target_perc_l, target_perc_a, target_perc_b, alpha_clamped,
+        )
+    };
+
+    let (best_r, best_g, best_b, best_a) = palette.get_srgb(best_idx);
+    let (best_lin_r, best_lin_g, best_lin_b, best_lin_a) = palette.get_linear_rgb(best_idx);
+
+    // 7. Compute alpha-aware error to diffuse
+    let q_err_r = lin_r_clamped - best_lin_r;
+    let q_err_g = lin_g_clamped - best_lin_g;
+    let q_err_b = lin_b_clamped - best_lin_b;
+
+    let alpha_factor = alpha_clamped;
+    let one_minus_alpha = 1.0 - alpha_factor;
+    let err_r_val = one_minus_alpha * err_r_in + alpha_factor * q_err_r;
+    let err_g_val = one_minus_alpha * err_g_in + alpha_factor * q_err_g;
+    let err_b_val = one_minus_alpha * err_b_in + alpha_factor * q_err_b;
+
+    let err_a_val = alpha_adj - best_lin_a;
+
+    (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val)
+}
+
+/// Find nearest palette entry using integrated alpha-RGB distance.
+#[inline]
+fn find_nearest_palette_entry(
+    palette: &DitherPalette,
+    space: PerceptualSpace,
+    target_perc_l: f32,
+    target_perc_a: f32,
+    target_perc_b: f32,
+    target_alpha: f32,
+) -> usize {
+    let mut best_idx = 0;
+    let mut best_dist = f32::INFINITY;
+
+    for idx in 0..palette.len() {
+        let (entry_perc_l, entry_perc_a, entry_perc_b) = palette.get_perceptual(idx);
+        let (_, _, _, entry_lin_a) = palette.get_linear_rgb(idx);
+
+        // Alpha distance
+        let alpha_diff = target_alpha - entry_lin_a;
+        let alpha_dist_sq = alpha_diff * alpha_diff;
+
+        // RGB perceptual distance
+        let rgb_dist_sq = perceptual_distance_sq(
+            space,
+            target_perc_l, target_perc_a, target_perc_b,
+            entry_perc_l, entry_perc_a, entry_perc_b,
+        );
+
+        // Combined distance with alpha weighting
+        let alpha_factor = target_alpha.clamp(0.0, 1.0);
+        let weighted_rgb_dist_sq = rgb_dist_sq * alpha_factor * alpha_factor;
+        let dist = alpha_dist_sq + weighted_rgb_dist_sq;
+
+        if dist < best_dist {
+            best_dist = dist;
+            best_idx = idx;
+        }
+    }
+
+    best_idx
 }
 
 // ============================================================================
@@ -718,6 +853,419 @@ fn dither_mixed_random_paletted(
 }
 
 // ============================================================================
+// Extended scan pattern implementations (with hull clamping + ghost entries)
+// ============================================================================
+
+#[inline]
+fn dither_standard_paletted_extended<K: RgbaKernel>(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, a_val) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+            } else {
+                get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+            };
+
+            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+                a_out[idx] = best_a;
+            }
+
+            K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+#[inline]
+fn dither_serpentine_paletted_extended<K: RgbaKernel>(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                K::apply_rtl(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+            }
+        } else {
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+            }
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_standard_paletted_extended(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, a_val) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+            } else {
+                get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+            };
+
+            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+                a_out[idx] = best_a;
+            }
+
+            let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_serpentine_paletted_extended(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
+            }
+        } else {
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+            }
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+#[inline]
+fn dither_mixed_random_paletted_extended(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let is_rtl = row_hash & 1 == 1;
+
+        if is_rtl {
+            for bx in (bx_start..bx_start + process_width).rev() {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
+            }
+        } else {
+            for bx in bx_start..bx_start + process_width {
+                let px = bx - bx_start;
+                let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+                let (r_val, g_val, b_val, a_val) = if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+                } else {
+                    get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+                };
+
+                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+                if in_real_image {
+                    let img_x = px - reach;
+                    let img_y = y - reach;
+                    let idx = img_y * width + img_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                    a_out[idx] = best_a;
+                }
+
+                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+            }
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -867,6 +1415,132 @@ pub fn paletted_dither_rgba_with_mode(
         }
         DitherMode::MixedRandom => {
             dither_mixed_random_paletted(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+    }
+
+    (r_out, g_out, b_out, a_out)
+}
+
+/// Palette-based RGBA dithering with gamut mapping (hull clamping + optional ghost entries).
+///
+/// This extended version provides better handling of colors at palette gamut boundaries:
+/// - Always clamps error-adjusted colors to within the palette's convex hull
+/// - When `use_ghost_entries` is true, uses ghost entry redirection to keep
+///   quantization error tangent to hull boundaries instead of pointing outward
+///
+/// Args:
+///     r_channel, g_channel, b_channel, a_channel: Input channels as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     palette: Precomputed palette (up to 256 RGBA colors)
+///     mode: Dithering algorithm and scanning mode
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     use_ghost_entries: If true, use ghost entry redirection for boundary colors
+///     progress: Optional callback called with progress (0.0 to 1.0)
+///
+/// Returns:
+///     (r_out, g_out, b_out, a_out): Output channels as u8
+pub fn paletted_dither_rgba_gamut_mapped(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    width: usize,
+    height: usize,
+    palette: &DitherPalette,
+    mode: DitherMode,
+    seed: u32,
+    use_ghost_entries: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    let pixels = width * height;
+
+    // Build extended palette with hull and optional ghost entries
+    let extended = ExtendedPalette::new(palette.clone(), palette.space());
+    let ctx = ExtendedDitherContext {
+        extended: &extended,
+        use_ghost_entries,
+    };
+
+    let reach = <JarvisJudiceNinke as RgbaKernel>::REACH;
+    let buf_width = reach * 4 + width;
+    let buf_height = reach * 2 + height;
+
+    let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+    let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+    let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+    let mut err_a: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+
+    let mut r_out = vec![0u8; pixels];
+    let mut g_out = vec![0u8; pixels];
+    let mut b_out = vec![0u8; pixels];
+    let mut a_out = vec![0u8; pixels];
+
+    let hashed_seed = wang_hash(seed);
+
+    match mode {
+        DitherMode::None => {
+            dither_standard_paletted_extended::<NoneKernel>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::Standard => {
+            dither_standard_paletted_extended::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::Serpentine => {
+            dither_serpentine_paletted_extended::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::JarvisStandard => {
+            dither_standard_paletted_extended::<JarvisJudiceNinke>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::JarvisSerpentine => {
+            dither_serpentine_paletted_extended::<JarvisJudiceNinke>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::MixedStandard => {
+            dither_mixed_standard_paletted_extended(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedSerpentine => {
+            dither_mixed_serpentine_paletted_extended(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedRandom => {
+            dither_mixed_random_paletted_extended(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
                 &mut r_out, &mut g_out, &mut b_out, &mut a_out,

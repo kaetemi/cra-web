@@ -489,6 +489,15 @@ pub struct Args {
     #[arg(long, value_enum)]
     pub output_distance_space: Option<ColorSpace>,
 
+    /// Disable ghost entries for palette dithering (used for testing)
+    ///
+    /// Ghost entries prevent error diffusion from escaping the palette's color gamut
+    /// by redirecting boundary color matches to other boundary colors. This keeps
+    /// quantization error tangent to the gamut hull instead of pointing outward.
+    /// Clamping to the gamut hull is always performed regardless of this flag.
+    #[arg(long)]
+    pub no_palette_ghosts: bool,
+
     /// Random seed for mixed dithering modes
     #[arg(short, long, default_value_t = 12345)]
     pub seed: u32,

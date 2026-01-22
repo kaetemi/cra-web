@@ -1534,6 +1534,7 @@ fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
 /// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
+/// use_ghost_entries: Whether to use ghost entries for gamut mapping (recommended: true)
 #[wasm_bindgen]
 pub fn dither_paletted_wasm(
     buf: &BufferF32x4,
@@ -1543,8 +1544,9 @@ pub fn dither_paletted_wasm(
     mode: u8,
     space: u8,
     seed: u32,
+    use_ghost_entries: bool,
 ) -> BufferU8 {
-    use dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
+    use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
     use color::interleave_rgba_u8;
 
     let dither_mode = dither_mode_from_u8(mode);
@@ -1562,13 +1564,14 @@ pub fn dither_paletted_wasm(
     let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
     let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
 
-    // Perform paletted dithering
-    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+    // Perform gamut-mapped paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_gamut_mapped(
         &r_channel, &g_channel, &b_channel, &a_channel,
         width, height,
         &palette,
         dither_mode,
         seed,
+        use_ghost_entries,
         None,
     );
 
@@ -1585,6 +1588,7 @@ pub fn dither_paletted_wasm(
 /// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
+/// use_ghost_entries: Whether to use ghost entries for gamut mapping (recommended: true)
 #[wasm_bindgen]
 pub fn dither_paletted_with_progress_wasm(
     buf: &BufferF32x4,
@@ -1594,9 +1598,10 @@ pub fn dither_paletted_with_progress_wasm(
     mode: u8,
     space: u8,
     seed: u32,
+    use_ghost_entries: bool,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
-    use dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
+    use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
     use color::interleave_rgba_u8;
 
     let dither_mode = dither_mode_from_u8(mode);
@@ -1621,13 +1626,14 @@ pub fn dither_paletted_with_progress_wasm(
         let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
     };
 
-    // Perform paletted dithering
-    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+    // Perform gamut-mapped paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_gamut_mapped(
         &r_channel, &g_channel, &b_channel, &a_channel,
         width, height,
         &palette,
         dither_mode,
         seed,
+        use_ghost_entries,
         Some(&mut progress_fn),
     );
 

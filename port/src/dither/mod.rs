@@ -95,6 +95,7 @@ pub use rgba::{
 pub use paletted::{
     paletted_dither_rgba,
     paletted_dither_rgba_channels,
+    paletted_dither_rgba_gamut_mapped,
     paletted_dither_rgba_interleaved,
     paletted_dither_rgba_with_mode,
     paletted_dither_to_indices,

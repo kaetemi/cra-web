@@ -21,7 +21,7 @@ use cra_wasm::binary_format::{
     encode_palettized_png, encode_rgb_row_aligned_stride,
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
-use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
+use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
 use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
@@ -730,6 +730,7 @@ fn dither_pixels_paletted(
     colorspace: PerceptualSpace,
     dither_mode: DitherMode,
     seed: u32,
+    use_ghost_entries: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -756,13 +757,14 @@ fn dither_pixels_paletted(
     let b_channel: Vec<f32> = linear_pixels.iter().map(|p| p[2]).collect();
     let a_channel: Vec<f32> = linear_pixels.iter().map(|p| p[3]).collect();
 
-    // Perform paletted dithering
-    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+    // Perform gamut-mapped paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_gamut_mapped(
         &r_channel, &g_channel, &b_channel, &a_channel,
         width, height,
         &palette,
         dither_mode,
         seed,
+        use_ghost_entries,
         progress,
     );
 
@@ -787,6 +789,7 @@ fn dither_pixels_srgb_paletted(
     colorspace: PerceptualSpace,
     dither_mode: DitherMode,
     seed: u32,
+    use_ghost_entries: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -807,13 +810,14 @@ fn dither_pixels_srgb_paletted(
     let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
     let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
 
-    // Perform paletted dithering
-    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+    // Perform gamut-mapped paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_gamut_mapped(
         &r_channel, &g_channel, &b_channel, &a_channel,
         width, height,
         &palette,
         dither_mode,
         seed,
+        use_ghost_entries,
         progress,
     );
 
@@ -1873,6 +1877,7 @@ fn main() -> Result<(), String> {
                         output_colorspace.to_perceptual_space(),
                         args.output_dither.to_dither_mode(),
                         args.seed,
+                        !args.no_palette_ghosts,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     )
                 } else {
@@ -1938,6 +1943,7 @@ fn main() -> Result<(), String> {
                     output_colorspace.to_perceptual_space(),
                     args.output_dither.to_dither_mode(),
                     args.seed,
+                    !args.no_palette_ghosts,
                     if args.progress { Some(&mut dither_progress) } else { None },
                 )
             } else {
