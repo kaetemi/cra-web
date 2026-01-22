@@ -852,6 +852,8 @@
                     <option value="rgb" selected>RGB Bit Depth</option>
                     <option value="grayscale">Grayscale Bit Depth</option>
                     <option value="palette-websafe">Paletted Web-Safe (216 colors)</option>
+                    <option value="palette-cga-5153">Paletted CGA 5153 (16 colors)</option>
+                    <option value="palette-cga-bios">Paletted CGA BIOS (16 colors)</option>
                 </select>
             </div>
 
@@ -1333,7 +1335,9 @@
             const mode = parseInt(document.getElementById('dither-mode').value);
             const outputMode = document.getElementById('output-mode').value;
             const isGrayscale = outputMode === 'grayscale';
-            const isPaletted = outputMode === 'palette-websafe';
+            const isPaletted = outputMode.startsWith('palette-');
+            // Palette type: 0=websafe, 1=cga-5153, 2=cga-bios
+            const paletteType = outputMode === 'palette-cga-5153' ? 1 : outputMode === 'palette-cga-bios' ? 2 : 0;
             const doDownscale = document.getElementById('downscale-toggle').checked;
             const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
@@ -1370,6 +1374,7 @@
                 inputHasNonSrgbIcc: inputHasNonSrgbIcc,
                 isGrayscale: isGrayscale,
                 isPaletted: isPaletted,
+                paletteType: paletteType,  // 0=websafe, 1=cga-5153, 2=cga-bios
                 doDownscale: doDownscale,
                 processWidth: processWidth,
                 processHeight: processHeight,
@@ -1397,6 +1402,10 @@
 
             if (outputMode === 'palette-websafe') {
                 return 'PALETTE_WEBSAFE';
+            } else if (outputMode === 'palette-cga-5153') {
+                return 'PALETTE_CGA_5153';
+            } else if (outputMode === 'palette-cga-bios') {
+                return 'PALETTE_CGA_BIOS';
             } else if (outputMode === 'grayscale') {
                 const bitsL = parseInt(document.getElementById('bits-gray').value);
                 const bitsA = parseInt(document.getElementById('bits-gray-alpha').value);
@@ -1489,7 +1498,7 @@
         function generateCliCommand() {
             const outputMode = document.getElementById('output-mode').value;
             const isGrayscale = outputMode === 'grayscale';
-            const isPaletted = outputMode === 'palette-websafe';
+            const isPaletted = outputMode.startsWith('palette-');
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const mode = parseInt(document.getElementById('dither-mode').value);
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
@@ -1524,7 +1533,13 @@
 
             // Add format based on output mode
             if (isPaletted) {
-                cmd += ' --format PALETTE_WEBSAFE';
+                // Map output mode to CLI format name
+                const paletteFormatMap = {
+                    'palette-websafe': 'PALETTE_WEBSAFE',
+                    'palette-cga-5153': 'PALETTE_CGA_5153',
+                    'palette-cga-bios': 'PALETTE_CGA_BIOS'
+                };
+                cmd += ` --format ${paletteFormatMap[outputMode] || 'PALETTE_WEBSAFE'}`;
             } else if (isGrayscale) {
                 const bitsGray = parseInt(document.getElementById('bits-gray').value);
                 const bitsGrayA = parseInt(document.getElementById('bits-gray-alpha').value) || 0;
@@ -1826,7 +1841,7 @@
         function updateOutputMode() {
             const outputMode = document.getElementById('output-mode').value;
             const isGrayscale = outputMode === 'grayscale';
-            const isPaletted = outputMode === 'palette-websafe';
+            const isPaletted = outputMode.startsWith('palette-');
             const isRgb = outputMode === 'rgb';
 
             // Toggle visibility of bit depth options
@@ -1849,7 +1864,7 @@
         function updateAlphaControlVisibility() {
             const outputMode = document.getElementById('output-mode').value;
             const isGrayscale = outputMode === 'grayscale';
-            const isPaletted = outputMode === 'palette-websafe';
+            const isPaletted = outputMode.startsWith('palette-');
             const isRgb = outputMode === 'rgb';
 
             const showRgbAlpha = inputHasAlpha && isRgb;

@@ -75,6 +75,10 @@ fn clear_progress() {
 enum PaletteFormat {
     /// Web-safe 216-color palette (6×6×6 RGB cube)
     WebSafe,
+    /// CGA 5153 monitor palette (16 colors, hardware-accurate voltage normalization)
+    Cga5153,
+    /// CGA BIOS/EGA canonical palette (16 colors, the "fake" standard palette)
+    CgaBios,
 }
 
 impl PaletteFormat {
@@ -82,6 +86,8 @@ impl PaletteFormat {
     fn parse(format: &str) -> Option<Self> {
         match format.to_uppercase().as_str() {
             "PALETTE_WEBSAFE" => Some(PaletteFormat::WebSafe),
+            "PALETTE_CGA_5153" => Some(PaletteFormat::Cga5153),
+            "PALETTE_CGA_BIOS" => Some(PaletteFormat::CgaBios),
             _ => None,
         }
     }
@@ -90,6 +96,8 @@ impl PaletteFormat {
     fn name(&self) -> &'static str {
         match self {
             PaletteFormat::WebSafe => "PALETTE_WEBSAFE",
+            PaletteFormat::Cga5153 => "PALETTE_CGA_5153",
+            PaletteFormat::CgaBios => "PALETTE_CGA_BIOS",
         }
     }
 
@@ -97,6 +105,8 @@ impl PaletteFormat {
     fn color_count(&self) -> usize {
         match self {
             PaletteFormat::WebSafe => 216,
+            PaletteFormat::Cga5153 => 16,
+            PaletteFormat::CgaBios => 16,
         }
     }
 }
@@ -114,6 +124,54 @@ fn generate_websafe_palette() -> Vec<(u8, u8, u8, u8)> {
         }
     }
     colors
+}
+
+/// Generate the CGA 5153 monitor palette (16 colors)
+/// Hardware-accurate palette based on actual IBM 5153 monitor voltage normalization (0 to 1.30V range)
+/// This is what CGA graphics actually looked like on period-accurate hardware.
+fn generate_cga_5153_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 00: Black
+        (0x00, 0x00, 0xC4, 255), // 01: Blue
+        (0x00, 0xC4, 0x00, 255), // 02: Green
+        (0x00, 0xC4, 0xC4, 255), // 03: Cyan
+        (0xC4, 0x00, 0x00, 255), // 04: Red
+        (0xC4, 0x00, 0xC4, 255), // 05: Magenta
+        (0xC4, 0x7E, 0x00, 255), // 06: Brown (dark yellow)
+        (0xC4, 0xC4, 0xC4, 255), // 07: Light gray
+        (0x4E, 0x4E, 0x4E, 255), // 08: Dark gray
+        (0x4E, 0x4E, 0xDC, 255), // 09: Light blue
+        (0x4E, 0xDC, 0x4E, 255), // 10: Light green
+        (0x4E, 0xF3, 0xF3, 255), // 11: Light cyan
+        (0xDC, 0x4E, 0x4E, 255), // 12: Light red
+        (0xF3, 0x4E, 0xF3, 255), // 13: Light magenta
+        (0xF3, 0xF3, 0x4E, 255), // 14: Yellow
+        (0xFF, 0xFF, 0xFF, 255), // 15: White
+    ]
+}
+
+/// Generate the CGA BIOS/EGA canonical palette (16 colors)
+/// The "fake" standard palette commonly used in emulators and documentation.
+/// Less accurate to actual CGA hardware but widely recognized.
+fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 00: Black
+        (0x00, 0x00, 0xAA, 255), // 01: Blue
+        (0x00, 0xAA, 0x00, 255), // 02: Green
+        (0x00, 0xAA, 0xAA, 255), // 03: Cyan
+        (0xAA, 0x00, 0x00, 255), // 04: Red
+        (0xAA, 0x00, 0xAA, 255), // 05: Magenta
+        (0xAA, 0x55, 0x00, 255), // 06: Brown (dark yellow)
+        (0xAA, 0xAA, 0xAA, 255), // 07: Light gray
+        (0x55, 0x55, 0x55, 255), // 08: Dark gray
+        (0x55, 0x55, 0xFF, 255), // 09: Light blue
+        (0x55, 0xFF, 0x55, 255), // 10: Light green
+        (0x55, 0xFF, 0xFF, 255), // 11: Light cyan
+        (0xFF, 0x55, 0x55, 255), // 12: Light red
+        (0xFF, 0x55, 0xFF, 255), // 13: Light magenta
+        (0xFF, 0xFF, 0x55, 255), // 14: Yellow
+        (0xFF, 0xFF, 0xFF, 255), // 15: White
+    ]
 }
 
 // ============================================================================
@@ -685,6 +743,8 @@ fn dither_pixels_paletted(
     // Generate the palette based on format type
     let palette_colors = match palette_format {
         PaletteFormat::WebSafe => generate_websafe_palette(),
+        PaletteFormat::Cga5153 => generate_cga_5153_palette(),
+        PaletteFormat::CgaBios => generate_cga_bios_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates
@@ -734,6 +794,8 @@ fn dither_pixels_srgb_paletted(
     // Generate the palette based on format type
     let palette_colors = match palette_format {
         PaletteFormat::WebSafe => generate_websafe_palette(),
+        PaletteFormat::Cga5153 => generate_cga_5153_palette(),
+        PaletteFormat::CgaBios => generate_cga_bios_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates

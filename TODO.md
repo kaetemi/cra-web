@@ -38,3 +38,7 @@ Add exr loading to web somehow if possible.
 ---
 
 Tga saving with different formats?
+
+---
+
+Support re-using the palette of the input file as output palett, option PALETTE_INPUT

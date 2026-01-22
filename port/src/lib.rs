@@ -1450,7 +1450,7 @@ pub fn dither_rgba_with_progress_wasm(
 }
 
 // ============================================================================
-// Paletted Dithering (Web-safe palette with integrated alpha-RGB distance)
+// Paletted Dithering (Palette-based dithering with integrated alpha-RGB distance)
 // ============================================================================
 
 /// Generate the web-safe 216-color palette (6×6×6 RGB cube)
@@ -1468,14 +1468,70 @@ fn generate_websafe_palette() -> Vec<(u8, u8, u8, u8)> {
     colors
 }
 
-/// Dither RGBA image to web-safe palette with integrated alpha-RGB distance metric
+/// Generate the CGA 5153 monitor palette (16 colors)
+/// Hardware-accurate palette based on actual IBM 5153 monitor voltage normalization
+fn generate_cga_5153_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 00: Black
+        (0x00, 0x00, 0xC4, 255), // 01: Blue
+        (0x00, 0xC4, 0x00, 255), // 02: Green
+        (0x00, 0xC4, 0xC4, 255), // 03: Cyan
+        (0xC4, 0x00, 0x00, 255), // 04: Red
+        (0xC4, 0x00, 0xC4, 255), // 05: Magenta
+        (0xC4, 0x7E, 0x00, 255), // 06: Brown (dark yellow)
+        (0xC4, 0xC4, 0xC4, 255), // 07: Light gray
+        (0x4E, 0x4E, 0x4E, 255), // 08: Dark gray
+        (0x4E, 0x4E, 0xDC, 255), // 09: Light blue
+        (0x4E, 0xDC, 0x4E, 255), // 10: Light green
+        (0x4E, 0xF3, 0xF3, 255), // 11: Light cyan
+        (0xDC, 0x4E, 0x4E, 255), // 12: Light red
+        (0xF3, 0x4E, 0xF3, 255), // 13: Light magenta
+        (0xF3, 0xF3, 0x4E, 255), // 14: Yellow
+        (0xFF, 0xFF, 0xFF, 255), // 15: White
+    ]
+}
+
+/// Generate the CGA BIOS/EGA canonical palette (16 colors)
+/// The "fake" standard palette commonly used in emulators and documentation
+fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 00: Black
+        (0x00, 0x00, 0xAA, 255), // 01: Blue
+        (0x00, 0xAA, 0x00, 255), // 02: Green
+        (0x00, 0xAA, 0xAA, 255), // 03: Cyan
+        (0xAA, 0x00, 0x00, 255), // 04: Red
+        (0xAA, 0x00, 0xAA, 255), // 05: Magenta
+        (0xAA, 0x55, 0x00, 255), // 06: Brown (dark yellow)
+        (0xAA, 0xAA, 0xAA, 255), // 07: Light gray
+        (0x55, 0x55, 0x55, 255), // 08: Dark gray
+        (0x55, 0x55, 0xFF, 255), // 09: Light blue
+        (0x55, 0xFF, 0x55, 255), // 10: Light green
+        (0x55, 0xFF, 0xFF, 255), // 11: Light cyan
+        (0xFF, 0x55, 0x55, 255), // 12: Light red
+        (0xFF, 0x55, 0xFF, 255), // 13: Light magenta
+        (0xFF, 0xFF, 0x55, 255), // 14: Yellow
+        (0xFF, 0xFF, 0xFF, 255), // 15: White
+    ]
+}
+
+/// Generate palette colors based on palette type
+/// 0 = WebSafe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
+fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
+    match palette_type {
+        1 => generate_cga_5153_palette(),
+        2 => generate_cga_bios_palette(),
+        _ => generate_websafe_palette(), // Default to web-safe
+    }
+}
+
+/// Dither RGBA image to palette with integrated alpha-RGB distance metric
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
 ///
 /// Uses the integrated distance metric: sqrt(alpha_dist² + (rgb_dist × alpha)²)
 /// This weighs down RGB errors where pixels are less visible (low alpha).
 ///
-/// palette_type: 0 = web-safe (216 colors), others reserved for future palettes
+/// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
 #[wasm_bindgen]
@@ -1494,10 +1550,8 @@ pub fn dither_paletted_wasm(
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
 
-    // Generate palette based on type (currently only web-safe supported)
-    let palette_colors = match palette_type {
-        _ => generate_websafe_palette(), // Default to web-safe
-    };
+    // Generate palette based on type
+    let palette_colors = generate_palette(palette_type);
 
     let palette = DitherPalette::new(&palette_colors, perceptual_space);
 
@@ -1524,11 +1578,11 @@ pub fn dither_paletted_wasm(
     BufferU8::new(interleaved)
 }
 
-/// Dither RGBA image to web-safe palette with progress callback
+/// Dither RGBA image to palette with progress callback
 /// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
 /// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
 ///
-/// palette_type: 0 = web-safe (216 colors), others reserved for future palettes
+/// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
 #[wasm_bindgen]
@@ -1548,10 +1602,8 @@ pub fn dither_paletted_with_progress_wasm(
     let dither_mode = dither_mode_from_u8(mode);
     let perceptual_space = perceptual_space_from_u8(space);
 
-    // Generate palette based on type (currently only web-safe supported)
-    let palette_colors = match palette_type {
-        _ => generate_websafe_palette(), // Default to web-safe
-    };
+    // Generate palette based on type
+    let palette_colors = generate_palette(palette_type);
 
     let palette = DitherPalette::new(&palette_colors, perceptual_space);
 
