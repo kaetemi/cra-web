@@ -11,7 +11,7 @@ pub use super::rgb::{
 pub use super::common::DitherMode;
 
 // Import shared utilities from common
-use super::common::{bit_replicate, wang_hash};
+use super::common::{apply_single_channel_kernel, bit_replicate, wang_hash};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.
@@ -474,12 +474,7 @@ fn process_pixel(buf: &mut [Vec<f32>], bx: usize, y: usize, quant: &QuantParams)
 /// Apply kernel based on runtime selection.
 #[inline]
 fn apply_mixed_kernel(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, use_jjn: bool, is_rtl: bool) {
-    match (use_jjn, is_rtl) {
-        (true, false) => JarvisJudiceNinke::apply_ltr(buf, bx, y, err),
-        (true, true) => JarvisJudiceNinke::apply_rtl(buf, bx, y, err),
-        (false, false) => FloydSteinberg::apply_ltr(buf, bx, y, err),
-        (false, true) => FloydSteinberg::apply_rtl(buf, bx, y, err),
-    }
+    apply_single_channel_kernel(buf, bx, y, err, use_jjn, is_rtl);
 }
 
 /// Mixed dithering with standard left-to-right scanning.

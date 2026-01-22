@@ -12,7 +12,7 @@
 use crate::color::srgb_to_linear_single;
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
-    apply_single_channel_kernel, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
+    apply_mixed_kernel_rgba, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
     wang_hash, DitherMode, PerceptualSpace,
 };
 
@@ -338,36 +338,6 @@ impl DitherKernel for NoneKernel {
         _bx: usize, _y: usize,
         _err_r_val: f32, _err_g_val: f32, _err_b_val: f32, _err_a_val: f32,
     ) {}
-}
-
-// ============================================================================
-// Mixed kernel helpers
-// ============================================================================
-
-#[inline]
-fn apply_mixed_kernel(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    err_a: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-    err_a_val: f32,
-    pixel_hash: u32,
-    is_rtl: bool,
-) {
-    let use_jjn_r = pixel_hash & 1 != 0;
-    let use_jjn_g = pixel_hash & 2 != 0;
-    let use_jjn_b = pixel_hash & 4 != 0;
-    let use_jjn_a = pixel_hash & 8 != 0;
-
-    apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
-    apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
-    apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
-    apply_single_channel_kernel(err_a, bx, y, err_a_val, use_jjn_a, is_rtl);
 }
 
 // ============================================================================
@@ -750,7 +720,7 @@ fn dither_mixed_standard_paletted(
             }
 
             let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-            apply_mixed_kernel(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+            apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -814,7 +784,7 @@ fn dither_mixed_serpentine_paletted(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                apply_mixed_kernel(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
             }
         } else {
             for bx in bx_start..bx_start + process_width {
@@ -844,7 +814,7 @@ fn dither_mixed_serpentine_paletted(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                apply_mixed_kernel(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
             }
         }
         if y >= reach {
@@ -912,7 +882,7 @@ fn dither_mixed_random_paletted(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                apply_mixed_kernel(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
             }
         } else {
             for bx in bx_start..bx_start + process_width {
@@ -942,7 +912,7 @@ fn dither_mixed_random_paletted(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                apply_mixed_kernel(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+                apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
             }
         }
         if y >= reach {

@@ -13,8 +13,8 @@ use half::bf16;
 use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
-    apply_single_channel_kernel, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
-    wang_hash, DitherMode, PerceptualSpace,
+    apply_mixed_kernel_rgb, apply_single_channel_kernel, linear_rgb_to_perceptual,
+    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, PerceptualSpace,
 };
 
 // ============================================================================
@@ -326,26 +326,6 @@ impl RgbDitherKernel for NoneKernel {
         _bx: usize, _y: usize,
         _err_r_val: f32, _err_g_val: f32, _err_b_val: f32,
     ) {}
-}
-
-#[inline]
-fn apply_mixed_kernel_per_channel(
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_r_val: f32,
-    err_g_val: f32,
-    err_b_val: f32,
-    use_jjn_r: bool,
-    use_jjn_g: bool,
-    use_jjn_b: bool,
-    is_rtl: bool,
-) {
-    apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
-    apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
-    apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
 }
 
 // ============================================================================
@@ -944,10 +924,7 @@ fn dither_mixed_standard_bf16(
             }
 
             let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-            let use_jjn_r = pixel_hash & 1 != 0;
-            let use_jjn_g = pixel_hash & 2 != 0;
-            let use_jjn_b = pixel_hash & 4 != 0;
-            apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
+            apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -1002,10 +979,7 @@ fn dither_mixed_serpentine_bf16(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn_r = pixel_hash & 1 != 0;
-                let use_jjn_g = pixel_hash & 2 != 0;
-                let use_jjn_b = pixel_hash & 4 != 0;
-                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
+                apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
             }
         } else {
             for px in 0..process_width {
@@ -1027,10 +1001,7 @@ fn dither_mixed_serpentine_bf16(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn_r = pixel_hash & 1 != 0;
-                let use_jjn_g = pixel_hash & 2 != 0;
-                let use_jjn_b = pixel_hash & 4 != 0;
-                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
+                apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
             }
         }
         if y >= reach {
@@ -1089,10 +1060,7 @@ fn dither_mixed_random_bf16(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn_r = pixel_hash & 1 != 0;
-                let use_jjn_g = pixel_hash & 2 != 0;
-                let use_jjn_b = pixel_hash & 4 != 0;
-                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, true);
+                apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
             }
         } else {
             for px in 0..process_width {
@@ -1114,10 +1082,7 @@ fn dither_mixed_random_bf16(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn_r = pixel_hash & 1 != 0;
-                let use_jjn_g = pixel_hash & 2 != 0;
-                let use_jjn_b = pixel_hash & 4 != 0;
-                apply_mixed_kernel_per_channel(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, use_jjn_r, use_jjn_g, use_jjn_b, false);
+                apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
             }
         }
         if y >= reach {

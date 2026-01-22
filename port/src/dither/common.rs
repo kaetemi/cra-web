@@ -365,3 +365,65 @@ pub fn apply_single_channel_kernel(
         }
     }
 }
+
+/// Apply mixed-mode error diffusion to RGB channels (3 separate buffers).
+///
+/// Each channel independently selects between Floyd-Steinberg and Jarvis-Judice-Ninke
+/// based on bits from the pixel_hash. This creates texture variety while maintaining
+/// deterministic results from the seed.
+///
+/// Bit assignment: R=bit0, G=bit1, B=bit2
+#[inline]
+pub fn apply_mixed_kernel_rgb(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    pixel_hash: u32,
+    is_rtl: bool,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+
+    apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
+    apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
+    apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
+}
+
+/// Apply mixed-mode error diffusion to RGBA channels (4 separate buffers).
+///
+/// Each channel independently selects between Floyd-Steinberg and Jarvis-Judice-Ninke
+/// based on bits from the pixel_hash. This creates texture variety while maintaining
+/// deterministic results from the seed.
+///
+/// Bit assignment: R=bit0, G=bit1, B=bit2, A=bit3
+#[inline]
+pub fn apply_mixed_kernel_rgba(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    pixel_hash: u32,
+    is_rtl: bool,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+    let use_jjn_a = pixel_hash & 8 != 0;
+
+    apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
+    apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
+    apply_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
+    apply_single_channel_kernel(err_a, bx, y, err_a_val, use_jjn_a, is_rtl);
+}
