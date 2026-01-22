@@ -88,7 +88,6 @@ impl ExtendedPalette {
         // Extract edges as intersections of pairs of hull planes.
         // Each edge is where two adjacent faces meet.
         let mut edges: Vec<HullEdge> = Vec::new();
-        let num_planes = hull.planes.len();
 
         for i in 0..num_planes {
             for j in (i + 1)..num_planes {
@@ -461,31 +460,11 @@ fn project_point_onto_segment(point: [f32; 3], p0: [f32; 3], p1: [f32; 3]) -> [f
     ]
 }
 
-/// Compare two points lexicographically (for consistent edge ordering).
-fn compare_points(a: &[f32; 3], b: &[f32; 3]) -> bool {
-    if (a[0] - b[0]).abs() > EPSILON {
-        return a[0] < b[0];
-    }
-    if (a[1] - b[1]).abs() > EPSILON {
-        return a[1] < b[1];
-    }
-    a[2] < b[2]
-}
-
 /// Check if two points are equal within epsilon.
 fn points_equal(a: &[f32; 3], b: &[f32; 3]) -> bool {
     (a[0] - b[0]).abs() <= EPSILON
         && (a[1] - b[1]).abs() <= EPSILON
         && (a[2] - b[2]).abs() <= EPSILON
-}
-
-/// Check if a point lies on a line segment (within epsilon).
-fn point_on_line_segment(point: [f32; 3], p0: [f32; 3], p1: [f32; 3]) -> bool {
-    let projected = project_point_onto_segment(point, p0, p1);
-    let dx = point[0] - projected[0];
-    let dy = point[1] - projected[1];
-    let dz = point[2] - projected[2];
-    (dx * dx + dy * dy + dz * dz) <= EPSILON * EPSILON * 100.0
 }
 
 // ============================================================================
