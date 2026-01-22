@@ -39,6 +39,8 @@ use super::common::{
     DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
     SingleChannelKernel,
 };
+#[cfg(test)]
+use super::common::{lightness_distance_ciede2000_sq, lightness_distance_sq};
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
 /// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
