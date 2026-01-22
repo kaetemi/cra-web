@@ -79,8 +79,10 @@ enum PaletteFormat {
     Cga5153,
     /// CGA BIOS/EGA canonical palette (16 colors, the "fake" standard palette)
     CgaBios,
-    /// CGA Mode 5 palette (4 colors: black, cyan, magenta, white)
-    CgaMode5,
+    /// CGA Palette 1 (4 colors: black, cyan, magenta, white)
+    CgaPalette1,
+    /// CGA Palette 1 with 5153 monitor colors (4 colors)
+    CgaPalette1_5153,
 }
 
 impl PaletteFormat {
@@ -90,7 +92,8 @@ impl PaletteFormat {
             "PALETTE_WEBSAFE" => Some(PaletteFormat::WebSafe),
             "PALETTE_CGA_5153" => Some(PaletteFormat::Cga5153),
             "PALETTE_CGA_BIOS" => Some(PaletteFormat::CgaBios),
-            "PALETTE_CGA_MODE5" => Some(PaletteFormat::CgaMode5),
+            "PALETTE_CGA_PALETTE1" => Some(PaletteFormat::CgaPalette1),
+            "PALETTE_CGA_PALETTE1_5153" => Some(PaletteFormat::CgaPalette1_5153),
             _ => None,
         }
     }
@@ -101,7 +104,8 @@ impl PaletteFormat {
             PaletteFormat::WebSafe => "PALETTE_WEBSAFE",
             PaletteFormat::Cga5153 => "PALETTE_CGA_5153",
             PaletteFormat::CgaBios => "PALETTE_CGA_BIOS",
-            PaletteFormat::CgaMode5 => "PALETTE_CGA_MODE5",
+            PaletteFormat::CgaPalette1 => "PALETTE_CGA_PALETTE1",
+            PaletteFormat::CgaPalette1_5153 => "PALETTE_CGA_PALETTE1_5153",
         }
     }
 
@@ -111,7 +115,8 @@ impl PaletteFormat {
             PaletteFormat::WebSafe => 216,
             PaletteFormat::Cga5153 => 16,
             PaletteFormat::CgaBios => 16,
-            PaletteFormat::CgaMode5 => 4,
+            PaletteFormat::CgaPalette1 => 4,
+            PaletteFormat::CgaPalette1_5153 => 4,
         }
     }
 }
@@ -179,13 +184,24 @@ fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
     ]
 }
 
-/// Generate the CGA Mode 5 palette (4 colors)
-/// The cyan/magenta high-intensity palette used in CGA graphics mode 5.
-fn generate_cga_mode5_palette() -> Vec<(u8, u8, u8, u8)> {
+/// Generate the CGA Palette 1 (4 colors)
+/// The cyan/magenta high-intensity palette used in CGA graphics mode 4/5.
+fn generate_cga_palette1_palette() -> Vec<(u8, u8, u8, u8)> {
     vec![
         (0x00, 0x00, 0x00, 255), // 0: Black
-        (0x00, 0xFF, 0xFF, 255), // 1: Cyan
-        (0xFF, 0x00, 0xFF, 255), // 2: Magenta
+        (0x55, 0xFF, 0xFF, 255), // 1: Cyan (85, 255, 255)
+        (0xFF, 0x55, 0xFF, 255), // 2: Magenta (255, 85, 255)
+        (0xFF, 0xFF, 0xFF, 255), // 3: White
+    ]
+}
+
+/// Generate the CGA Palette 1 with 5153 monitor colors (4 colors)
+/// Hardware-accurate palette based on actual IBM 5153 monitor measurements
+fn generate_cga_palette1_5153_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 0: Black
+        (0x4E, 0xF3, 0xF3, 255), // 1: Light cyan (78, 243, 243)
+        (0xF3, 0x4E, 0xF3, 255), // 2: Light magenta (243, 78, 243)
         (0xFF, 0xFF, 0xFF, 255), // 3: White
     ]
 }
@@ -762,7 +778,8 @@ fn dither_pixels_paletted(
         PaletteFormat::WebSafe => generate_websafe_palette(),
         PaletteFormat::Cga5153 => generate_cga_5153_palette(),
         PaletteFormat::CgaBios => generate_cga_bios_palette(),
-        PaletteFormat::CgaMode5 => generate_cga_mode5_palette(),
+        PaletteFormat::CgaPalette1 => generate_cga_palette1_palette(),
+        PaletteFormat::CgaPalette1_5153 => generate_cga_palette1_5153_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates
@@ -816,7 +833,8 @@ fn dither_pixels_srgb_paletted(
         PaletteFormat::WebSafe => generate_websafe_palette(),
         PaletteFormat::Cga5153 => generate_cga_5153_palette(),
         PaletteFormat::CgaBios => generate_cga_bios_palette(),
-        PaletteFormat::CgaMode5 => generate_cga_mode5_palette(),
+        PaletteFormat::CgaPalette1 => generate_cga_palette1_palette(),
+        PaletteFormat::CgaPalette1_5153 => generate_cga_palette1_5153_palette(),
     };
 
     // Create the dither palette with precomputed perceptual coordinates

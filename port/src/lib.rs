@@ -1515,24 +1515,37 @@ fn generate_cga_bios_palette() -> Vec<(u8, u8, u8, u8)> {
     ]
 }
 
-/// Generate the CGA Mode 5 palette (4 colors)
-/// The cyan/magenta high-intensity palette used in CGA graphics mode 5
-fn generate_cga_mode5_palette() -> Vec<(u8, u8, u8, u8)> {
+/// Generate the CGA Palette 1 (4 colors)
+/// The cyan/magenta high-intensity palette used in CGA graphics mode 4/5
+fn generate_cga_palette1_palette() -> Vec<(u8, u8, u8, u8)> {
     vec![
         (0x00, 0x00, 0x00, 255), // 0: Black
-        (0x00, 0xFF, 0xFF, 255), // 1: Cyan
-        (0xFF, 0x00, 0xFF, 255), // 2: Magenta
+        (0x55, 0xFF, 0xFF, 255), // 1: Cyan (85, 255, 255)
+        (0xFF, 0x55, 0xFF, 255), // 2: Magenta (255, 85, 255)
+        (0xFF, 0xFF, 0xFF, 255), // 3: White
+    ]
+}
+
+/// Generate the CGA Palette 1 with 5153 monitor colors (4 colors)
+/// Hardware-accurate palette based on actual IBM 5153 monitor measurements
+fn generate_cga_palette1_5153_palette() -> Vec<(u8, u8, u8, u8)> {
+    vec![
+        (0x00, 0x00, 0x00, 255), // 0: Black
+        (0x4E, 0xF3, 0xF3, 255), // 1: Light cyan (78, 243, 243)
+        (0xF3, 0x4E, 0xF3, 255), // 2: Light magenta (243, 78, 243)
         (0xFF, 0xFF, 0xFF, 255), // 3: White
     ]
 }
 
 /// Generate palette colors based on palette type
-/// 0 = WebSafe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors), 3 = CGA Mode 5 (4 colors)
+/// 0 = WebSafe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors),
+/// 3 = CGA Palette 1 (4 colors), 4 = CGA Palette 1 5153 (4 colors)
 fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
     match palette_type {
         1 => generate_cga_5153_palette(),
         2 => generate_cga_bios_palette(),
-        3 => generate_cga_mode5_palette(),
+        3 => generate_cga_palette1_palette(),
+        4 => generate_cga_palette1_5153_palette(),
         _ => generate_websafe_palette(), // Default to web-safe
     }
 }
