@@ -58,6 +58,7 @@ function processDither(params) {
             originalHeight,
             inputIsLinear,  // True if input is already linear (normal maps, data textures)
             isGrayscale,
+            isPaletted = false,  // True for paletted mode (web-safe 216 colors)
             doDownscale,
             processWidth,
             processHeight,
@@ -99,6 +100,7 @@ function processDither(params) {
         // inputIsLinear counts as needing the linear path (already in linear, process there)
         // Premultiplied alpha also requires linear path (un-premultiply must happen in linear space)
         // Tonemapping requires linear path (operates on linear values)
+        // Note: isPaletted does NOT require linear path by itself (uses sRGB input like RGB dithering)
         const needsTonemapping = tonemapping !== 'none';
         const needsLinear = isGrayscale || doDownscale || loadedImage.has_non_srgb_icc || loadedImage.is_cicp_needs_conversion || inputIsLinear || needsUnpremultiply || needsTonemapping;
 
@@ -264,6 +266,52 @@ function processDither(params) {
                         outputData[i * 4 + 3] = 255;
                     }
                 }
+            } else if (isPaletted) {
+                // PALETTED PATH: tonemapping → tent_contract → sRGB → paletted dither
+                // Uses fixed palette (e.g., web-safe 216 colors) with integrated alpha distance
+
+                // Step 4b: Apply tonemapping (in tent-space if supersampling)
+                if (tonemapping === 'aces') {
+                    sendProgress(45, 'Applying tonemapping (ACES)...');
+                    craWasm.tonemap_aces_wasm(buffer);
+                } else if (tonemapping === 'aces-inverse') {
+                    sendProgress(45, 'Applying tonemapping (ACES inverse)...');
+                    craWasm.tonemap_aces_inverse_wasm(buffer);
+                }
+
+                // Step 5b: Tent-volume contraction (if supersampling enabled)
+                if (useSupersampling) {
+                    sendProgress(50, 'Contracting from tent-space...');
+                    const contracted = craWasm.tent_contract_wasm(buffer, currentWidth, currentHeight);
+                    buffer = contracted.buffer;
+                    currentWidth = contracted.width;
+                    currentHeight = contracted.height;
+                }
+
+                sendProgress(55, 'Converting to sRGB...');
+                craWasm.linear_to_srgb_wasm(buffer);
+
+                sendProgress(60, 'Denormalizing...');
+                craWasm.denormalize_clamped_wasm(buffer);
+
+                sendProgress(70, 'Dithering with palette...');
+                // palette_type: 0 = WebSafe (216 colors)
+                const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
+                    buffer, currentWidth, currentHeight, 0, mode, perceptualSpace, seed,
+                    (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering with palette...')
+                );
+                const ditheredData = ditheredBuffer.to_vec();
+
+                // Paletted dithering always returns RGBA (4 bytes/pixel)
+                rgbaInterleaved = new Uint8Array(ditheredData);
+
+                // Copy RGBA directly to output
+                for (let i = 0; i < pixelCount; i++) {
+                    outputData[i * 4] = ditheredData[i * 4];
+                    outputData[i * 4 + 1] = ditheredData[i * 4 + 1];
+                    outputData[i * 4 + 2] = ditheredData[i * 4 + 2];
+                    outputData[i * 4 + 3] = ditheredData[i * 4 + 3];
+                }
             } else {
                 // RGB PATH: tonemapping → tent_contract → sRGB → dither
                 // (matches CLI RGB path order)
@@ -352,10 +400,30 @@ function processDither(params) {
             sendProgress(10, 'Converting to sRGB 0-255...');
             let buffer = loadedImage.to_srgb_255_buffer_rgba();
 
-            sendProgress(50, 'Dithering RGB...');
-            if (hasAlpha) {
+            if (isPaletted) {
+                // PALETTED PATH (sRGB-direct): paletted dither
+                sendProgress(50, 'Dithering with palette...');
+                // palette_type: 0 = WebSafe (216 colors)
+                const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
+                    buffer, currentWidth, currentHeight, 0, mode, perceptualSpace, seed,
+                    (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering with palette...')
+                );
+                const ditheredData = ditheredBuffer.to_vec();
+
+                // Paletted dithering always returns RGBA (4 bytes/pixel)
+                rgbaInterleaved = new Uint8Array(ditheredData);
+
+                // Copy RGBA directly to output
+                for (let i = 0; i < pixelCount; i++) {
+                    outputData[i * 4] = ditheredData[i * 4];
+                    outputData[i * 4 + 1] = ditheredData[i * 4 + 1];
+                    outputData[i * 4 + 2] = ditheredData[i * 4 + 2];
+                    outputData[i * 4 + 3] = ditheredData[i * 4 + 3];
+                }
+            } else if (hasAlpha) {
                 // Use RGBA dithering with alpha-aware error propagation
                 // When bitsA=0, returns RGB (3 bytes/pixel); otherwise RGBA (4 bytes/pixel)
+                sendProgress(50, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
                     buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, alphaMode, perceptualSpace, seed,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering...')
@@ -387,6 +455,7 @@ function processDither(params) {
                 }
             } else {
                 // Use RGB dithering for images without alpha
+                sendProgress(50, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
                     buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering RGB...')
@@ -408,10 +477,15 @@ function processDither(params) {
 
         sendProgress(100, 'Complete');
 
-        // Grayscale has alpha when LA format (bitsGrayA > 0); RGB has alpha only when bitsA > 0
+        // Determine if output has alpha:
+        // - Grayscale: alpha when LA format (bitsGrayA > 0)
+        // - Paletted: always has alpha (RGBA output)
+        // - RGB/RGBA: alpha only when bitsA > 0
         const outputHasAlpha = isGrayscale
             ? (hasAlpha && bitsGrayA > 0)  // LA format
-            : (hasAlpha && bitsA > 0);     // ARGB format
+            : isPaletted
+                ? true  // Paletted always outputs RGBA
+                : (hasAlpha && bitsA > 0);  // ARGB format
 
         // Send result back
         sendComplete({
@@ -419,16 +493,17 @@ function processDither(params) {
             width: processWidth,
             height: processHeight,
             isGrayscale: isGrayscale,
+            isPaletted: isPaletted,
             bitsR: isGrayscale ? bitsGray : bitsR,
             bitsG: isGrayscale ? bitsGray : bitsG,
             bitsB: isGrayscale ? bitsGray : bitsB,
-            bitsA: isGrayscale ? (hasAlpha ? bitsGrayA : 0) : (hasAlpha ? bitsA : 0),
+            bitsA: isGrayscale ? (hasAlpha ? bitsGrayA : 0) : (isPaletted ? 8 : (hasAlpha ? bitsA : 0)),
             mode: mode,
             rgbInterleaved: rgbInterleaved,
             rgbaInterleaved: rgbaInterleaved,
             grayChannel: grayChannel,
             laInterleaved: laInterleaved,
-            hasAlpha: outputHasAlpha  // True only if input had alpha AND we preserved it
+            hasAlpha: outputHasAlpha  // True only if input had alpha AND we preserved it (or paletted)
         });
 
     } catch (error) {

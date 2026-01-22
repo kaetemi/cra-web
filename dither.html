@@ -846,12 +846,13 @@
                 <p class="stride-hint">Row stride aligns each row to the specified byte boundary. Stride 1 means packed (no padding). Padding fill also affects RGB666 partial groups (4-pixel boundaries).</p>
             </div>
 
-            <div class="toggle-row">
-                <span>Grayscale:</span>
-                <label class="toggle-switch">
-                    <input type="checkbox" id="grayscale-toggle">
-                    <span class="toggle-slider"></span>
-                </label>
+            <div class="option-row">
+                <label for="output-mode">Output Mode:</label>
+                <select id="output-mode">
+                    <option value="rgb" selected>RGB Bit Depth</option>
+                    <option value="grayscale">Grayscale Bit Depth</option>
+                    <option value="palette-websafe">Paletted Web-Safe (216 colors)</option>
+                </select>
             </div>
 
             <div class="toggle-row">
@@ -1330,7 +1331,9 @@
             outputSection.style.display = 'none';
 
             const mode = parseInt(document.getElementById('dither-mode').value);
-            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            const outputMode = document.getElementById('output-mode').value;
+            const isGrayscale = outputMode === 'grayscale';
+            const isPaletted = outputMode === 'palette-websafe';
             const doDownscale = document.getElementById('downscale-toggle').checked;
             const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
@@ -1366,6 +1369,7 @@
                 originalHeight: originalHeight,
                 inputHasNonSrgbIcc: inputHasNonSrgbIcc,
                 isGrayscale: isGrayscale,
+                isPaletted: isPaletted,
                 doDownscale: doDownscale,
                 processWidth: processWidth,
                 processHeight: processHeight,
@@ -1389,8 +1393,11 @@
 
         // Get format string from current settings
         function getFormatString() {
-            const isGrayscale = document.getElementById('grayscale-toggle').checked;
-            if (isGrayscale) {
+            const outputMode = document.getElementById('output-mode').value;
+
+            if (outputMode === 'palette-websafe') {
+                return 'PALETTE_WEBSAFE';
+            } else if (outputMode === 'grayscale') {
                 const bitsL = parseInt(document.getElementById('bits-gray').value);
                 const bitsA = parseInt(document.getElementById('bits-gray-alpha').value);
                 // Use LA format when input has alpha and alpha bits > 0
@@ -1480,7 +1487,9 @@
 
         // Generate CLI command based on current settings
         function generateCliCommand() {
-            const isGrayscale = document.getElementById('grayscale-toggle').checked;
+            const outputMode = document.getElementById('output-mode').value;
+            const isGrayscale = outputMode === 'grayscale';
+            const isPaletted = outputMode === 'palette-websafe';
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const mode = parseInt(document.getElementById('dither-mode').value);
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
@@ -1513,8 +1522,10 @@
             // Use cra tool for dither (--histogram defaults to none when no --ref)
             let cmd = 'cra -i input.png -o output.png';
 
-            // Add format (only if not default: ARGB8888 for alpha inputs, RGB888 for non-alpha)
-            if (isGrayscale) {
+            // Add format based on output mode
+            if (isPaletted) {
+                cmd += ' --format PALETTE_WEBSAFE';
+            } else if (isGrayscale) {
                 const bitsGray = parseInt(document.getElementById('bits-gray').value);
                 const bitsGrayA = parseInt(document.getElementById('bits-gray-alpha').value) || 0;
                 // Use LA format when input has alpha and alpha bits > 0
@@ -1555,16 +1566,19 @@
             }
 
             // Add alpha dither mode (only if not default "same as mode" = 255)
+            // Not applicable for paletted mode (alpha is integrated)
             const alphaMode = parseInt(document.getElementById('alpha-dither-mode').value);
-            const hasAlphaOutput = isGrayscale
-                ? (inputHasAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
-                : (inputHasAlpha && parseInt(document.getElementById('bits-a').value) > 0);
+            const hasAlphaOutput = isPaletted
+                ? false  // Paletted mode: alpha is integrated, no separate dither mode
+                : isGrayscale
+                    ? (inputHasAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
+                    : (inputHasAlpha && parseInt(document.getElementById('bits-a').value) > 0);
             if (hasAlphaOutput && alphaMode !== 255) {
                 cmd += ` --output-alpha-dither ${modeMap[alphaMode]}`;
             }
 
-            // Add colorspace-aware output options
-            if (isPerceptual) {
+            // Add colorspace-aware output options (not for paletted - always uses colorspace-aware)
+            if (isPerceptual && !isPaletted) {
                 const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                 // Default is oklab for RGB, lab-cie94 for grayscale
                 const defaultSpace = isGrayscale ? 2 : 1; // 2 = lab-cie94, 1 = oklab
@@ -1808,22 +1822,37 @@
             updateAlphaControlVisibility();
         });
 
-        // Grayscale toggle
-        function updateGrayscaleMode() {
-            const isGrayscale = document.getElementById('grayscale-toggle').checked;
-            document.getElementById('rgb-options').classList.toggle('hidden', isGrayscale);
+        // Output mode dropdown (RGB / Grayscale / Paletted)
+        function updateOutputMode() {
+            const outputMode = document.getElementById('output-mode').value;
+            const isGrayscale = outputMode === 'grayscale';
+            const isPaletted = outputMode === 'palette-websafe';
+            const isRgb = outputMode === 'rgb';
+
+            // Toggle visibility of bit depth options
+            document.getElementById('rgb-options').classList.toggle('hidden', !isRgb);
             document.getElementById('grayscale-options').classList.toggle('active', isGrayscale);
-            // Grayscale now works with color space aware mode, no need to disable it
-            // Update alpha visibility (hidden in grayscale mode)
+
+            // Hide alpha dither mode for paletted (alpha is integrated into main dithering)
+            const alphaDitherRow = document.getElementById('alpha-dither-mode-row');
+            if (isPaletted) {
+                alphaDitherRow.classList.add('hidden');
+            }
+
+            // Update alpha visibility
             updateAlphaControlVisibility();
         }
 
-        document.getElementById('grayscale-toggle').addEventListener('change', updateGrayscaleMode);
+        document.getElementById('output-mode').addEventListener('change', updateOutputMode);
 
         // Alpha channel control visibility
         function updateAlphaControlVisibility() {
-            const isGrayscale = document.getElementById('grayscale-toggle').checked;
-            const showRgbAlpha = inputHasAlpha && !isGrayscale;
+            const outputMode = document.getElementById('output-mode').value;
+            const isGrayscale = outputMode === 'grayscale';
+            const isPaletted = outputMode === 'palette-websafe';
+            const isRgb = outputMode === 'rgb';
+
+            const showRgbAlpha = inputHasAlpha && isRgb;
             const showGrayAlpha = inputHasAlpha && isGrayscale;
             const alphaBox = document.getElementById('alpha-channel-box');
             const grayAlphaBox = document.getElementById('grayscale-alpha-box');
@@ -1834,11 +1863,14 @@
             grayAlphaBox.style.display = showGrayAlpha ? 'block' : 'none';
             rgbOptions.classList.toggle('has-alpha', showRgbAlpha);
 
-            // Show alpha dither mode when output will have alpha
+            // Show alpha dither mode when output will have alpha (not for paletted mode)
             // Check if alpha bits > 0 for the current mode (RGB or grayscale)
-            const hasAlphaOutput = isGrayscale
-                ? (showGrayAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
-                : (showRgbAlpha && parseInt(document.getElementById('bits-a').value) > 0);
+            // For paletted mode, alpha is always integrated (no separate alpha dither)
+            const hasAlphaOutput = isPaletted
+                ? false  // Paletted mode: alpha integrated, no separate dither mode
+                : isGrayscale
+                    ? (showGrayAlpha && parseInt(document.getElementById('bits-gray-alpha').value) > 0)
+                    : (showRgbAlpha && parseInt(document.getElementById('bits-a').value) > 0);
             alphaDitherRow.classList.toggle('hidden', !hasAlphaOutput);
         }
 

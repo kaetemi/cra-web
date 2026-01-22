@@ -1450,6 +1450,142 @@ pub fn dither_rgba_with_progress_wasm(
 }
 
 // ============================================================================
+// Paletted Dithering (Web-safe palette with integrated alpha-RGB distance)
+// ============================================================================
+
+/// Generate the web-safe 216-color palette (6×6×6 RGB cube)
+/// Returns RGBA tuples as (r, g, b, 255) - all colors are fully opaque
+fn generate_websafe_palette() -> Vec<(u8, u8, u8, u8)> {
+    const LEVELS: [u8; 6] = [0, 51, 102, 153, 204, 255];
+    let mut colors = Vec::with_capacity(216);
+    for &r in &LEVELS {
+        for &g in &LEVELS {
+            for &b in &LEVELS {
+                colors.push((r, g, b, 255));
+            }
+        }
+    }
+    colors
+}
+
+/// Dither RGBA image to web-safe palette with integrated alpha-RGB distance metric
+/// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
+/// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
+///
+/// Uses the integrated distance metric: sqrt(alpha_dist² + (rgb_dist × alpha)²)
+/// This weighs down RGB errors where pixels are less visible (low alpha).
+///
+/// palette_type: 0 = web-safe (216 colors), others reserved for future palettes
+/// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
+/// space: Perceptual space for RGB distance (0=OkLab, etc.)
+#[wasm_bindgen]
+pub fn dither_paletted_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+    palette_type: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+) -> BufferU8 {
+    use dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
+    use color::interleave_rgba_u8;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    // Generate palette based on type (currently only web-safe supported)
+    let palette_colors = match palette_type {
+        _ => generate_websafe_palette(), // Default to web-safe
+    };
+
+    let palette = DitherPalette::new(&palette_colors, perceptual_space);
+
+    // Extract channels from input buffer
+    let pixels = buf.as_slice();
+    let r_channel: Vec<f32> = pixels.iter().map(|p| p[0]).collect();
+    let g_channel: Vec<f32> = pixels.iter().map(|p| p[1]).collect();
+    let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
+    let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
+
+    // Perform paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+        &r_channel, &g_channel, &b_channel, &a_channel,
+        width, height,
+        &palette,
+        dither_mode,
+        seed,
+        None,
+    );
+
+    // Interleave to RGBA
+    let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
+
+    BufferU8::new(interleaved)
+}
+
+/// Dither RGBA image to web-safe palette with progress callback
+/// Input: BufferF32x4 with sRGB 0-255 values (alpha also 0-255)
+/// Output: BufferU8 with interleaved RGBA u8 values (4 bytes per pixel)
+///
+/// palette_type: 0 = web-safe (216 colors), others reserved for future palettes
+/// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
+/// space: Perceptual space for RGB distance (0=OkLab, etc.)
+#[wasm_bindgen]
+pub fn dither_paletted_with_progress_wasm(
+    buf: &BufferF32x4,
+    width: usize,
+    height: usize,
+    palette_type: u8,
+    mode: u8,
+    space: u8,
+    seed: u32,
+    progress_callback: &js_sys::Function,
+) -> BufferU8 {
+    use dither::paletted::{DitherPalette, paletted_dither_rgba_with_mode};
+    use color::interleave_rgba_u8;
+
+    let dither_mode = dither_mode_from_u8(mode);
+    let perceptual_space = perceptual_space_from_u8(space);
+
+    // Generate palette based on type (currently only web-safe supported)
+    let palette_colors = match palette_type {
+        _ => generate_websafe_palette(), // Default to web-safe
+    };
+
+    let palette = DitherPalette::new(&palette_colors, perceptual_space);
+
+    // Extract channels from input buffer
+    let pixels = buf.as_slice();
+    let r_channel: Vec<f32> = pixels.iter().map(|p| p[0]).collect();
+    let g_channel: Vec<f32> = pixels.iter().map(|p| p[1]).collect();
+    let b_channel: Vec<f32> = pixels.iter().map(|p| p[2]).collect();
+    let a_channel: Vec<f32> = pixels.iter().map(|p| p[3]).collect();
+
+    // Setup progress callback
+    let js_this = wasm_bindgen::JsValue::NULL;
+    let callback = progress_callback.clone();
+    let mut progress_fn = |progress: f32| {
+        let _ = callback.call1(&js_this, &wasm_bindgen::JsValue::from_f64(progress as f64));
+    };
+
+    // Perform paletted dithering
+    let (r_out, g_out, b_out, a_out) = paletted_dither_rgba_with_mode(
+        &r_channel, &g_channel, &b_channel, &a_channel,
+        width, height,
+        &palette,
+        dither_mode,
+        seed,
+        Some(&mut progress_fn),
+    );
+
+    // Interleave to RGBA
+    let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
+
+    BufferU8::new(interleaved)
+}
+
+// ============================================================================
 // Binary Format Encoding (takes final u8 data)
 // ============================================================================
 
