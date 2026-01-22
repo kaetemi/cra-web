@@ -292,3 +292,76 @@ pub fn linear_rgb_to_perceptual_clamped(
         PerceptualSpace::OkLab => linear_rgb_to_oklab(r_clamped, g_clamped, b_clamped),
     }
 }
+
+// ============================================================================
+// Single-channel error diffusion kernel
+// ============================================================================
+
+/// Apply Floyd-Steinberg or Jarvis-Judice-Ninke error diffusion to a single channel.
+///
+/// This is used by mixed-mode dithering where each channel can use a different kernel.
+/// The kernel is selected at runtime based on the `use_jjn` flag.
+///
+/// Args:
+///     err: Error buffer for one channel (2D array indexed as err[y][x])
+///     bx: Buffer x coordinate (includes padding for kernel reach)
+///     y: Buffer y coordinate
+///     err_val: Error value to diffuse
+///     use_jjn: If true, use Jarvis-Judice-Ninke; if false, use Floyd-Steinberg
+///     is_rtl: If true, diffuse right-to-left; if false, left-to-right
+#[inline]
+pub fn apply_single_channel_kernel(
+    err: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_val: f32,
+    use_jjn: bool,
+    is_rtl: bool,
+) {
+    match (use_jjn, is_rtl) {
+        (true, false) => {
+            // JJN LTR
+            err[y][bx + 1] += err_val * (7.0 / 48.0);
+            err[y][bx + 2] += err_val * (5.0 / 48.0);
+            err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+            err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+            err[y + 1][bx] += err_val * (7.0 / 48.0);
+            err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+            err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+            err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+            err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+            err[y + 2][bx] += err_val * (5.0 / 48.0);
+            err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+            err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+        }
+        (true, true) => {
+            // JJN RTL
+            err[y][bx - 1] += err_val * (7.0 / 48.0);
+            err[y][bx - 2] += err_val * (5.0 / 48.0);
+            err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
+            err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
+            err[y + 1][bx] += err_val * (7.0 / 48.0);
+            err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
+            err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
+            err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
+            err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
+            err[y + 2][bx] += err_val * (5.0 / 48.0);
+            err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
+            err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
+        }
+        (false, false) => {
+            // FS LTR
+            err[y][bx + 1] += err_val * (7.0 / 16.0);
+            err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
+            err[y + 1][bx] += err_val * (5.0 / 16.0);
+            err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
+        }
+        (false, true) => {
+            // FS RTL
+            err[y][bx - 1] += err_val * (7.0 / 16.0);
+            err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
+            err[y + 1][bx] += err_val * (5.0 / 16.0);
+            err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
+        }
+    }
+}

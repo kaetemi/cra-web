@@ -28,7 +28,7 @@ use crate::color::{
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use crate::colorspace_derived::f32 as cs;
 use super::basic::dither_with_mode_bits;
-use super::common::{bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+use super::common::{apply_single_channel_kernel, bit_replicate, wang_hash, DitherMode, PerceptualSpace};
 
 // ============================================================================
 // Optimized Grayscale Distance (same as luminosity.rs)
@@ -275,16 +275,6 @@ impl GrayDitherKernel for NoneKernel {
 
     #[inline]
     fn apply_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
-}
-
-#[inline]
-fn apply_mixed_kernel(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32, use_jjn: bool, is_rtl: bool) {
-    match (use_jjn, is_rtl) {
-        (true, false) => JarvisJudiceNinke::apply_ltr(err, bx, y, err_val),
-        (true, true) => JarvisJudiceNinke::apply_rtl(err, bx, y, err_val),
-        (false, false) => FloydSteinberg::apply_ltr(err, bx, y, err_val),
-        (false, true) => FloydSteinberg::apply_rtl(err, bx, y, err_val),
-    }
 }
 
 // ============================================================================
@@ -656,7 +646,7 @@ fn dither_mixed_standard_gray_alpha(
 
             let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 != 0;
-            apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+            apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -702,7 +692,7 @@ fn dither_mixed_serpentine_gray_alpha(
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
-                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
+                apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
             // LTR scan
@@ -723,7 +713,7 @@ fn dither_mixed_serpentine_gray_alpha(
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
-                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+                apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
         if y >= reach {
@@ -772,7 +762,7 @@ fn dither_mixed_random_gray_alpha(
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
-                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, true);
+                apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
             for px in 0..process_width {
@@ -792,7 +782,7 @@ fn dither_mixed_random_gray_alpha(
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 != 0;
-                apply_mixed_kernel(err_buf, bx, y, err_val, use_jjn, false);
+                apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
         if y >= reach {

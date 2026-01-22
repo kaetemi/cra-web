@@ -15,8 +15,8 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::basic::dither_with_mode_bits;
 use super::common::{
-    bit_replicate, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash,
-    DitherMode, PerceptualSpace,
+    apply_single_channel_kernel, bit_replicate, linear_rgb_to_perceptual,
+    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, PerceptualSpace,
 };
 
 // ============================================================================
@@ -149,9 +149,6 @@ trait RgbDitherKernel {
         bx: usize, y: usize,
         err_r_val: f32, err_g_val: f32, err_b_val: f32,
     );
-
-    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
-    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
 }
 
 struct FloydSteinberg;
@@ -203,22 +200,6 @@ impl RgbDitherKernel for FloydSteinberg {
         err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
         err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
         err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx + 1] += err_val * (7.0 / 16.0);
-        err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
-        err[y + 1][bx] += err_val * (5.0 / 16.0);
-        err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx - 1] += err_val * (7.0 / 16.0);
-        err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
-        err[y + 1][bx] += err_val * (5.0 / 16.0);
-        err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
     }
 }
 
@@ -320,38 +301,6 @@ impl RgbDitherKernel for JarvisJudiceNinke {
         err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
         err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
     }
-
-    #[inline]
-    fn apply_single_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx + 1] += err_val * (7.0 / 48.0);
-        err[y][bx + 2] += err_val * (5.0 / 48.0);
-        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx] += err_val * (7.0 / 48.0);
-        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx] += err_val * (5.0 / 48.0);
-        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_single_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx - 1] += err_val * (7.0 / 48.0);
-        err[y][bx - 2] += err_val * (5.0 / 48.0);
-        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx] += err_val * (7.0 / 48.0);
-        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx] += err_val * (5.0 / 48.0);
-        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-    }
 }
 
 struct NoneKernel;
@@ -372,29 +321,6 @@ impl RgbDitherKernel for NoneKernel {
         _bx: usize, _y: usize,
         _err_r_val: f32, _err_g_val: f32, _err_b_val: f32,
     ) {}
-
-    #[inline]
-    fn apply_single_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
-
-    #[inline]
-    fn apply_single_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
-}
-
-#[inline]
-fn apply_single_channel_kernel(
-    err: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_val: f32,
-    use_jjn: bool,
-    is_rtl: bool,
-) {
-    match (use_jjn, is_rtl) {
-        (true, false) => JarvisJudiceNinke::apply_single_ltr(err, bx, y, err_val),
-        (true, true) => JarvisJudiceNinke::apply_single_rtl(err, bx, y, err_val),
-        (false, false) => FloydSteinberg::apply_single_ltr(err, bx, y, err_val),
-        (false, true) => FloydSteinberg::apply_single_rtl(err, bx, y, err_val),
-    }
 }
 
 #[inline]

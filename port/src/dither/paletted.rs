@@ -12,8 +12,8 @@
 use crate::color::srgb_to_linear_single;
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
-    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash, DitherMode,
-    PerceptualSpace,
+    apply_single_channel_kernel, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
+    wang_hash, DitherMode, PerceptualSpace,
 };
 
 // ============================================================================
@@ -343,63 +343,6 @@ impl DitherKernel for NoneKernel {
 // ============================================================================
 // Mixed kernel helpers
 // ============================================================================
-
-#[inline]
-fn apply_single_channel_kernel(
-    err: &mut [Vec<f32>],
-    bx: usize,
-    y: usize,
-    err_val: f32,
-    use_jjn: bool,
-    is_rtl: bool,
-) {
-    match (use_jjn, is_rtl) {
-        (true, false) => {
-            // JJN LTR
-            err[y][bx + 1] += err_val * (7.0 / 48.0);
-            err[y][bx + 2] += err_val * (5.0 / 48.0);
-            err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-            err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-            err[y + 1][bx] += err_val * (7.0 / 48.0);
-            err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-            err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-            err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-            err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-            err[y + 2][bx] += err_val * (5.0 / 48.0);
-            err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-            err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-        }
-        (true, true) => {
-            // JJN RTL
-            err[y][bx - 1] += err_val * (7.0 / 48.0);
-            err[y][bx - 2] += err_val * (5.0 / 48.0);
-            err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-            err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-            err[y + 1][bx] += err_val * (7.0 / 48.0);
-            err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-            err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-            err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-            err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-            err[y + 2][bx] += err_val * (5.0 / 48.0);
-            err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-            err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-        }
-        (false, false) => {
-            // FS LTR
-            err[y][bx + 1] += err_val * (7.0 / 16.0);
-            err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
-            err[y + 1][bx] += err_val * (5.0 / 16.0);
-            err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
-        }
-        (false, true) => {
-            // FS RTL
-            err[y][bx - 1] += err_val * (7.0 / 16.0);
-            err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
-            err[y + 1][bx] += err_val * (5.0 / 16.0);
-            err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
-        }
-    }
-}
 
 #[inline]
 fn apply_mixed_kernel(
