@@ -13,7 +13,8 @@ use crate::color::srgb_to_linear_single;
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgba, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
-    wang_hash, DitherMode, PerceptualSpace,
+    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
+    RgbaKernel,
 };
 
 // ============================================================================
@@ -98,246 +99,6 @@ impl DitherPalette {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
-}
-
-// ============================================================================
-// Dither Kernel trait and implementations
-// ============================================================================
-
-trait DitherKernel {
-    const REACH: usize;
-
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    );
-
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    );
-}
-
-struct FloydSteinberg;
-
-impl DitherKernel for FloydSteinberg {
-    const REACH: usize = 1;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    ) {
-        // 7/16 to right
-        err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
-        err_a[y][bx + 1] += err_a_val * (7.0 / 16.0);
-
-        // 3/16 to bottom-left
-        err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
-        err_a[y + 1][bx - 1] += err_a_val * (3.0 / 16.0);
-
-        // 5/16 to bottom
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-        err_a[y + 1][bx] += err_a_val * (5.0 / 16.0);
-
-        // 1/16 to bottom-right
-        err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
-        err_a[y + 1][bx + 1] += err_a_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    ) {
-        err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
-        err_a[y][bx - 1] += err_a_val * (7.0 / 16.0);
-
-        err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
-        err_a[y + 1][bx + 1] += err_a_val * (3.0 / 16.0);
-
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-        err_a[y + 1][bx] += err_a_val * (5.0 / 16.0);
-
-        err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
-        err_a[y + 1][bx - 1] += err_a_val * (1.0 / 16.0);
-    }
-}
-
-struct JarvisJudiceNinke;
-
-impl DitherKernel for JarvisJudiceNinke {
-    const REACH: usize = 2;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
-        err_a[y][bx + 1] += err_a_val * (7.0 / 48.0);
-        err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
-        err_a[y][bx + 2] += err_a_val * (5.0 / 48.0);
-
-        // Row 1
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-        err_a[y + 1][bx - 2] += err_a_val * (3.0 / 48.0);
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-        err_a[y + 1][bx - 1] += err_a_val * (5.0 / 48.0);
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-        err_a[y + 1][bx] += err_a_val * (7.0 / 48.0);
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-        err_a[y + 1][bx + 1] += err_a_val * (5.0 / 48.0);
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-        err_a[y + 1][bx + 2] += err_a_val * (3.0 / 48.0);
-
-        // Row 2
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-        err_a[y + 2][bx - 2] += err_a_val * (1.0 / 48.0);
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-        err_a[y + 2][bx - 1] += err_a_val * (3.0 / 48.0);
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-        err_a[y + 2][bx] += err_a_val * (5.0 / 48.0);
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-        err_a[y + 2][bx + 1] += err_a_val * (3.0 / 48.0);
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-        err_a[y + 2][bx + 2] += err_a_val * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>], err_a: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32, err_a_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
-        err_a[y][bx - 1] += err_a_val * (7.0 / 48.0);
-        err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
-        err_a[y][bx - 2] += err_a_val * (5.0 / 48.0);
-
-        // Row 1
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-        err_a[y + 1][bx + 2] += err_a_val * (3.0 / 48.0);
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-        err_a[y + 1][bx + 1] += err_a_val * (5.0 / 48.0);
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-        err_a[y + 1][bx] += err_a_val * (7.0 / 48.0);
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-        err_a[y + 1][bx - 1] += err_a_val * (5.0 / 48.0);
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-        err_a[y + 1][bx - 2] += err_a_val * (3.0 / 48.0);
-
-        // Row 2
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-        err_a[y + 2][bx + 2] += err_a_val * (1.0 / 48.0);
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-        err_a[y + 2][bx + 1] += err_a_val * (3.0 / 48.0);
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-        err_a[y + 2][bx] += err_a_val * (5.0 / 48.0);
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-        err_a[y + 2][bx - 1] += err_a_val * (3.0 / 48.0);
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-        err_a[y + 2][bx - 2] += err_a_val * (1.0 / 48.0);
-    }
-}
-
-struct NoneKernel;
-
-impl DitherKernel for NoneKernel {
-    const REACH: usize = 0;
-
-    #[inline]
-    fn apply_ltr(
-        _err_r: &mut [Vec<f32>], _err_g: &mut [Vec<f32>],
-        _err_b: &mut [Vec<f32>], _err_a: &mut [Vec<f32>],
-        _bx: usize, _y: usize,
-        _err_r_val: f32, _err_g_val: f32, _err_b_val: f32, _err_a_val: f32,
-    ) {}
-
-    #[inline]
-    fn apply_rtl(
-        _err_r: &mut [Vec<f32>], _err_g: &mut [Vec<f32>],
-        _err_b: &mut [Vec<f32>], _err_a: &mut [Vec<f32>],
-        _bx: usize, _y: usize,
-        _err_r_val: f32, _err_g_val: f32, _err_b_val: f32, _err_a_val: f32,
-    ) {}
 }
 
 // ============================================================================
@@ -513,7 +274,7 @@ fn process_pixel_paletted(
 // ============================================================================
 
 #[inline]
-fn dither_standard_paletted<K: DitherKernel>(
+fn dither_standard_paletted<K: RgbaKernel>(
     ctx: &DitherContextPaletted,
     r_channel: &[f32],
     g_channel: &[f32],
@@ -574,7 +335,7 @@ fn dither_standard_paletted<K: DitherKernel>(
 }
 
 #[inline]
-fn dither_serpentine_paletted<K: DitherKernel>(
+fn dither_serpentine_paletted<K: RgbaKernel>(
     ctx: &DitherContextPaletted,
     r_channel: &[f32],
     g_channel: &[f32],
@@ -998,7 +759,7 @@ pub fn paletted_dither_rgba_with_mode(
     let ctx = DitherContextPaletted { palette };
 
     // Use JJN reach for all modes (largest kernel)
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as RgbaKernel>::REACH;
     let buf_width = reach * 4 + width;
     let buf_height = reach * 2 + height;
 
@@ -1196,7 +957,7 @@ fn paletted_dither_to_indices_impl(
 
     let ctx = DitherContextPaletted { palette };
 
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as RgbaKernel>::REACH;
     let buf_width = reach * 4 + width;
     let buf_height = reach * 2 + height;
 

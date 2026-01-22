@@ -18,6 +18,7 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgb, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, RgbKernel,
 };
 
 // Re-export common types for backwards compatibility
@@ -163,300 +164,6 @@ fn build_perceptual_lut(
 }
 
 // ============================================================================
-// Trait-based kernel abstraction for RGB error diffusion
-// ============================================================================
-
-/// Trait for RGB error diffusion dithering kernels.
-/// Implementations define the kernel shape (padding) and error distribution pattern.
-/// Unlike single-channel kernels, these operate on all three RGB error buffers jointly.
-///
-/// Buffer structure with seeding (to normalize edge dithering):
-/// ```text
-/// [overshoot] [seeding] [real image] [seeding] [overshoot]
-/// ```
-/// - Seeding columns/rows: process duplicated edge pixels to generate initial error
-/// - Overshoot: catches error diffusion from seeding area
-trait RgbDitherKernel {
-    /// Kernel reach - how far error diffuses in each direction.
-    /// This determines both seeding size and overshoot size.
-    const REACH: usize;
-
-    /// Apply the kernel for left-to-right scanning.
-    /// Distributes quantization error to neighboring pixels in all three channels.
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    );
-
-    /// Apply the kernel for right-to-left scanning (mirrored).
-    /// Used for serpentine scanning on odd rows.
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    );
-}
-
-/// Floyd-Steinberg error diffusion kernel for RGB.
-/// Compact 2-row kernel with good speed/quality trade-off.
-///
-/// Kernel (divided by 16):
-///       * 7
-///     3 5 1
-struct FloydSteinberg;
-
-impl RgbDitherKernel for FloydSteinberg {
-    const REACH: usize = 1;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    ) {
-        // Right: 7/16
-        err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
-
-        // Bottom-left: 3/16
-        err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
-
-        // Bottom: 5/16
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-
-        // Bottom-right: 1/16
-        err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    ) {
-        // Left: 7/16
-        err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
-
-        // Bottom-right: 3/16
-        err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
-
-        // Bottom: 5/16
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-
-        // Bottom-left: 1/16
-        err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
-    }
-}
-
-/// Jarvis-Judice-Ninke error diffusion kernel for RGB.
-/// Larger 3-row kernel produces smoother gradients than Floyd-Steinberg.
-///
-/// Kernel (divided by 48):
-///         * 7 5
-///     3 5 7 5 3
-///     1 3 5 3 1
-struct JarvisJudiceNinke;
-
-impl RgbDitherKernel for JarvisJudiceNinke {
-    const REACH: usize = 2;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
-
-        err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
-
-        // Row 1
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-
-        // Row 2
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>],
-        err_g: &mut [Vec<f32>],
-        err_b: &mut [Vec<f32>],
-        bx: usize,
-        y: usize,
-        err_r_val: f32,
-        err_g_val: f32,
-        err_b_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
-
-        err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
-
-        // Row 1
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-
-        // Row 2
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-    }
-}
-
-/// No-op kernel that discards error (no diffusion).
-/// Each pixel is independently quantized to the perceptually nearest level.
-/// Produces banding but useful as a baseline for comparison.
-struct NoneKernel;
-
-impl RgbDitherKernel for NoneKernel {
-    const REACH: usize = 0;
-
-    #[inline]
-    fn apply_ltr(
-        _err_r: &mut [Vec<f32>],
-        _err_g: &mut [Vec<f32>],
-        _err_b: &mut [Vec<f32>],
-        _bx: usize,
-        _y: usize,
-        _err_r_val: f32,
-        _err_g_val: f32,
-        _err_b_val: f32,
-    ) {}
-
-    #[inline]
-    fn apply_rtl(
-        _err_r: &mut [Vec<f32>],
-        _err_g: &mut [Vec<f32>],
-        _err_b: &mut [Vec<f32>],
-        _bx: usize,
-        _y: usize,
-        _err_r_val: f32,
-        _err_g_val: f32,
-        _err_b_val: f32,
-    ) {}
-}
-
-// ============================================================================
 // Generic scan pattern implementations
 // ============================================================================
 
@@ -598,7 +305,7 @@ fn process_pixel_with_rgb(
 /// Generic standard (left-to-right) dithering with any RGB kernel.
 /// Processes seeding rows/columns plus real image, all left-to-right.
 #[inline]
-fn dither_standard_rgb<K: RgbDitherKernel>(
+fn dither_standard_rgb<K: RgbKernel>(
     ctx: &DitherContext,
     r_channel: &[f32],
     g_channel: &[f32],
@@ -657,7 +364,7 @@ fn dither_standard_rgb<K: RgbDitherKernel>(
 /// Alternates scan direction each row to reduce diagonal banding.
 /// Processes seeding rows/columns plus real image.
 #[inline]
-fn dither_serpentine_rgb<K: RgbDitherKernel>(
+fn dither_serpentine_rgb<K: RgbKernel>(
     ctx: &DitherContext,
     r_channel: &[f32],
     g_channel: &[f32],
@@ -1196,7 +903,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
 
     // Use JJN reach (larger) for all modes to accommodate both kernels
     // Buffer layout: [overshoot][seeding][real][seeding][overshoot]
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as RgbKernel>::REACH;
     let buf_width = reach * 4 + width;  // overshoot + seeding + real + seeding + overshoot
     let buf_height = reach * 2 + height;  // seeding + real + overshoot
 

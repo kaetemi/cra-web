@@ -28,7 +28,10 @@ use crate::color::{
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use crate::colorspace_derived::f32 as cs;
 use super::basic::dither_with_mode_bits;
-use super::common::{apply_single_channel_kernel, bit_replicate, wang_hash, DitherMode, PerceptualSpace};
+use super::common::{
+    apply_single_channel_kernel, bit_replicate, wang_hash, DitherMode, FloydSteinberg,
+    JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
+};
 
 // ============================================================================
 // Optimized Grayscale Distance (same as luminosity.rs)
@@ -184,97 +187,6 @@ fn build_gray_lightness_lut(
     }
 
     lut
-}
-
-// ============================================================================
-// Dither kernels
-// ============================================================================
-
-trait GrayDitherKernel {
-    /// Maximum distance the kernel diffuses error in any direction.
-    /// This determines both seeding size and overshoot padding.
-    const REACH: usize;
-
-    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
-    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32);
-}
-
-struct FloydSteinberg;
-
-impl GrayDitherKernel for FloydSteinberg {
-    const REACH: usize = 1;
-
-    #[inline]
-    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx + 1] += err_val * (7.0 / 16.0);
-        err[y + 1][bx - 1] += err_val * (3.0 / 16.0);
-        err[y + 1][bx] += err_val * (5.0 / 16.0);
-        err[y + 1][bx + 1] += err_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        err[y][bx - 1] += err_val * (7.0 / 16.0);
-        err[y + 1][bx + 1] += err_val * (3.0 / 16.0);
-        err[y + 1][bx] += err_val * (5.0 / 16.0);
-        err[y + 1][bx - 1] += err_val * (1.0 / 16.0);
-    }
-}
-
-struct JarvisJudiceNinke;
-
-impl GrayDitherKernel for JarvisJudiceNinke {
-    const REACH: usize = 2;
-
-    #[inline]
-    fn apply_ltr(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        // Row 0
-        err[y][bx + 1] += err_val * (7.0 / 48.0);
-        err[y][bx + 2] += err_val * (5.0 / 48.0);
-        // Row 1
-        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx] += err_val * (7.0 / 48.0);
-        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-        // Row 2
-        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx] += err_val * (5.0 / 48.0);
-        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_rtl(err: &mut [Vec<f32>], bx: usize, y: usize, err_val: f32) {
-        // Row 0
-        err[y][bx - 1] += err_val * (7.0 / 48.0);
-        err[y][bx - 2] += err_val * (5.0 / 48.0);
-        // Row 1
-        err[y + 1][bx + 2] += err_val * (3.0 / 48.0);
-        err[y + 1][bx + 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx] += err_val * (7.0 / 48.0);
-        err[y + 1][bx - 1] += err_val * (5.0 / 48.0);
-        err[y + 1][bx - 2] += err_val * (3.0 / 48.0);
-        // Row 2
-        err[y + 2][bx + 2] += err_val * (1.0 / 48.0);
-        err[y + 2][bx + 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx] += err_val * (5.0 / 48.0);
-        err[y + 2][bx - 1] += err_val * (3.0 / 48.0);
-        err[y + 2][bx - 2] += err_val * (1.0 / 48.0);
-    }
-}
-
-struct NoneKernel;
-
-impl GrayDitherKernel for NoneKernel {
-    const REACH: usize = 0;
-
-    #[inline]
-    fn apply_ltr(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
-
-    #[inline]
-    fn apply_rtl(_err: &mut [Vec<f32>], _bx: usize, _y: usize, _err_val: f32) {}
 }
 
 // ============================================================================
@@ -509,7 +421,7 @@ fn process_pixel_gray_alpha_with_values(
 // ============================================================================
 
 #[inline]
-fn dither_standard_gray_alpha<K: GrayDitherKernel>(
+fn dither_standard_gray_alpha<K: SingleChannelKernel>(
     ctx: &GrayAlphaDitherContext,
     gray_channel: &[f32],
     err_buf: &mut [Vec<f32>],
@@ -550,7 +462,7 @@ fn dither_standard_gray_alpha<K: GrayDitherKernel>(
 }
 
 #[inline]
-fn dither_serpentine_gray_alpha<K: GrayDitherKernel>(
+fn dither_serpentine_gray_alpha<K: SingleChannelKernel>(
     ctx: &GrayAlphaDitherContext,
     gray_channel: &[f32],
     err_buf: &mut [Vec<f32>],
@@ -904,7 +816,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_mode(
     };
 
     // Use JJN reach for all modes (largest kernel)
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
 
     // Error buffer with edge seeding
     let mut err_buf = create_seeded_error_buffer(reach, width, height);

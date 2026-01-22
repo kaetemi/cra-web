@@ -14,7 +14,8 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgb, apply_single_channel_kernel, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, PerceptualSpace,
+    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke,
+    NoneKernel, PerceptualSpace, RgbKernel, SingleChannelKernel,
 };
 
 // ============================================================================
@@ -136,199 +137,6 @@ fn srgb_to_linear_signed(srgb: f32) -> f32 {
 }
 
 // ============================================================================
-// RGB Dither Kernel trait and implementations (same as dither_rgba.rs)
-// ============================================================================
-
-trait RgbDitherKernel {
-    /// Maximum distance the kernel diffuses error in any direction.
-    const REACH: usize;
-
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    );
-
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    );
-}
-
-struct FloydSteinberg;
-
-impl RgbDitherKernel for FloydSteinberg {
-    const REACH: usize = 1;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    ) {
-        err_r[y][bx + 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 16.0);
-
-        err_r[y + 1][bx - 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (3.0 / 16.0);
-
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-
-        err_r[y + 1][bx + 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    ) {
-        err_r[y][bx - 1] += err_r_val * (7.0 / 16.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 16.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 16.0);
-
-        err_r[y + 1][bx + 1] += err_r_val * (3.0 / 16.0);
-        err_g[y + 1][bx + 1] += err_g_val * (3.0 / 16.0);
-        err_b[y + 1][bx + 1] += err_b_val * (3.0 / 16.0);
-
-        err_r[y + 1][bx] += err_r_val * (5.0 / 16.0);
-        err_g[y + 1][bx] += err_g_val * (5.0 / 16.0);
-        err_b[y + 1][bx] += err_b_val * (5.0 / 16.0);
-
-        err_r[y + 1][bx - 1] += err_r_val * (1.0 / 16.0);
-        err_g[y + 1][bx - 1] += err_g_val * (1.0 / 16.0);
-        err_b[y + 1][bx - 1] += err_b_val * (1.0 / 16.0);
-    }
-}
-
-struct JarvisJudiceNinke;
-
-impl RgbDitherKernel for JarvisJudiceNinke {
-    const REACH: usize = 2;
-
-    #[inline]
-    fn apply_ltr(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx + 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx + 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx + 1] += err_b_val * (7.0 / 48.0);
-        err_r[y][bx + 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx + 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx + 2] += err_b_val * (5.0 / 48.0);
-        // Row 1
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-        // Row 2
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_rtl(
-        err_r: &mut [Vec<f32>], err_g: &mut [Vec<f32>], err_b: &mut [Vec<f32>],
-        bx: usize, y: usize,
-        err_r_val: f32, err_g_val: f32, err_b_val: f32,
-    ) {
-        // Row 0
-        err_r[y][bx - 1] += err_r_val * (7.0 / 48.0);
-        err_g[y][bx - 1] += err_g_val * (7.0 / 48.0);
-        err_b[y][bx - 1] += err_b_val * (7.0 / 48.0);
-        err_r[y][bx - 2] += err_r_val * (5.0 / 48.0);
-        err_g[y][bx - 2] += err_g_val * (5.0 / 48.0);
-        err_b[y][bx - 2] += err_b_val * (5.0 / 48.0);
-        // Row 1
-        err_r[y + 1][bx + 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx + 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx + 2] += err_b_val * (3.0 / 48.0);
-        err_r[y + 1][bx + 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx + 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx + 1] += err_b_val * (5.0 / 48.0);
-        err_r[y + 1][bx] += err_r_val * (7.0 / 48.0);
-        err_g[y + 1][bx] += err_g_val * (7.0 / 48.0);
-        err_b[y + 1][bx] += err_b_val * (7.0 / 48.0);
-        err_r[y + 1][bx - 1] += err_r_val * (5.0 / 48.0);
-        err_g[y + 1][bx - 1] += err_g_val * (5.0 / 48.0);
-        err_b[y + 1][bx - 1] += err_b_val * (5.0 / 48.0);
-        err_r[y + 1][bx - 2] += err_r_val * (3.0 / 48.0);
-        err_g[y + 1][bx - 2] += err_g_val * (3.0 / 48.0);
-        err_b[y + 1][bx - 2] += err_b_val * (3.0 / 48.0);
-        // Row 2
-        err_r[y + 2][bx + 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx + 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx + 2] += err_b_val * (1.0 / 48.0);
-        err_r[y + 2][bx + 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx + 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx + 1] += err_b_val * (3.0 / 48.0);
-        err_r[y + 2][bx] += err_r_val * (5.0 / 48.0);
-        err_g[y + 2][bx] += err_g_val * (5.0 / 48.0);
-        err_b[y + 2][bx] += err_b_val * (5.0 / 48.0);
-        err_r[y + 2][bx - 1] += err_r_val * (3.0 / 48.0);
-        err_g[y + 2][bx - 1] += err_g_val * (3.0 / 48.0);
-        err_b[y + 2][bx - 1] += err_b_val * (3.0 / 48.0);
-        err_r[y + 2][bx - 2] += err_r_val * (1.0 / 48.0);
-        err_g[y + 2][bx - 2] += err_g_val * (1.0 / 48.0);
-        err_b[y + 2][bx - 2] += err_b_val * (1.0 / 48.0);
-    }
-}
-
-struct NoneKernel;
-
-impl RgbDitherKernel for NoneKernel {
-    const REACH: usize = 0;
-
-    #[inline]
-    fn apply_ltr(
-        _err_r: &mut [Vec<f32>], _err_g: &mut [Vec<f32>], _err_b: &mut [Vec<f32>],
-        _bx: usize, _y: usize,
-        _err_r_val: f32, _err_g_val: f32, _err_b_val: f32,
-    ) {}
-
-    #[inline]
-    fn apply_rtl(
-        _err_r: &mut [Vec<f32>], _err_g: &mut [Vec<f32>], _err_b: &mut [Vec<f32>],
-        _bx: usize, _y: usize,
-        _err_r_val: f32, _err_g_val: f32, _err_b_val: f32,
-    ) {}
-}
-
-// ============================================================================
 // Edge seeding helper functions
 // ============================================================================
 
@@ -394,7 +202,7 @@ fn get_seeding_alpha_dithered(alpha_dithered: &[f16], width: usize, px: usize, p
 
 /// Dither a single alpha channel from f32 to f16.
 /// Alpha is always treated as linear.
-fn dither_alpha_f16<K: RgbDitherKernel>(
+fn dither_alpha_f16<K: SingleChannelKernel>(
     alpha: &[f32],
     width: usize,
     height: usize,
@@ -529,7 +337,7 @@ fn dither_alpha_f16_mixed(
     seed: u32,
 ) -> Vec<f16> {
     let pixels = width * height;
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as RgbKernel>::REACH;
 
     // Buffer layout for width: [overshoot][seeding][real image][seeding][overshoot]
     // Buffer layout for height: [seeding][real image][overshoot]
@@ -754,7 +562,7 @@ fn process_pixel_f16_with_values(
 // ============================================================================
 
 #[inline]
-fn dither_standard_f16<K: RgbDitherKernel>(
+fn dither_standard_f16<K: RgbKernel>(
     space: PerceptualSpace,
     working_space: Fp16WorkingSpace,
     alpha_dithered: &[f16],
@@ -806,7 +614,7 @@ fn dither_standard_f16<K: RgbDitherKernel>(
 }
 
 #[inline]
-fn dither_serpentine_f16<K: RgbDitherKernel>(
+fn dither_serpentine_f16<K: RgbKernel>(
     space: PerceptualSpace,
     working_space: Fp16WorkingSpace,
     alpha_dithered: &[f16],
@@ -1194,7 +1002,7 @@ pub fn dither_rgba_f16_with_mode(
 
     // Step 2: Set up RGB dithering with alpha awareness
     // Use JJN reach for all modes (largest kernel)
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as RgbKernel>::REACH;
     // Buffer layout: [overshoot][seeding][real image][seeding][overshoot]
     let buf_width = reach * 4 + width;
     let buf_height = reach * 2 + height;

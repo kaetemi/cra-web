@@ -11,7 +11,10 @@ pub use super::rgb::{
 pub use super::common::DitherMode;
 
 // Import shared utilities from common
-use super::common::{apply_single_channel_kernel, bit_replicate, wang_hash};
+use super::common::{
+    apply_single_channel_kernel, bit_replicate, wang_hash, FloydSteinberg, JarvisJudiceNinke,
+    NoneKernel, SingleChannelKernel,
+};
 
 /// Quantization parameters for reduced bit depth dithering.
 /// Pre-computed to avoid repeated calculations in the hot loop.
@@ -128,141 +131,6 @@ impl QuantParams {
     }
 }
 
-// wang_hash is imported from dither_common
-
-// ============================================================================
-// Trait-based kernel abstraction
-// ============================================================================
-
-/// Trait for error diffusion dithering kernels.
-/// Implementations define the kernel shape (padding) and error distribution pattern.
-///
-/// Buffer structure with seeding (to normalize edge dithering):
-/// ```text
-/// [overshoot] [seeding] [real image] [seeding] [overshoot]
-/// ```
-/// - Seeding columns/rows: filled with duplicated edge pixels, ARE processed
-/// - Overshoot: initialized to zero, catches error diffusion, NOT processed
-trait DitherKernel {
-    /// Kernel reach - how far error diffuses in each direction.
-    /// This determines both seeding size and overshoot size.
-    const REACH: usize;
-
-    /// Apply the kernel for left-to-right scanning.
-    /// Distributes quantization error to neighboring pixels.
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
-
-    /// Apply the kernel for right-to-left scanning (mirrored).
-    /// Used for serpentine scanning on odd rows.
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
-
-    // Derived constants for buffer layout
-    /// Total left padding (overshoot + seeding)
-    const TOTAL_LEFT: usize = Self::REACH * 2;
-    /// Total right padding (seeding + overshoot)
-    const TOTAL_RIGHT: usize = Self::REACH * 2;
-    /// Total top padding (seeding only, no overshoot since error flows down)
-    const TOTAL_TOP: usize = Self::REACH;
-    /// Total bottom padding (overshoot only, no seeding since error comes from above)
-    const TOTAL_BOTTOM: usize = Self::REACH;
-    /// Offset from buffer edge to start of seeding area (= overshoot size)
-    const SEED_OFFSET: usize = Self::REACH;
-}
-
-/// Floyd-Steinberg error diffusion kernel.
-/// Compact 2-row kernel with good speed/quality trade-off.
-///
-/// Kernel (divided by 16):
-///       * 7
-///     3 5 1
-struct FloydSteinberg;
-
-impl DitherKernel for FloydSteinberg {
-    const REACH: usize = 1;
-
-    #[inline]
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        buf[y][bx + 1] += err * (7.0 / 16.0);
-        buf[y + 1][bx - 1] += err * (3.0 / 16.0);
-        buf[y + 1][bx] += err * (5.0 / 16.0);
-        buf[y + 1][bx + 1] += err * (1.0 / 16.0);
-    }
-
-    #[inline]
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        buf[y][bx - 1] += err * (7.0 / 16.0);
-        buf[y + 1][bx + 1] += err * (3.0 / 16.0);
-        buf[y + 1][bx] += err * (5.0 / 16.0);
-        buf[y + 1][bx - 1] += err * (1.0 / 16.0);
-    }
-}
-
-/// Jarvis-Judice-Ninke error diffusion kernel.
-/// Larger 3-row kernel produces smoother gradients than Floyd-Steinberg.
-///
-/// Kernel (divided by 48):
-///         * 7 5
-///     3 5 7 5 3
-///     1 3 5 3 1
-struct JarvisJudiceNinke;
-
-impl DitherKernel for JarvisJudiceNinke {
-    const REACH: usize = 2;
-
-    #[inline]
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        // Row 0
-        buf[y][bx + 1] += err * (7.0 / 48.0);
-        buf[y][bx + 2] += err * (5.0 / 48.0);
-        // Row 1
-        buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-        buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-        buf[y + 1][bx] += err * (7.0 / 48.0);
-        buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-        buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-        // Row 2
-        buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-        buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-        buf[y + 2][bx] += err * (5.0 / 48.0);
-        buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-        buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-    }
-
-    #[inline]
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        // Row 0
-        buf[y][bx - 1] += err * (7.0 / 48.0);
-        buf[y][bx - 2] += err * (5.0 / 48.0);
-        // Row 1
-        buf[y + 1][bx + 2] += err * (3.0 / 48.0);
-        buf[y + 1][bx + 1] += err * (5.0 / 48.0);
-        buf[y + 1][bx] += err * (7.0 / 48.0);
-        buf[y + 1][bx - 1] += err * (5.0 / 48.0);
-        buf[y + 1][bx - 2] += err * (3.0 / 48.0);
-        // Row 2
-        buf[y + 2][bx + 2] += err * (1.0 / 48.0);
-        buf[y + 2][bx + 1] += err * (3.0 / 48.0);
-        buf[y + 2][bx] += err * (5.0 / 48.0);
-        buf[y + 2][bx - 1] += err * (3.0 / 48.0);
-        buf[y + 2][bx - 2] += err * (1.0 / 48.0);
-    }
-}
-
-/// No-op kernel that discards error (no diffusion).
-/// Each pixel is independently quantized to nearest level.
-/// Produces banding but useful as a baseline for comparison.
-struct NoneKernel;
-
-impl DitherKernel for NoneKernel {
-    const REACH: usize = 0;
-
-    #[inline]
-    fn apply_ltr(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
-
-    #[inline]
-    fn apply_rtl(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
-}
-
 // ============================================================================
 // Buffer helpers
 // ============================================================================
@@ -373,7 +241,7 @@ fn extract_result_seeded(
 
 /// Generic standard (left-to-right) dithering with any kernel.
 /// Processes seeding rows/columns plus real image, all left-to-right.
-fn dither_standard<K: DitherKernel>(
+fn dither_standard<K: SingleChannelKernel>(
     img: &[f32],
     width: usize,
     height: usize,
@@ -411,7 +279,7 @@ fn dither_standard<K: DitherKernel>(
 /// Generic serpentine dithering with any kernel.
 /// Alternates scan direction each row to reduce diagonal banding.
 /// Processes seeding rows/columns plus real image.
-fn dither_serpentine<K: DitherKernel>(
+fn dither_serpentine<K: SingleChannelKernel>(
     img: &[f32],
     width: usize,
     height: usize,
@@ -489,7 +357,7 @@ fn mixed_dither_standard(
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
     // Use JJN reach (larger) to accommodate both kernels
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 
     // Processing area: seeding rows + real rows, seeding cols + real cols + seeding cols
@@ -529,7 +397,7 @@ fn mixed_dither_serpentine(
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 
     let process_height = reach + height;
@@ -581,7 +449,7 @@ fn mixed_dither_random(
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
     let hashed_seed = wang_hash(seed);
-    let reach = JarvisJudiceNinke::REACH;
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 
     let process_height = reach + height;
