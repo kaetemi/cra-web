@@ -8,7 +8,7 @@
 use super::palette_hull::{HullPlane, PaletteHull, EPSILON};
 use super::paletted::DitherPalette;
 use crate::color_distance::perceptual_distance_sq;
-use super::common::{linear_rgb_to_perceptual_clamped, PerceptualSpace};
+use super::common::{linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, PerceptualSpace};
 
 // ============================================================================
 // Ghost entry and extended palette structures
@@ -228,7 +228,8 @@ impl ExtendedPalette {
     /// doesn't align well with the linear RGB convex hull.
     pub fn find_nearest_real(&self, lin_rgb: [f32; 3]) -> usize {
         // First, find nearest entry (real or ghost) in perceptual space
-        let (l, a, b) = linear_rgb_to_perceptual_clamped(self.space, lin_rgb[0], lin_rgb[1], lin_rgb[2]);
+        // Use non-clamped conversion since this is a target color (input is already hull-clamped)
+        let (l, a, b) = linear_rgb_to_perceptual(self.space, lin_rgb[0], lin_rgb[1], lin_rgb[2]);
         let target_perc = [l, a, b];
 
         let perceptual_nearest = self.find_nearest_entry_perceptual(target_perc);
@@ -610,4 +611,25 @@ mod tests {
         let total: usize = extended.surface_real_entries.iter().map(|v| v.len()).sum();
         assert_eq!(total, 12, "Total surface entries should be 12");
     }
+}
+
+#[test]
+fn test_tetrahedron_no_ghosts() {
+    // A tetrahedron (4 vertices) creates NO ghost entries because when each
+    // vertex is projected onto its opposite face, the projection lands outside
+    // the bounded triangular face. This is geometrically correct for this shape.
+    //
+    // For tetrahedra, ghost entries aren't critical because all 4 palette
+    // entries are boundary vertices - there are no interior palette colors.
+    let colors = vec![
+        (0, 0, 0, 255),       // Black
+        (0, 255, 255, 255),   // Cyan
+        (255, 0, 255, 255),   // Magenta
+        (255, 255, 255, 255), // White
+    ];
+    let palette = DitherPalette::new(&colors, PerceptualSpace::OkLab);
+    let extended = ExtendedPalette::new(palette, PerceptualSpace::OkLab);
+
+    assert_eq!(extended.real_count(), 4);
+    assert_eq!(extended.ghost_count(), 0, "Tetrahedron should create 0 ghosts");
 }
