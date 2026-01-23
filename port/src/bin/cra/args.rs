@@ -378,6 +378,11 @@ pub struct Args {
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 
+    /// Output GIF image path (optional) - for paletted formats only (≤256 colors)
+    /// GIF supports 1-bit transparency only (fully opaque or fully transparent)
+    #[arg(long)]
+    pub output_gif: Option<PathBuf>,
+
     /// Output raw binary file path (optional) - respects --stride for row alignment
     #[arg(long)]
     pub output_raw: Option<PathBuf>,

@@ -19,6 +19,7 @@ use cra_wasm::binary_format::{
     encode_channel_from_interleaved_row_aligned_stride,
     encode_gray_row_aligned_stride, encode_la_row_aligned_stride,
     encode_palettized_png, encode_explicit_palette_png, encode_rgb_row_aligned_stride,
+    encode_palettized_gif, encode_explicit_palette_gif, supports_gif,
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
 use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
@@ -2323,6 +2324,59 @@ fn main() -> Result<(), String> {
                 .map(|m| m.len() as usize)
                 .unwrap_or(0);
             outputs.push(("png".to_string(), png_path.clone(), size));
+        }
+
+        // Write GIF output (paletted formats only)
+        if let Some(ref gif_path) = args.output_gif {
+            // Check if we have explicit palette data (from paletted dithering)
+            let has_explicit_palette = dither_result.palette_indices.is_some()
+                && dither_result.palette_colors.is_some();
+            let use_palettized_gif = supports_gif(&format);
+
+            if has_explicit_palette {
+                if args.verbose {
+                    eprintln!("Writing GIF (palettized, {} colors): {}",
+                        dither_result.palette_colors.as_ref().map(|p| p.len()).unwrap_or(0),
+                        gif_path.display());
+                }
+                // Use explicit palette GIF for true paletted output (CGA, web-safe, etc.)
+                let gif_data = encode_explicit_palette_gif(
+                    dither_result.palette_indices.as_ref().unwrap(),
+                    width_usize,
+                    height_usize,
+                    dither_result.palette_colors.as_ref().unwrap(),
+                )?;
+                let mut file = File::create(gif_path)
+                    .map_err(|e| format!("Failed to create {}: {}", gif_path.display(), e))?;
+                file.write_all(&gif_data)
+                    .map_err(|e| format!("Failed to write {}: {}", gif_path.display(), e))?;
+            } else if use_palettized_gif {
+                if args.verbose {
+                    eprintln!("Writing GIF (palettized): {}", gif_path.display());
+                }
+                // Use palettized GIF for formats ≤8 bits
+                let gif_data = encode_palettized_gif(
+                    &dither_result.interleaved,
+                    width_usize,
+                    height_usize,
+                    &format,
+                )?;
+                let mut file = File::create(gif_path)
+                    .map_err(|e| format!("Failed to create {}: {}", gif_path.display(), e))?;
+                file.write_all(&gif_data)
+                    .map_err(|e| format!("Failed to write {}: {}", gif_path.display(), e))?;
+            } else {
+                return Err(format!(
+                    "GIF output requires paletted format (≤8 bits per pixel). \
+                    Format {} has {} bits. Use --format with a lower bit depth or use --input-palette.",
+                    format.name, format.total_bits
+                ));
+            }
+
+            let size = std::fs::metadata(gif_path)
+                .map(|m| m.len() as usize)
+                .unwrap_or(0);
+            outputs.push(("gif".to_string(), gif_path.clone(), size));
         }
 
         // Write binary output (always row-aligned, respects --stride for additional alignment)

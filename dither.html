@@ -1045,6 +1045,7 @@
             <h4>Downloads</h4>
             <div class="download-row">
                 <button class="download-btn" id="download-btn" disabled>PNG Image</button>
+                <button class="download-btn" id="download-gif-btn" disabled>GIF Image</button>
                 <button class="download-btn secondary" id="download-raw-btn" disabled>Raw Binary</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
             </div>
@@ -1090,6 +1091,8 @@
             encode_channel_row_aligned_stride_wasm,
             encode_palettized_png_wasm,
             encode_explicit_palette_png_wasm,
+            encode_palettized_gif_wasm,
+            encode_explicit_palette_gif_wasm,
             encode_png_rgb_wasm,
             encode_png_rgba_wasm,
             encode_png_gray_wasm,
@@ -1543,6 +1546,10 @@
                 document.getElementById('download-palette-indices-btn').disabled = true;
                 document.getElementById('download-palette-colors-btn').disabled = true;
             }
+
+            // GIF download - enabled for paletted formats (≤8 bits per pixel or explicit palette)
+            const supportsGif = isPaletted || totalBits <= 8;
+            document.getElementById('download-gif-btn').disabled = !supportsGif;
         }
 
         // Download helper function
@@ -2272,6 +2279,74 @@
             } catch (e) {
                 console.error('Failed to generate PNG:', e);
                 alert('Failed to generate PNG: ' + e.message);
+            }
+        });
+
+        // GIF download handler - only for paletted formats (≤8 bits or explicit palette)
+        document.getElementById('download-gif-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            const totalBits = format_total_bits_wasm(format);
+            let gifData;
+
+            try {
+                // For explicit palette formats (CGA, web-safe), use palettized GIF with actual palette
+                if (lastDitherResult.isPaletted) {
+                    // Convert RGBA to palette indices
+                    const indices = rgba_to_palette_indices_wasm(
+                        lastDitherResult.rgbaInterleaved,
+                        lastDitherResult.paletteType
+                    );
+                    // Encode with explicit palette
+                    gifData = encode_explicit_palette_gif_wasm(
+                        indices,
+                        lastDitherResult.paletteType,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                } else if (totalBits <= 8) {
+                    // Use palettized GIF for formats ≤8 bits
+                    if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                        gifData = encode_palettized_gif_wasm(
+                            lastDitherResult.laInterleaved,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.isGrayscale) {
+                        gifData = encode_palettized_gif_wasm(
+                            lastDitherResult.grayChannel,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else if (lastDitherResult.hasAlpha) {
+                        gifData = encode_palettized_gif_wasm(
+                            lastDitherResult.rgbaInterleaved,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    } else {
+                        const rgbData = getRgbInterleaved();
+                        gifData = encode_palettized_gif_wasm(
+                            rgbData,
+                            format,
+                            lastDitherResult.width,
+                            lastDitherResult.height
+                        );
+                    }
+                } else {
+                    throw new Error(`GIF requires ≤8 bits per pixel. Format ${format} has ${totalBits} bits.`);
+                }
+
+                const blob = new Blob([gifData], { type: 'image/gif' });
+                const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'gif');
+                downloadBlob(blob, filename);
+            } catch (e) {
+                console.error('Failed to generate GIF:', e);
+                alert('Failed to generate GIF: ' + e.message);
             }
         });
 

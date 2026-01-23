@@ -7,10 +7,12 @@
 //! - `color_format`: Color format definition and parsing
 //! - `rgb666`: RGB666 special format encoding/decoding
 //! - `palettized_png`: Palettized PNG output for low-bit-depth formats
+//! - `gif`: GIF output for palettized formats
 
 pub mod binary;
 pub mod color_format;
 pub mod decode;
+pub mod gif;
 pub mod palettized_png;
 pub mod rgb666;
 pub mod sfi;

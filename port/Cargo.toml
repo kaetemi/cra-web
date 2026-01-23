@@ -24,6 +24,9 @@ moxcms = "0.7"
 # PNG crate for palettized PNG output (direct PLTE/tRNS chunk control)
 png = "0.17"
 
+# GIF crate for palettized GIF output
+gif = "0.13"
+
 # SFI (Safetensors Floating-point Image) format support
 serde_json = "1.0"
 half = { version = "2.3", features = ["std"] }

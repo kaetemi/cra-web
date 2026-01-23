@@ -24,6 +24,11 @@ pub use super::palettized_png::{
     supports_palettized_png, generate_palette, encode_palettized_png, encode_explicit_palette_png
 };
 
+// Re-export GIF functions
+pub use super::gif::{
+    supports_gif, encode_palettized_gif, encode_explicit_palette_gif
+};
+
 /// Align a byte count up to the specified stride (must be power of 2)
 #[inline]
 pub fn align_to_stride(bytes: usize, stride: usize) -> usize {

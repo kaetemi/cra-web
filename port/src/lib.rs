@@ -2016,6 +2016,59 @@ pub fn encode_explicit_palette_png_wasm(
     .map_err(|e| JsValue::from_str(&e))
 }
 
+/// Encode GIF from interleaved u8 data (palettized formats only)
+/// Input:
+///   - interleaved_data: Pixel data in format-specific layout:
+///     - Grayscale (L): 1 byte per pixel
+///     - Grayscale+Alpha (LA): 2 bytes per pixel (L, A)
+///     - RGB: 3 bytes per pixel (R, G, B)
+///     - RGBA/ARGB: 4 bytes per pixel (R, G, B, A)
+/// Output: GIF file bytes with palette containing bit-replicated colors
+/// Only works for formats with ≤8 bits per pixel (≤256 colors)
+#[wasm_bindgen]
+pub fn encode_palettized_gif_wasm(
+    interleaved_data: Vec<u8>,
+    format: &str,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let color_format = binary_format::ColorFormat::parse(format)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    binary_format::encode_palettized_gif(
+        &interleaved_data,
+        width as usize,
+        height as usize,
+        &color_format,
+    )
+    .map_err(|e| JsValue::from_str(&e))
+}
+
+/// Encode GIF with explicit palette indices and colors
+/// Input:
+///   - indices: Palette indices (1 byte per pixel, values 0-255)
+///   - palette_type: 0=web-safe, 1=CGA 5153, 2=CGA BIOS, 3=CGA Palette 1, 4=CGA Palette 1 5153
+///   - width, height: Image dimensions
+/// Output: GIF file bytes with the specified palette
+/// Note: GIF only supports 1-bit transparency (fully opaque or fully transparent)
+#[wasm_bindgen]
+pub fn encode_explicit_palette_gif_wasm(
+    indices: Vec<u8>,
+    palette_type: u8,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let palette_colors = generate_palette(palette_type);
+
+    binary_format::encode_explicit_palette_gif(
+        &indices,
+        width as usize,
+        height as usize,
+        &palette_colors,
+    )
+    .map_err(|e| JsValue::from_str(&e))
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
