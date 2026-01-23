@@ -1634,6 +1634,7 @@ pub fn dither_paletted_with_progress_wasm(
     space: u8,
     seed: u32,
     use_ghost_entries: bool,
+    overshoot_penalty: bool,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
     use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
@@ -1669,7 +1670,7 @@ pub fn dither_paletted_with_progress_wasm(
         dither_mode,
         seed,
         use_ghost_entries,
-        true, // overshoot_penalty enabled by default
+        overshoot_penalty,
         Some(&mut progress_fn),
     );
 

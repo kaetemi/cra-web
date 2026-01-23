@@ -300,7 +300,7 @@ function processDither(params) {
                 // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
                 // use_ghost_entries: true (gamut mapping with ghost entries for better boundary handling)
                 const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
-                    buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true,
+                    buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true, overshootPenalty,
                     (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering with palette...')
                 );
                 const ditheredData = ditheredBuffer.to_vec();
@@ -409,7 +409,7 @@ function processDither(params) {
                 // palette_type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-mode5
                 // use_ghost_entries: true (gamut mapping with ghost entries for better boundary handling)
                 const ditheredBuffer = craWasm.dither_paletted_with_progress_wasm(
-                    buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true,
+                    buffer, currentWidth, currentHeight, paletteType, mode, perceptualSpace, seed, true, overshootPenalty,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering with palette...')
                 );
                 const ditheredData = ditheredBuffer.to_vec();

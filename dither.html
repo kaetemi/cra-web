@@ -1615,8 +1615,9 @@
                 cmd += ` --output-alpha-dither ${modeMap[alphaMode]}`;
             }
 
-            // Add colorspace-aware output options (not for paletted - always uses colorspace-aware)
-            if (isPerceptual && !isPaletted) {
+            // Add colorspace-aware output options
+            // Paletted modes always use colorspace-aware dithering
+            if (isPerceptual || isPaletted) {
                 const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
                 // Default is oklab-lr for RGB, lab-cie94 for grayscale
                 const defaultSpace = isGrayscale ? 2 : 8; // 2 = lab-cie94, 8 = oklab-lr
@@ -1629,7 +1630,7 @@
                     cmd += ' --no-overshoot-penalty';
                 }
             } else {
-                // Colorspace-aware is ON by default, add flag to disable
+                // Colorspace-aware is OFF, add flag to disable
                 cmd += ' --no-colorspace-aware-output';
             }
 
