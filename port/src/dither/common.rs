@@ -29,13 +29,13 @@ pub enum PerceptualSpace {
     /// CIELAB with CIEDE2000: Most accurate perceptual distance
     /// Includes corrections for blue region, lightness, and chroma
     LabCIEDE2000,
-    /// OKLab color space with Euclidean distance (default)
+    /// OKLab color space with Euclidean distance
     /// Designed so Euclidean distance is perceptually uniform
-    #[default]
     OkLab,
-    /// OKLab with revised lightness (Lr) for better Munsell Value matching
+    /// OKLab with revised lightness (Lr) for better Munsell Value matching (default)
     /// Uses Ottosson's Lr formula which expands dark values compared to standard L
     /// Better for palettes where dark colors should stay distinct from grays
+    #[default]
     OkLabLr,
     /// OKLab with heavy chroma weighting (×4) for dithering
     /// Penalizes chromatic differences more heavily, encouraging neutral (light/dark)

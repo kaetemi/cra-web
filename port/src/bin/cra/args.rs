@@ -431,7 +431,7 @@ pub struct Args {
     pub safetensors_dither: DitherMethod,
 
     /// Perceptual space for safetensors dithering distance metric
-    #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
+    #[arg(long, value_enum, default_value_t = ColorSpace::OklabLr)]
     pub safetensors_distance_space: ColorSpace,
 
     /// Output format: RGB, ARGB, L with bit counts.
@@ -481,7 +481,7 @@ pub struct Args {
     pub no_colorspace_aware_histogram: bool,
 
     /// Perceptual space for colorspace-aware histogram dithering distance metric
-    #[arg(long, value_enum, default_value_t = ColorSpace::Oklab)]
+    #[arg(long, value_enum, default_value_t = ColorSpace::OklabLr)]
     pub histogram_distance_space: ColorSpace,
 
     /// Disable colorspace-aware dithering for final RGB output (use per-channel instead)
@@ -497,7 +497,7 @@ pub struct Args {
     #[arg(long)]
     pub no_overshoot_penalty: bool,
 
-    /// Perceptual space for output dithering distance metric (default: oklab for RGB, lab-cie94 for grayscale)
+    /// Perceptual space for output dithering distance metric (default: oklab-lr for RGB, lab-cie94 for grayscale)
     #[arg(long, value_enum)]
     pub output_distance_space: Option<ColorSpace>,
 

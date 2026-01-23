@@ -497,7 +497,7 @@
                 </select>
             </div>
 
-            <!-- Dither options hidden - using good defaults (Mixed + OKLab color-aware) -->
+            <!-- Dither options hidden - using good defaults (Mixed + OKLab Lr color-aware) -->
             <div class="option-row" style="display: none;">
                 <label>Dither Mode:</label>
                 <select id="dither-mode">
@@ -505,7 +505,7 @@
                 </select>
             </div>
             <input type="hidden" id="perceptual-toggle" value="1">
-            <input type="hidden" id="perceptual-space" value="1">
+            <input type="hidden" id="perceptual-space" value="8">
             <input type="hidden" id="overshoot-penalty" value="1">
 
             <div class="option-row">
@@ -844,7 +844,9 @@
                 4: 'linear-rgb',
                 5: 'y-cb-cr',
                 6: 'srgb',
-                7: 'y-cb-cr-bt601'
+                7: 'y-cb-cr-bt601',
+                8: 'oklab-lr',
+                9: 'oklab-heavy-chroma'
             };
 
             // Use cra tool for resize (--histogram defaults to none when no --ref)
@@ -867,8 +869,8 @@
                 cmd += ` --output-dither ${modeMap[ditherMode]}`;
             }
 
-            // Add colorspace if perceptual and not default oklab
-            if (isPerceptual && perceptualSpace !== 1) {
+            // Add colorspace if perceptual and not default oklab-lr
+            if (isPerceptual && perceptualSpace !== 8) {
                 cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
             }
 

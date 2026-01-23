@@ -772,8 +772,8 @@
             <div class="perceptual-options visible" id="perceptual-options">
                 <label for="perceptual-space">Distance Metric:</label>
                 <select id="perceptual-space">
-                    <option value="1" selected>* OKLab</option>
-                    <option value="8">OKLab Lr (better for dark colors)</option>
+                    <option value="1">OKLab</option>
+                    <option value="8" selected>* OKLab Lr (better for dark colors)</option>
                     <option value="9">OKLab Heavy Chroma (×4, for limited palettes)</option>
                     <option value="3">CIELAB (CIEDE2000)</option>
                     <option value="2">* CIELAB (CIE94)</option>
@@ -1544,7 +1544,9 @@
                 4: 'linear-rgb',
                 5: 'y-cb-cr',
                 6: 'srgb',
-                7: 'y-cb-cr-bt601'
+                7: 'y-cb-cr-bt601',
+                8: 'oklab-lr',
+                9: 'oklab-heavy-chroma'
             };
 
             // Use cra tool for dither (--histogram defaults to none when no --ref)
@@ -1616,8 +1618,8 @@
             // Add colorspace-aware output options (not for paletted - always uses colorspace-aware)
             if (isPerceptual && !isPaletted) {
                 const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
-                // Default is oklab for RGB, lab-cie94 for grayscale
-                const defaultSpace = isGrayscale ? 2 : 1; // 2 = lab-cie94, 1 = oklab
+                // Default is oklab-lr for RGB, lab-cie94 for grayscale
+                const defaultSpace = isGrayscale ? 2 : 8; // 2 = lab-cie94, 8 = oklab-lr
                 if (perceptualSpace !== defaultSpace) {
                     cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
                 }
@@ -1719,8 +1721,8 @@
             if (lastDitherResult.hasAlpha && lastDitherResult.alphaMode !== undefined) {
                 metadata.output_alpha_dither = modeNames[lastDitherResult.alphaMode] || 'Unknown';
             }
-            // Perceptual space for dithering distance metric (defaults to Oklab for RGB, LabCie94 for grayscale)
-            const defaultSpace = lastDitherResult.isGrayscale ? 'LabCie94' : 'Oklab';
+            // Perceptual space for dithering distance metric (defaults to OklabLr for RGB, LabCie94 for grayscale)
+            const defaultSpace = lastDitherResult.isGrayscale ? 'LabCie94' : 'OklabLr';
             metadata.output_distance_space = lastDitherResult.perceptualSpace !== null ?
                 (spaceNames[lastDitherResult.perceptualSpace] || defaultSpace) : defaultSpace;
 
