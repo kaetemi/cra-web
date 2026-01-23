@@ -270,7 +270,7 @@ fn dither_standard_gray<K: SingleChannelKernel>(
                 out[idx] = best_gray;
             }
 
-            K::apply_ltr(err_buf, bx, y, err_val);
+            K::apply_ltr(err_buf, bx, y, err_val, gray_value);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -312,7 +312,7 @@ fn dither_serpentine_gray<K: SingleChannelKernel>(
                     out[idx] = best_gray;
                 }
 
-                K::apply_rtl(err_buf, bx, y, err_val);
+                K::apply_rtl(err_buf, bx, y, err_val, gray_value);
             }
         } else {
             // LTR scan
@@ -330,7 +330,7 @@ fn dither_serpentine_gray<K: SingleChannelKernel>(
                     out[idx] = best_gray;
                 }
 
-                K::apply_ltr(err_buf, bx, y, err_val);
+                K::apply_ltr(err_buf, bx, y, err_val, gray_value);
             }
         }
         if y >= reach {

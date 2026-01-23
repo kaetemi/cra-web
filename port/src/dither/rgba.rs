@@ -330,7 +330,7 @@ fn dither_standard_rgba<K: RgbKernel>(
                 b_out[idx] = best_b;
             }
 
-            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -390,7 +390,7 @@ fn dither_serpentine_rgba<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
             }
         } else {
             for bx in bx_start..bx_start + process_width {
@@ -420,7 +420,7 @@ fn dither_serpentine_rgba<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
             }
         }
         if y >= reach {

@@ -273,7 +273,7 @@ fn dither_standard_rgb<K: RgbKernel>(
                 b_out[idx] = best_b;
             }
 
-            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
         }
         if let Some(ref mut cb) = progress {
             if y >= reach {
@@ -331,7 +331,7 @@ fn dither_serpentine_rgb<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
             }
         } else {
             // Left-to-right on even rows
@@ -356,7 +356,7 @@ fn dither_serpentine_rgb<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val);
+                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
             }
         }
         if let Some(ref mut cb) = progress {

@@ -525,7 +525,7 @@ fn dither_standard_paletted<K: RgbaKernel>(
                 a_out[idx] = best_a;
             }
 
-            K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+            K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -588,7 +588,7 @@ fn dither_serpentine_paletted<K: RgbaKernel>(
                     a_out[idx] = best_a;
                 }
 
-                K::apply_rtl(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                K::apply_rtl(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
             }
         } else {
             // Left-to-right
@@ -618,7 +618,7 @@ fn dither_serpentine_paletted<K: RgbaKernel>(
                     a_out[idx] = best_a;
                 }
 
-                K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
             }
         }
         if y >= reach {
@@ -940,7 +940,7 @@ fn dither_standard_paletted_extended<K: RgbaKernel>(
                 a_out[idx] = best_a;
             }
 
-            K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+            K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -1002,7 +1002,7 @@ fn dither_serpentine_paletted_extended<K: RgbaKernel>(
                     a_out[idx] = best_a;
                 }
 
-                K::apply_rtl(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                K::apply_rtl(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
             }
         } else {
             for bx in bx_start..bx_start + process_width {
@@ -1031,7 +1031,7 @@ fn dither_serpentine_paletted_extended<K: RgbaKernel>(
                     a_out[idx] = best_a;
                 }
 
-                K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                K::apply_ltr(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
             }
         }
         if y >= reach {
@@ -1783,7 +1783,7 @@ fn paletted_dither_to_indices_impl(
                     }
 
                     if matches!(mode, DitherMode::Standard) {
-                        FloydSteinberg::apply_ltr(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                        FloydSteinberg::apply_ltr(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
                     }
                 }
                 if y >= reach {
@@ -1819,7 +1819,7 @@ fn paletted_dither_to_indices_impl(
                             indices[idx] = best_idx;
                         }
 
-                        FloydSteinberg::apply_rtl(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                        FloydSteinberg::apply_rtl(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
                     }
                 } else {
                     for bx in bx_start..bx_start + process_width {
@@ -1845,7 +1845,7 @@ fn paletted_dither_to_indices_impl(
                             indices[idx] = best_idx;
                         }
 
-                        FloydSteinberg::apply_ltr(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val);
+                        FloydSteinberg::apply_ltr(&mut err_r, &mut err_g, &mut err_b, &mut err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, r_val, g_val, b_val, a_val);
                     }
                 }
                 if y >= reach {

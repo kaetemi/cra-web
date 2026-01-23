@@ -164,10 +164,14 @@ pub trait SingleChannelKernel {
     const REACH: usize;
 
     /// Apply kernel for left-to-right scanning.
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
+    /// `orig` is the original pixel value (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, orig: f32);
 
     /// Apply kernel for right-to-left scanning (mirrored).
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32);
+    /// `orig` is the original pixel value (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, orig: f32);
 
     // Derived constants for buffer layout
     /// Total left padding (overshoot + seeding)
@@ -190,6 +194,8 @@ pub trait RgbKernel {
     const REACH: usize;
 
     /// Apply kernel to RGB channels for left-to-right scanning.
+    /// `orig_r/g/b` are the original pixel values (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
     fn apply_ltr(
         err_r: &mut [Vec<f32>],
         err_g: &mut [Vec<f32>],
@@ -199,9 +205,14 @@ pub trait RgbKernel {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
     );
 
     /// Apply kernel to RGB channels for right-to-left scanning.
+    /// `orig_r/g/b` are the original pixel values (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
     fn apply_rtl(
         err_r: &mut [Vec<f32>],
         err_g: &mut [Vec<f32>],
@@ -211,6 +222,9 @@ pub trait RgbKernel {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
     );
 
     // Derived constants for buffer layout
@@ -229,6 +243,8 @@ pub trait RgbaKernel {
     const REACH: usize;
 
     /// Apply kernel to RGBA channels for left-to-right scanning.
+    /// `orig_r/g/b/a` are the original pixel values (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
     fn apply_ltr(
         err_r: &mut [Vec<f32>],
         err_g: &mut [Vec<f32>],
@@ -240,9 +256,15 @@ pub trait RgbaKernel {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
+        orig_a: f32,
     );
 
     /// Apply kernel to RGBA channels for right-to-left scanning.
+    /// `orig_r/g/b/a` are the original pixel values (0-255 scale) before error adjustment,
+    /// used by variable-coefficient kernels like Ostromoukhov.
     fn apply_rtl(
         err_r: &mut [Vec<f32>],
         err_g: &mut [Vec<f32>],
@@ -254,6 +276,10 @@ pub trait RgbaKernel {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
+        orig_a: f32,
     );
 
     // Derived constants for buffer layout
@@ -282,12 +308,12 @@ impl SingleChannelKernel for FloydSteinberg {
     const REACH: usize = 1;
 
     #[inline]
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, _orig: f32) {
         apply_single_channel_kernel(buf, bx, y, err, false, false);
     }
 
     #[inline]
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, _orig: f32) {
         apply_single_channel_kernel(buf, bx, y, err, false, true);
     }
 }
@@ -305,10 +331,13 @@ impl RgbKernel for FloydSteinberg {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val);
+        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val, 0.0);
     }
 
     #[inline]
@@ -321,10 +350,13 @@ impl RgbKernel for FloydSteinberg {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val);
+        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val, 0.0);
     }
 }
 
@@ -343,11 +375,15 @@ impl RgbaKernel for FloydSteinberg {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_a, bx, y, err_a_val);
+        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_a, bx, y, err_a_val, 0.0);
     }
 
     #[inline]
@@ -362,11 +398,15 @@ impl RgbaKernel for FloydSteinberg {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_a, bx, y, err_a_val);
+        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_a, bx, y, err_a_val, 0.0);
     }
 }
 
@@ -389,12 +429,12 @@ impl SingleChannelKernel for JarvisJudiceNinke {
     const REACH: usize = 2;
 
     #[inline]
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, _orig: f32) {
         apply_single_channel_kernel(buf, bx, y, err, true, false);
     }
 
     #[inline]
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, _orig: f32) {
         apply_single_channel_kernel(buf, bx, y, err, true, true);
     }
 }
@@ -412,10 +452,13 @@ impl RgbKernel for JarvisJudiceNinke {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val);
+        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val, 0.0);
     }
 
     #[inline]
@@ -428,10 +471,13 @@ impl RgbKernel for JarvisJudiceNinke {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val);
+        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val, 0.0);
     }
 }
 
@@ -450,11 +496,15 @@ impl RgbaKernel for JarvisJudiceNinke {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val);
-        <Self as SingleChannelKernel>::apply_ltr(err_a, bx, y, err_a_val);
+        <Self as SingleChannelKernel>::apply_ltr(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_b, bx, y, err_b_val, 0.0);
+        <Self as SingleChannelKernel>::apply_ltr(err_a, bx, y, err_a_val, 0.0);
     }
 
     #[inline]
@@ -469,11 +519,15 @@ impl RgbaKernel for JarvisJudiceNinke {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
-        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val);
-        <Self as SingleChannelKernel>::apply_rtl(err_a, bx, y, err_a_val);
+        <Self as SingleChannelKernel>::apply_rtl(err_r, bx, y, err_r_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_g, bx, y, err_g_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_b, bx, y, err_b_val, 0.0);
+        <Self as SingleChannelKernel>::apply_rtl(err_a, bx, y, err_a_val, 0.0);
     }
 }
 
@@ -629,19 +683,20 @@ const OSTRO_TABLE: [[i32; 3]; 128] = [
     [4, 1, 1],       // 127
 ];
 
-/// Get Ostromoukhov coefficients for a given input level (0.0-1.0).
-/// Returns (d10, d11, d01) normalized coefficients and whether to mirror.
+/// Get Ostromoukhov coefficients for a given input level (0-255 scale).
+/// Returns (d10, d11, d01) normalized coefficients.
+/// Values outside 0-255 are clamped.
 #[inline]
-fn ostro_coefficients(original_value: f32) -> (f32, f32, f32, bool) {
-    // Convert to 0-255 level
-    let level = (original_value * 255.0 + 0.5) as i32;
+fn ostro_coefficients(original_value: f32) -> (f32, f32, f32) {
+    // Clamp to 0-255 range
+    let level = (original_value + 0.5) as i32;
     let level = level.clamp(0, 255);
 
     // Mirror for levels > 127
-    let (idx, mirror) = if level > 127 {
-        (255 - level, true)
+    let idx = if level > 127 {
+        255 - level
     } else {
-        (level, false)
+        level
     };
 
     let coeffs = OSTRO_TABLE[idx as usize];
@@ -651,13 +706,14 @@ fn ostro_coefficients(original_value: f32) -> (f32, f32, f32, bool) {
     let d11 = coeffs[1] as f32 / sum;
     let d01 = coeffs[2] as f32 / sum;
 
-    (d10, d11, d01, mirror)
+    (d10, d11, d01)
 }
 
 /// Apply Ostromoukhov kernel to a single channel (left-to-right).
+/// `original` is the original pixel value in 0-255 scale.
 #[inline]
 pub fn apply_ostromoukhov_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, original: f32) {
-    let (d10, d11, d01, _mirror) = ostro_coefficients(original);
+    let (d10, d11, d01) = ostro_coefficients(original);
 
     // LTR: next=bx+1, diagonal_behind=bx-1, below=bx
     buf[y][bx + 1] += err * d10;     // next pixel in scan direction
@@ -666,9 +722,10 @@ pub fn apply_ostromoukhov_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f3
 }
 
 /// Apply Ostromoukhov kernel to a single channel (right-to-left).
+/// `original` is the original pixel value in 0-255 scale.
 #[inline]
 pub fn apply_ostromoukhov_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, original: f32) {
-    let (d10, d11, d01, _mirror) = ostro_coefficients(original);
+    let (d10, d11, d01) = ostro_coefficients(original);
 
     // RTL: next=bx-1, diagonal_behind=bx+1, below=bx
     buf[y][bx - 1] += err * d10;     // next pixel in scan direction
@@ -768,15 +825,13 @@ impl SingleChannelKernel for Ostromoukhov {
     const REACH: usize = 1; // Same footprint as Floyd-Steinberg
 
     #[inline]
-    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        // Fallback: use middle gray (0.5) when original value not available
-        apply_ostromoukhov_ltr(buf, bx, y, err, 0.5);
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, orig: f32) {
+        apply_ostromoukhov_ltr(buf, bx, y, err, orig);
     }
 
     #[inline]
-    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
-        // Fallback: use middle gray (0.5) when original value not available
-        apply_ostromoukhov_rtl(buf, bx, y, err, 0.5);
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, orig: f32) {
+        apply_ostromoukhov_rtl(buf, bx, y, err, orig);
     }
 }
 
@@ -793,9 +848,11 @@ impl RgbKernel for Ostromoukhov {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
     ) {
-        // Fallback: use middle gray (0.5) when original values not available
-        apply_ostromoukhov_rgb_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, 0.5, 0.5, 0.5);
+        apply_ostromoukhov_rgb_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, orig_r, orig_g, orig_b);
     }
 
     #[inline]
@@ -808,9 +865,11 @@ impl RgbKernel for Ostromoukhov {
         err_r_val: f32,
         err_g_val: f32,
         err_b_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
     ) {
-        // Fallback: use middle gray (0.5) when original values not available
-        apply_ostromoukhov_rgb_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, 0.5, 0.5, 0.5);
+        apply_ostromoukhov_rgb_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, orig_r, orig_g, orig_b);
     }
 }
 
@@ -829,12 +888,15 @@ impl RgbaKernel for Ostromoukhov {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
+        orig_a: f32,
     ) {
-        // Fallback: use middle gray (0.5) when original values not available
         apply_ostromoukhov_rgba_ltr(
             err_r, err_g, err_b, err_a, bx, y,
             err_r_val, err_g_val, err_b_val, err_a_val,
-            0.5, 0.5, 0.5, 0.5,
+            orig_r, orig_g, orig_b, orig_a,
         );
     }
 
@@ -850,12 +912,15 @@ impl RgbaKernel for Ostromoukhov {
         err_g_val: f32,
         err_b_val: f32,
         err_a_val: f32,
+        orig_r: f32,
+        orig_g: f32,
+        orig_b: f32,
+        orig_a: f32,
     ) {
-        // Fallback: use middle gray (0.5) when original values not available
         apply_ostromoukhov_rgba_rtl(
             err_r, err_g, err_b, err_a, bx, y,
             err_r_val, err_g_val, err_b_val, err_a_val,
-            0.5, 0.5, 0.5, 0.5,
+            orig_r, orig_g, orig_b, orig_a,
         );
     }
 }
@@ -874,10 +939,10 @@ impl SingleChannelKernel for NoneKernel {
     const REACH: usize = 0;
 
     #[inline]
-    fn apply_ltr(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
+    fn apply_ltr(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32, _orig: f32) {}
 
     #[inline]
-    fn apply_rtl(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32) {}
+    fn apply_rtl(_buf: &mut [Vec<f32>], _bx: usize, _y: usize, _err: f32, _orig: f32) {}
 }
 
 impl RgbKernel for NoneKernel {
@@ -893,6 +958,9 @@ impl RgbKernel for NoneKernel {
         _err_r_val: f32,
         _err_g_val: f32,
         _err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
     }
 
@@ -906,6 +974,9 @@ impl RgbKernel for NoneKernel {
         _err_r_val: f32,
         _err_g_val: f32,
         _err_b_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
     ) {
     }
 }
@@ -925,6 +996,10 @@ impl RgbaKernel for NoneKernel {
         _err_g_val: f32,
         _err_b_val: f32,
         _err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
     }
 
@@ -940,6 +1015,10 @@ impl RgbaKernel for NoneKernel {
         _err_g_val: f32,
         _err_b_val: f32,
         _err_a_val: f32,
+        _orig_r: f32,
+        _orig_g: f32,
+        _orig_b: f32,
+        _orig_a: f32,
     ) {
     }
 }

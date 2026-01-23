@@ -263,7 +263,7 @@ fn dither_standard<K: SingleChannelKernel>(
             let new = quant.quantize(old);
             buf[y][bx] = new;
             let err = old - new;
-            K::apply_ltr(&mut buf, bx, y, err);
+            K::apply_ltr(&mut buf, bx, y, err, old);
         }
         if let Some(ref mut cb) = progress {
             // Progress based on real image rows (after seeding)
@@ -303,7 +303,7 @@ fn dither_serpentine<K: SingleChannelKernel>(
                 let new = quant.quantize(old);
                 buf[y][bx] = new;
                 let err = old - new;
-                K::apply_rtl(&mut buf, bx, y, err);
+                K::apply_rtl(&mut buf, bx, y, err, old);
             }
         } else {
             // Left-to-right on even rows
@@ -313,7 +313,7 @@ fn dither_serpentine<K: SingleChannelKernel>(
                 let new = quant.quantize(old);
                 buf[y][bx] = new;
                 let err = old - new;
-                K::apply_ltr(&mut buf, bx, y, err);
+                K::apply_ltr(&mut buf, bx, y, err, old);
             }
         }
         if let Some(ref mut cb) = progress {
