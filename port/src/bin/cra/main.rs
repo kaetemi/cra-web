@@ -1618,6 +1618,16 @@ fn main() -> Result<(), String> {
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
     let output_alpha_mode = args.output_alpha_dither.map(|m| m.to_cs_dither_mode());
 
+    // Warn about Zhou-Fang limitations
+    let is_zhou_fang = matches!(
+        output_dither_mode,
+        CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine
+    );
+    if is_zhou_fang && !args.no_colorspace_aware_output {
+        eprintln!("Warning: Zhou-Fang threshold modulation only works with --no-colorspace-aware-output.");
+        eprintln!("         With colorspace-aware dithering, Zhou-Fang falls back to Ostromoukhov (variable coefficients only).");
+    }
+
     // Build the correction method (None if histogram is None)
     let correction_method = build_correction_method(
         histogram,
@@ -1753,6 +1763,9 @@ fn main() -> Result<(), String> {
         }
         if args.output_alpha_dither.is_some() {
             eprintln!("Warning: --output-alpha-dither is ignored for palette formats (alpha is integrated into main dithering)");
+        }
+        if is_zhou_fang {
+            eprintln!("Warning: Zhou-Fang falls back to Ostromoukhov for palette formats (threshold modulation not applicable).");
         }
     } else {
         // --output-raw-palette is only valid for palette formats
