@@ -258,7 +258,8 @@ fn dither_alpha_f16<K: SingleChannelKernel>(
 
                 // Compute and diffuse error
                 let err_val = adjusted - best_val;
-                apply_single_channel_kernel(&mut err, bx, y, err_val, K::REACH >= 2, true);
+                // Scale original value to 0-255 range for Ostromoukhov coefficient lookup
+                K::apply_rtl(&mut err, bx, y, err_val, alpha_value.clamp(0.0, 1.0) * 255.0);
             }
         } else {
             for px in 0..process_width {
@@ -290,7 +291,8 @@ fn dither_alpha_f16<K: SingleChannelKernel>(
 
                 // Compute and diffuse error
                 let err_val = adjusted - best_val;
-                apply_single_channel_kernel(&mut err, bx, y, err_val, K::REACH >= 2, false);
+                // Scale original value to 0-255 range for Ostromoukhov coefficient lookup
+                K::apply_ltr(&mut err, bx, y, err_val, alpha_value.clamp(0.0, 1.0) * 255.0);
             }
         }
     }
@@ -630,7 +632,10 @@ fn dither_standard_f16<K: RgbKernel>(
                 b_out[idx] = best_b;
             }
 
-            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
+            // Scale original values to 0-255 range for Ostromoukhov coefficient lookup
+            // (for sRGB working space, values are already 0-1; for linear, clamp to reasonable range)
+            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val,
+                r_val.clamp(0.0, 1.0) * 255.0, g_val.clamp(0.0, 1.0) * 255.0, b_val.clamp(0.0, 1.0) * 255.0);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -684,7 +689,9 @@ fn dither_serpentine_f16<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
+                // Scale original values to 0-255 range for Ostromoukhov coefficient lookup
+                K::apply_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val,
+                    r_val.clamp(0.0, 1.0) * 255.0, g_val.clamp(0.0, 1.0) * 255.0, b_val.clamp(0.0, 1.0) * 255.0);
             }
         } else {
             for px in 0..process_width {
@@ -705,7 +712,10 @@ fn dither_serpentine_f16<K: RgbKernel>(
                     b_out[idx] = best_b;
                 }
 
-                K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, r_val, g_val, b_val);
+                // Scale original values to 0-255 range for Ostromoukhov coefficient lookup
+            // (for sRGB working space, values are already 0-1; for linear, clamp to reasonable range)
+            K::apply_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val,
+                r_val.clamp(0.0, 1.0) * 255.0, g_val.clamp(0.0, 1.0) * 255.0, b_val.clamp(0.0, 1.0) * 255.0);
             }
         }
         if y >= reach {
