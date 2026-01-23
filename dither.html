@@ -1063,8 +1063,8 @@
             <div class="palette-downloads" id="palette-downloads" style="display: none;">
                 <h5>Palette Data</h5>
                 <div class="download-row">
-                    <button class="download-btn secondary" id="download-palette-indices-btn" disabled>Palette Indices</button>
-                    <button class="download-btn secondary" id="download-palette-colors-btn" disabled>Palette Colors (ARGB8888)</button>
+                    <button class="download-btn secondary" id="download-palette-indices-btn" disabled>Raw Indices</button>
+                    <button class="download-btn secondary" id="download-palette-colors-btn" disabled>Palette LUT</button>
                 </div>
             </div>
         </div>
@@ -1503,9 +1503,11 @@
             // Enable/disable raw download buttons
             document.getElementById('download-raw-btn').disabled = !supportsBinary;
 
-            // Per-channel downloads
+            // Per-channel downloads - hide for grayscale and paletted modes
             const channelDownloads = document.getElementById('channel-downloads');
-            if (lastDitherResult.isGrayscale) {
+            const outputMode = document.getElementById('output-mode').value;
+            const isPaletted = outputMode.startsWith('palette-');
+            if (lastDitherResult.isGrayscale || isPaletted) {
                 channelDownloads.style.display = 'none';
             } else {
                 channelDownloads.style.display = 'block';
@@ -1531,8 +1533,6 @@
 
             // Palette downloads - only show for palette output modes
             const paletteDownloads = document.getElementById('palette-downloads');
-            const outputMode = document.getElementById('output-mode').value;
-            const isPaletted = outputMode.startsWith('palette-');
             if (isPaletted) {
                 paletteDownloads.style.display = 'block';
                 document.getElementById('download-palette-indices-btn').disabled = false;
@@ -1749,8 +1749,13 @@
                 height: lastDitherResult.height
             };
 
-            // For palette formats, output PALETTED8 and include palette name
+            // For palette formats, output PALETTED8 and include palette name and LUT size
             if (isPaletteFormat) {
+                // Map palette type to color count
+                const paletteColorCounts = { 0: 216, 1: 16, 2: 16, 3: 4, 4: 4 };
+                const colorCount = paletteColorCounts[lastDitherResult.paletteType] || 256;
+                const lutFileSize = colorCount * 4; // 4 bytes (ARGB8888) per color
+                metadata.lut_file_size = lutFileSize;
                 metadata.format = 'PALETTED8';
                 metadata.bits_per_pixel = 8;
                 metadata.palette = format;
@@ -2347,20 +2352,22 @@
 
             const blob = new Blob([rawData], { type: 'application/octet-stream' });
             const strideSuffix = stride > 1 ? `_stride${stride}` : '';
-            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `PALETTED8${strideSuffix}`, 'raw');
+            // Use _index suffix for hardware compatibility
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `PALETTED8${strideSuffix}_index`, 'raw');
             downloadBlob(blob, filename);
         });
 
-        // Download palette colors as ARGB8888
+        // Download palette colors as ARGB8888 (LUT)
         document.getElementById('download-palette-colors-btn').addEventListener('click', () => {
             if (!lastDitherResult || !lastDitherResult.isPaletted) return;
 
             const paletteData = get_palette_colors_wasm(lastDitherResult.paletteType);
 
             const blob = new Blob([paletteData], { type: 'application/octet-stream' });
-            const paletteNames = ['websafe', 'cga5153', 'cgabios', 'cgapalette1', 'cgapalette1_5153'];
-            const paletteName = paletteNames[lastDitherResult.paletteType] || 'palette';
-            const filename = `cra_${paletteName}_ARGB8888.pal`;
+            const strideSuffix = parseInt(document.getElementById('stride-select').value) > 1 ?
+                `_stride${document.getElementById('stride-select').value}` : '';
+            // Use _lut suffix for hardware compatibility
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `PALETTED8${strideSuffix}_lut`, 'raw');
             downloadBlob(blob, filename);
         });
 

@@ -1049,6 +1049,9 @@ fn write_metadata(
         // For palette formats, output "PALETTED8" as the format; otherwise use the format name
         let is_palette_format = palette_format.is_some();
         if let Some(pf) = palette_format {
+            // LUT file size = 4 bytes (ARGB8888) per color
+            let lut_file_size = pf.color_count() * 4;
+            json.push_str(&format!("  \"lut_file_size\": {},\n", lut_file_size));
             json.push_str("  \"format\": \"PALETTED8\",\n");
             json.push_str("  \"bits_per_pixel\": 8,\n");
             // Also include the actual palette name for reference
