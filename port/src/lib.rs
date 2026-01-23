@@ -50,6 +50,8 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
         5 => DitherMode::MixedSerpentine,
         6 => DitherMode::MixedRandom,
         7 => DitherMode::None,
+        8 => DitherMode::OstromoukhovStandard,
+        9 => DitherMode::OstromoukhovSerpentine,
         _ => DitherMode::Standard,
     }
 }

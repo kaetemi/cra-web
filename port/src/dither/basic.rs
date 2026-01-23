@@ -13,7 +13,7 @@ pub use super::common::DitherMode;
 // Import shared utilities from common
 use super::common::{
     apply_single_channel_kernel, bit_replicate, wang_hash, FloydSteinberg, JarvisJudiceNinke,
-    NoneKernel, SingleChannelKernel,
+    NoneKernel, Ostromoukhov, SingleChannelKernel,
 };
 
 /// Quantization parameters for reduced bit depth dithering.
@@ -584,6 +584,8 @@ pub fn dither_with_mode_bits(
         DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed, quant, progress),
         DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant, progress),
+        DitherMode::OstromoukhovStandard => dither_standard::<Ostromoukhov>(img, width, height, quant, progress),
+        DitherMode::OstromoukhovSerpentine => dither_serpentine::<Ostromoukhov>(img, width, height, quant, progress),
     }
 }
 

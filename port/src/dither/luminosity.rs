@@ -37,8 +37,8 @@ use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_single_channel_kernel, gray_overshoot_penalty, perceptual_lightness_distance_sq,
-    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
-    SingleChannelKernel,
+    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
+    PerceptualSpace, SingleChannelKernel,
 };
 #[cfg(test)]
 use super::common::{lightness_distance_ciede2000_sq, lightness_distance_sq};
@@ -687,6 +687,18 @@ pub fn colorspace_aware_dither_gray_with_options(
             dither_mixed_random_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_gray::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_gray::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
             );
         }
     }

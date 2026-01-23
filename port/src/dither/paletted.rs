@@ -13,8 +13,8 @@ use crate::color::srgb_to_linear_single;
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgba, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
-    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
-    RgbaKernel,
+    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
+    PerceptualSpace, RgbaKernel,
 };
 use super::palette_hull::EPSILON as HULL_EPSILON;
 use super::palette_projection::ExtendedPalette;
@@ -1454,6 +1454,22 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, hashed_seed, progress,
             );
         }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_paletted::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_paletted::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     (r_out, g_out, b_out, a_out)
@@ -1586,6 +1602,22 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
                 &mut r_out, &mut g_out, &mut b_out, &mut a_out,
                 width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_paletted_extended::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_paletted_extended::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
             );
         }
     }

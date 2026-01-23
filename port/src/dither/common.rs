@@ -205,6 +205,12 @@ pub enum DitherMode {
     /// Mixed: Randomly selects between FS and JJN kernels per-pixel
     /// AND randomly selects scan direction per row
     MixedRandom,
+    /// Ostromoukhov: Variable-coefficient kernel based on input intensity
+    /// Standard left-to-right scanning
+    OstromoukhovStandard,
+    /// Ostromoukhov: Variable-coefficient kernel based on input intensity
+    /// Serpentine scanning (alternating direction each row)
+    OstromoukhovSerpentine,
 }
 
 /// Wang hash for deterministic randomization - excellent avalanche properties.
@@ -430,5 +436,5 @@ pub fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32
 // Re-export kernel types from dedicated module
 pub use super::kernels::{
     apply_mixed_kernel_rgb, apply_mixed_kernel_rgba, apply_single_channel_kernel, FloydSteinberg,
-    JarvisJudiceNinke, NoneKernel, RgbKernel, RgbaKernel, SingleChannelKernel,
+    JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel, RgbaKernel, SingleChannelKernel,
 };

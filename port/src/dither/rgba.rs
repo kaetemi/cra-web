@@ -18,7 +18,7 @@ use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
     linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke,
-    NoneKernel, PerceptualSpace, RgbKernel,
+    NoneKernel, Ostromoukhov, PerceptualSpace, RgbKernel,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -935,6 +935,22 @@ pub fn colorspace_aware_dither_rgba_with_options(
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
                 width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_rgba::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_rgba::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
             );
         }
     }

@@ -478,6 +478,389 @@ impl RgbaKernel for JarvisJudiceNinke {
 }
 
 // ============================================================================
+// Ostromoukhov kernel implementation
+// ============================================================================
+
+/// Ostromoukhov variable-coefficient error diffusion kernel.
+///
+/// Uses input intensity to select coefficients from a lookup table.
+/// Produces visually pleasing results with reduced artifacts compared to
+/// fixed-coefficient kernels. Same footprint as Floyd-Steinberg (REACH=1).
+///
+/// Reference: Victor Ostromoukhov, "A Simple and Efficient Error-Diffusion
+/// Algorithm", SIGGRAPH 2001.
+pub struct Ostromoukhov;
+
+/// Coefficient table for Ostromoukhov dithering (128 entries).
+/// Each entry is [A10, A11, A01] where:
+/// - A10: coefficient for next pixel in scan direction
+/// - A11: coefficient for diagonal (behind scan direction, next row)
+/// - A01: coefficient for directly below
+/// Actual weight = A / (A10 + A11 + A01)
+/// For levels 128-255, use entry (255 - level) with mirrored directions.
+const OSTRO_TABLE: [[i32; 3]; 128] = [
+    [13, 0, 5],      // 0
+    [13, 0, 5],      // 1
+    [21, 0, 10],     // 2
+    [7, 0, 4],       // 3
+    [8, 0, 5],       // 4
+    [47, 3, 28],     // 5
+    [23, 3, 13],     // 6
+    [15, 3, 8],      // 7
+    [22, 6, 11],     // 8
+    [43, 15, 20],    // 9
+    [7, 3, 3],       // 10
+    [501, 224, 211], // 11
+    [249, 116, 103], // 12
+    [165, 80, 67],   // 13
+    [123, 62, 49],   // 14
+    [489, 256, 191], // 15
+    [81, 44, 31],    // 16
+    [483, 272, 181], // 17
+    [60, 35, 22],    // 18
+    [53, 32, 19],    // 19
+    [237, 148, 83],  // 20
+    [471, 304, 161], // 21
+    [3, 2, 1],       // 22
+    [481, 314, 185], // 23
+    [354, 226, 155], // 24
+    [1389, 866, 685], // 25
+    [227, 138, 125], // 26
+    [267, 158, 163], // 27
+    [327, 188, 220], // 28
+    [61, 34, 45],    // 29
+    [627, 338, 505], // 30
+    [1227, 638, 1075], // 31
+    [20, 10, 19],    // 32
+    [1937, 1000, 1767], // 33
+    [977, 520, 855], // 34
+    [657, 360, 551], // 35
+    [71, 40, 57],    // 36
+    [2005, 1160, 1539], // 37
+    [337, 200, 247], // 38
+    [2039, 1240, 1425], // 39
+    [257, 160, 171], // 40
+    [691, 440, 437], // 41
+    [1045, 680, 627], // 42
+    [301, 200, 171], // 43
+    [177, 120, 95],  // 44
+    [2141, 1480, 1083], // 45
+    [1079, 760, 513], // 46
+    [725, 520, 323], // 47
+    [137, 100, 57],  // 48
+    [2209, 1640, 855], // 49
+    [53, 40, 19],    // 50
+    [2243, 1720, 741], // 51
+    [565, 440, 171], // 52
+    [759, 600, 209], // 53
+    [1147, 920, 285], // 54
+    [2311, 1880, 513], // 55
+    [97, 80, 19],    // 56
+    [335, 280, 57],  // 57
+    [1181, 1000, 171], // 58
+    [793, 680, 95],  // 59
+    [599, 520, 57],  // 60
+    [2413, 2120, 171], // 61
+    [405, 360, 19],  // 62
+    [2447, 2200, 57], // 63
+    [11, 10, 0],     // 64
+    [158, 151, 3],   // 65
+    [178, 179, 7],   // 66
+    [1030, 1091, 63], // 67
+    [248, 277, 21],  // 68
+    [318, 375, 35],  // 69
+    [458, 571, 63],  // 70
+    [878, 1159, 147], // 71
+    [5, 7, 1],       // 72
+    [172, 181, 37],  // 73
+    [97, 76, 22],    // 74
+    [72, 41, 17],    // 75
+    [119, 47, 29],   // 76
+    [4, 1, 1],       // 77
+    [4, 1, 1],       // 78
+    [4, 1, 1],       // 79
+    [4, 1, 1],       // 80
+    [4, 1, 1],       // 81
+    [4, 1, 1],       // 82
+    [4, 1, 1],       // 83
+    [4, 1, 1],       // 84
+    [4, 1, 1],       // 85
+    [65, 18, 17],    // 86
+    [95, 29, 26],    // 87
+    [185, 62, 53],   // 88
+    [30, 11, 9],     // 89
+    [35, 14, 11],    // 90
+    [85, 37, 28],    // 91
+    [55, 26, 19],    // 92
+    [80, 41, 29],    // 93
+    [155, 86, 59],   // 94
+    [5, 3, 2],       // 95
+    [5, 3, 2],       // 96
+    [5, 3, 2],       // 97
+    [5, 3, 2],       // 98
+    [5, 3, 2],       // 99
+    [5, 3, 2],       // 100
+    [5, 3, 2],       // 101
+    [5, 3, 2],       // 102
+    [5, 3, 2],       // 103
+    [5, 3, 2],       // 104
+    [5, 3, 2],       // 105
+    [5, 3, 2],       // 106
+    [5, 3, 2],       // 107
+    [305, 176, 119], // 108
+    [155, 86, 59],   // 109
+    [105, 56, 39],   // 110
+    [80, 41, 29],    // 111
+    [65, 32, 23],    // 112
+    [55, 26, 19],    // 113
+    [335, 152, 113], // 114
+    [85, 37, 28],    // 115
+    [115, 48, 37],   // 116
+    [35, 14, 11],    // 117
+    [355, 136, 109], // 118
+    [30, 11, 9],     // 119
+    [365, 128, 107], // 120
+    [185, 62, 53],   // 121
+    [25, 8, 7],      // 122
+    [95, 29, 26],    // 123
+    [385, 112, 103], // 124
+    [65, 18, 17],    // 125
+    [395, 104, 101], // 126
+    [4, 1, 1],       // 127
+];
+
+/// Get Ostromoukhov coefficients for a given input level (0.0-1.0).
+/// Returns (d10, d11, d01) normalized coefficients and whether to mirror.
+#[inline]
+fn ostro_coefficients(original_value: f32) -> (f32, f32, f32, bool) {
+    // Convert to 0-255 level
+    let level = (original_value * 255.0 + 0.5) as i32;
+    let level = level.clamp(0, 255);
+
+    // Mirror for levels > 127
+    let (idx, mirror) = if level > 127 {
+        (255 - level, true)
+    } else {
+        (level, false)
+    };
+
+    let coeffs = OSTRO_TABLE[idx as usize];
+    let sum = (coeffs[0] + coeffs[1] + coeffs[2]) as f32;
+
+    let d10 = coeffs[0] as f32 / sum;
+    let d11 = coeffs[1] as f32 / sum;
+    let d01 = coeffs[2] as f32 / sum;
+
+    (d10, d11, d01, mirror)
+}
+
+/// Apply Ostromoukhov kernel to a single channel (left-to-right).
+#[inline]
+pub fn apply_ostromoukhov_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, original: f32) {
+    let (d10, d11, d01, _mirror) = ostro_coefficients(original);
+
+    // LTR: next=bx+1, diagonal_behind=bx-1, below=bx
+    buf[y][bx + 1] += err * d10;     // next pixel in scan direction
+    buf[y + 1][bx - 1] += err * d11; // diagonal behind
+    buf[y + 1][bx] += err * d01;     // directly below
+}
+
+/// Apply Ostromoukhov kernel to a single channel (right-to-left).
+#[inline]
+pub fn apply_ostromoukhov_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, original: f32) {
+    let (d10, d11, d01, _mirror) = ostro_coefficients(original);
+
+    // RTL: next=bx-1, diagonal_behind=bx+1, below=bx
+    buf[y][bx - 1] += err * d10;     // next pixel in scan direction
+    buf[y + 1][bx + 1] += err * d11; // diagonal behind
+    buf[y + 1][bx] += err * d01;     // directly below
+}
+
+/// Apply Ostromoukhov kernel to RGB channels (left-to-right).
+#[inline]
+pub fn apply_ostromoukhov_rgb_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    orig_r: f32,
+    orig_g: f32,
+    orig_b: f32,
+) {
+    apply_ostromoukhov_ltr(err_r, bx, y, err_r_val, orig_r);
+    apply_ostromoukhov_ltr(err_g, bx, y, err_g_val, orig_g);
+    apply_ostromoukhov_ltr(err_b, bx, y, err_b_val, orig_b);
+}
+
+/// Apply Ostromoukhov kernel to RGB channels (right-to-left).
+#[inline]
+pub fn apply_ostromoukhov_rgb_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    orig_r: f32,
+    orig_g: f32,
+    orig_b: f32,
+) {
+    apply_ostromoukhov_rtl(err_r, bx, y, err_r_val, orig_r);
+    apply_ostromoukhov_rtl(err_g, bx, y, err_g_val, orig_g);
+    apply_ostromoukhov_rtl(err_b, bx, y, err_b_val, orig_b);
+}
+
+/// Apply Ostromoukhov kernel to RGBA channels (left-to-right).
+#[inline]
+pub fn apply_ostromoukhov_rgba_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    orig_r: f32,
+    orig_g: f32,
+    orig_b: f32,
+    orig_a: f32,
+) {
+    apply_ostromoukhov_ltr(err_r, bx, y, err_r_val, orig_r);
+    apply_ostromoukhov_ltr(err_g, bx, y, err_g_val, orig_g);
+    apply_ostromoukhov_ltr(err_b, bx, y, err_b_val, orig_b);
+    apply_ostromoukhov_ltr(err_a, bx, y, err_a_val, orig_a);
+}
+
+/// Apply Ostromoukhov kernel to RGBA channels (right-to-left).
+#[inline]
+pub fn apply_ostromoukhov_rgba_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    orig_r: f32,
+    orig_g: f32,
+    orig_b: f32,
+    orig_a: f32,
+) {
+    apply_ostromoukhov_rtl(err_r, bx, y, err_r_val, orig_r);
+    apply_ostromoukhov_rtl(err_g, bx, y, err_g_val, orig_g);
+    apply_ostromoukhov_rtl(err_b, bx, y, err_b_val, orig_b);
+    apply_ostromoukhov_rtl(err_a, bx, y, err_a_val, orig_a);
+}
+
+impl SingleChannelKernel for Ostromoukhov {
+    const REACH: usize = 1; // Same footprint as Floyd-Steinberg
+
+    #[inline]
+    fn apply_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        // Fallback: use middle gray (0.5) when original value not available
+        apply_ostromoukhov_ltr(buf, bx, y, err, 0.5);
+    }
+
+    #[inline]
+    fn apply_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+        // Fallback: use middle gray (0.5) when original value not available
+        apply_ostromoukhov_rtl(buf, bx, y, err, 0.5);
+    }
+}
+
+impl RgbKernel for Ostromoukhov {
+    const REACH: usize = 1;
+
+    #[inline]
+    fn apply_ltr(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Fallback: use middle gray (0.5) when original values not available
+        apply_ostromoukhov_rgb_ltr(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, 0.5, 0.5, 0.5);
+    }
+
+    #[inline]
+    fn apply_rtl(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+    ) {
+        // Fallback: use middle gray (0.5) when original values not available
+        apply_ostromoukhov_rgb_rtl(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, 0.5, 0.5, 0.5);
+    }
+}
+
+impl RgbaKernel for Ostromoukhov {
+    const REACH: usize = 1;
+
+    #[inline]
+    fn apply_ltr(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        err_a: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+        err_a_val: f32,
+    ) {
+        // Fallback: use middle gray (0.5) when original values not available
+        apply_ostromoukhov_rgba_ltr(
+            err_r, err_g, err_b, err_a, bx, y,
+            err_r_val, err_g_val, err_b_val, err_a_val,
+            0.5, 0.5, 0.5, 0.5,
+        );
+    }
+
+    #[inline]
+    fn apply_rtl(
+        err_r: &mut [Vec<f32>],
+        err_g: &mut [Vec<f32>],
+        err_b: &mut [Vec<f32>],
+        err_a: &mut [Vec<f32>],
+        bx: usize,
+        y: usize,
+        err_r_val: f32,
+        err_g_val: f32,
+        err_b_val: f32,
+        err_a_val: f32,
+    ) {
+        // Fallback: use middle gray (0.5) when original values not available
+        apply_ostromoukhov_rgba_rtl(
+            err_r, err_g, err_b, err_a, bx, y,
+            err_r_val, err_g_val, err_b_val, err_a_val,
+            0.5, 0.5, 0.5, 0.5,
+        );
+    }
+}
+
+// ============================================================================
 // No-op kernel implementation
 // ============================================================================
 

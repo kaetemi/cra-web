@@ -19,7 +19,7 @@ use crate::color_distance::perceptual_distance_sq;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, FloydSteinberg, JarvisJudiceNinke, NoneKernel, RgbKernel,
+    linear_rgb_to_perceptual_clamped, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
 };
 
 // Re-export common types for backwards compatibility
@@ -845,6 +845,22 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
                 width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_rgb::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_rgb::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
             );
         }
     }

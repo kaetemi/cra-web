@@ -49,6 +49,10 @@ pub enum DitherMethod {
     MixedSerpentine,
     /// Mixed: randomly selects kernel AND scan direction per-row
     MixedRandom,
+    /// Ostromoukhov: variable-coefficient kernel based on input intensity, standard scanning
+    OstroStandard,
+    /// Ostromoukhov: variable-coefficient kernel based on input intensity, serpentine scanning
+    OstroSerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
 }
@@ -63,6 +67,8 @@ impl DitherMethod {
             DitherMethod::MixedStandard => DitherMode::MixedStandard,
             DitherMethod::MixedSerpentine => DitherMode::MixedSerpentine,
             DitherMethod::MixedRandom => DitherMode::MixedRandom,
+            DitherMethod::OstroStandard => DitherMode::OstromoukhovStandard,
+            DitherMethod::OstroSerpentine => DitherMode::OstromoukhovSerpentine,
             DitherMethod::None => DitherMode::None,
         }
     }
@@ -76,6 +82,8 @@ impl DitherMethod {
             DitherMethod::MixedStandard => CSDitherMode::MixedStandard,
             DitherMethod::MixedSerpentine => CSDitherMode::MixedSerpentine,
             DitherMethod::MixedRandom => CSDitherMode::MixedRandom,
+            DitherMethod::OstroStandard => CSDitherMode::OstromoukhovStandard,
+            DitherMethod::OstroSerpentine => CSDitherMode::OstromoukhovSerpentine,
             DitherMethod::None => CSDitherMode::None,
         }
     }

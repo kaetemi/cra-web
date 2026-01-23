@@ -15,7 +15,8 @@ use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgb, apply_single_channel_kernel, gamut_overshoot_penalty,
     linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash, DitherMode,
-    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, RgbKernel, SingleChannelKernel,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, PerceptualSpace, RgbKernel,
+    SingleChannelKernel,
 };
 
 // ============================================================================
@@ -325,6 +326,12 @@ fn dither_alpha_bf16_with_mode(
         DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom => {
             // For mixed modes, use JJN padding but random kernel selection
             dither_alpha_bf16_mixed(alpha, width, height, mode, seed)
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_alpha_bf16::<Ostromoukhov>(alpha, width, height, false)
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_alpha_bf16::<Ostromoukhov>(alpha, width, height, true)
         }
     }
 }
@@ -1116,6 +1123,24 @@ pub fn dither_rgba_bf16_with_options(
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
                 width, height, reach, hashed_seed, overshoot_penalty, progress,
+            );
+        }
+        DitherMode::OstromoukhovStandard => {
+            dither_standard_bf16::<Ostromoukhov>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_bf16::<Ostromoukhov>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
     }
