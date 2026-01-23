@@ -16,8 +16,9 @@ use crate::color_distance::perceptual_distance_sq;
 use super::basic::dither_with_mode_bits;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_mixed_kernel_rgb, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash,
-    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, RgbKernel,
+    apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
+    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke,
+    NoneKernel, PerceptualSpace, RgbKernel,
 };
 
 #[derive(Clone, Copy, Default)]
@@ -118,6 +119,9 @@ struct DitherContextRgba<'a> {
     space: PerceptualSpace,
     /// Pre-dithered alpha channel (u8 values, 0-255)
     alpha_dithered: &'a [u8],
+    /// Apply gamut overshoot penalty to discourage choices that push error
+    /// diffusion outside the representable color gamut.
+    overshoot_penalty: bool,
 }
 
 /// Process a single pixel with alpha-aware error diffusion.
@@ -204,31 +208,43 @@ fn process_pixel_rgba(
     let mut best_dist = f32::INFINITY;
 
     for r_level in r_min..=r_max {
+        let r_ext = ctx.quant_r.level_to_srgb(r_level);
+        let cand_r_lin = ctx.linear_lut[r_ext as usize];
+
         for g_level in g_min..=g_max {
+            let g_ext = ctx.quant_g.level_to_srgb(g_level);
+            let cand_g_lin = ctx.linear_lut[g_ext as usize];
+
             for b_level in b_min..=b_max {
+                let b_ext = ctx.quant_b.level_to_srgb(b_level);
+                let cand_b_lin = ctx.linear_lut[b_ext as usize];
+
                 let lab_candidate = if let Some(lut) = ctx.lab_lut {
                     let n = ctx.quant_r.num_levels;
                     let lut_idx = r_level * n * n + g_level * n + b_level;
                     lut[lut_idx]
                 } else {
-                    let r_ext = ctx.quant_r.level_to_srgb(r_level);
-                    let g_ext = ctx.quant_g.level_to_srgb(g_level);
-                    let b_ext = ctx.quant_b.level_to_srgb(b_level);
-
-                    let r_lin = ctx.linear_lut[r_ext as usize];
-                    let g_lin = ctx.linear_lut[g_ext as usize];
-                    let b_lin = ctx.linear_lut[b_ext as usize];
-
                     let (l, a, b_ch) =
-                        linear_rgb_to_perceptual_clamped(ctx.space, r_lin, g_lin, b_lin);
+                        linear_rgb_to_perceptual_clamped(ctx.space, cand_r_lin, cand_g_lin, cand_b_lin);
                     LabValue { l, a, b: b_ch }
                 };
 
-                let dist = perceptual_distance_sq(
+                let base_dist = perceptual_distance_sq(
                     ctx.space,
                     lab_target.0, lab_target.1, lab_target.2,
                     lab_candidate.l, lab_candidate.a, lab_candidate.b,
                 );
+
+                // Apply gamut overshoot penalty if enabled
+                let dist = if ctx.overshoot_penalty {
+                    let penalty = gamut_overshoot_penalty(
+                        lin_r_adj, lin_g_adj, lin_b_adj,
+                        cand_r_lin, cand_g_lin, cand_b_lin,
+                    );
+                    base_dist * penalty
+                } else {
+                    base_dist
+                };
 
                 if dist < best_dist {
                     best_dist = dist;
@@ -333,31 +349,43 @@ fn process_pixel_rgba_with_values(
     let mut best_dist = f32::INFINITY;
 
     for r_level in r_min..=r_max {
+        let r_ext = ctx.quant_r.level_to_srgb(r_level);
+        let cand_r_lin = ctx.linear_lut[r_ext as usize];
+
         for g_level in g_min..=g_max {
+            let g_ext = ctx.quant_g.level_to_srgb(g_level);
+            let cand_g_lin = ctx.linear_lut[g_ext as usize];
+
             for b_level in b_min..=b_max {
+                let b_ext = ctx.quant_b.level_to_srgb(b_level);
+                let cand_b_lin = ctx.linear_lut[b_ext as usize];
+
                 let lab_candidate = if let Some(lut) = ctx.lab_lut {
                     let n = ctx.quant_r.num_levels;
                     let lut_idx = r_level * n * n + g_level * n + b_level;
                     lut[lut_idx]
                 } else {
-                    let r_ext = ctx.quant_r.level_to_srgb(r_level);
-                    let g_ext = ctx.quant_g.level_to_srgb(g_level);
-                    let b_ext = ctx.quant_b.level_to_srgb(b_level);
-
-                    let r_lin = ctx.linear_lut[r_ext as usize];
-                    let g_lin = ctx.linear_lut[g_ext as usize];
-                    let b_lin = ctx.linear_lut[b_ext as usize];
-
                     let (l, a, b_ch) =
-                        linear_rgb_to_perceptual_clamped(ctx.space, r_lin, g_lin, b_lin);
+                        linear_rgb_to_perceptual_clamped(ctx.space, cand_r_lin, cand_g_lin, cand_b_lin);
                     LabValue { l, a, b: b_ch }
                 };
 
-                let dist = perceptual_distance_sq(
+                let base_dist = perceptual_distance_sq(
                     ctx.space,
                     lab_target.0, lab_target.1, lab_target.2,
                     lab_candidate.l, lab_candidate.a, lab_candidate.b,
                 );
+
+                // Apply gamut overshoot penalty if enabled
+                let dist = if ctx.overshoot_penalty {
+                    let penalty = gamut_overshoot_penalty(
+                        lin_r_adj, lin_g_adj, lin_b_adj,
+                        cand_r_lin, cand_g_lin, cand_b_lin,
+                    );
+                    base_dist * penalty
+                } else {
+                    base_dist
+                };
 
                 if dist < best_dist {
                     best_dist = dist;
@@ -856,6 +884,9 @@ pub fn colorspace_aware_dither_rgba(
 /// - e_in: accumulated incoming error from previous pixels
 /// - q_err: quantization error (adjusted - quantized)
 ///
+/// This is a convenience wrapper that enables overshoot penalty by default.
+/// Use `colorspace_aware_dither_rgba_with_options` for full control.
+///
 /// Args:
 ///     r_channel, g_channel, b_channel, a_channel: Input channels as f32 in range [0, 255]
 ///     width, height: Image dimensions
@@ -883,6 +914,53 @@ pub fn colorspace_aware_dither_rgba_with_mode(
     mode: DitherMode,
     alpha_mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
+    colorspace_aware_dither_rgba_with_options(
+        r_channel, g_channel, b_channel, a_channel,
+        width, height,
+        bits_r, bits_g, bits_b, bits_a,
+        space, mode, alpha_mode, seed,
+        true, // overshoot_penalty enabled by default
+        progress,
+    )
+}
+
+/// Color space aware RGBA dithering with full options control.
+///
+/// Uses perceptual color space (Lab or OkLab) for finding the best RGB quantization
+/// candidate, with alpha-aware error diffusion.
+///
+/// Args:
+///     r_channel, g_channel, b_channel, a_channel: Input channels as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b, bits_a: Bit depth for each channel (1-8)
+///     space: Perceptual color space for RGB distance calculation
+///     mode: Dithering algorithm and scanning mode for RGB channels
+///     alpha_mode: Dithering algorithm and scanning mode for alpha channel
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     overshoot_penalty: If true, penalize quantization choices that would push
+///         error diffusion outside the representable color gamut (recommended)
+///     progress: Optional callback called with progress (0.0 to 1.0)
+///
+/// Returns:
+///     (r_out, g_out, b_out, a_out): Output channels as u8
+pub fn colorspace_aware_dither_rgba_with_options(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    bits_a: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    alpha_mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
@@ -918,6 +996,7 @@ pub fn colorspace_aware_dither_rgba_with_mode(
         lab_lut: &lab_lut,
         space,
         alpha_dithered: &alpha_dithered,
+        overshoot_penalty,
     };
 
     // Use JJN reach for all modes (largest kernel)

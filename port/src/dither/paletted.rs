@@ -176,6 +176,7 @@ struct DitherContextPaletted<'a> {
 struct ExtendedDitherContext<'a> {
     extended: &'a ExtendedPalette,
     use_ghost_entries: bool,
+    overshoot_penalty: bool,
 }
 
 /// Compute the integrated alpha-RGB distance for palette matching.
@@ -367,7 +368,7 @@ fn process_pixel_paletted_extended(
     // 6. Find best palette entry
     let best_idx = if ctx.use_ghost_entries {
         // Use ghost entry redirection for boundary colors
-        ctx.extended.find_nearest_real([lin_r_clamped, lin_g_clamped, lin_b_clamped])
+        ctx.extended.find_nearest_real([lin_r_clamped, lin_g_clamped, lin_b_clamped], ctx.overshoot_penalty)
     } else {
         // Direct search on real palette entries only
         find_nearest_palette_entry(
@@ -1440,6 +1441,7 @@ pub fn paletted_dither_rgba_with_mode(
 ///     mode: Dithering algorithm and scanning mode
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
 ///     use_ghost_entries: If true, use ghost entry redirection for boundary colors
+///     overshoot_penalty: If true, penalize choices that push error diffusion outside gamut
 ///     progress: Optional callback called with progress (0.0 to 1.0)
 ///
 /// Returns:
@@ -1455,6 +1457,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
     mode: DitherMode,
     seed: u32,
     use_ghost_entries: bool,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
@@ -1464,6 +1467,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
     let ctx = ExtendedDitherContext {
         extended: &extended,
         use_ghost_entries,
+        overshoot_penalty,
     };
 
     let reach = <JarvisJudiceNinke as RgbaKernel>::REACH;

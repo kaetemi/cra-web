@@ -18,8 +18,8 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_mixed_kernel_rgb, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
-    FloydSteinberg, JarvisJudiceNinke, NoneKernel, RgbKernel,
+    apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
+    linear_rgb_to_perceptual_clamped, FloydSteinberg, JarvisJudiceNinke, NoneKernel, RgbKernel,
 };
 
 // Re-export common types for backwards compatibility
@@ -160,31 +160,44 @@ fn process_pixel_with_rgb(
     let mut best_dist = f32::INFINITY;
 
     for r_level in r_min..=r_max {
+        let r_ext = ctx.quant_r.level_to_srgb(r_level);
+        let cand_r_lin = ctx.linear_lut[r_ext as usize];
+
         for g_level in g_min..=g_max {
+            let g_ext = ctx.quant_g.level_to_srgb(g_level);
+            let cand_g_lin = ctx.linear_lut[g_ext as usize];
+
             for b_level in b_min..=b_max {
+                let b_ext = ctx.quant_b.level_to_srgb(b_level);
+                let cand_b_lin = ctx.linear_lut[b_ext as usize];
+
                 let lab_candidate = if let Some(lut) = ctx.lab_lut {
                     let n = ctx.quant_r.num_levels;
                     let lut_idx = r_level * n * n + g_level * n + b_level;
                     lut[lut_idx]
                 } else {
-                    let r_ext = ctx.quant_r.level_to_srgb(r_level);
-                    let g_ext = ctx.quant_g.level_to_srgb(g_level);
-                    let b_ext = ctx.quant_b.level_to_srgb(b_level);
-
-                    let r_lin = ctx.linear_lut[r_ext as usize];
-                    let g_lin = ctx.linear_lut[g_ext as usize];
-                    let b_lin = ctx.linear_lut[b_ext as usize];
-
                     let (l, a, b_ch) =
-                        linear_rgb_to_perceptual_clamped(ctx.space, r_lin, g_lin, b_lin);
+                        linear_rgb_to_perceptual_clamped(ctx.space, cand_r_lin, cand_g_lin, cand_b_lin);
                     LabValue { l, a, b: b_ch }
                 };
 
-                let dist = perceptual_distance_sq(
+                let base_dist = perceptual_distance_sq(
                     ctx.space,
                     lab_target.0, lab_target.1, lab_target.2,
                     lab_candidate.l, lab_candidate.a, lab_candidate.b,
                 );
+
+                // Apply gamut overshoot penalty if enabled
+                let dist = if ctx.overshoot_penalty {
+                    let penalty = gamut_overshoot_penalty(
+                        lin_r_adj, lin_g_adj, lin_b_adj,
+                        cand_r_lin, cand_g_lin, cand_b_lin,
+                    );
+                    base_dist * penalty
+                } else {
+                    base_dist
+                };
+
                 if dist < best_dist {
                     best_dist = dist;
                     best_r_level = r_level;
@@ -605,6 +618,9 @@ struct DitherContext<'a> {
     linear_lut: &'a [f32; 256],
     lab_lut: &'a Option<Vec<LabValue>>,
     space: PerceptualSpace,
+    /// Apply gamut overshoot penalty to discourage choices that push error
+    /// diffusion outside the representable color gamut.
+    overshoot_penalty: bool,
 }
 
 /// Process a single pixel: find best quantization and compute error.
@@ -761,6 +777,9 @@ pub fn colorspace_aware_dither_rgb(
 /// candidate, and accumulates/diffuses error in linear RGB space for physically
 /// correct light mixing. Processes all three channels jointly.
 ///
+/// This is a convenience wrapper that enables overshoot penalty by default.
+/// Use `colorspace_aware_dither_rgb_with_options` for full control.
+///
 /// Args:
 ///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
 ///     width, height: Image dimensions
@@ -786,6 +805,50 @@ pub fn colorspace_aware_dither_rgb_with_mode(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    colorspace_aware_dither_rgb_with_options(
+        r_channel, g_channel, b_channel,
+        width, height,
+        bits_r, bits_g, bits_b,
+        space, mode, seed,
+        true, // overshoot_penalty enabled by default
+        progress,
+    )
+}
+
+/// Color space aware dithering with full options control.
+///
+/// Uses perceptual color space (Lab or OkLab) for finding the best quantization
+/// candidate, and accumulates/diffuses error in linear RGB space for physically
+/// correct light mixing. Processes all three channels jointly.
+///
+/// Args:
+///     r_channel, g_channel, b_channel: Input channels as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_r, bits_g, bits_b: Bit depth for each channel (1-8)
+///     space: Perceptual color space for distance calculation
+///     mode: Dithering algorithm and scanning mode
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     overshoot_penalty: If true, penalize quantization choices that would push
+///         error diffusion outside the representable color gamut (recommended)
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
+///
+/// Returns:
+///     (r_out, g_out, b_out): Output channels as u8
+pub fn colorspace_aware_dither_rgb_with_options(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let quant_r = QuantLevelParams::new(bits_r);
     let quant_g = QuantLevelParams::new(bits_g);
     let quant_b = QuantLevelParams::new(bits_b);
@@ -807,6 +870,7 @@ pub fn colorspace_aware_dither_rgb_with_mode(
         linear_lut: &linear_lut,
         lab_lut: &lab_lut,
         space,
+        overshoot_penalty,
     };
 
     let pixels = width * height;

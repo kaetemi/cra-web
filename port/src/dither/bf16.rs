@@ -13,9 +13,9 @@ use half::bf16;
 use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
-    apply_mixed_kernel_rgb, apply_single_channel_kernel, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke,
-    NoneKernel, PerceptualSpace, RgbKernel, SingleChannelKernel,
+    apply_mixed_kernel_rgb, apply_single_channel_kernel, gamut_overshoot_penalty,
+    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash, DitherMode,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, RgbKernel, SingleChannelKernel,
 };
 
 // ============================================================================
@@ -457,6 +457,7 @@ fn process_pixel_bf16_with_values(
     err_b: &[Vec<f32>],
     bx: usize,
     y: usize,
+    overshoot_penalty: bool,
 ) -> (bf16, bf16, bf16, f32, f32, f32) {
     // Get alpha (normalized)
     let alpha = alpha_bf16.to_f32().clamp(0.0, 1.0);
@@ -522,11 +523,22 @@ fn process_pixel_bf16_with_values(
                 // Convert to perceptual space (clamped for candidate)
                 let lab_cand = linear_rgb_to_perceptual_clamped(space, r_lin, g_lin, b_lin);
 
-                let dist = perceptual_distance_sq(
+                let base_dist = perceptual_distance_sq(
                     space,
                     lab_target.0, lab_target.1, lab_target.2,
                     lab_cand.0, lab_cand.1, lab_cand.2,
                 );
+
+                // Apply gamut overshoot penalty if enabled
+                let dist = if overshoot_penalty {
+                    let penalty = gamut_overshoot_penalty(
+                        lin_r_adj, lin_g_adj, lin_b_adj,
+                        r_lin, g_lin, b_lin,
+                    );
+                    base_dist * penalty
+                } else {
+                    base_dist
+                };
 
                 if dist < best_dist {
                     best_dist = dist;
@@ -578,6 +590,7 @@ fn dither_standard_bf16<K: RgbKernel>(
     width: usize,
     height: usize,
     reach: usize,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     let process_height = reach + height;
@@ -591,7 +604,7 @@ fn dither_standard_bf16<K: RgbKernel>(
             let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
             let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
             // Only write output for real image pixels
             let in_real_y = y >= reach;
@@ -630,6 +643,7 @@ fn dither_serpentine_bf16<K: RgbKernel>(
     width: usize,
     height: usize,
     reach: usize,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     let process_height = reach + height;
@@ -644,7 +658,7 @@ fn dither_serpentine_bf16<K: RgbKernel>(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -665,7 +679,7 @@ fn dither_serpentine_bf16<K: RgbKernel>(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -706,6 +720,7 @@ fn dither_mixed_standard_bf16(
     height: usize,
     reach: usize,
     hashed_seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     let process_height = reach + height;
@@ -719,7 +734,7 @@ fn dither_mixed_standard_bf16(
             let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
             let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
             // Only write output for real image pixels
             let in_real_y = y >= reach;
@@ -760,6 +775,7 @@ fn dither_mixed_serpentine_bf16(
     height: usize,
     reach: usize,
     hashed_seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     let process_height = reach + height;
@@ -774,7 +790,7 @@ fn dither_mixed_serpentine_bf16(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -796,7 +812,7 @@ fn dither_mixed_serpentine_bf16(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -838,6 +854,7 @@ fn dither_mixed_random_bf16(
     height: usize,
     reach: usize,
     hashed_seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) {
     let process_height = reach + height;
@@ -855,7 +872,7 @@ fn dither_mixed_random_bf16(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -877,7 +894,7 @@ fn dither_mixed_random_bf16(
                 let alpha_bf16 = get_seeding_alpha_dithered(alpha_dithered, width, px, y, reach);
 
                 let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y);
+                    process_pixel_bf16_with_values(space, working_space, r_val, g_val, b_val, alpha_bf16, err_r, err_g, err_b, bx, y, overshoot_penalty);
 
                 // Only write output for real image pixels
                 let in_real_y = y >= reach;
@@ -970,6 +987,33 @@ pub fn dither_rgba_bf16_with_mode(
     working_space: Bf16WorkingSpace,
     mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<bf16>, Vec<bf16>, Vec<bf16>, Vec<bf16>) {
+    dither_rgba_bf16_with_options(
+        r_channel, g_channel, b_channel, a_channel,
+        width, height, space, working_space, mode, seed, true, progress,
+    )
+}
+
+/// Color space aware RGBA dithering from f32 to bf16 with full options.
+///
+/// Same as `dither_rgba_bf16_with_mode` but with additional control over overshoot penalty.
+///
+/// Args:
+///     overshoot_penalty: If true, penalize candidates that would cause the opposing
+///         point to fall outside the [0,1]³ RGB cube (reduces color fringing)
+pub fn dither_rgba_bf16_with_options(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    width: usize,
+    height: usize,
+    space: PerceptualSpace,
+    working_space: Bf16WorkingSpace,
+    mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<bf16>, Vec<bf16>, Vec<bf16>, Vec<bf16>) {
     let pixels = width * height;
@@ -1008,7 +1052,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, progress,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
         DitherMode::Standard => {
@@ -1017,7 +1061,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, progress,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
         DitherMode::Serpentine => {
@@ -1026,7 +1070,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, progress,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
         DitherMode::JarvisStandard => {
@@ -1035,7 +1079,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, progress,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
         DitherMode::JarvisSerpentine => {
@@ -1044,7 +1088,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, progress,
+                width, height, reach, overshoot_penalty, progress,
             );
         }
         DitherMode::MixedStandard => {
@@ -1053,7 +1097,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, hashed_seed, progress,
+                width, height, reach, hashed_seed, overshoot_penalty, progress,
             );
         }
         DitherMode::MixedSerpentine => {
@@ -1062,7 +1106,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, hashed_seed, progress,
+                width, height, reach, hashed_seed, overshoot_penalty, progress,
             );
         }
         DitherMode::MixedRandom => {
@@ -1071,7 +1115,7 @@ pub fn dither_rgba_bf16_with_mode(
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,
-                width, height, reach, hashed_seed, progress,
+                width, height, reach, hashed_seed, overshoot_penalty, progress,
             );
         }
     }
@@ -1104,15 +1148,37 @@ pub fn dither_rgb_bf16_with_mode(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<bf16>, Vec<bf16>, Vec<bf16>) {
+    dither_rgb_bf16_with_options(
+        r_channel, g_channel, b_channel,
+        width, height, space, working_space, mode, seed, true, progress,
+    )
+}
+
+/// Color space aware RGB dithering from f32 to bf16 with full options.
+///
+/// Same as `dither_rgb_bf16_with_mode` but with additional control over overshoot penalty.
+pub fn dither_rgb_bf16_with_options(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    height: usize,
+    space: PerceptualSpace,
+    working_space: Bf16WorkingSpace,
+    mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<bf16>, Vec<bf16>, Vec<bf16>) {
     // Create fully opaque alpha channel
     let pixels = width * height;
     let a_channel = vec![1.0f32; pixels];
 
-    let (r_out, g_out, b_out, _) = dither_rgba_bf16_with_mode(
+    let (r_out, g_out, b_out, _) = dither_rgba_bf16_with_options(
         r_channel, g_channel, b_channel, &a_channel,
         width, height,
         space, working_space,
-        mode, seed, progress,
+        mode, seed, overshoot_penalty, progress,
     );
 
     (r_out, g_out, b_out)

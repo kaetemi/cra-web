@@ -1599,6 +1599,7 @@ pub fn dither_paletted_wasm(
         dither_mode,
         seed,
         use_ghost_entries,
+        true, // overshoot_penalty enabled by default
         None,
     );
 
@@ -1661,6 +1662,7 @@ pub fn dither_paletted_with_progress_wasm(
         dither_mode,
         seed,
         use_ghost_entries,
+        true, // overshoot_penalty enabled by default
         Some(&mut progress_fn),
     );
 

@@ -217,6 +217,84 @@ pub fn wang_hash(mut x: u32) -> u32 {
 }
 
 // ============================================================================
+// Gamut overshoot penalty helpers
+// ============================================================================
+
+/// Calculate distance from a linear RGB point to the [0,1]³ RGB cube.
+/// Returns 0.0 if the point is inside the cube.
+///
+/// Used for gamut overshoot penalty: when choosing a quantized color,
+/// we penalize choices that would push the error diffusion outside the
+/// representable color gamut.
+#[inline]
+pub fn rgb_cube_overshoot_distance(r: f32, g: f32, b: f32) -> f32 {
+    // Clamp to [0, 1] cube
+    let r_clamped = r.clamp(0.0, 1.0);
+    let g_clamped = g.clamp(0.0, 1.0);
+    let b_clamped = b.clamp(0.0, 1.0);
+
+    // Euclidean distance from original to clamped
+    let dr = r - r_clamped;
+    let dg = g - g_clamped;
+    let db = b - b_clamped;
+    (dr * dr + dg * dg + db * db).sqrt()
+}
+
+/// Calculate the gamut overshoot penalty multiplier.
+///
+/// Given the target linear RGB (with error already added) and a candidate
+/// quantized linear RGB, computes the "opposing point" where error diffusion
+/// would push neighboring pixels: opposing = 2*target - candidate.
+///
+/// If this opposing point is outside the [0,1]³ RGB cube, returns a penalty
+/// multiplier > 1 that scales the perceptual distance, discouraging choices
+/// that cause large unrecoverable errors.
+///
+/// Penalty formula: (overshoot_distance + 1)²
+#[inline]
+pub fn gamut_overshoot_penalty(
+    target_r: f32, target_g: f32, target_b: f32,
+    candidate_r: f32, candidate_g: f32, candidate_b: f32,
+) -> f32 {
+    // Calculate the opposing point: where error diffusion would push neighbors
+    let opposing_r = 2.0 * target_r - candidate_r;
+    let opposing_g = 2.0 * target_g - candidate_g;
+    let opposing_b = 2.0 * target_b - candidate_b;
+
+    // Calculate overshoot distance
+    let overshoot = rgb_cube_overshoot_distance(opposing_r, opposing_g, opposing_b);
+
+    // Penalty multiplier: (overshoot + 1)²
+    let factor = overshoot + 1.0;
+    factor * factor
+}
+
+/// Calculate the grayscale gamut overshoot penalty multiplier.
+///
+/// Similar to RGB version but for single-channel grayscale dithering.
+/// The gamut is simply [0, 1] on the linear gray axis.
+///
+/// Penalty formula: (overshoot_distance + 1)²
+#[inline]
+pub fn gray_overshoot_penalty(target_gray: f32, candidate_gray: f32) -> f32 {
+    // Calculate the opposing point
+    let opposing = 2.0 * target_gray - candidate_gray;
+
+    // Calculate overshoot (distance outside [0, 1])
+    let overshoot = if opposing < 0.0 {
+        -opposing
+    } else if opposing > 1.0 {
+        opposing - 1.0
+    } else {
+        0.0
+    };
+
+    // Penalty multiplier: (overshoot + 1)²
+    let factor = overshoot + 1.0;
+    factor * factor
+}
+
+// ============================================================================
 // Perceptual space conversion helpers
 // ============================================================================
 

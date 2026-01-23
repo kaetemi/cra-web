@@ -224,16 +224,16 @@ impl ExtendedPalette {
     /// Find the nearest real palette entry for a linear RGB point.
     ///
     /// This searches:
-    /// 1. Real palette entries (perceptual distance with gamut overshoot penalty)
+    /// 1. Real palette entries (perceptual distance, optionally with gamut overshoot penalty)
     /// 2. Projections onto each hull edge (project in linear, distance in perceptual)
     /// 3. Projections onto each hull surface (project in linear, distance in perceptual)
     ///
     /// If an edge projection is closest, we search only among entries on that edge.
     /// If a surface projection is closest, we search only among entries on that surface.
     ///
-    /// The gamut overshoot penalty discourages choosing palette colors that would
-    /// cause large error diffusion outside the palette's color gamut.
-    pub fn find_nearest_real(&self, lin_rgb: [f32; 3]) -> usize {
+    /// If `overshoot_penalty` is true, the gamut overshoot penalty discourages choosing
+    /// palette colors that would cause large error diffusion outside the palette's gamut.
+    pub fn find_nearest_real(&self, lin_rgb: [f32; 3], overshoot_penalty: bool) -> usize {
         // Convert target to perceptual space (non-clamped since this is a target color)
         let (l, a, b) = linear_rgb_to_perceptual(self.space, lin_rgb[0], lin_rgb[1], lin_rgb[2]);
         let target_perc = [l, a, b];
@@ -242,16 +242,24 @@ impl ExtendedPalette {
         let mut best_real_idx = 0;
         let mut best_real_dist = f32::INFINITY;
 
-        // Search real palette entries with gamut overshoot penalty
+        // Search real palette entries (with optional gamut overshoot penalty)
         for (idx, perc) in self.perceptual_positions.iter().enumerate() {
-            let d = penalized_perceptual_distance_sq(
-                &self.hull,
-                self.space,
-                lin_rgb,
-                target_perc,
-                *perc,
-                self.linear_positions[idx],
-            );
+            let d = if overshoot_penalty {
+                penalized_perceptual_distance_sq(
+                    &self.hull,
+                    self.space,
+                    lin_rgb,
+                    target_perc,
+                    *perc,
+                    self.linear_positions[idx],
+                )
+            } else {
+                perceptual_distance_sq(
+                    self.space,
+                    target_perc[0], target_perc[1], target_perc[2],
+                    perc[0], perc[1], perc[2],
+                )
+            };
             if d < best_real_dist {
                 best_real_dist = d;
                 best_real_idx = idx;
@@ -325,24 +333,24 @@ impl ExtendedPalette {
 
         if best_edge_dist < best_surface_dist {
             if let Some(edge_idx) = best_edge_idx {
-                return self.find_nearest_on_edge(lin_rgb, target_perc, edge_idx);
+                return self.find_nearest_on_edge(lin_rgb, target_perc, edge_idx, overshoot_penalty);
             }
         }
 
         if let Some(surface_idx) = best_surface_idx {
-            return self.find_nearest_on_surface(lin_rgb, target_perc, surface_idx);
+            return self.find_nearest_on_surface(lin_rgb, target_perc, surface_idx, overshoot_penalty);
         }
 
         best_real_idx
     }
 
     /// Find nearest real entry among those on a specific hull edge.
-    fn find_nearest_on_edge(&self, target_lin: [f32; 3], target_perc: [f32; 3], edge_idx: usize) -> usize {
+    fn find_nearest_on_edge(&self, target_lin: [f32; 3], target_perc: [f32; 3], edge_idx: usize, overshoot_penalty: bool) -> usize {
         let edge_entries = &self.edges[edge_idx].entries;
 
         if edge_entries.is_empty() {
             // Fallback: find any nearest real entry
-            return self.find_nearest_fallback(target_lin, target_perc);
+            return self.find_nearest_fallback(target_lin, target_perc, overshoot_penalty);
         }
 
         let mut best_idx = edge_entries[0];
@@ -350,14 +358,22 @@ impl ExtendedPalette {
 
         for &real_idx in edge_entries {
             let perc = &self.perceptual_positions[real_idx];
-            let d = penalized_perceptual_distance_sq(
-                &self.hull,
-                self.space,
-                target_lin,
-                target_perc,
-                *perc,
-                self.linear_positions[real_idx],
-            );
+            let d = if overshoot_penalty {
+                penalized_perceptual_distance_sq(
+                    &self.hull,
+                    self.space,
+                    target_lin,
+                    target_perc,
+                    *perc,
+                    self.linear_positions[real_idx],
+                )
+            } else {
+                perceptual_distance_sq(
+                    self.space,
+                    target_perc[0], target_perc[1], target_perc[2],
+                    perc[0], perc[1], perc[2],
+                )
+            };
             if d < best_dist {
                 best_dist = d;
                 best_idx = real_idx;
@@ -368,12 +384,12 @@ impl ExtendedPalette {
     }
 
     /// Find nearest real entry among those on a specific hull surface.
-    fn find_nearest_on_surface(&self, target_lin: [f32; 3], target_perc: [f32; 3], plane_idx: usize) -> usize {
+    fn find_nearest_on_surface(&self, target_lin: [f32; 3], target_perc: [f32; 3], plane_idx: usize, overshoot_penalty: bool) -> usize {
         let surface_entries = &self.surface_entries[plane_idx];
 
         if surface_entries.is_empty() {
             // Fallback: find any nearest real entry
-            return self.find_nearest_fallback(target_lin, target_perc);
+            return self.find_nearest_fallback(target_lin, target_perc, overshoot_penalty);
         }
 
         let mut best_idx = surface_entries[0];
@@ -381,14 +397,22 @@ impl ExtendedPalette {
 
         for &real_idx in surface_entries {
             let perc = &self.perceptual_positions[real_idx];
-            let d = penalized_perceptual_distance_sq(
-                &self.hull,
-                self.space,
-                target_lin,
-                target_perc,
-                *perc,
-                self.linear_positions[real_idx],
-            );
+            let d = if overshoot_penalty {
+                penalized_perceptual_distance_sq(
+                    &self.hull,
+                    self.space,
+                    target_lin,
+                    target_perc,
+                    *perc,
+                    self.linear_positions[real_idx],
+                )
+            } else {
+                perceptual_distance_sq(
+                    self.space,
+                    target_perc[0], target_perc[1], target_perc[2],
+                    perc[0], perc[1], perc[2],
+                )
+            };
             if d < best_dist {
                 best_dist = d;
                 best_idx = real_idx;
@@ -399,19 +423,27 @@ impl ExtendedPalette {
     }
 
     /// Fallback: find nearest among all real entries.
-    fn find_nearest_fallback(&self, target_lin: [f32; 3], target_perc: [f32; 3]) -> usize {
+    fn find_nearest_fallback(&self, target_lin: [f32; 3], target_perc: [f32; 3], overshoot_penalty: bool) -> usize {
         let mut best_idx = 0;
         let mut best_dist = f32::INFINITY;
 
         for (idx, perc) in self.perceptual_positions.iter().enumerate() {
-            let d = penalized_perceptual_distance_sq(
-                &self.hull,
-                self.space,
-                target_lin,
-                target_perc,
-                *perc,
-                self.linear_positions[idx],
-            );
+            let d = if overshoot_penalty {
+                penalized_perceptual_distance_sq(
+                    &self.hull,
+                    self.space,
+                    target_lin,
+                    target_perc,
+                    *perc,
+                    self.linear_positions[idx],
+                )
+            } else {
+                perceptual_distance_sq(
+                    self.space,
+                    target_perc[0], target_perc[1], target_perc[2],
+                    perc[0], perc[1], perc[2],
+                )
+            };
             if d < best_dist {
                 best_dist = d;
                 best_idx = idx;
@@ -627,7 +659,7 @@ mod tests {
 
         // Point very close to black corner
         let near_black = [0.01, 0.01, 0.01];
-        let nearest = extended.find_nearest_real(near_black);
+        let nearest = extended.find_nearest_real(near_black, true);
 
         // Should find black (index 0)
         let (r, g, b, _) = extended.get_srgb(nearest);
@@ -635,7 +667,7 @@ mod tests {
 
         // Point very close to white corner
         let near_white = [0.99, 0.99, 0.99];
-        let nearest = extended.find_nearest_real(near_white);
+        let nearest = extended.find_nearest_real(near_white, true);
 
         // Should find white (index 7)
         let (r, g, b, _) = extended.get_srgb(nearest);
@@ -794,7 +826,7 @@ mod tests {
         // Test a point that should trigger surface redirection
         // A point outside the tetrahedron should still find a valid entry
         let test_point = [0.5, 0.5, 0.0]; // This point may be outside the tetrahedron
-        let nearest = extended.find_nearest_real(test_point);
+        let nearest = extended.find_nearest_real(test_point, true);
 
         // Should return a valid index
         assert!(nearest < 4);

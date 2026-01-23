@@ -36,8 +36,9 @@ use crate::color::{
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_single_channel_kernel, perceptual_lightness_distance_sq, wang_hash, DitherMode,
-    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
+    apply_single_channel_kernel, gray_overshoot_penalty, perceptual_lightness_distance_sq,
+    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
+    SingleChannelKernel,
 };
 #[cfg(test)]
 use super::common::{lightness_distance_ciede2000_sq, lightness_distance_sq};
@@ -153,6 +154,9 @@ struct GrayDitherContext<'a> {
     /// Only L is stored since a* = b* = 0 for neutral grays.
     lightness_lut: &'a Vec<f32>,
     space: PerceptualSpace,
+    /// Apply gamut overshoot penalty to discourage choices that push error
+    /// diffusion outside the representable range.
+    overshoot_penalty: bool,
 }
 
 /// Process a single grayscale pixel: find best quantization and compute error.
@@ -268,8 +272,19 @@ fn process_pixel_with_gray(
     let mut best_dist = f32::INFINITY;
 
     for level in level_min..=level_max {
+        let cand_gray_srgb = ctx.quant.level_to_srgb(level);
+        let cand_lin_gray = ctx.linear_lut[cand_gray_srgb as usize];
+
         let l_candidate = ctx.lightness_lut[level];
-        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+        let base_dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+
+        // Apply gamut overshoot penalty if enabled
+        let dist = if ctx.overshoot_penalty {
+            let penalty = gray_overshoot_penalty(lin_gray_adj, cand_lin_gray);
+            base_dist * penalty
+        } else {
+            base_dist
+        };
 
         if dist < best_dist {
             best_dist = dist;
@@ -610,8 +625,8 @@ pub fn colorspace_aware_dither_gray(
 
 /// Color space aware dithering for grayscale with selectable algorithm.
 ///
-/// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation.
-/// Input is sRGB gamma-encoded (0-255).
+/// This is a convenience wrapper that enables overshoot penalty by default.
+/// Use `colorspace_aware_dither_gray_with_options` for full control.
 ///
 /// Args:
 ///     gray_channel: Grayscale input as f32 in range [0, 255]
@@ -634,6 +649,41 @@ pub fn colorspace_aware_dither_gray_with_mode(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
+    colorspace_aware_dither_gray_with_options(
+        gray_channel, width, height, bits, space, mode, seed,
+        true, // overshoot_penalty enabled by default
+        progress,
+    )
+}
+
+/// Color space aware dithering for grayscale with full options control.
+///
+/// Treats grayscale input as RGB=(L,L,L) for perceptual distance calculation.
+/// Input is sRGB gamma-encoded (0-255).
+///
+/// Args:
+///     gray_channel: Grayscale input as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits: Output bit depth (1-8)
+///     space: Perceptual color space for distance calculation
+///     mode: Dithering algorithm and scanning mode
+///     seed: Random seed for mixed modes
+///     overshoot_penalty: If true, penalize choices that push error diffusion outside gamut
+///     progress: Optional callback called after each row with progress (0.0 to 1.0)
+///
+/// Returns:
+///     Output grayscale as u8
+pub fn colorspace_aware_dither_gray_with_options(
+    gray_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
     let quant = QuantLevelParams::new(bits);
     let linear_lut = build_linear_lut();
     let lightness_lut = build_gray_lightness_lut(&quant, &linear_lut, space);
@@ -643,6 +693,7 @@ pub fn colorspace_aware_dither_gray_with_mode(
         linear_lut: &linear_lut,
         lightness_lut: &lightness_lut,
         space,
+        overshoot_penalty,
     };
 
     let pixels = width * height;

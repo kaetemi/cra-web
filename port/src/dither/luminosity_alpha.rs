@@ -29,8 +29,9 @@ use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::basic::dither_with_mode_bits;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_single_channel_kernel, perceptual_lightness_distance_sq, wang_hash, DitherMode,
-    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
+    apply_single_channel_kernel, gray_overshoot_penalty, perceptual_lightness_distance_sq,
+    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
+    SingleChannelKernel,
 };
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
@@ -133,6 +134,8 @@ struct GrayAlphaDitherContext<'a> {
     space: PerceptualSpace,
     /// Pre-dithered alpha channel (u8 values, 0-255)
     alpha_dithered: &'a [u8],
+    /// Apply gamut overshoot penalty
+    overshoot_penalty: bool,
 }
 
 /// Process a single pixel with alpha-aware error diffusion.
@@ -202,8 +205,19 @@ fn process_pixel_gray_alpha(
     let mut best_dist = f32::INFINITY;
 
     for level in level_min..=level_max {
+        let cand_gray_srgb = ctx.quant.level_to_srgb(level);
+        let cand_lin_gray = ctx.linear_lut[cand_gray_srgb as usize];
+
         let l_candidate = ctx.lightness_lut[level];
-        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+        let base_dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+
+        // Apply gamut overshoot penalty if enabled
+        let dist = if ctx.overshoot_penalty {
+            let penalty = gray_overshoot_penalty(lin_gray_adj, cand_lin_gray);
+            base_dist * penalty
+        } else {
+            base_dist
+        };
 
         if dist < best_dist {
             best_dist = dist;
@@ -281,8 +295,19 @@ fn process_pixel_gray_alpha_with_values(
     let mut best_dist = f32::INFINITY;
 
     for level in level_min..=level_max {
+        let cand_gray_srgb = ctx.quant.level_to_srgb(level);
+        let cand_lin_gray = ctx.linear_lut[cand_gray_srgb as usize];
+
         let l_candidate = ctx.lightness_lut[level];
-        let dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+        let base_dist = perceptual_lightness_distance_sq(ctx.space, l_target, l_candidate);
+
+        // Apply gamut overshoot penalty if enabled
+        let dist = if ctx.overshoot_penalty {
+            let penalty = gray_overshoot_penalty(lin_gray_adj, cand_lin_gray);
+            base_dist * penalty
+        } else {
+            base_dist
+        };
 
         if dist < best_dist {
             best_dist = dist;
@@ -638,6 +663,9 @@ pub fn colorspace_aware_dither_gray_alpha(
 
 /// Color space aware dithering for grayscale with alpha channel and selectable algorithm.
 ///
+/// This is a convenience wrapper that enables overshoot penalty by default.
+/// Use `colorspace_aware_dither_gray_alpha_with_options` for full control.
+///
 /// Process:
 /// 1. Alpha channel is dithered first using the specified alpha dithering mode
 /// 2. Grayscale channel is then dithered with alpha-aware error propagation:
@@ -677,6 +705,50 @@ pub fn colorspace_aware_dither_gray_alpha_with_mode(
     mode: DitherMode,
     alpha_mode: DitherMode,
     seed: u32,
+    progress: Option<&mut dyn FnMut(f32)>,
+) -> (Vec<u8>, Vec<u8>) {
+    colorspace_aware_dither_gray_alpha_with_options(
+        gray_channel, alpha_channel, width, height,
+        bits_gray, bits_alpha, space, mode, alpha_mode, seed,
+        true, // overshoot_penalty enabled by default
+        progress,
+    )
+}
+
+/// Color space aware dithering for grayscale with alpha channel with full options control.
+///
+/// Process:
+/// 1. Alpha channel is dithered first using the specified alpha dithering mode
+/// 2. Grayscale channel is then dithered with alpha-aware error propagation:
+///    - Error that couldn't be applied due to transparency is fully propagated
+///    - Quantization error is weighted by pixel visibility (alpha)
+///
+/// Args:
+///     gray_channel, alpha_channel: Input channels as f32 in range [0, 255]
+///     width, height: Image dimensions
+///     bits_gray: Bit depth for grayscale channel (1-8)
+///     bits_alpha: Bit depth for alpha channel (1-8)
+///     space: Perceptual color space for distance calculation
+///     mode: Dithering algorithm and scanning mode for grayscale channel
+///     alpha_mode: Dithering algorithm and scanning mode for alpha channel
+///     seed: Random seed for mixed modes (ignored for non-mixed modes)
+///     overshoot_penalty: If true, penalize choices that push error diffusion outside gamut
+///     progress: Optional callback called with progress (0.0 to 1.0)
+///
+/// Returns:
+///     (gray_out, alpha_out): Output channels as u8
+pub fn colorspace_aware_dither_gray_alpha_with_options(
+    gray_channel: &[f32],
+    alpha_channel: &[f32],
+    width: usize,
+    height: usize,
+    bits_gray: u8,
+    bits_alpha: u8,
+    space: PerceptualSpace,
+    mode: DitherMode,
+    alpha_mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>) {
     let pixels = width * height;
@@ -701,6 +773,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_mode(
         lightness_lut: &lightness_lut,
         space,
         alpha_dithered: &alpha_dithered,
+        overshoot_penalty,
     };
 
     // Use JJN reach for all modes (largest kernel)
