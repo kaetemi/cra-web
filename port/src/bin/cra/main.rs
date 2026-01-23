@@ -36,6 +36,7 @@ use cra_wasm::decode::{
 };
 use cra_wasm::dither::rgb::DitherMode as CSDitherMode;
 use cra_wasm::dither::luminosity::colorspace_aware_dither_gray_with_mode;
+use cra_wasm::dither::basic::dither_with_mode_bits;
 use cra_wasm::dither::common::{DitherMode, OutputTechnique, PerceptualSpace};
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
@@ -790,9 +791,29 @@ fn dither_grayscale(
     space: PerceptualSpace,
     mode: CSDitherMode,
     seed: u32,
+    colorspace_aware: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed, progress)
+    if colorspace_aware {
+        colorspace_aware_dither_gray_with_mode(gray, width, height, bits, space, mode, seed, progress)
+    } else {
+        // Use basic per-channel dithering (supports Zhou-Fang threshold modulation)
+        let basic_mode = match mode {
+            CSDitherMode::Standard => DitherMode::Standard,
+            CSDitherMode::Serpentine => DitherMode::Serpentine,
+            CSDitherMode::JarvisStandard => DitherMode::JarvisStandard,
+            CSDitherMode::JarvisSerpentine => DitherMode::JarvisSerpentine,
+            CSDitherMode::MixedStandard => DitherMode::MixedStandard,
+            CSDitherMode::MixedSerpentine => DitherMode::MixedSerpentine,
+            CSDitherMode::MixedRandom => DitherMode::MixedRandom,
+            CSDitherMode::OstromoukhovStandard => DitherMode::OstromoukhovStandard,
+            CSDitherMode::OstromoukhovSerpentine => DitherMode::OstromoukhovSerpentine,
+            CSDitherMode::ZhouFangStandard => DitherMode::ZhouFangStandard,
+            CSDitherMode::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
+            CSDitherMode::None => DitherMode::None,
+        };
+        dither_with_mode_bits(gray, width, height, basic_mode, seed, bits, progress)
+    }
 }
 
 /// Result of dithering operation
@@ -2064,6 +2085,7 @@ fn main() -> Result<(), String> {
                     let interleaved = dither_grayscale(
                         &srgb_gray, width_usize, height_usize, format.bits_r,
                         output_colorspace.to_perceptual_space(), output_dither_mode, args.seed,
+                        !args.no_colorspace_aware_output,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     );
                     DitherResult { interleaved, is_grayscale: true, has_alpha: false, palette_indices: None, palette_colors: None }
