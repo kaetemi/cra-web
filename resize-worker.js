@@ -70,6 +70,7 @@ function processResize(params) {
             ditherMode,
             ditherTechnique,
             perceptualSpace,
+            overshootPenalty = true,  // Penalize quantization choices that cause overshoot
             inputIsLinear,  // True if input is already linear (normal maps, data textures)
             supersample = SUPERSAMPLE_NONE,  // Supersampling mode
             tonemapping = 'none'  // 'none', 'aces', 'aces-inverse'
@@ -297,6 +298,7 @@ function processResize(params) {
                 255,  // alpha_mode: use same as ditherMode
                 perceptualSpace,
                 0,
+                overshootPenalty,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             // RGBA output is already in correct format for ImageData
@@ -311,6 +313,7 @@ function processResize(params) {
                 ditherMode,
                 perceptualSpace,
                 0,
+                overshootPenalty,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             const dithered = ditheredBuffer.to_vec();
@@ -351,6 +354,7 @@ function processSrgbResize(params) {
             ditherMode,
             ditherTechnique,
             perceptualSpace,
+            overshootPenalty = true,
             inputIsLinear
         } = params;
 
@@ -457,6 +461,7 @@ function processSrgbResize(params) {
                 255,  // alpha_mode: use same as ditherMode
                 perceptualSpace,
                 0,
+                overshootPenalty,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             outputData = new Uint8ClampedArray(ditheredBuffer.to_vec());
@@ -470,6 +475,7 @@ function processSrgbResize(params) {
                 ditherMode,
                 perceptualSpace,
                 0,
+                overshootPenalty,
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             const dithered = ditheredBuffer.to_vec();
@@ -570,6 +576,7 @@ function processResizePixels(params) {
                 255,  // alpha_mode: use same as ditherMode
                 1,  // OKLab
                 0,  // seed
+                true,  // overshootPenalty
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             outputData = new Uint8ClampedArray(ditheredBuffer.to_vec());
@@ -583,6 +590,7 @@ function processResizePixels(params) {
                 4,  // Mixed
                 1,  // OKLab
                 0,  // seed
+                true,  // overshootPenalty
                 (progress) => sendProgress(90 + Math.round(progress * 10))
             );
             const dithered = ditheredBuffer.to_vec();

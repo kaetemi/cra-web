@@ -998,10 +998,11 @@ pub fn colorspace_aware_dither_rgb_channels(
     space: PerceptualSpace,
     mode: DitherMode,
     seed: u32,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let (r, g, b) = pixels_to_channels(pixels);
-    colorspace_aware_dither_rgb_with_mode(&r, &g, &b, width, height, bits_r, bits_g, bits_b, space, mode, seed, progress)
+    colorspace_aware_dither_rgb_with_options(&r, &g, &b, width, height, bits_r, bits_g, bits_b, space, mode, seed, overshoot_penalty, progress)
 }
 
 /// Color-aware dither for Pixel4 array (sRGB 0-255 range) to interleaved u8.

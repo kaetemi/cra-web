@@ -599,6 +599,17 @@
                     <option value="7">Y'CbCr BT.601 (legacy)</option>
                 </select>
             </div>
+            <label class="toggle-container" style="margin-top: 10px;">
+                <span class="toggle-label">Overshoot Penalty:</span>
+                <div class="toggle-switch">
+                    <input type="checkbox" id="overshoot-penalty" checked>
+                    <span class="toggle-slider"></span>
+                </div>
+                <span class="toggle-text" id="overshoot-penalty-label">On</span>
+            </label>
+            <p class="impl-description" style="margin-top: 5px;">
+                Penalizes quantization choices that would cause the opposing point to fall outside the color gamut. Reduces color fringing artifacts.
+            </p>
         </div>
 
         <button class="process-btn" id="process-btn" disabled>Process Images</button>

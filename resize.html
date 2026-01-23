@@ -506,6 +506,7 @@
             </div>
             <input type="hidden" id="perceptual-toggle" value="1">
             <input type="hidden" id="perceptual-space" value="1">
+            <input type="hidden" id="overshoot-penalty" value="1">
 
             <div class="option-row">
                 <label>
@@ -812,6 +813,7 @@
             const ditherMode = parseInt(document.getElementById('dither-mode').value);
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const overshootPenalty = document.getElementById('overshoot-penalty').value === '1';
             const supersample = parseInt(document.getElementById('supersample').value);
             const tonemapping = document.getElementById('tonemapping').value;
 
@@ -873,6 +875,11 @@
             // Add --no-colorspace-aware-output if not using perceptual
             if (!isPerceptual) {
                 cmd += ' --no-colorspace-aware-output';
+            }
+
+            // Add --no-overshoot-penalty if perceptual but penalty disabled
+            if (isPerceptual && !overshootPenalty) {
+                cmd += ' --no-overshoot-penalty';
             }
 
             // Add supersample if not none
@@ -1006,6 +1013,7 @@
             const showComparison = document.getElementById('show-comparison').checked;
             const isPerceptual = document.getElementById('perceptual-toggle').value === '1';
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const overshootPenalty = document.getElementById('overshoot-penalty').value === '1';
             const supersample = parseInt(document.getElementById('supersample').value);
             const tonemapping = document.getElementById('tonemapping').value;
 
@@ -1026,6 +1034,7 @@
                 ditherMode,
                 ditherTechnique,
                 perceptualSpace,
+                overshootPenalty,
                 supersample,
                 tonemapping
             };

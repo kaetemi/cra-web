@@ -75,6 +75,7 @@ function processDither(params) {
             alphaMode = 255,  // Alpha dithering mode: 255 = use same as mode, otherwise separate mode for alpha
             isPerceptual,
             perceptualSpace,
+            overshootPenalty = true,  // Penalize quantization choices that cause overshoot
             seed,
             tonemapping = 'none',  // 'none', 'aces', 'aces-inverse'
             supersample = 'none'   // 'none', 'tent-volume'
@@ -347,7 +348,7 @@ function processDither(params) {
                     // Use RGBA dithering with alpha-aware error propagation
                     // When bitsA=0, returns RGB (3 bytes/pixel); otherwise RGBA (4 bytes/pixel)
                     const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
-                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, alphaMode, perceptualSpace, seed,
+                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, alphaMode, perceptualSpace, seed, overshootPenalty,
                         (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering...')
                     );
                     const ditheredData = ditheredBuffer.to_vec();
@@ -378,7 +379,7 @@ function processDither(params) {
                 } else {
                     // Use RGB dithering for images without alpha
                     const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
-                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                        buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed, overshootPenalty,
                         (progress) => sendProgress(70 + Math.round(progress * 25), 'Dithering RGB...')
                     );
                     const rgbDithered = ditheredBuffer.to_vec();
@@ -428,7 +429,7 @@ function processDither(params) {
                 // When bitsA=0, returns RGB (3 bytes/pixel); otherwise RGBA (4 bytes/pixel)
                 sendProgress(50, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgba_with_progress_wasm(
-                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, alphaMode, perceptualSpace, seed,
+                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, bitsA, technique, mode, alphaMode, perceptualSpace, seed, overshootPenalty,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering...')
                 );
                 const ditheredData = ditheredBuffer.to_vec();
@@ -460,7 +461,7 @@ function processDither(params) {
                 // Use RGB dithering for images without alpha
                 sendProgress(50, 'Dithering RGB...');
                 const ditheredBuffer = craWasm.dither_rgb_with_progress_wasm(
-                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed,
+                    buffer, currentWidth, currentHeight, bitsR, bitsG, bitsB, technique, mode, perceptualSpace, seed, overshootPenalty,
                     (progress) => sendProgress(50 + Math.round(progress * 45), 'Dithering RGB...')
                 );
                 const rgbDithered = ditheredBuffer.to_vec();

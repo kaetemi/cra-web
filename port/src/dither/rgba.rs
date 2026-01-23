@@ -1118,14 +1118,15 @@ pub fn colorspace_aware_dither_rgba_channels(
     mode: DitherMode,
     alpha_mode: DitherMode,
     seed: u32,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let (r, g, b, a) = pixels_to_channels_rgba(pixels);
-    colorspace_aware_dither_rgba_with_mode(
+    colorspace_aware_dither_rgba_with_options(
         &r, &g, &b, &a,
         width, height,
         bits_r, bits_g, bits_b, bits_a,
-        space, mode, alpha_mode, seed, progress,
+        space, mode, alpha_mode, seed, overshoot_penalty, progress,
     )
 }
 

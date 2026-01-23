@@ -10,8 +10,8 @@ use crate::color::{interleave_rgb_u8, interleave_rgba_u8, interleave_la_u8};
 use crate::dither::dither_with_mode_bits;
 use crate::dither::rgb::colorspace_aware_dither_rgb_channels;
 use crate::dither::rgba::colorspace_aware_dither_rgba_channels;
-use crate::dither::luminosity::colorspace_aware_dither_gray_with_mode;
-use crate::dither::luminosity_alpha::colorspace_aware_dither_gray_alpha_with_mode;
+use crate::dither::luminosity::colorspace_aware_dither_gray_with_options;
+use crate::dither::luminosity_alpha::colorspace_aware_dither_gray_alpha_with_options;
 use crate::dither::common::OutputTechnique;
 use crate::pixel::{pixels_to_channels, pixels_to_channels_rgba, Pixel4};
 
@@ -65,7 +65,7 @@ pub fn dither_output_rgb(
             let b_u8 = dither_with_mode_bits(&b, width, height, mode, seed.wrapping_add(2), bits_b, None);
             interleave_rgb_u8(&r_u8, &g_u8, &b_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space, .. } => {
+        OutputTechnique::ColorspaceAware { mode, space, overshoot_penalty, .. } => {
             // Joint RGB color-aware dithering with progress
             let (r, g, b) = colorspace_aware_dither_rgb_channels(
                 srgb_pixels,
@@ -77,6 +77,7 @@ pub fn dither_output_rgb(
                 space,
                 mode,
                 seed,
+                overshoot_penalty,
                 progress,
             );
             interleave_rgb_u8(&r, &g, &b)
@@ -167,7 +168,7 @@ pub fn dither_output_rgba(
             let a_u8 = dither_with_mode_bits(&a, width, height, effective_alpha_mode, seed.wrapping_add(3), bits_a, None);
             interleave_rgba_u8(&r_u8, &g_u8, &b_u8, &a_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space, alpha_mode } => {
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode, overshoot_penalty } => {
             // Alpha-aware color-space dithering with progress
             // Uses alpha visibility weighting for RGB error propagation
             let effective_alpha_mode = alpha_mode.unwrap_or(mode);
@@ -183,6 +184,7 @@ pub fn dither_output_rgba(
                 mode,
                 effective_alpha_mode,
                 seed,
+                overshoot_penalty,
                 progress,
             );
             interleave_rgba_u8(&r, &g, &b, &a)
@@ -229,10 +231,10 @@ pub fn dither_output_luminosity(
             // Note: alpha_mode is ignored for grayscale-only dithering
             crate::dither::dither_with_mode_bits(gray_channel, width, height, mode, seed, bits, None)
         }
-        OutputTechnique::ColorspaceAware { mode, space, .. } => {
+        OutputTechnique::ColorspaceAware { mode, space, overshoot_penalty, .. } => {
             // Color-aware dithering for grayscale
             // Note: alpha_mode is ignored for grayscale-only dithering
-            colorspace_aware_dither_gray_with_mode(
+            colorspace_aware_dither_gray_with_options(
                 gray_channel,
                 width,
                 height,
@@ -240,6 +242,7 @@ pub fn dither_output_luminosity(
                 space,
                 mode,
                 seed,
+                overshoot_penalty,
                 progress,
             )
         }
@@ -311,11 +314,11 @@ pub fn dither_output_la(
             let a_u8 = dither_with_mode_bits(alpha_channel, width, height, effective_alpha_mode, seed.wrapping_add(1), bits_a, None);
             interleave_la_u8(&l_u8, &a_u8)
         }
-        OutputTechnique::ColorspaceAware { mode, space, alpha_mode } => {
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode, overshoot_penalty } => {
             // Alpha-aware color-space dithering with progress
             // Uses alpha visibility weighting for luminosity error propagation
             let effective_alpha_mode = alpha_mode.unwrap_or(mode);
-            let (l, a) = colorspace_aware_dither_gray_alpha_with_mode(
+            let (l, a) = colorspace_aware_dither_gray_alpha_with_options(
                 gray_channel,
                 alpha_channel,
                 width,
@@ -326,6 +329,7 @@ pub fn dither_output_la(
                 mode,
                 effective_alpha_mode,
                 seed,
+                overshoot_penalty,
                 progress,
             );
             interleave_la_u8(&l, &a)

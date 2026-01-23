@@ -488,6 +488,15 @@ pub struct Args {
     #[arg(long)]
     pub no_colorspace_aware_output: bool,
 
+    /// Disable overshoot penalty for colorspace-aware dithering
+    ///
+    /// By default, colorspace-aware dithering penalizes quantization choices that would
+    /// cause the "opposing point" (2×target - candidate) to fall outside the [0,1]³ RGB cube.
+    /// This reduces color fringing artifacts at the cost of slightly less optimal error diffusion.
+    /// Use this flag to disable the penalty for testing or comparison.
+    #[arg(long)]
+    pub no_overshoot_penalty: bool,
+
     /// Perceptual space for output dithering distance metric (default: oklab for RGB, lab-cie94 for grayscale)
     #[arg(long, value_enum)]
     pub output_distance_space: Option<ColorSpace>,

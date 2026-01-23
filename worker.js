@@ -178,7 +178,7 @@ const SUPERSAMPLE_TENT_VOLUME = 1;
 
 // Process images using WASM with precise 16-bit and ICC support
 // Pipeline: file bytes → decode (16-bit preserved) → ICC transform if needed → linear RGB → color_correct → sRGB → dither
-async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample = SUPERSAMPLE_NONE) {
+async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty = true, supersample = SUPERSAMPLE_NONE) {
     sendProgress('process', 'Decoding images (precise)...', 5);
 
     // First decode input to check for alpha
@@ -437,6 +437,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             255,  // alpha_mode: use same as outputDitherMode
             outputDistanceSpace,
             0,  // seed
+            overshootPenalty,
             (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
         );
         resultData = ditheredBuffer.to_vec();
@@ -451,6 +452,7 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             outputDitherMode,
             outputDistanceSpace,
             0,  // seed
+            overshootPenalty,
             (progress) => sendProgress('process', 'Dithering output...', 70 + Math.round(progress * 10))
         );
         resultData = ditheredBuffer.to_vec();
@@ -500,12 +502,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample) {
+async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty, supersample) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, supersample);
+            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty, supersample);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -540,6 +542,7 @@ self.onmessage = async function(e) {
                 data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
                 data.colorAwareOutput !== undefined ? data.colorAwareOutput : true,
                 data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1,
+                data.overshootPenalty !== undefined ? data.overshootPenalty : true,
                 data.supersample !== undefined ? data.supersample : 0
             );
             break;

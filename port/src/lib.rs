@@ -1095,6 +1095,7 @@ pub fn dither_rgb_wasm(
             mode: dither_mode,
             space: perceptual_space,
             alpha_mode: None,
+            overshoot_penalty: true,
         },
     };
 
@@ -1175,6 +1176,7 @@ pub fn dither_rgb_with_progress_wasm(
     mode: u8,
     space: u8,
     seed: u32,
+    overshoot_penalty: bool,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
     use dither::common::OutputTechnique;
@@ -1189,6 +1191,7 @@ pub fn dither_rgb_with_progress_wasm(
             mode: dither_mode,
             space: perceptual_space,
             alpha_mode: None,
+            overshoot_penalty,
         },
     };
 
@@ -1311,6 +1314,7 @@ pub fn dither_la_with_progress_wasm(
             mode: dither_mode,
             space: perceptual_space,
             alpha_mode: alpha_dither_mode,
+            overshoot_penalty: true,
         },
     };
 
@@ -1367,6 +1371,7 @@ pub fn dither_rgba_wasm(
             mode: dither_mode,
             space: perceptual_space,
             alpha_mode: alpha_dither_mode,
+            overshoot_penalty: true,
         },
     };
 
@@ -1407,6 +1412,7 @@ pub fn dither_rgba_with_progress_wasm(
     alpha_mode: u8,
     space: u8,
     seed: u32,
+    overshoot_penalty: bool,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
     use dither::common::OutputTechnique;
@@ -1426,6 +1432,7 @@ pub fn dither_rgba_with_progress_wasm(
             mode: dither_mode,
             space: perceptual_space,
             alpha_mode: alpha_dither_mode,
+            overshoot_penalty,
         },
     };
 

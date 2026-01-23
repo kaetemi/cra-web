@@ -85,6 +85,8 @@ pub enum OutputTechnique {
         space: PerceptualSpace,
         /// Optional separate mode for alpha channel (defaults to mode if None)
         alpha_mode: Option<DitherMode>,
+        /// Whether to apply gamut overshoot penalty (reduces color fringing)
+        overshoot_penalty: bool,
     },
 }
 
@@ -94,6 +96,7 @@ impl Default for OutputTechnique {
             mode: DitherMode::default(),
             space: PerceptualSpace::default(),
             alpha_mode: None,
+            overshoot_penalty: true,
         }
     }
 }

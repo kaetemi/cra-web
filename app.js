@@ -599,6 +599,7 @@ function processImages() {
     const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
     const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+    const overshootPenalty = document.getElementById('overshoot-penalty')?.checked !== false;
 
     // Store timestamp when processing starts
     processTimestamp = Date.now();
@@ -639,7 +640,8 @@ function processImages() {
         colorAwareHistogram: colorAwareHistogram,
         histogramDistanceSpace: histogramDistanceSpace,
         colorAwareOutput: colorAwareOutput,
-        outputDistanceSpace: outputDistanceSpace
+        outputDistanceSpace: outputDistanceSpace,
+        overshootPenalty: overshootPenalty
     });
 }
 

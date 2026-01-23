@@ -625,9 +625,10 @@ fn build_output_technique(
     mode: CSDitherMode,
     space: PerceptualSpace,
     alpha_mode: Option<CSDitherMode>,
+    overshoot_penalty: bool,
 ) -> OutputTechnique {
     if colorspace_aware {
-        OutputTechnique::ColorspaceAware { mode, space, alpha_mode }
+        OutputTechnique::ColorspaceAware { mode, space, alpha_mode, overshoot_penalty }
     } else {
         OutputTechnique::PerChannel { mode, alpha_mode }
     }
@@ -669,6 +670,7 @@ fn dither_pixels_rgb(
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     let mut linear_pixels = pixels;
@@ -678,7 +680,7 @@ fn dither_pixels_rgb(
     denormalize_inplace_clamped(&mut linear_pixels);
 
     // Dither
-    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
+    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode, overshoot_penalty);
     if has_alpha {
         // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
         let bits_a = format.bits_a;
@@ -720,11 +722,12 @@ fn dither_pixels_srgb_rgb(
     colorspace: PerceptualSpace,
     seed: u32,
     has_alpha: bool,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     debug_assert!(!format.is_grayscale, "Use linear path for grayscale");
 
-    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode);
+    let technique = build_output_technique(colorspace_aware, dither_mode, colorspace, alpha_mode, overshoot_penalty);
     if has_alpha {
         // Use bits_a from format: ARGB formats preserve alpha, RGB formats strip it (bits_a=0)
         let bits_a = format.bits_a;
@@ -763,6 +766,7 @@ fn dither_pixels_paletted(
     dither_mode: DitherMode,
     seed: u32,
     use_ghost_entries: bool,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -799,6 +803,7 @@ fn dither_pixels_paletted(
         dither_mode,
         seed,
         use_ghost_entries,
+        overshoot_penalty,
         progress,
     );
 
@@ -824,6 +829,7 @@ fn dither_pixels_srgb_paletted(
     dither_mode: DitherMode,
     seed: u32,
     use_ghost_entries: bool,
+    overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -854,6 +860,7 @@ fn dither_pixels_srgb_paletted(
         dither_mode,
         seed,
         use_ghost_entries,
+        overshoot_penalty,
         progress,
     );
 
@@ -1824,7 +1831,7 @@ fn main() -> Result<(), String> {
                 let result = if let Some(ref alpha) = alpha {
                     // LA format: grayscale with alpha
                     let alpha_255: Vec<f32> = alpha.iter().map(|&a| a * 255.0).collect();
-                    let technique = build_output_technique(!args.no_colorspace_aware_output, output_dither_mode, output_colorspace.to_perceptual_space(), output_alpha_mode);
+                    let technique = build_output_technique(!args.no_colorspace_aware_output, output_dither_mode, output_colorspace.to_perceptual_space(), output_alpha_mode, !args.no_overshoot_penalty);
                     let interleaved = dither_output_la(
                         &srgb_gray, &alpha_255, width_usize, height_usize, format.bits_r, format.bits_a,
                         technique, args.seed, if args.progress { Some(&mut dither_progress) } else { None },
@@ -1914,6 +1921,7 @@ fn main() -> Result<(), String> {
                         args.output_dither.to_dither_mode(),
                         args.seed,
                         !args.no_palette_ghosts,
+                        !args.no_overshoot_penalty,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     )
                 } else {
@@ -1929,6 +1937,7 @@ fn main() -> Result<(), String> {
                         output_colorspace.to_perceptual_space(),
                         args.seed,
                         input_has_alpha,
+                        !args.no_overshoot_penalty,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     )
                 };
@@ -1980,6 +1989,7 @@ fn main() -> Result<(), String> {
                     args.output_dither.to_dither_mode(),
                     args.seed,
                     !args.no_palette_ghosts,
+                    !args.no_overshoot_penalty,
                     if args.progress { Some(&mut dither_progress) } else { None },
                 )
             } else {
@@ -1995,6 +2005,7 @@ fn main() -> Result<(), String> {
                     output_colorspace.to_perceptual_space(),
                     args.seed,
                     input_has_alpha,
+                    !args.no_overshoot_penalty,
                     if args.progress { Some(&mut dither_progress) } else { None },
                 )
             };

@@ -784,6 +784,15 @@
                     <option value="7">Y'CbCr BT.601 legacy (not recommended)</option>
                 </select>
                 <p class="perceptual-hint">Uses perceptual distance for candidate selection with linear error diffusion. For RGB, processes channels jointly. For grayscale: CIE76=CIE94 (simple ΔL²), CIEDE2000 uses lightness-dependent weighting, OKLab uses different L curve.</p>
+
+                <div class="toggle-row" style="margin-top: 8px;">
+                    <span>Overshoot Penalty:</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="overshoot-penalty-toggle" checked>
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+                <p class="perceptual-hint">Penalizes quantization choices that would cause the opposing point to fall outside the color gamut. Reduces color fringing artifacts.</p>
             </div>
 
             <div class="option-row" id="dither-mode-row">
@@ -1346,6 +1355,7 @@
             const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
+            const overshootPenalty = document.getElementById('overshoot-penalty-toggle').checked;
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
             const tonemapping = document.getElementById('tonemapping').value;
             const supersample = document.getElementById('supersample').value;
@@ -1394,6 +1404,7 @@
                 alphaMode: alphaMode,  // Separate alpha dither mode (255 = same as mode)
                 isPerceptual: isPerceptual,
                 perceptualSpace: perceptualSpace,
+                overshootPenalty: overshootPenalty,
                 seed: seed,
                 tonemapping: tonemapping,
                 supersample: supersample
@@ -1609,6 +1620,11 @@
                 const defaultSpace = isGrayscale ? 2 : 1; // 2 = lab-cie94, 1 = oklab
                 if (perceptualSpace !== defaultSpace) {
                     cmd += ` --output-distance-space ${spaceMap[perceptualSpace]}`;
+                }
+                // Add overshoot penalty flag if disabled (enabled by default)
+                const overshootPenalty = document.getElementById('overshoot-penalty-toggle').checked;
+                if (!overshootPenalty) {
+                    cmd += ' --no-overshoot-penalty';
                 }
             } else {
                 // Colorspace-aware is ON by default, add flag to disable
