@@ -491,6 +491,147 @@ fn mixed_dither_random(
 }
 
 // ============================================================================
+// Zhou-Fang dithering (threshold modulation + variable coefficients)
+// ============================================================================
+
+use super::kernels::{apply_zhou_fang_ltr, apply_zhou_fang_rtl, zhou_fang_threshold};
+
+/// Zhou-Fang dithering with standard left-to-right scanning.
+/// Uses threshold modulation to break up "worm" patterns in mid-tones.
+fn zhou_fang_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    // Same reach as Floyd-Steinberg (3 neighbors)
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let old = buf[y][bx];
+
+            // Get input level for threshold modulation
+            let level = ((old + 0.5) as i32).clamp(0, 255);
+
+            // Compute modulated threshold based on position
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+
+            // Quantize using modulated threshold between floor and ceil
+            let floor_val = quant.quantize_floor(old);
+            let ceil_val = quant.quantize_ceil(old);
+            let new = if floor_val == ceil_val {
+                floor_val
+            } else {
+                // Interpolation position between floor and ceil
+                let frac = (old - floor_val) / (ceil_val - floor_val);
+                if frac > threshold { ceil_val } else { floor_val }
+            };
+            buf[y][bx] = new;
+
+            let err = old - new;
+            apply_zhou_fang_ltr(&mut buf, bx, y, err, level);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Zhou-Fang dithering with serpentine scanning.
+/// Uses threshold modulation with alternating scan direction each row.
+fn zhou_fang_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+                let level = ((old + 0.5) as i32).clamp(0, 255);
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+
+                let floor_val = quant.quantize_floor(old);
+                let ceil_val = quant.quantize_ceil(old);
+                let new = if floor_val == ceil_val {
+                    floor_val
+                } else {
+                    let frac = (old - floor_val) / (ceil_val - floor_val);
+                    if frac > threshold { ceil_val } else { floor_val }
+                };
+                buf[y][bx] = new;
+
+                let err = old - new;
+                apply_zhou_fang_rtl(&mut buf, bx, y, err, level);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+                let level = ((old + 0.5) as i32).clamp(0, 255);
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+
+                let floor_val = quant.quantize_floor(old);
+                let ceil_val = quant.quantize_ceil(old);
+                let new = if floor_val == ceil_val {
+                    floor_val
+                } else {
+                    let frac = (old - floor_val) / (ceil_val - floor_val);
+                    if frac > threshold { ceil_val } else { floor_val }
+                };
+                buf[y][bx] = new;
+
+                let err = old - new;
+                apply_zhou_fang_ltr(&mut buf, bx, y, err, level);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -586,6 +727,8 @@ pub fn dither_with_mode_bits(
         DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant, progress),
         DitherMode::OstromoukhovStandard => dither_standard::<Ostromoukhov>(img, width, height, quant, progress),
         DitherMode::OstromoukhovSerpentine => dither_serpentine::<Ostromoukhov>(img, width, height, quant, progress),
+        DitherMode::ZhouFangStandard => zhou_fang_standard(img, width, height, seed, quant, progress),
+        DitherMode::ZhouFangSerpentine => zhou_fang_serpentine(img, width, height, seed, quant, progress),
     }
 }
 

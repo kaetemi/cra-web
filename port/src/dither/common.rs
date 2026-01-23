@@ -211,6 +211,13 @@ pub enum DitherMode {
     /// Ostromoukhov: Variable-coefficient kernel based on input intensity
     /// Serpentine scanning (alternating direction each row)
     OstromoukhovSerpentine,
+    /// Zhou-Fang: Variable-coefficient kernel with threshold modulation
+    /// Standard left-to-right scanning
+    /// Threshold modulation breaks up "worm" patterns in mid-tones
+    ZhouFangStandard,
+    /// Zhou-Fang: Variable-coefficient kernel with threshold modulation
+    /// Serpentine scanning (alternating direction each row)
+    ZhouFangSerpentine,
 }
 
 /// Wang hash for deterministic randomization - excellent avalanche properties.
@@ -435,6 +442,10 @@ pub fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32
 
 // Re-export kernel types from dedicated module
 pub use super::kernels::{
-    apply_mixed_kernel_rgb, apply_mixed_kernel_rgba, apply_single_channel_kernel, FloydSteinberg,
-    JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel, RgbaKernel, SingleChannelKernel,
+    apply_mixed_kernel_rgb, apply_mixed_kernel_rgba, apply_single_channel_kernel,
+    apply_zhou_fang_ltr, apply_zhou_fang_rtl, apply_zhou_fang_rgb_ltr, apply_zhou_fang_rgb_rtl,
+    apply_zhou_fang_rgba_ltr, apply_zhou_fang_rgba_rtl,
+    zhou_fang_coefficients, zhou_fang_modulation, zhou_fang_threshold,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
+    RgbKernel, RgbaKernel, SingleChannelKernel,
 };

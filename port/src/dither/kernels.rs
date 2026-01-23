@@ -1022,3 +1022,267 @@ impl RgbaKernel for NoneKernel {
     ) {
     }
 }
+
+// ============================================================================
+// Zhou-Fang dithering tables and functions
+// ============================================================================
+
+/// Zhou-Fang variable-coefficient error diffusion with threshold modulation.
+///
+/// Key difference from Ostromoukhov: Zhou-Fang modulates the quantization
+/// threshold based on position and input intensity, breaking up "worm" patterns.
+///
+/// Reference: Zhou & Fang, "Improving Mid-tone Quality of Variable-coefficient
+/// Error Diffusion Using Threshold Modulation", SIGGRAPH 2003.
+
+/// Key levels for coefficient interpolation
+const ZF_COEFF_KEY_LEVELS: [i32; 18] = [0, 1, 2, 3, 4, 10, 22, 32, 44, 64, 72, 77, 85, 95, 102, 107, 112, 127];
+
+/// Key coefficient values [A10, A11, A01] at each key level
+const ZF_COEFF_KEY_VALUES: [[i32; 3]; 18] = [
+    [13, 0, 5],              // 0
+    [1300249, 0, 499250],    // 1
+    [214114, 287, 99357],    // 2
+    [351854, 0, 199965],     // 3
+    [801100, 0, 490999],     // 4
+    [704075, 297466, 303694], // 10
+    [46613, 31917, 21469],   // 22
+    [47482, 30617, 21900],   // 32
+    [43024, 42131, 14826],   // 44
+    [36411, 43219, 20369],   // 64
+    [38477, 53843, 7678],    // 72
+    [40503, 51547, 7948],    // 77
+    [35865, 34108, 30026],   // 85
+    [34117, 36899, 28983],   // 95
+    [35464, 35049, 29485],   // 102
+    [16477, 18810, 14712],   // 107
+    [33360, 37954, 28685],   // 112
+    [35269, 36066, 28664],   // 127
+];
+
+/// Key levels for modulation strength interpolation
+const ZF_MOD_KEY_LEVELS: [i32; 9] = [0, 44, 64, 85, 95, 102, 107, 112, 127];
+
+/// Key modulation strength values (stored as fixed-point, multiply by 1/1000)
+const ZF_MOD_KEY_VALUES: [i32; 9] = [0, 340, 500, 1000, 170, 500, 700, 790, 1000];
+
+/// Get Zhou-Fang coefficients for a given input level (0-255 scale).
+/// Returns (d10, d11, d01) normalized coefficients.
+#[inline]
+pub fn zhou_fang_coefficients(level: i32) -> (f32, f32, f32) {
+    let level = level.clamp(0, 255);
+
+    // Mirror for levels > 127
+    let idx = if level > 127 { 255 - level } else { level };
+
+    // Find surrounding key levels
+    let mut lo = 0usize;
+    while lo + 1 < ZF_COEFF_KEY_LEVELS.len() && ZF_COEFF_KEY_LEVELS[lo + 1] <= idx {
+        lo += 1;
+    }
+    let hi = (lo + 1).min(ZF_COEFF_KEY_LEVELS.len() - 1);
+
+    let key_lo = ZF_COEFF_KEY_LEVELS[lo];
+    let key_hi = ZF_COEFF_KEY_LEVELS[hi];
+
+    // Interpolate
+    let (a10, a11, a01) = if key_hi == key_lo {
+        // Exact match
+        (
+            ZF_COEFF_KEY_VALUES[lo][0] as f32,
+            ZF_COEFF_KEY_VALUES[lo][1] as f32,
+            ZF_COEFF_KEY_VALUES[lo][2] as f32,
+        )
+    } else {
+        let t = (idx - key_lo) as f32 / (key_hi - key_lo) as f32;
+        (
+            ZF_COEFF_KEY_VALUES[lo][0] as f32 + t * (ZF_COEFF_KEY_VALUES[hi][0] - ZF_COEFF_KEY_VALUES[lo][0]) as f32,
+            ZF_COEFF_KEY_VALUES[lo][1] as f32 + t * (ZF_COEFF_KEY_VALUES[hi][1] - ZF_COEFF_KEY_VALUES[lo][1]) as f32,
+            ZF_COEFF_KEY_VALUES[lo][2] as f32 + t * (ZF_COEFF_KEY_VALUES[hi][2] - ZF_COEFF_KEY_VALUES[lo][2]) as f32,
+        )
+    };
+
+    let sum = a10 + a11 + a01;
+    if sum > 0.0 {
+        (a10 / sum, a11 / sum, a01 / sum)
+    } else {
+        (1.0, 0.0, 0.0) // Fallback
+    }
+}
+
+/// Get Zhou-Fang modulation strength for a given input level (0-255 scale).
+/// Returns modulation factor in range [0.0, 1.0].
+#[inline]
+pub fn zhou_fang_modulation(level: i32) -> f32 {
+    let level = level.clamp(0, 255);
+
+    // Mirror for levels > 127
+    let idx = if level > 127 { 255 - level } else { level };
+
+    // Find surrounding key levels
+    let mut lo = 0usize;
+    while lo + 1 < ZF_MOD_KEY_LEVELS.len() && ZF_MOD_KEY_LEVELS[lo + 1] <= idx {
+        lo += 1;
+    }
+    let hi = (lo + 1).min(ZF_MOD_KEY_LEVELS.len() - 1);
+
+    let key_lo = ZF_MOD_KEY_LEVELS[lo];
+    let key_hi = ZF_MOD_KEY_LEVELS[hi];
+
+    // Interpolate
+    let m = if key_hi == key_lo {
+        ZF_MOD_KEY_VALUES[lo] as f32
+    } else {
+        let t = (idx - key_lo) as f32 / (key_hi - key_lo) as f32;
+        ZF_MOD_KEY_VALUES[lo] as f32 + t * (ZF_MOD_KEY_VALUES[hi] - ZF_MOD_KEY_VALUES[lo]) as f32
+    };
+
+    m / 1000.0 // Convert from fixed-point
+}
+
+/// Apply Zhou-Fang kernel to a single channel (left-to-right).
+/// Uses position hash for threshold modulation.
+#[inline]
+pub fn apply_zhou_fang_ltr(
+    buf: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err: f32,
+    level: i32,
+) {
+    let (d10, d11, d01) = zhou_fang_coefficients(level);
+
+    // LTR: next=bx+1, diagonal_behind=bx-1, below=bx
+    buf[y][bx + 1] += err * d10;
+    buf[y + 1][bx - 1] += err * d11;
+    buf[y + 1][bx] += err * d01;
+}
+
+/// Apply Zhou-Fang kernel to a single channel (right-to-left).
+#[inline]
+pub fn apply_zhou_fang_rtl(
+    buf: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err: f32,
+    level: i32,
+) {
+    let (d10, d11, d01) = zhou_fang_coefficients(level);
+
+    // RTL: next=bx-1, diagonal_behind=bx+1, below=bx
+    buf[y][bx - 1] += err * d10;
+    buf[y + 1][bx + 1] += err * d11;
+    buf[y + 1][bx] += err * d01;
+}
+
+/// Compute modulated threshold for Zhou-Fang dithering.
+/// Uses position-based noise to break up patterns in mid-tones.
+///
+/// Arguments:
+///   - level: input intensity (0-255)
+///   - x, y: pixel coordinates for noise generation
+///   - seed: random seed for reproducibility
+///
+/// Returns: threshold in [0.0, 1.0] range (typically near 0.5)
+#[inline]
+pub fn zhou_fang_threshold(level: i32, x: usize, y: usize, seed: u32) -> f32 {
+    use super::common::wang_hash;
+
+    let m = zhou_fang_modulation(level);
+
+    // Generate position-based noise in [0, 127]
+    let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ seed);
+    let noise = (pixel_hash & 127) as f32 / 127.0; // [0.0, 1.0]
+
+    // Modulate threshold: 0.5 + (noise - 0.5) * m
+    // This gives threshold in range [0.5 - m/2, 0.5 + m/2]
+    0.5 + (noise - 0.5) * m
+}
+
+/// Apply Zhou-Fang kernel to RGB channels (left-to-right).
+#[inline]
+pub fn apply_zhou_fang_rgb_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    level_r: i32,
+    level_g: i32,
+    level_b: i32,
+) {
+    apply_zhou_fang_ltr(err_r, bx, y, err_r_val, level_r);
+    apply_zhou_fang_ltr(err_g, bx, y, err_g_val, level_g);
+    apply_zhou_fang_ltr(err_b, bx, y, err_b_val, level_b);
+}
+
+/// Apply Zhou-Fang kernel to RGB channels (right-to-left).
+#[inline]
+pub fn apply_zhou_fang_rgb_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    level_r: i32,
+    level_g: i32,
+    level_b: i32,
+) {
+    apply_zhou_fang_rtl(err_r, bx, y, err_r_val, level_r);
+    apply_zhou_fang_rtl(err_g, bx, y, err_g_val, level_g);
+    apply_zhou_fang_rtl(err_b, bx, y, err_b_val, level_b);
+}
+
+/// Apply Zhou-Fang kernel to RGBA channels (left-to-right).
+#[inline]
+pub fn apply_zhou_fang_rgba_ltr(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    level_r: i32,
+    level_g: i32,
+    level_b: i32,
+    level_a: i32,
+) {
+    apply_zhou_fang_ltr(err_r, bx, y, err_r_val, level_r);
+    apply_zhou_fang_ltr(err_g, bx, y, err_g_val, level_g);
+    apply_zhou_fang_ltr(err_b, bx, y, err_b_val, level_b);
+    apply_zhou_fang_ltr(err_a, bx, y, err_a_val, level_a);
+}
+
+/// Apply Zhou-Fang kernel to RGBA channels (right-to-left).
+#[inline]
+pub fn apply_zhou_fang_rgba_rtl(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    level_r: i32,
+    level_g: i32,
+    level_b: i32,
+    level_a: i32,
+) {
+    apply_zhou_fang_rtl(err_r, bx, y, err_r_val, level_r);
+    apply_zhou_fang_rtl(err_g, bx, y, err_g_val, level_g);
+    apply_zhou_fang_rtl(err_b, bx, y, err_b_val, level_b);
+    apply_zhou_fang_rtl(err_a, bx, y, err_a_val, level_a);
+}

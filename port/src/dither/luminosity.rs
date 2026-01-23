@@ -701,6 +701,20 @@ pub fn colorspace_aware_dither_gray_with_options(
                 width, height, reach, progress,
             );
         }
+        // Zhou-Fang: fall back to Ostromoukhov for colorspace-aware dithering
+        // (threshold modulation is for per-channel quantization)
+        DitherMode::ZhouFangStandard => {
+            dither_standard_gray::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::ZhouFangSerpentine => {
+            dither_serpentine_gray::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     out

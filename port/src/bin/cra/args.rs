@@ -53,6 +53,10 @@ pub enum DitherMethod {
     OstroStandard,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, serpentine scanning
     OstroSerpentine,
+    /// Zhou-Fang: variable-coefficient kernel with threshold modulation, standard scanning
+    ZhouFangStandard,
+    /// Zhou-Fang: variable-coefficient kernel with threshold modulation, serpentine scanning
+    ZhouFangSerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
 }
@@ -69,6 +73,8 @@ impl DitherMethod {
             DitherMethod::MixedRandom => DitherMode::MixedRandom,
             DitherMethod::OstroStandard => DitherMode::OstromoukhovStandard,
             DitherMethod::OstroSerpentine => DitherMode::OstromoukhovSerpentine,
+            DitherMethod::ZhouFangStandard => DitherMode::ZhouFangStandard,
+            DitherMethod::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
             DitherMethod::None => DitherMode::None,
         }
     }
@@ -84,6 +90,8 @@ impl DitherMethod {
             DitherMethod::MixedRandom => CSDitherMode::MixedRandom,
             DitherMethod::OstroStandard => CSDitherMode::OstromoukhovStandard,
             DitherMethod::OstroSerpentine => CSDitherMode::OstromoukhovSerpentine,
+            DitherMethod::ZhouFangStandard => CSDitherMode::ZhouFangStandard,
+            DitherMethod::ZhouFangSerpentine => CSDitherMode::ZhouFangSerpentine,
             DitherMethod::None => CSDitherMode::None,
         }
     }

@@ -953,6 +953,23 @@ pub fn colorspace_aware_dither_rgba_with_options(
                 width, height, reach, progress,
             );
         }
+        // Zhou-Fang: fall back to Ostromoukhov for colorspace-aware dithering
+        DitherMode::ZhouFangStandard => {
+            dither_standard_rgba::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::ZhouFangSerpentine => {
+            dither_serpentine_rgba::<Ostromoukhov>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     (r_out, g_out, b_out, alpha_dithered)

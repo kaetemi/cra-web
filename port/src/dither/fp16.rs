@@ -333,6 +333,13 @@ fn dither_alpha_f16_with_mode(
         DitherMode::OstromoukhovSerpentine => {
             dither_alpha_f16::<Ostromoukhov>(alpha, width, height, true)
         }
+        // Zhou-Fang: fall back to Ostromoukhov for colorspace-aware dithering
+        DitherMode::ZhouFangStandard => {
+            dither_alpha_f16::<Ostromoukhov>(alpha, width, height, false)
+        }
+        DitherMode::ZhouFangSerpentine => {
+            dither_alpha_f16::<Ostromoukhov>(alpha, width, height, true)
+        }
     }
 }
 
@@ -1151,6 +1158,25 @@ pub fn dither_rgba_f16_with_options(
             );
         }
         DitherMode::OstromoukhovSerpentine => {
+            dither_serpentine_f16::<Ostromoukhov>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        // Zhou-Fang: fall back to Ostromoukhov for colorspace-aware dithering
+        DitherMode::ZhouFangStandard => {
+            dither_standard_f16::<Ostromoukhov>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        DitherMode::ZhouFangSerpentine => {
             dither_serpentine_f16::<Ostromoukhov>(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,

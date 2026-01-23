@@ -757,6 +757,19 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
                 width, height, reach, progress,
             );
         }
+        // Zhou-Fang: fall back to Ostromoukhov for colorspace-aware dithering
+        DitherMode::ZhouFangStandard => {
+            dither_standard_gray_alpha::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::ZhouFangSerpentine => {
+            dither_serpentine_gray_alpha::<Ostromoukhov>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     (out, alpha_dithered)
