@@ -4,7 +4,7 @@
 
 set -e
 
-CRA="/root/cra-web/dist/bin/cra"
+CRA="/root/cra-web/port/target/release/cra"
 INPUT_DIR="/root/cra-web/tools/test_images"
 OUTPUT_BASE="/root/cra-web/tools/test_images/dithered"
 
