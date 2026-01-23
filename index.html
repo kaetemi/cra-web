@@ -520,13 +520,17 @@
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4" selected>* Mixed (Standard)</option>
-                <option value="5">Mixed (Serpentine)</option>
-                <option value="6">Mixed (Random Direction)</option>
+                <option value="4" selected>* Our method (Standard)</option>
+                <option value="5">Our method (Serpentine)</option>
+                <option value="6">Our method (Random Direction)</option>
+                <option value="8">Ostromoukhov (Standard)</option>
+                <option value="9">Ostromoukhov (Serpentine)</option>
+                <option value="10">Zhou-Fang (Standard)</option>
+                <option value="11">Zhou-Fang (Serpentine)</option>
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="histogram-dither-description">
-                Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).
             </p>
         </div>
 
@@ -565,13 +569,17 @@
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4" selected>* Mixed (Standard, Recommended)</option>
-                <option value="5">Mixed (Serpentine)</option>
-                <option value="6">Mixed (Random Direction)</option>
+                <option value="4" selected>* Our method (Standard, Recommended)</option>
+                <option value="5">Our method (Serpentine)</option>
+                <option value="6">Our method (Random Direction)</option>
+                <option value="8">Ostromoukhov (Standard)</option>
+                <option value="9">Ostromoukhov (Serpentine)</option>
+                <option value="10">Zhou-Fang (Standard)</option>
+                <option value="11">Zhou-Fang (Serpentine)</option>
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
-                Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
             </p>
         </div>
 

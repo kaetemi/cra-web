@@ -489,9 +489,13 @@ const OUTPUT_DITHER_DESCRIPTIONS = {
     '1': 'Floyd-Steinberg with serpentine scanning (alternating direction each row). Reduces diagonal banding artifacts. Used for final output quantization.',
     '2': 'Jarvis-Judice-Ninke with standard scanning. Larger 3-row kernel produces smoother gradients. Used for final output quantization.',
     '3': 'Jarvis-Judice-Ninke with serpentine scanning. Combines larger kernel with alternating scan direction for best quality. Used for final output quantization.',
-    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.',
-    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for final output quantization.',
-    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Most randomized option. Used for final output quantization.'
+    '4': 'Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.',
+    '5': 'Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for final output quantization.',
+    '6': 'Our method: Randomly selects both kernel AND scan direction per-row. Most randomized option. Used for final output quantization.',
+    '8': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Standard scanning. Used for final output quantization.',
+    '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for final output quantization.',
+    '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for final output quantization.',
+    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for final output quantization.'
 };
 
 // Histogram dithering method descriptions
@@ -500,9 +504,13 @@ const HISTOGRAM_DITHER_DESCRIPTIONS = {
     '1': 'Floyd-Steinberg with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).',
     '2': 'Jarvis-Judice-Ninke with standard scanning. Used for histogram processing quantization (when not using f32 histogram).',
     '3': 'Jarvis-Judice-Ninke with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).',
-    '4': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).',
-    '5': 'Mixed: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for histogram processing quantization.',
-    '6': 'Mixed: Randomly selects both kernel AND scan direction per-row. Used for histogram processing quantization.'
+    '4': 'Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).',
+    '5': 'Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for histogram processing quantization.',
+    '6': 'Our method: Randomly selects both kernel AND scan direction per-row. Used for histogram processing quantization.',
+    '8': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Standard scanning. Used for histogram processing.',
+    '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for histogram processing.',
+    '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for histogram processing.',
+    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for histogram processing.'
 };
 
 // Update output dither method description

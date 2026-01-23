@@ -43,11 +43,14 @@ pub enum DitherMethod {
     JjnStandard,
     /// Jarvis-Judice-Ninke with serpentine scanning
     JjnSerpentine,
-    /// Mixed: randomly selects FS or JJN per-pixel, standard scanning
+    /// Mixed (Our method): randomly selects FS or JJN per-pixel, standard scanning
+    #[value(alias = "boon-standard", alias = "boon")]
     MixedStandard,
-    /// Mixed: randomly selects FS or JJN per-pixel, serpentine scanning
+    /// Mixed (Our method): randomly selects FS or JJN per-pixel, serpentine scanning
+    #[value(alias = "boon-serpentine")]
     MixedSerpentine,
-    /// Mixed: randomly selects kernel AND scan direction per-row
+    /// Mixed (Our method): randomly selects kernel AND scan direction per-row
+    #[value(alias = "boon-random")]
     MixedRandom,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, standard scanning
     OstroStandard,
