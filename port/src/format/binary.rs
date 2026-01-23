@@ -21,7 +21,7 @@ pub use super::rgb666::{
 
 // Re-export palettized PNG functions
 pub use super::palettized_png::{
-    supports_palettized_png, generate_palette, encode_palettized_png
+    supports_palettized_png, generate_palette, encode_palettized_png, encode_explicit_palette_png
 };
 
 /// Align a byte count up to the specified stride (must be power of 2)

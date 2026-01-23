@@ -18,7 +18,7 @@ use cra_wasm::binary_format::{
     encode_argb_row_aligned_stride,
     encode_channel_from_interleaved_row_aligned_stride,
     encode_gray_row_aligned_stride, encode_la_row_aligned_stride,
-    encode_palettized_png, encode_rgb_row_aligned_stride,
+    encode_palettized_png, encode_explicit_palette_png, encode_rgb_row_aligned_stride,
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
 use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
@@ -2112,20 +2112,39 @@ fn main() -> Result<(), String> {
         };
 
         // Write PNG output
-        // Use palettized PNG by default for formats ≤8 bits (smaller files)
+        // Use palettized PNG for explicit palette formats or formats ≤8 bits
         if let Some(ref png_path) = args.output {
+            // Check if we have explicit palette data (from paletted dithering)
+            let has_explicit_palette = dither_result.palette_indices.is_some()
+                && dither_result.palette_colors.is_some();
             let use_palettized = supports_palettized_png(&format) && !args.no_palettized_output;
 
             if args.verbose {
-                if use_palettized {
+                if has_explicit_palette {
+                    eprintln!("Writing PNG (palettized, {} colors): {}",
+                        dither_result.palette_colors.as_ref().map(|p| p.len()).unwrap_or(0),
+                        png_path.display());
+                } else if use_palettized {
                     eprintln!("Writing PNG (palettized): {}", png_path.display());
                 } else {
                     eprintln!("Writing PNG: {}", png_path.display());
                 }
             }
 
-            if use_palettized {
-                // Use palettized PNG for smaller file size
+            if has_explicit_palette {
+                // Use explicit palette PNG for true paletted output (CGA, web-safe, etc.)
+                let png_data = encode_explicit_palette_png(
+                    dither_result.palette_indices.as_ref().unwrap(),
+                    width_usize,
+                    height_usize,
+                    dither_result.palette_colors.as_ref().unwrap(),
+                )?;
+                let mut file = File::create(png_path)
+                    .map_err(|e| format!("Failed to create {}: {}", png_path.display(), e))?;
+                file.write_all(&png_data)
+                    .map_err(|e| format!("Failed to write {}: {}", png_path.display(), e))?;
+            } else if use_palettized {
+                // Use palettized PNG for smaller file size (formats ≤8 bits)
                 let png_data = encode_palettized_png(
                     &dither_result.interleaved,
                     width_usize,
@@ -2292,9 +2311,9 @@ fn main() -> Result<(), String> {
             eprintln!("Writing metadata: {}", meta_path.display());
         }
         // Determine if PNG output used palettized encoding
+        // Explicit palette formats (CGA, web-safe) always use palettized PNG
         let png_palettized = args.output.is_some()
-            && supports_palettized_png(&format)
-            && !args.no_palettized_output;
+            && (palette_format.is_some() || (supports_palettized_png(&format) && !args.no_palettized_output));
         write_metadata(
             meta_path,
             &args,

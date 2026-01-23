@@ -247,3 +247,68 @@ pub fn encode_palettized_png(
 
     Ok(output)
 }
+
+/// Encode a PNG using explicit palette indices and palette colors.
+///
+/// This is used for true paletted output modes (like CGA palettes) where we have:
+/// - `indices`: One byte per pixel, indexing into the palette
+/// - `palette`: Explicit RGBA colors (R, G, B, A) tuples
+///
+/// The output PNG uses 8-bit indexed color with the specified palette.
+pub fn encode_explicit_palette_png(
+    indices: &[u8],
+    width: usize,
+    height: usize,
+    palette: &[(u8, u8, u8, u8)],
+) -> Result<Vec<u8>, String> {
+    let pixel_count = width * height;
+    if indices.len() < pixel_count {
+        return Err(format!(
+            "Indices array too small: got {} bytes, expected {} for {}x{} image",
+            indices.len(), pixel_count, width, height
+        ));
+    }
+
+    if palette.is_empty() || palette.len() > 256 {
+        return Err(format!(
+            "Palette must have 1-256 colors, got {}",
+            palette.len()
+        ));
+    }
+
+    // Build RGB palette and check if we need alpha (tRNS chunk)
+    let mut rgb_palette: Vec<u8> = Vec::with_capacity(palette.len() * 3);
+    let mut alpha_palette: Vec<u8> = Vec::with_capacity(palette.len());
+    let mut needs_alpha = false;
+
+    for &(r, g, b, a) in palette {
+        rgb_palette.push(r);
+        rgb_palette.push(g);
+        rgb_palette.push(b);
+        alpha_palette.push(a);
+        if a != 255 {
+            needs_alpha = true;
+        }
+    }
+
+    // Create PNG encoder
+    let mut output = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut output, width as u32, height as u32);
+        encoder.set_color(png::ColorType::Indexed);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder.set_palette(rgb_palette);
+
+        // Set tRNS chunk for alpha if any palette entry has non-opaque alpha
+        if needs_alpha {
+            encoder.set_trns(alpha_palette);
+        }
+
+        let mut writer = encoder.write_header().map_err(|e| format!("PNG header error: {}", e))?;
+
+        // For 8-bit indexed, indices are written directly (one byte per pixel)
+        writer.write_image_data(&indices[..pixel_count]).map_err(|e| format!("PNG write error: {}", e))?;
+    }
+
+    Ok(output)
+}

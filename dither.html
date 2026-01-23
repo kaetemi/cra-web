@@ -1089,6 +1089,7 @@
             encode_la_row_aligned_stride_wasm,
             encode_channel_row_aligned_stride_wasm,
             encode_palettized_png_wasm,
+            encode_explicit_palette_png_wasm,
             encode_png_rgb_wasm,
             encode_png_rgba_wasm,
             encode_png_gray_wasm,
@@ -2188,7 +2189,21 @@
             let pngData;
 
             try {
-                if (supportsPalettized) {
+                // For explicit palette formats (CGA, web-safe), use palettized PNG with actual palette
+                if (lastDitherResult.isPaletted) {
+                    // Convert RGBA to palette indices
+                    const indices = rgba_to_palette_indices_wasm(
+                        lastDitherResult.rgbaInterleaved,
+                        lastDitherResult.paletteType
+                    );
+                    // Encode with explicit palette
+                    pngData = encode_explicit_palette_png_wasm(
+                        indices,
+                        lastDitherResult.paletteType,
+                        lastDitherResult.width,
+                        lastDitherResult.height
+                    );
+                } else if (supportsPalettized) {
                     // Use palettized PNG for smaller file size (format ≤8 bits)
                     if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
                         pngData = encode_palettized_png_wasm(

@@ -1986,6 +1986,30 @@ pub fn encode_palettized_png_wasm(
     .map_err(|e| JsValue::from_str(&e))
 }
 
+/// Encode PNG with explicit palette indices and colors
+/// Input:
+///   - indices: Palette indices (1 byte per pixel, values 0-255)
+///   - palette_type: 0=web-safe, 1=CGA 5153, 2=CGA BIOS, 3=CGA Palette 1, 4=CGA Palette 1 5153
+///   - width, height: Image dimensions
+/// Output: PNG file bytes with the specified palette
+#[wasm_bindgen]
+pub fn encode_explicit_palette_png_wasm(
+    indices: Vec<u8>,
+    palette_type: u8,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>, JsValue> {
+    let palette_colors = generate_palette(palette_type);
+
+    binary_format::encode_explicit_palette_png(
+        &indices,
+        width as usize,
+        height as usize,
+        &palette_colors,
+    )
+    .map_err(|e| JsValue::from_str(&e))
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
