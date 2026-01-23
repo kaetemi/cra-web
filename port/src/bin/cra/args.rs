@@ -448,6 +448,17 @@ pub struct Args {
     #[arg(short, long)]
     pub format: Option<String>,
 
+    /// Input palette from a PNG file
+    ///
+    /// When specified, the palette from this PNG is used for dithering.
+    /// The --format option is ignored when --input-palette is used.
+    ///
+    /// For indexed (paletted) PNGs: extracts the palette directly from the PLTE chunk.
+    /// For non-indexed PNGs (RGB, RGBA, Grayscale): extracts unique colors from pixel data
+    /// in order of appearance. Fails if the image has more than 256 unique colors.
+    #[arg(long, value_name = "PNG_FILE")]
+    pub input_palette: Option<PathBuf>,
+
     /// Histogram matching method (default: none if no reference, cra-oklab if reference provided)
     #[arg(long, value_enum)]
     pub histogram: Option<Histogram>,

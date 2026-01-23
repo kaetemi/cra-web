@@ -71,7 +71,7 @@ fn clear_progress() {
 // ============================================================================
 
 /// Known palette-based formats
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum PaletteFormat {
     /// Web-safe 216-color palette (6×6×6 RGB cube)
     WebSafe,
@@ -83,6 +83,8 @@ enum PaletteFormat {
     CgaPalette1,
     /// CGA Palette 1 with 5153 monitor colors (4 colors)
     CgaPalette1_5153,
+    /// Custom palette loaded from an input PNG file
+    Input(String, Vec<(u8, u8, u8, u8)>),
 }
 
 impl PaletteFormat {
@@ -99,13 +101,14 @@ impl PaletteFormat {
     }
 
     /// Get display name
-    fn name(&self) -> &'static str {
+    fn name(&self) -> String {
         match self {
-            PaletteFormat::WebSafe => "PALETTE_WEBSAFE",
-            PaletteFormat::Cga5153 => "PALETTE_CGA_5153",
-            PaletteFormat::CgaBios => "PALETTE_CGA_BIOS",
-            PaletteFormat::CgaPalette1 => "PALETTE_CGA_PALETTE1",
-            PaletteFormat::CgaPalette1_5153 => "PALETTE_CGA_PALETTE1_5153",
+            PaletteFormat::WebSafe => "PALETTE_WEBSAFE".to_string(),
+            PaletteFormat::Cga5153 => "PALETTE_CGA_5153".to_string(),
+            PaletteFormat::CgaBios => "PALETTE_CGA_BIOS".to_string(),
+            PaletteFormat::CgaPalette1 => "PALETTE_CGA_PALETTE1".to_string(),
+            PaletteFormat::CgaPalette1_5153 => "PALETTE_CGA_PALETTE1_5153".to_string(),
+            PaletteFormat::Input(name, _) => name.clone(),
         }
     }
 
@@ -117,6 +120,19 @@ impl PaletteFormat {
             PaletteFormat::CgaBios => 16,
             PaletteFormat::CgaPalette1 => 4,
             PaletteFormat::CgaPalette1_5153 => 4,
+            PaletteFormat::Input(_, colors) => colors.len(),
+        }
+    }
+
+    /// Get the palette colors
+    fn colors(&self) -> Vec<(u8, u8, u8, u8)> {
+        match self {
+            PaletteFormat::WebSafe => generate_websafe_palette(),
+            PaletteFormat::Cga5153 => generate_cga_5153_palette(),
+            PaletteFormat::CgaBios => generate_cga_bios_palette(),
+            PaletteFormat::CgaPalette1 => generate_cga_palette1_palette(),
+            PaletteFormat::CgaPalette1_5153 => generate_cga_palette1_5153_palette(),
+            PaletteFormat::Input(_, colors) => colors.clone(),
         }
     }
 }
@@ -204,6 +220,137 @@ fn generate_cga_palette1_5153_palette() -> Vec<(u8, u8, u8, u8)> {
         (0xF3, 0x4E, 0xF3, 255), // 2: Light magenta (243, 78, 243)
         (0xFF, 0xFF, 0xFF, 255), // 3: White
     ]
+}
+
+/// Extract palette from a PNG file
+/// Returns (palette_name, colors) or an error message
+fn extract_palette_from_png(path: &PathBuf) -> Result<(String, Vec<(u8, u8, u8, u8)>), String> {
+    use png::ColorType;
+    use std::fs::File;
+    use std::io::BufReader;
+    use std::collections::HashSet;
+
+    let file = File::open(path)
+        .map_err(|e| format!("Failed to open palette file {}: {}", path.display(), e))?;
+    let decoder = png::Decoder::new(BufReader::new(file));
+    let mut reader = decoder.read_info()
+        .map_err(|e| format!("Failed to read PNG info from {}: {}", path.display(), e))?;
+    let info = reader.info().clone();
+
+    // Generate name from filename
+    let name = path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|s| format!("PALETTE_INPUT_{}", s.to_uppercase().replace(['-', ' ', '.'], "_")))
+        .unwrap_or_else(|| "PALETTE_INPUT".to_string());
+
+    // Check if this is an indexed/paletted PNG
+    if info.color_type == ColorType::Indexed {
+        // Get the palette
+        let palette = info.palette.as_ref()
+            .ok_or_else(|| format!("PNG {} has no palette", path.display()))?;
+
+        // Get the tRNS (transparency) chunk if present
+        let trns = info.trns.as_ref().map(|t| t.as_ref());
+
+        // Convert to our format (R, G, B, A)
+        let num_colors = palette.len() / 3;
+        if num_colors == 0 || num_colors > 256 {
+            return Err(format!("Invalid palette size: {} colors", num_colors));
+        }
+
+        let mut colors = Vec::with_capacity(num_colors);
+        for i in 0..num_colors {
+            let r = palette[i * 3];
+            let g = palette[i * 3 + 1];
+            let b = palette[i * 3 + 2];
+            let a = trns.and_then(|t| t.get(i).copied()).unwrap_or(255);
+            colors.push((r, g, b, a));
+        }
+
+        return Ok((name, colors));
+    }
+
+    // Not an indexed PNG - extract unique colors from pixel data
+    let mut buf = vec![0u8; reader.output_buffer_size()];
+    let frame_info = reader.next_frame(&mut buf)
+        .map_err(|e| format!("Failed to decode PNG {}: {}", path.display(), e))?;
+
+    let data = &buf[..frame_info.buffer_size()];
+
+    // Extract unique colors in order of appearance
+    let mut colors: Vec<(u8, u8, u8, u8)> = Vec::new();
+    let mut seen: HashSet<(u8, u8, u8, u8)> = HashSet::new();
+
+    match info.color_type {
+        ColorType::Rgba => {
+            for chunk in data.chunks_exact(4) {
+                let color = (chunk[0], chunk[1], chunk[2], chunk[3]);
+                if seen.insert(color) {
+                    colors.push(color);
+                    if colors.len() > 256 {
+                        return Err(format!(
+                            "PNG {} has more than 256 unique colors ({} found so far). Cannot use as palette source.",
+                            path.display(), colors.len()
+                        ));
+                    }
+                }
+            }
+        }
+        ColorType::Rgb => {
+            for chunk in data.chunks_exact(3) {
+                let color = (chunk[0], chunk[1], chunk[2], 255);
+                if seen.insert(color) {
+                    colors.push(color);
+                    if colors.len() > 256 {
+                        return Err(format!(
+                            "PNG {} has more than 256 unique colors ({} found so far). Cannot use as palette source.",
+                            path.display(), colors.len()
+                        ));
+                    }
+                }
+            }
+        }
+        ColorType::GrayscaleAlpha => {
+            for chunk in data.chunks_exact(2) {
+                let color = (chunk[0], chunk[0], chunk[0], chunk[1]);
+                if seen.insert(color) {
+                    colors.push(color);
+                    if colors.len() > 256 {
+                        return Err(format!(
+                            "PNG {} has more than 256 unique colors ({} found so far). Cannot use as palette source.",
+                            path.display(), colors.len()
+                        ));
+                    }
+                }
+            }
+        }
+        ColorType::Grayscale => {
+            for &g in data {
+                let color = (g, g, g, 255);
+                if seen.insert(color) {
+                    colors.push(color);
+                    if colors.len() > 256 {
+                        return Err(format!(
+                            "PNG {} has more than 256 unique colors ({} found so far). Cannot use as palette source.",
+                            path.display(), colors.len()
+                        ));
+                    }
+                }
+            }
+        }
+        _ => {
+            return Err(format!(
+                "Unsupported color type {:?} for palette extraction from {}",
+                info.color_type, path.display()
+            ));
+        }
+    }
+
+    if colors.is_empty() {
+        return Err(format!("PNG {} contains no colors", path.display()));
+    }
+
+    Ok((name, colors))
 }
 
 // ============================================================================
@@ -782,14 +929,8 @@ fn dither_pixels_paletted(
     linear_to_srgb_inplace(&mut linear_pixels);
     denormalize_inplace_clamped(&mut linear_pixels);
 
-    // Generate the palette based on format type
-    let palette_colors = match palette_format {
-        PaletteFormat::WebSafe => generate_websafe_palette(),
-        PaletteFormat::Cga5153 => generate_cga_5153_palette(),
-        PaletteFormat::CgaBios => generate_cga_bios_palette(),
-        PaletteFormat::CgaPalette1 => generate_cga_palette1_palette(),
-        PaletteFormat::CgaPalette1_5153 => generate_cga_palette1_5153_palette(),
-    };
+    // Get palette colors (works for all palette types including Input)
+    let palette_colors = palette_format.colors();
 
     // Create the dither palette with precomputed perceptual coordinates
     let palette = DitherPalette::new(&palette_colors, colorspace);
@@ -858,14 +999,8 @@ fn dither_pixels_srgb_paletted(
     use cra_wasm::color::interleave_rgba_u8;
     use std::collections::HashMap;
 
-    // Generate the palette based on format type
-    let palette_colors = match palette_format {
-        PaletteFormat::WebSafe => generate_websafe_palette(),
-        PaletteFormat::Cga5153 => generate_cga_5153_palette(),
-        PaletteFormat::CgaBios => generate_cga_bios_palette(),
-        PaletteFormat::CgaPalette1 => generate_cga_palette1_palette(),
-        PaletteFormat::CgaPalette1_5153 => generate_cga_palette1_5153_palette(),
-    };
+    // Get palette colors (works for all palette types including Input)
+    let palette_colors = palette_format.colors();
 
     // Create the dither palette with precomputed perceptual coordinates
     let palette = DitherPalette::new(&palette_colors, colorspace);
@@ -1048,7 +1183,7 @@ fn write_metadata(
     if has_integer_output {
         // For palette formats, output "PALETTED8" as the format; otherwise use the format name
         let is_palette_format = palette_format.is_some();
-        if let Some(pf) = palette_format {
+        if let Some(ref pf) = palette_format {
             // LUT file size = 4 bytes (ARGB8888) per color
             let lut_file_size = pf.color_count() * 4;
             json.push_str(&format!("  \"lut_file_size\": {},\n", lut_file_size));
@@ -1427,8 +1562,20 @@ fn write_safetensors_output(
 fn main() -> Result<(), String> {
     let args = Args::parse();
 
-    // Check for palette-based formats first (e.g., PALETTE_WEBSAFE)
-    let palette_format = args.format.as_ref().and_then(|f| PaletteFormat::parse(f));
+    // Check for input palette file first (takes priority over --format)
+    let palette_format = if let Some(ref palette_path) = args.input_palette {
+        let (name, colors) = extract_palette_from_png(palette_path)?;
+        if args.verbose {
+            eprintln!("Loaded palette from {}: {} colors", palette_path.display(), colors.len());
+        }
+        if args.format.is_some() {
+            eprintln!("Warning: --format is ignored when --input-palette is specified");
+        }
+        Some(PaletteFormat::Input(name, colors))
+    } else {
+        // Check for palette-based formats (e.g., PALETTE_WEBSAFE)
+        args.format.as_ref().and_then(|f| PaletteFormat::parse(f))
+    };
 
     // Parse format string if explicitly provided and not a palette format
     // If user specified a format, parse it now to detect grayscale for needs_linear
@@ -1543,7 +1690,7 @@ fn main() -> Result<(), String> {
 
     // Finalize format: use explicit format if provided, otherwise apply alpha-aware default
     // For palette formats, we create a synthetic RGBA8888 format for output handling
-    let format = if let Some(pf) = palette_format {
+    let format = if let Some(ref pf) = palette_format {
         if args.verbose {
             eprintln!("  Palette format: {} ({} colors)", pf.name(), pf.color_count());
         }
@@ -1967,13 +2114,13 @@ fn main() -> Result<(), String> {
             // Step 5: Dither RGB (or palette)
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
-                let result = if let Some(pf) = palette_format {
+                let result = if let Some(ref pf) = palette_format {
                     // Palette dithering with integrated alpha-RGB distance
                     dither_pixels_paletted(
                         pixels_to_dither,
                         width_usize,
                         height_usize,
-                        pf,
+                        pf.clone(),
                         output_colorspace.to_perceptual_space(),
                         args.output_dither.to_dither_mode(),
                         args.seed,
@@ -2035,13 +2182,13 @@ fn main() -> Result<(), String> {
         // Only perform dithering if integer output is needed
         let result = if has_integer_output {
             let mut dither_progress = |p: f32| print_progress("Dither", p);
-            let result = if let Some(pf) = palette_format {
+            let result = if let Some(ref pf) = palette_format {
                 // Palette dithering with integrated alpha-RGB distance
                 dither_pixels_srgb_paletted(
                     input_pixels,
                     width as usize,
                     height as usize,
-                    pf,
+                    pf.clone(),
                     output_colorspace.to_perceptual_space(),
                     args.output_dither.to_dither_mode(),
                     args.seed,
