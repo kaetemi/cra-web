@@ -14,82 +14,11 @@
 use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::basic::dither_with_mode_bits;
+use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_mixed_kernel_rgb, bit_replicate, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke,
-    NoneKernel, PerceptualSpace, RgbKernel,
+    apply_mixed_kernel_rgb, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash,
+    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, RgbKernel,
 };
-
-// ============================================================================
-// Quantization and LUT structures (same as dither_rgb.rs)
-// ============================================================================
-
-/// Perceptual quantization parameters for joint RGB dithering.
-struct PerceptualQuantParams {
-    num_levels: usize,
-    level_values: Vec<u8>,
-    lut_floor_level: [u8; 256],
-    lut_ceil_level: [u8; 256],
-}
-
-impl PerceptualQuantParams {
-    fn new(bits: u8) -> Self {
-        debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
-        let num_levels = 1usize << bits;
-        let max_idx = num_levels - 1;
-        let shift = 8 - bits;
-
-        let level_values: Vec<u8> = (0..num_levels)
-            .map(|l| bit_replicate(l as u8, bits))
-            .collect();
-
-        let mut lut_floor_level = [0u8; 256];
-        let mut lut_ceil_level = [0u8; 256];
-
-        for v in 0..256u16 {
-            let trunc_idx = (v as u8 >> shift) as usize;
-            let trunc_val = level_values[trunc_idx];
-
-            let (floor_idx, ceil_idx) = if trunc_val == v as u8 {
-                (trunc_idx, trunc_idx)
-            } else if trunc_val < v as u8 {
-                let ceil = if trunc_idx < max_idx { trunc_idx + 1 } else { trunc_idx };
-                (trunc_idx, ceil)
-            } else {
-                let floor = if trunc_idx > 0 { trunc_idx - 1 } else { trunc_idx };
-                (floor, trunc_idx)
-            };
-
-            lut_floor_level[v as usize] = floor_idx as u8;
-            lut_ceil_level[v as usize] = ceil_idx as u8;
-        }
-
-        Self { num_levels, level_values, lut_floor_level, lut_ceil_level }
-    }
-
-    #[inline]
-    fn floor_level(&self, srgb_value: u8) -> usize {
-        self.lut_floor_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn ceil_level(&self, srgb_value: u8) -> usize {
-        self.lut_ceil_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn level_to_srgb(&self, level: usize) -> u8 {
-        self.level_values[level]
-    }
-}
-
-fn build_linear_lut() -> [f32; 256] {
-    let mut lut = [0.0f32; 256];
-    for i in 0..256 {
-        lut[i] = srgb_to_linear_single(i as f32 / 255.0);
-    }
-    lut
-}
 
 #[derive(Clone, Copy, Default)]
 struct LabValue {
@@ -99,7 +28,7 @@ struct LabValue {
 }
 
 fn build_perceptual_lut(
-    quant: &PerceptualQuantParams,
+    quant: &QuantLevelParams,
     linear_lut: &[f32; 256],
     space: PerceptualSpace,
 ) -> Vec<LabValue> {
@@ -181,9 +110,9 @@ fn get_seeding_alpha_dithered(alpha_dithered: &[u8], width: usize, px: usize, py
 
 /// Context for alpha-aware pixel processing
 struct DitherContextRgba<'a> {
-    quant_r: &'a PerceptualQuantParams,
-    quant_g: &'a PerceptualQuantParams,
-    quant_b: &'a PerceptualQuantParams,
+    quant_r: &'a QuantLevelParams,
+    quant_g: &'a QuantLevelParams,
+    quant_b: &'a QuantLevelParams,
     linear_lut: &'a [f32; 256],
     lab_lut: &'a Option<Vec<LabValue>>,
     space: PerceptualSpace,
@@ -968,9 +897,9 @@ pub fn colorspace_aware_dither_rgba_with_mode(
     }
 
     // Step 2: Set up RGB dithering with alpha awareness
-    let quant_r = PerceptualQuantParams::new(bits_r);
-    let quant_g = PerceptualQuantParams::new(bits_g);
-    let quant_b = PerceptualQuantParams::new(bits_b);
+    let quant_r = QuantLevelParams::new(bits_r);
+    let quant_g = QuantLevelParams::new(bits_g);
+    let quant_b = QuantLevelParams::new(bits_b);
 
     let linear_lut = build_linear_lut();
 

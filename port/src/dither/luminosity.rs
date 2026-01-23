@@ -34,10 +34,10 @@ use crate::color::{
     linear_rgb_to_lab, linear_rgb_to_oklab, linear_to_srgb_single, srgb_to_linear_single,
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
+use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, perceptual_lightness_distance_sq, wang_hash,
-    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
-    SingleChannelKernel,
+    apply_single_channel_kernel, perceptual_lightness_distance_sq, wang_hash, DitherMode,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
 };
 #[cfg(test)]
 use super::common::{lightness_distance_ciede2000_sq, lightness_distance_sq};
@@ -55,93 +55,12 @@ fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
     }
 }
 
-/// Quantization parameters for grayscale dithering
-struct GrayQuantParams {
-    /// Number of quantization levels (2^bits)
-    num_levels: usize,
-    /// Level index -> extended sRGB value (0-255)
-    level_values: Vec<u8>,
-    /// sRGB value -> floor level index
-    lut_floor_level: [u8; 256],
-    /// sRGB value -> ceil level index
-    lut_ceil_level: [u8; 256],
-}
-
-impl GrayQuantParams {
-    fn new(bits: u8) -> Self {
-        debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
-        let num_levels = 1usize << bits;
-        let max_idx = num_levels - 1;
-        let shift = 8 - bits;
-
-        let level_values: Vec<u8> = (0..num_levels)
-            .map(|l| bit_replicate(l as u8, bits))
-            .collect();
-
-        let mut lut_floor_level = [0u8; 256];
-        let mut lut_ceil_level = [0u8; 256];
-
-        for v in 0..256u16 {
-            let trunc_idx = (v as u8 >> shift) as usize;
-            let trunc_val = level_values[trunc_idx];
-
-            let (floor_idx, ceil_idx) = if trunc_val == v as u8 {
-                (trunc_idx, trunc_idx)
-            } else if trunc_val < v as u8 {
-                let ceil = if trunc_idx < max_idx {
-                    trunc_idx + 1
-                } else {
-                    trunc_idx
-                };
-                (trunc_idx, ceil)
-            } else {
-                let floor = if trunc_idx > 0 { trunc_idx - 1 } else { trunc_idx };
-                (floor, trunc_idx)
-            };
-
-            lut_floor_level[v as usize] = floor_idx as u8;
-            lut_ceil_level[v as usize] = ceil_idx as u8;
-        }
-
-        Self {
-            num_levels,
-            level_values,
-            lut_floor_level,
-            lut_ceil_level,
-        }
-    }
-
-    #[inline]
-    fn floor_level(&self, srgb_value: u8) -> usize {
-        self.lut_floor_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn ceil_level(&self, srgb_value: u8) -> usize {
-        self.lut_ceil_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn level_to_srgb(&self, level: usize) -> u8 {
-        self.level_values[level]
-    }
-}
-
-/// Pre-computed LUT for sRGB to linear conversion (256 entries)
-fn build_linear_lut() -> [f32; 256] {
-    let mut lut = [0.0f32; 256];
-    for i in 0..256 {
-        lut[i] = srgb_to_linear_single(i as f32 / 255.0);
-    }
-    lut
-}
-
 /// Build perceptual lightness LUT for grayscale levels.
 /// Each level is converted to perceptual lightness (L* for CIELAB, L for OKLab).
 /// For LinearRGB, stores the linear luminosity value directly.
 /// We only store L since a* = b* = 0 for all neutral grays.
 fn build_gray_lightness_lut(
-    quant: &GrayQuantParams,
+    quant: &QuantLevelParams,
     linear_lut: &[f32; 256],
     space: PerceptualSpace,
 ) -> Vec<f32> {
@@ -228,7 +147,7 @@ fn get_seeding_gray(gray_channel: &[f32], width: usize, px: usize, py: usize, re
 // ============================================================================
 
 struct GrayDitherContext<'a> {
-    quant: &'a GrayQuantParams,
+    quant: &'a QuantLevelParams,
     linear_lut: &'a [f32; 256],
     /// Perceptual lightness values for each quantization level.
     /// Only L is stored since a* = b* = 0 for neutral grays.
@@ -715,7 +634,7 @@ pub fn colorspace_aware_dither_gray_with_mode(
     seed: u32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let quant = GrayQuantParams::new(bits);
+    let quant = QuantLevelParams::new(bits);
     let linear_lut = build_linear_lut();
     let lightness_lut = build_gray_lightness_lut(&quant, &linear_lut, space);
 

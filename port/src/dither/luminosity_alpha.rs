@@ -27,10 +27,10 @@ use crate::color::{
 };
 use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::basic::dither_with_mode_bits;
+use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, perceptual_lightness_distance_sq, wang_hash,
-    DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
-    SingleChannelKernel,
+    apply_single_channel_kernel, perceptual_lightness_distance_sq, wang_hash, DitherMode,
+    FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace, SingleChannelKernel,
 };
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
@@ -46,79 +46,9 @@ fn linear_gray_to_ycbcr_y(lin_gray: f32) -> f32 {
     }
 }
 
-// ============================================================================
-// Quantization parameters
-// ============================================================================
-
-struct GrayQuantParams {
-    num_levels: usize,
-    level_values: Vec<u8>,
-    lut_floor_level: [u8; 256],
-    lut_ceil_level: [u8; 256],
-}
-
-impl GrayQuantParams {
-    fn new(bits: u8) -> Self {
-        debug_assert!(bits >= 1 && bits <= 8, "bits must be 1-8");
-        let num_levels = 1usize << bits;
-        let max_idx = num_levels - 1;
-        let shift = 8 - bits;
-
-        let level_values: Vec<u8> = (0..num_levels)
-            .map(|l| bit_replicate(l as u8, bits))
-            .collect();
-
-        let mut lut_floor_level = [0u8; 256];
-        let mut lut_ceil_level = [0u8; 256];
-
-        for v in 0..256u16 {
-            let trunc_idx = (v as u8 >> shift) as usize;
-            let trunc_val = level_values[trunc_idx];
-
-            let (floor_idx, ceil_idx) = if trunc_val == v as u8 {
-                (trunc_idx, trunc_idx)
-            } else if trunc_val < v as u8 {
-                let ceil = if trunc_idx < max_idx { trunc_idx + 1 } else { trunc_idx };
-                (trunc_idx, ceil)
-            } else {
-                let floor = if trunc_idx > 0 { trunc_idx - 1 } else { trunc_idx };
-                (floor, trunc_idx)
-            };
-
-            lut_floor_level[v as usize] = floor_idx as u8;
-            lut_ceil_level[v as usize] = ceil_idx as u8;
-        }
-
-        Self { num_levels, level_values, lut_floor_level, lut_ceil_level }
-    }
-
-    #[inline]
-    fn floor_level(&self, srgb_value: u8) -> usize {
-        self.lut_floor_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn ceil_level(&self, srgb_value: u8) -> usize {
-        self.lut_ceil_level[srgb_value as usize] as usize
-    }
-
-    #[inline]
-    fn level_to_srgb(&self, level: usize) -> u8 {
-        self.level_values[level]
-    }
-}
-
-fn build_linear_lut() -> [f32; 256] {
-    let mut lut = [0.0f32; 256];
-    for i in 0..256 {
-        lut[i] = srgb_to_linear_single(i as f32 / 255.0);
-    }
-    lut
-}
-
 /// Build perceptual lightness LUT for grayscale levels.
 fn build_gray_lightness_lut(
-    quant: &GrayQuantParams,
+    quant: &QuantLevelParams,
     linear_lut: &[f32; 256],
     space: PerceptualSpace,
 ) -> Vec<f32> {
@@ -197,7 +127,7 @@ fn get_seeding_alpha(alpha_dithered: &[u8], width: usize, px: usize, py: usize, 
 // ============================================================================
 
 struct GrayAlphaDitherContext<'a> {
-    quant: &'a GrayQuantParams,
+    quant: &'a QuantLevelParams,
     linear_lut: &'a [f32; 256],
     lightness_lut: &'a Vec<f32>,
     space: PerceptualSpace,
@@ -761,7 +691,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_mode(
     }
 
     // Step 2: Set up grayscale dithering with alpha awareness
-    let quant = GrayQuantParams::new(bits_gray);
+    let quant = QuantLevelParams::new(bits_gray);
     let linear_lut = build_linear_lut();
     let lightness_lut = build_gray_lightness_lut(&quant, &linear_lut, space);
 

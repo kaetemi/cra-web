@@ -17,8 +17,10 @@
 //! - `fp16`: FP16 (half-precision float) dithering
 //! - `bf16`: BF16 (brain float) dithering
 //! - `kernels`: Error diffusion kernel implementations
+//! - `bitdepth`: Bit depth quantization utilities (bit_replicate, linear LUT, quant params)
 
 pub mod kernels;
+pub mod bitdepth;
 pub mod common;
 pub mod basic;
 pub mod lab;
@@ -33,8 +35,8 @@ pub mod fp16;
 pub mod bf16;
 
 // Re-export common types at the dither module level for convenience
+pub use bitdepth::{bit_replicate, build_linear_lut, QuantLevelParams};
 pub use common::{
-    bit_replicate,
     wang_hash,
     ColorCorrectionMethod,
     DitherMode,
