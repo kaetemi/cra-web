@@ -13,7 +13,7 @@ use crate::color::{
     lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, oklab_to_linear_rgb,
 };
 use crate::color_distance::perceptual_distance_sq;
-use super::common::{wang_hash, DitherMode, PerceptualSpace};
+use super::common::{gamut_overshoot_penalty, wang_hash, DitherMode, PerceptualSpace};
 use crate::rotation::deg_to_rad;
 
 /// Color space for rotation and quantization operations
@@ -114,10 +114,12 @@ struct LabDitherContext {
     scale_b: f32,
     /// Offset for b channel
     offset_b: f32,
+    /// Whether to apply gamut overshoot penalty
+    overshoot_penalty: bool,
 }
 
 impl LabDitherContext {
-    fn new(params: &LabQuantParams, quant_space: LabQuantSpace, distance_space: PerceptualSpace) -> Self {
+    fn new(params: &LabQuantParams, quant_space: LabQuantSpace, distance_space: PerceptualSpace, overshoot_penalty: bool) -> Self {
         let theta_rad = deg_to_rad(params.rotation_deg);
         let cos_theta = theta_rad.cos();
         let sin_theta = theta_rad.sin();
@@ -134,6 +136,7 @@ impl LabDitherContext {
             offset_a: params.offset_a,
             scale_b: params.scale_b,
             offset_b: params.offset_b,
+            overshoot_penalty,
         }
     }
 
@@ -487,11 +490,22 @@ fn process_pixel_lab(
 
                 // Calculate distance in the distance space (unrotated)
                 let cand_dist = ctx.to_distance_space(r_cand, g_cand, b_cand_rgb);
-                let dist = perceptual_distance_sq(
+                let base_dist = perceptual_distance_sq(
                     ctx.distance_space,
                     target_dist.0, target_dist.1, target_dist.2,
                     cand_dist.0, cand_dist.1, cand_dist.2,
                 );
+
+                // Apply gamut overshoot penalty if enabled
+                let dist = if ctx.overshoot_penalty {
+                    let penalty = gamut_overshoot_penalty(
+                        r_adj, g_adj, b_adj,
+                        r_cand, g_cand, b_cand_rgb,
+                    );
+                    base_dist * penalty
+                } else {
+                    base_dist
+                };
 
                 if dist < best_dist {
                     best_dist = dist;
@@ -560,8 +574,34 @@ pub fn lab_space_dither_with_mode(
     mode: DitherMode,
     seed: u32,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+    lab_space_dither_with_options(
+        l_channel, a_channel, b_channel,
+        width, height, params, quant_space, distance_space, mode, seed, true,
+    )
+}
+
+/// Lab-space dithering with rotation-aware quantization and full options.
+///
+/// Same as `lab_space_dither_with_mode` but with additional control over overshoot penalty.
+///
+/// Args:
+///     overshoot_penalty: If true, penalize candidates that would cause the opposing
+///         point to fall outside the [0,1]³ RGB cube (reduces color fringing)
+pub fn lab_space_dither_with_options(
+    l_channel: &[f32],
+    a_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    height: usize,
+    params: &LabQuantParams,
+    quant_space: LabQuantSpace,
+    distance_space: PerceptualSpace,
+    mode: DitherMode,
+    seed: u32,
+    overshoot_penalty: bool,
+) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
-    let ctx = LabDitherContext::new(params, quant_space, distance_space);
+    let ctx = LabDitherContext::new(params, quant_space, distance_space, overshoot_penalty);
 
     // Use REACH for buffer sizing with edge seeding
     // Buffer layout:
