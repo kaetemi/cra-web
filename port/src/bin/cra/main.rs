@@ -916,7 +916,7 @@ fn dither_pixels_paletted(
     colorspace: PerceptualSpace,
     dither_mode: DitherMode,
     seed: u32,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
     overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
@@ -948,7 +948,7 @@ fn dither_pixels_paletted(
         &palette,
         dither_mode,
         seed,
-        use_ghost_entries,
+        use_hull_tracing,
         overshoot_penalty,
         progress,
     );
@@ -992,7 +992,7 @@ fn dither_pixels_srgb_paletted(
     colorspace: PerceptualSpace,
     dither_mode: DitherMode,
     seed: u32,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
     overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
@@ -1018,7 +1018,7 @@ fn dither_pixels_srgb_paletted(
         &palette,
         dither_mode,
         seed,
-        use_ghost_entries,
+        use_hull_tracing,
         overshoot_penalty,
         progress,
     );
@@ -2124,7 +2124,7 @@ fn main() -> Result<(), String> {
                         output_colorspace.to_perceptual_space(),
                         args.output_dither.to_dither_mode(),
                         args.seed,
-                        !args.no_palette_ghosts,
+                        !args.no_hull_tracing,
                         !args.no_overshoot_penalty,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     )
@@ -2192,7 +2192,7 @@ fn main() -> Result<(), String> {
                     output_colorspace.to_perceptual_space(),
                     args.output_dither.to_dither_mode(),
                     args.seed,
-                    !args.no_palette_ghosts,
+                    !args.no_hull_tracing,
                     !args.no_overshoot_penalty,
                     if args.progress { Some(&mut dither_progress) } else { None },
                 )

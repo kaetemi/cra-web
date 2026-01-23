@@ -1568,7 +1568,7 @@ fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
 /// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
-/// use_ghost_entries: Whether to use ghost entries for gamut mapping (recommended: true)
+/// use_hull_tracing: Whether to use hull tracing for gamut mapping (recommended: true)
 #[wasm_bindgen]
 pub fn dither_paletted_wasm(
     buf: &BufferF32x4,
@@ -1578,7 +1578,7 @@ pub fn dither_paletted_wasm(
     mode: u8,
     space: u8,
     seed: u32,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
 ) -> BufferU8 {
     use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
     use color::interleave_rgba_u8;
@@ -1605,7 +1605,7 @@ pub fn dither_paletted_wasm(
         &palette,
         dither_mode,
         seed,
-        use_ghost_entries,
+        use_hull_tracing,
         true, // overshoot_penalty enabled by default
         None,
     );
@@ -1623,7 +1623,7 @@ pub fn dither_paletted_wasm(
 /// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors)
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
-/// use_ghost_entries: Whether to use ghost entries for gamut mapping (recommended: true)
+/// use_hull_tracing: Whether to use hull tracing for gamut mapping (recommended: true)
 #[wasm_bindgen]
 pub fn dither_paletted_with_progress_wasm(
     buf: &BufferF32x4,
@@ -1633,7 +1633,7 @@ pub fn dither_paletted_with_progress_wasm(
     mode: u8,
     space: u8,
     seed: u32,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
     overshoot_penalty: bool,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
@@ -1669,7 +1669,7 @@ pub fn dither_paletted_with_progress_wasm(
         &palette,
         dither_mode,
         seed,
-        use_ghost_entries,
+        use_hull_tracing,
         overshoot_penalty,
         Some(&mut progress_fn),
     );

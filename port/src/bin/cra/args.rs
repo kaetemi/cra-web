@@ -517,14 +517,17 @@ pub struct Args {
     #[arg(long, value_enum)]
     pub output_distance_space: Option<ColorSpace>,
 
-    /// Disable ghost entries for palette dithering (used for testing)
+    /// Disable hull tracing for palette dithering
     ///
-    /// Ghost entries prevent error diffusion from escaping the palette's color gamut
-    /// by redirecting boundary color matches to other boundary colors. This keeps
-    /// quantization error tangent to the gamut hull instead of pointing outward.
-    /// Clamping to the gamut hull is always performed regardless of this flag.
+    /// Hull tracing projects colors onto the palette's convex hull edges/surfaces
+    /// before finding the nearest palette entry. This helps maintain color relationships
+    /// (e.g., keeping grays on the neutral axis for CMYK-style palettes) and keeps
+    /// quantization error tangent to the gamut hull during dithering.
+    /// Disable for quantizer-generated palettes (like pngquant) where interior cluster
+    /// colors are more important than hull boundaries.
+    /// Note: Hull clamping is always performed regardless of this flag.
     #[arg(long)]
-    pub no_palette_ghosts: bool,
+    pub no_hull_tracing: bool,
 
     /// Random seed for mixed dithering modes
     #[arg(short, long, default_value_t = 12345)]

@@ -13,7 +13,7 @@
 //! - `rgba`: Colorspace-aware RGBA dithering
 //! - `paletted`: Palette-based RGBA dithering with integrated alpha-RGB distance
 //! - `palette_hull`: Convex hull computation for palettes in linear RGB space
-//! - `palette_projection`: Ghost entries and gamut mapping for palette dithering
+//! - `palette_projection`: Hull tracing and gamut mapping for palette dithering
 //! - `fp16`: FP16 (half-precision float) dithering
 //! - `bf16`: BF16 (brain float) dithering
 //! - `kernels`: Error diffusion kernel implementations

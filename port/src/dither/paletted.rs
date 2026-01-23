@@ -172,10 +172,11 @@ struct DitherContextPaletted<'a> {
 }
 
 /// Extended context for paletted dithering with gamut mapping.
-/// Supports hull clamping and optional ghost entry redirection.
+/// Supports hull clamping and optional hull tracing for keeping error diffusion
+/// within the palette's gamut.
 struct ExtendedDitherContext<'a> {
     extended: &'a ExtendedPalette,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
     overshoot_penalty: bool,
 }
 
@@ -311,7 +312,7 @@ fn process_pixel_paletted(
     (best.r, best.g, best.b, best.a, err_r_val, err_g_val, err_b_val, err_a_val)
 }
 
-/// Process a single pixel with extended palette (hull clamping + optional ghost redirection).
+/// Process a single pixel with extended palette (hull clamping + optional hull tracing).
 ///
 /// Returns (best_r, best_g, best_b, best_a, err_r, err_g, err_b, err_a)
 #[inline]
@@ -366,11 +367,11 @@ fn process_pixel_paletted_extended(
         linear_rgb_to_perceptual(space, lin_r_clamped, lin_g_clamped, lin_b_clamped);
 
     // 6. Find best palette entry
-    let best_idx = if ctx.use_ghost_entries {
-        // Use ghost entry redirection for boundary colors
+    let best_idx = if ctx.use_hull_tracing {
+        // Use hull-aware search (projects to edges/surfaces for boundary colors)
         ctx.extended.find_nearest_real([lin_r_clamped, lin_g_clamped, lin_b_clamped], ctx.overshoot_penalty)
     } else {
-        // Direct search on real palette entries only
+        // Direct search on palette entries only
         find_nearest_palette_entry(
             palette, space,
             target_perc_l, target_perc_a, target_perc_b, alpha_clamped,
@@ -854,7 +855,7 @@ fn dither_mixed_random_paletted(
 }
 
 // ============================================================================
-// Extended scan pattern implementations (with hull clamping + ghost entries)
+// Extended scan pattern implementations (with hull clamping + optional hull tracing)
 // ============================================================================
 
 #[inline]
@@ -1427,12 +1428,12 @@ pub fn paletted_dither_rgba_with_mode(
     (r_out, g_out, b_out, a_out)
 }
 
-/// Palette-based RGBA dithering with gamut mapping (hull clamping + optional ghost entries).
+/// Palette-based RGBA dithering with gamut mapping (hull clamping + optional hull tracing).
 ///
 /// This extended version provides better handling of colors at palette gamut boundaries:
 /// - Always clamps error-adjusted colors to within the palette's convex hull
-/// - When `use_ghost_entries` is true, uses ghost entry redirection to keep
-///   quantization error tangent to hull boundaries instead of pointing outward
+/// - When `use_hull_tracing` is true, uses hull-aware search that considers
+///   edge/surface projections for boundary color matching
 ///
 /// Args:
 ///     r_channel, g_channel, b_channel, a_channel: Input channels as f32 in range [0, 255]
@@ -1440,7 +1441,7 @@ pub fn paletted_dither_rgba_with_mode(
 ///     palette: Precomputed palette (up to 256 RGBA colors)
 ///     mode: Dithering algorithm and scanning mode
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
-///     use_ghost_entries: If true, use ghost entry redirection for boundary colors
+///     use_hull_tracing: If true, use hull-aware search for boundary colors
 ///     overshoot_penalty: If true, penalize choices that push error diffusion outside gamut
 ///     progress: Optional callback called with progress (0.0 to 1.0)
 ///
@@ -1456,17 +1457,18 @@ pub fn paletted_dither_rgba_gamut_mapped(
     palette: &DitherPalette,
     mode: DitherMode,
     seed: u32,
-    use_ghost_entries: bool,
+    use_hull_tracing: bool,
     overshoot_penalty: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
 
-    // Build extended palette with hull and optional ghost entries
+    // Build extended palette with hull
     let extended = ExtendedPalette::new(palette.clone(), palette.space());
+
     let ctx = ExtendedDitherContext {
         extended: &extended,
-        use_ghost_entries,
+        use_hull_tracing,
         overshoot_penalty,
     };
 
