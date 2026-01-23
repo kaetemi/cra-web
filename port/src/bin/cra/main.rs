@@ -918,6 +918,7 @@ fn dither_pixels_paletted(
     seed: u32,
     use_hull_tracing: bool,
     overshoot_penalty: bool,
+    hull_error_decay: f32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -950,6 +951,7 @@ fn dither_pixels_paletted(
         seed,
         use_hull_tracing,
         overshoot_penalty,
+        hull_error_decay,
         progress,
     );
 
@@ -994,6 +996,7 @@ fn dither_pixels_srgb_paletted(
     seed: u32,
     use_hull_tracing: bool,
     overshoot_penalty: bool,
+    hull_error_decay: f32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
@@ -1020,6 +1023,7 @@ fn dither_pixels_srgb_paletted(
         seed,
         use_hull_tracing,
         overshoot_penalty,
+        hull_error_decay,
         progress,
     );
 
@@ -2126,6 +2130,7 @@ fn main() -> Result<(), String> {
                         args.seed,
                         !args.no_hull_tracing,
                         !args.no_overshoot_penalty,
+                        args.hull_error_decay.unwrap_or(1.0),
                         if args.progress { Some(&mut dither_progress) } else { None },
                     )
                 } else {
@@ -2194,6 +2199,7 @@ fn main() -> Result<(), String> {
                     args.seed,
                     !args.no_hull_tracing,
                     !args.no_overshoot_penalty,
+                    args.hull_error_decay.unwrap_or(1.0),
                     if args.progress { Some(&mut dither_progress) } else { None },
                 )
             } else {

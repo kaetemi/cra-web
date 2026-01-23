@@ -1569,6 +1569,7 @@ fn generate_palette(palette_type: u8) -> Vec<(u8, u8, u8, u8)> {
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
 /// use_hull_tracing: Whether to use hull tracing for gamut mapping (recommended: true)
+/// hull_error_decay: Error decay factor when palette color is farther than hull (1.0 = no decay)
 #[wasm_bindgen]
 pub fn dither_paletted_wasm(
     buf: &BufferF32x4,
@@ -1579,6 +1580,7 @@ pub fn dither_paletted_wasm(
     space: u8,
     seed: u32,
     use_hull_tracing: bool,
+    hull_error_decay: f32,
 ) -> BufferU8 {
     use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
     use color::interleave_rgba_u8;
@@ -1607,6 +1609,7 @@ pub fn dither_paletted_wasm(
         seed,
         use_hull_tracing,
         true, // overshoot_penalty enabled by default
+        hull_error_decay,
         None,
     );
 
@@ -1624,6 +1627,7 @@ pub fn dither_paletted_wasm(
 /// mode: Dither mode (0=none, 1=fs-standard, 2=fs-serpentine, etc.)
 /// space: Perceptual space for RGB distance (0=OkLab, etc.)
 /// use_hull_tracing: Whether to use hull tracing for gamut mapping (recommended: true)
+/// hull_error_decay: Error decay factor when palette color is farther than hull (1.0 = no decay)
 #[wasm_bindgen]
 pub fn dither_paletted_with_progress_wasm(
     buf: &BufferF32x4,
@@ -1635,6 +1639,7 @@ pub fn dither_paletted_with_progress_wasm(
     seed: u32,
     use_hull_tracing: bool,
     overshoot_penalty: bool,
+    hull_error_decay: f32,
     progress_callback: &js_sys::Function,
 ) -> BufferU8 {
     use dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
@@ -1671,6 +1676,7 @@ pub fn dither_paletted_with_progress_wasm(
         seed,
         use_hull_tracing,
         overshoot_penalty,
+        hull_error_decay,
         Some(&mut progress_fn),
     );
 

@@ -529,6 +529,17 @@ pub struct Args {
     #[arg(long)]
     pub no_hull_tracing: bool,
 
+    /// Error decay factor when palette color is farther than hull boundary
+    ///
+    /// When the nearest palette color is farther from the target than the hull
+    /// projection point, multiply the diffused error by this factor (0.0-1.0).
+    /// This prevents error accumulation artifacts with incomplete-gamut palettes
+    /// (like pngquant) where colors may be sparse near the hull boundary.
+    /// Default is 1.0 (no decay). Typical values: 0.5-0.9.
+    /// Note: This intentionally sacrifices energy conservation for artifact reduction.
+    #[arg(long, value_name = "FACTOR")]
+    pub hull_error_decay: Option<f32>,
+
     /// Random seed for mixed dithering modes
     #[arg(short, long, default_value_t = 12345)]
     pub seed: u32,

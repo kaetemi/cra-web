@@ -16,6 +16,7 @@ use super::common::{
     wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, PerceptualSpace,
     RgbaKernel,
 };
+use super::palette_hull::EPSILON as HULL_EPSILON;
 use super::palette_projection::ExtendedPalette;
 
 // ============================================================================
@@ -178,6 +179,9 @@ struct ExtendedDitherContext<'a> {
     extended: &'a ExtendedPalette,
     use_hull_tracing: bool,
     overshoot_penalty: bool,
+    /// Error decay factor (0.0-1.0) applied when selected color is farther than hull.
+    /// 1.0 = no decay (default), lower values reduce error accumulation.
+    hull_error_decay: f32,
 }
 
 /// Compute the integrated alpha-RGB distance for palette matching.
@@ -386,11 +390,38 @@ fn process_pixel_paletted_extended(
     let q_err_g = lin_g_clamped - best_lin_g;
     let q_err_b = lin_b_clamped - best_lin_b;
 
+    // 7a. Apply hull error decay if selected color is significantly farther than hull boundary
+    // This prevents error accumulation when palette is sparse near hull
+    let decay = if ctx.hull_error_decay < 1.0 {
+        // Distance from adjusted point to hull (how far we clamped)
+        let dr_hull = lin_r_adj - lin_r_clamped;
+        let dg_hull = lin_g_adj - lin_g_clamped;
+        let db_hull = lin_b_adj - lin_b_clamped;
+        let hull_dist_sq = dr_hull * dr_hull + dg_hull * dg_hull + db_hull * db_hull;
+
+        // Distance from adjusted point to selected color
+        let dr_color = lin_r_adj - best_lin_r;
+        let dg_color = lin_g_adj - best_lin_g;
+        let db_color = lin_b_adj - best_lin_b;
+        let color_dist_sq = dr_color * dr_color + dg_color * dg_color + db_color * db_color;
+
+        // Apply decay only when selected color is farther than hull by more than EPSILON
+        // (Use squared epsilon since we're comparing squared distances)
+        let epsilon_sq = HULL_EPSILON * HULL_EPSILON;
+        if color_dist_sq > hull_dist_sq + epsilon_sq {
+            ctx.hull_error_decay
+        } else {
+            1.0
+        }
+    } else {
+        1.0
+    };
+
     let alpha_factor = alpha_clamped;
     let one_minus_alpha = 1.0 - alpha_factor;
-    let err_r_val = one_minus_alpha * err_r_in + alpha_factor * q_err_r;
-    let err_g_val = one_minus_alpha * err_g_in + alpha_factor * q_err_g;
-    let err_b_val = one_minus_alpha * err_b_in + alpha_factor * q_err_b;
+    let err_r_val = decay * (one_minus_alpha * err_r_in + alpha_factor * q_err_r);
+    let err_g_val = decay * (one_minus_alpha * err_g_in + alpha_factor * q_err_g);
+    let err_b_val = decay * (one_minus_alpha * err_b_in + alpha_factor * q_err_b);
 
     let err_a_val = alpha_adj - best_lin_a;
 
@@ -1443,6 +1474,8 @@ pub fn paletted_dither_rgba_with_mode(
 ///     seed: Random seed for mixed modes (ignored for non-mixed modes)
 ///     use_hull_tracing: If true, use hull-aware search for boundary colors
 ///     overshoot_penalty: If true, penalize choices that push error diffusion outside gamut
+///     hull_error_decay: Error decay factor (0.0-1.0) when selected color is farther than hull.
+///                       1.0 = no decay, lower values reduce error accumulation for sparse palettes.
 ///     progress: Optional callback called with progress (0.0 to 1.0)
 ///
 /// Returns:
@@ -1459,6 +1492,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
     seed: u32,
     use_hull_tracing: bool,
     overshoot_penalty: bool,
+    hull_error_decay: f32,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> (Vec<u8>, Vec<u8>, Vec<u8>, Vec<u8>) {
     let pixels = width * height;
@@ -1470,6 +1504,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
         extended: &extended,
         use_hull_tracing,
         overshoot_penalty,
+        hull_error_decay,
     };
 
     let reach = <JarvisJudiceNinke as RgbaKernel>::REACH;
