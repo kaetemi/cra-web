@@ -47,8 +47,6 @@ pub use common::{
 
 // Re-export core dithering functions
 pub use basic::{
-    dither_channel_stack,
-    dither_rgb,
     dither_rgb_channels_with_mode,
     dither_rgb_with_mode,
     dither_with_mode,

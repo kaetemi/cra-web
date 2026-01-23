@@ -113,34 +113,6 @@ pub fn extract_block_single(
     block
 }
 
-/// Extract a block from a multi-channel image
-#[allow(dead_code)]
-pub fn extract_block(
-    img: &[f32],
-    width: usize,
-    channels: usize,
-    y_start: usize,
-    y_end: usize,
-    x_start: usize,
-    x_end: usize,
-) -> Vec<f32> {
-    let block_h = y_end - y_start;
-    let block_w = x_end - x_start;
-    let mut block = vec![0.0f32; block_h * block_w * channels];
-
-    for y in 0..block_h {
-        for x in 0..block_w {
-            let src_idx = ((y_start + y) * width + (x_start + x)) * channels;
-            let dst_idx = (y * block_w + x) * channels;
-            for c in 0..channels {
-                block[dst_idx + c] = img[src_idx + c];
-            }
-        }
-    }
-
-    block
-}
-
 /// Accumulate a weighted block into the result image (single channel)
 pub fn accumulate_block_single(
     result: &mut [f32],

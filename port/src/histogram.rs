@@ -231,36 +231,6 @@ pub fn match_histogram(source: &[u8], reference: &[u8]) -> Vec<u8> {
     source.iter().map(|&pixel| lookup[pixel as usize]).collect()
 }
 
-/// Match histogram for multi-channel image
-/// img and reference are flat arrays with interleaved channels (e.g., RGBRGBRGB)
-#[allow(dead_code)]
-pub fn match_histogram_multichannel(
-    source: &[u8],
-    reference: &[u8],
-    width: usize,
-    height: usize,
-    channels: usize,
-) -> Vec<u8> {
-    let pixels = width * height;
-    let mut output = vec![0u8; pixels * channels];
-
-    for ch in 0..channels {
-        // Extract channel
-        let src_channel: Vec<u8> = (0..pixels).map(|i| source[i * channels + ch]).collect();
-        let ref_channel: Vec<u8> = (0..pixels).map(|i| reference[i * channels + ch]).collect();
-
-        // Match histogram
-        let matched = match_histogram(&src_channel, &ref_channel);
-
-        // Store result
-        for i in 0..pixels {
-            output[i * channels + ch] = matched[i];
-        }
-    }
-
-    output
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

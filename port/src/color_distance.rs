@@ -223,15 +223,3 @@ pub fn is_linear_rgb_space(space: PerceptualSpace) -> bool {
 pub fn is_ycbcr_space(space: PerceptualSpace) -> bool {
     matches!(space, PerceptualSpace::YCbCr)
 }
-
-/// Check if a PerceptualSpace variant uses Y'CbCr BT.601 (legacy)
-#[inline]
-pub fn is_ycbcr_bt601_space(space: PerceptualSpace) -> bool {
-    matches!(space, PerceptualSpace::YCbCrBt601)
-}
-
-/// Check if a PerceptualSpace variant uses sRGB (gamma-encoded)
-#[inline]
-pub fn is_srgb_space(space: PerceptualSpace) -> bool {
-    matches!(space, PerceptualSpace::Srgb)
-}

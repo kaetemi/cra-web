@@ -587,48 +587,6 @@ pub fn dither_with_mode_bits(
     }
 }
 
-/// Dither multiple channels and interleave them
-/// channels: Vec of channel data, each scaled to 0-255
-/// Returns interleaved u8 data
-#[allow(dead_code)]
-pub fn dither_channel_stack(channels: &[Vec<f32>], width: usize, height: usize) -> Vec<u8> {
-    let num_channels = channels.len();
-    let pixels = width * height;
-    let mut result = vec![0u8; pixels * num_channels];
-
-    // Dither each channel
-    let dithered: Vec<Vec<u8>> = channels
-        .iter()
-        .map(|ch| floyd_steinberg_dither(ch, width, height))
-        .collect();
-
-    // Interleave
-    for i in 0..pixels {
-        for (ch, dithered_ch) in dithered.iter().enumerate() {
-            result[i * num_channels + ch] = dithered_ch[i];
-        }
-    }
-
-    result
-}
-
-/// Dither RGB float image (0-1 range) to uint8
-#[allow(dead_code)]
-pub fn dither_rgb(rgb: &[f32], width: usize, height: usize) -> Vec<u8> {
-    let pixels = width * height;
-
-    // Extract and scale channels
-    let channels: Vec<Vec<f32>> = (0..3)
-        .map(|ch| {
-            (0..pixels)
-                .map(|i| (rgb[i * 3 + ch] * 255.0).clamp(0.0, 255.0))
-                .collect()
-        })
-        .collect();
-
-    dither_channel_stack(&channels, width, height)
-}
-
 // ============================================================================
 // Pixel4 convenience wrappers
 // ============================================================================
