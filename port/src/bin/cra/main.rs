@@ -655,6 +655,10 @@ struct DitherResult {
     is_grayscale: bool,
     /// True if this is RGBA data (4 channels)
     has_alpha: bool,
+    /// Palette indices (for paletted output modes)
+    palette_indices: Option<Vec<u8>>,
+    /// Palette colors as RGBA tuples (for paletted output modes)
+    palette_colors: Option<Vec<(u8, u8, u8, u8)>>,
 }
 
 /// Dither linear RGB pixels to the target RGB format (grayscale handled separately in main)
@@ -693,7 +697,7 @@ fn dither_pixels_rgb(
             progress,
         );
         // Output has alpha only if format supports it (bits_a > 0)
-        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
+        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0, palette_indices: None, palette_colors: None }
     } else {
         let interleaved = dither_output_rgb(
             &linear_pixels,
@@ -703,7 +707,7 @@ fn dither_pixels_rgb(
             seed,
             progress,
         );
-        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+        DitherResult { interleaved, is_grayscale: false, has_alpha: false, palette_indices: None, palette_colors: None }
     }
 }
 
@@ -740,7 +744,7 @@ fn dither_pixels_srgb_rgb(
             progress,
         );
         // Output has alpha only if format supports it (bits_a > 0)
-        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0 }
+        DitherResult { interleaved, is_grayscale: false, has_alpha: bits_a > 0, palette_indices: None, palette_colors: None }
     } else {
         let interleaved = dither_output_rgb(
             &pixels,
@@ -750,7 +754,7 @@ fn dither_pixels_srgb_rgb(
             seed,
             progress,
         );
-        DitherResult { interleaved, is_grayscale: false, has_alpha: false }
+        DitherResult { interleaved, is_grayscale: false, has_alpha: false, palette_indices: None, palette_colors: None }
     }
 }
 
@@ -770,6 +774,7 @@ fn dither_pixels_paletted(
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
+    use std::collections::HashMap;
 
     let mut linear_pixels = pixels;
 
@@ -807,6 +812,22 @@ fn dither_pixels_paletted(
         progress,
     );
 
+    // Build reverse lookup map from RGBA to palette index
+    let color_to_index: HashMap<(u8, u8, u8, u8), u8> = palette_colors
+        .iter()
+        .enumerate()
+        .map(|(i, &(r, g, b, a))| ((r, g, b, a), i as u8))
+        .collect();
+
+    // Convert output to palette indices
+    let pixel_count = width * height;
+    let palette_indices: Vec<u8> = (0..pixel_count)
+        .map(|i| {
+            let key = (r_out[i], g_out[i], b_out[i], a_out[i]);
+            *color_to_index.get(&key).unwrap_or(&0)
+        })
+        .collect();
+
     // Interleave to RGBA
     let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
 
@@ -814,6 +835,8 @@ fn dither_pixels_paletted(
         interleaved,
         is_grayscale: false,
         has_alpha: true, // Palette formats always output RGBA
+        palette_indices: Some(palette_indices),
+        palette_colors: Some(palette_colors),
     }
 }
 
@@ -833,6 +856,7 @@ fn dither_pixels_srgb_paletted(
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> DitherResult {
     use cra_wasm::color::interleave_rgba_u8;
+    use std::collections::HashMap;
 
     // Generate the palette based on format type
     let palette_colors = match palette_format {
@@ -864,6 +888,22 @@ fn dither_pixels_srgb_paletted(
         progress,
     );
 
+    // Build reverse lookup map from RGBA to palette index
+    let color_to_index: HashMap<(u8, u8, u8, u8), u8> = palette_colors
+        .iter()
+        .enumerate()
+        .map(|(i, &(r, g, b, a))| ((r, g, b, a), i as u8))
+        .collect();
+
+    // Convert output to palette indices
+    let pixel_count = width * height;
+    let palette_indices: Vec<u8> = (0..pixel_count)
+        .map(|i| {
+            let key = (r_out[i], g_out[i], b_out[i], a_out[i]);
+            *color_to_index.get(&key).unwrap_or(&0)
+        })
+        .collect();
+
     // Interleave to RGBA
     let interleaved = interleave_rgba_u8(&r_out, &g_out, &b_out, &a_out);
 
@@ -871,6 +911,8 @@ fn dither_pixels_srgb_paletted(
         interleaved,
         is_grayscale: false,
         has_alpha: true, // Palette formats always output RGBA
+        palette_indices: Some(palette_indices),
+        palette_colors: Some(palette_colors),
     }
 }
 
@@ -974,6 +1016,7 @@ fn write_metadata(
     path: &PathBuf,
     args: &Args,
     format: &ColorFormat,
+    palette_format: Option<&PaletteFormat>,
     histogram: Histogram,
     output_colorspace: ColorSpace,
     width: u32,
@@ -1003,17 +1046,26 @@ fn write_metadata(
 
     // Integer format fields (only when integer output is present: PNG, raw, or channel outputs)
     if has_integer_output {
-        json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
-        json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
-        if !format.is_grayscale {
-            json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
-            json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
-            json.push_str(&format!("  \"bits_b\": {},\n", format.bits_b));
-            if format.has_alpha {
-                json.push_str(&format!("  \"bits_a\": {},\n", format.bits_a));
-            }
+        // For palette formats, output "PALETTED8" as the format; otherwise use the format name
+        let is_palette_format = palette_format.is_some();
+        if let Some(pf) = palette_format {
+            json.push_str("  \"format\": \"PALETTED8\",\n");
+            json.push_str("  \"bits_per_pixel\": 8,\n");
+            // Also include the actual palette name for reference
+            json.push_str(&format!("  \"palette\": \"{}\",\n", pf.name()));
         } else {
-            json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
+            json.push_str(&format!("  \"format\": \"{}\",\n", format.name));
+            json.push_str(&format!("  \"bits_per_pixel\": {},\n", format.total_bits));
+            if !format.is_grayscale {
+                json.push_str(&format!("  \"bits_r\": {},\n", format.bits_r));
+                json.push_str(&format!("  \"bits_g\": {},\n", format.bits_g));
+                json.push_str(&format!("  \"bits_b\": {},\n", format.bits_b));
+                if format.has_alpha {
+                    json.push_str(&format!("  \"bits_a\": {},\n", format.bits_a));
+                }
+            } else {
+                json.push_str(&format!("  \"bits_l\": {},\n", format.bits_r));
+            }
         }
         json.push_str(&format!("  \"output_dither\": \"{:?}\",\n", args.output_dither));
         if let Some(alpha_dither) = args.output_alpha_dither {
@@ -1030,7 +1082,8 @@ fn write_metadata(
         if args.output_raw.is_some() {
             // Calculate stride and total_size for raw output
             // Stride = bytes per row (respects --stride alignment)
-            let bits_per_pixel = format.total_bits as usize;
+            // For palette formats, use 8 bits per pixel (palette indices)
+            let bits_per_pixel = if is_palette_format { 8 } else { format.total_bits as usize };
             let packed_row_bits = width as usize * bits_per_pixel;
             let packed_row_bytes = (packed_row_bits + 7) / 8;
             let row_stride = if args.stride > 1 {
@@ -1535,13 +1588,9 @@ fn main() -> Result<(), String> {
 
     // Palette format validation
     if palette_format.is_some() {
-        // Palette formats don't support raw binary output (use PNG instead)
-        if args.output_raw.is_some() {
-            return Err("Palette formats do not support --output-raw. Use --output for PNG output.".to_string());
-        }
-        // Palette formats don't support channel outputs
+        // Palette formats don't support separate channel outputs
         if args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some() || args.output_raw_a.is_some() {
-            return Err("Palette formats do not support separate channel outputs.".to_string());
+            return Err("Palette formats do not support separate channel outputs. Use --output-raw for palette indices.".to_string());
         }
         // Warn about ignored options
         if args.no_colorspace_aware_output {
@@ -1549,6 +1598,11 @@ fn main() -> Result<(), String> {
         }
         if args.output_alpha_dither.is_some() {
             eprintln!("Warning: --output-alpha-dither is ignored for palette formats (alpha is integrated into main dithering)");
+        }
+    } else {
+        // --output-raw-palette is only valid for palette formats
+        if args.output_raw_palette.is_some() {
+            return Err("--output-raw-palette is only valid for palette output formats (e.g., --format PALETTE_WEBSAFE)".to_string());
         }
     }
 
@@ -1836,7 +1890,7 @@ fn main() -> Result<(), String> {
                         &srgb_gray, &alpha_255, width_usize, height_usize, format.bits_r, format.bits_a,
                         technique, args.seed, if args.progress { Some(&mut dither_progress) } else { None },
                     );
-                    DitherResult { interleaved, is_grayscale: true, has_alpha: true }
+                    DitherResult { interleaved, is_grayscale: true, has_alpha: true, palette_indices: None, palette_colors: None }
                 } else {
                     // Pure grayscale
                     let interleaved = dither_grayscale(
@@ -1844,7 +1898,7 @@ fn main() -> Result<(), String> {
                         output_colorspace.to_perceptual_space(), output_dither_mode, args.seed,
                         if args.progress { Some(&mut dither_progress) } else { None },
                     );
-                    DitherResult { interleaved, is_grayscale: true, has_alpha: false }
+                    DitherResult { interleaved, is_grayscale: true, has_alpha: false, palette_indices: None, palette_colors: None }
                 };
 
                 if args.progress {
@@ -2047,6 +2101,8 @@ fn main() -> Result<(), String> {
                 interleaved: rgba,
                 is_grayscale: false,
                 has_alpha: true,
+                palette_indices: dither_result.palette_indices,
+                palette_colors: dither_result.palette_colors,
             }
         } else {
             dither_result
@@ -2098,18 +2154,35 @@ fn main() -> Result<(), String> {
         if let Some(ref bin_path) = args.output_raw {
             let fill = args.stride_fill.to_stride_fill();
 
-            if args.verbose {
-                if args.stride > 1 {
-                    eprintln!(
-                        "Writing binary (row-aligned, stride={}, fill={:?}): {}",
-                        args.stride, args.stride_fill, bin_path.display()
-                    );
-                } else {
-                    eprintln!("Writing binary (row-aligned): {}", bin_path.display());
+            // For palette formats, output palette indices; otherwise output encoded binary
+            let bin_data = if let Some(ref indices) = dither_result.palette_indices {
+                if args.verbose {
+                    if args.stride > 1 {
+                        eprintln!(
+                            "Writing palette indices (row-aligned, stride={}, fill={:?}): {}",
+                            args.stride, args.stride_fill, bin_path.display()
+                        );
+                    } else {
+                        eprintln!("Writing palette indices (row-aligned): {}", bin_path.display());
+                    }
                 }
-            }
-
-            let bin_data = encode_binary(&dither_result, &format, width_usize, height_usize, args.stride, fill);
+                // Encode palette indices with row alignment (8 bits per pixel)
+                encode_channel_from_interleaved_row_aligned_stride(
+                    indices, width_usize, height_usize, 1, 0, 8, args.stride, fill,
+                )
+            } else {
+                if args.verbose {
+                    if args.stride > 1 {
+                        eprintln!(
+                            "Writing binary (row-aligned, stride={}, fill={:?}): {}",
+                            args.stride, args.stride_fill, bin_path.display()
+                        );
+                    } else {
+                        eprintln!("Writing binary (row-aligned): {}", bin_path.display());
+                    }
+                }
+                encode_binary(&dither_result, &format, width_usize, height_usize, args.stride, fill)
+            };
 
             let mut file = File::create(bin_path)
                 .map_err(|e| format!("Failed to create {}: {}", bin_path.display(), e))?;
@@ -2117,6 +2190,28 @@ fn main() -> Result<(), String> {
                 .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
             outputs.push(("binary".to_string(), bin_path.clone(), bin_data.len()));
+        }
+
+        // Write palette colors as ARGB8888 binary (for palette formats only)
+        if let Some(ref palette_path) = args.output_raw_palette {
+            if let Some(ref colors) = dither_result.palette_colors {
+                if args.verbose {
+                    eprintln!("Writing palette ({} colors, ARGB8888): {}", colors.len(), palette_path.display());
+                }
+                // Write palette as ARGB8888 (4 bytes per color: A, R, G, B)
+                let mut palette_data = Vec::with_capacity(colors.len() * 4);
+                for &(r, g, b, a) in colors {
+                    palette_data.push(a);
+                    palette_data.push(r);
+                    palette_data.push(g);
+                    palette_data.push(b);
+                }
+                let mut file = File::create(palette_path)
+                    .map_err(|e| format!("Failed to create {}: {}", palette_path.display(), e))?;
+                file.write_all(&palette_data)
+                    .map_err(|e| format!("Failed to write {}: {}", palette_path.display(), e))?;
+                outputs.push(("palette".to_string(), palette_path.clone(), palette_data.len()));
+            }
         }
 
         // Write separate channel outputs (R, G, B, A) - encode directly from interleaved data
@@ -2201,6 +2296,7 @@ fn main() -> Result<(), String> {
             meta_path,
             &args,
             &format,
+            palette_format.as_ref(),
             histogram,
             output_colorspace,
             width,

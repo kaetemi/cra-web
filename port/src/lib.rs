@@ -1680,6 +1680,50 @@ pub fn dither_paletted_with_progress_wasm(
     BufferU8::new(interleaved)
 }
 
+/// Get palette colors as ARGB8888 binary (4 bytes per color: A, R, G, B)
+/// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors),
+///               3 = CGA Palette 1 (4 colors), 4 = CGA Palette 1 5153 (4 colors)
+#[wasm_bindgen]
+pub fn get_palette_colors_wasm(palette_type: u8) -> Vec<u8> {
+    let palette_colors = generate_palette(palette_type);
+    let mut result = Vec::with_capacity(palette_colors.len() * 4);
+    for (r, g, b, a) in palette_colors {
+        result.push(a);
+        result.push(r);
+        result.push(g);
+        result.push(b);
+    }
+    result
+}
+
+/// Convert interleaved RGBA u8 data to palette indices
+/// Input: Interleaved RGBA u8 data (RGBARGBA..., 4 bytes per pixel) from paletted dithering
+/// Output: Palette indices (1 byte per pixel)
+/// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153, 2 = CGA BIOS, 3 = CGA Palette 1, 4 = CGA Palette 1 5153
+#[wasm_bindgen]
+pub fn rgba_to_palette_indices_wasm(rgba_data: Vec<u8>, palette_type: u8) -> Vec<u8> {
+    use std::collections::HashMap;
+
+    let palette_colors = generate_palette(palette_type);
+
+    // Build reverse lookup map from RGBA to palette index
+    let color_to_index: HashMap<(u8, u8, u8, u8), u8> = palette_colors
+        .iter()
+        .enumerate()
+        .map(|(i, &(r, g, b, a))| ((r, g, b, a), i as u8))
+        .collect();
+
+    // Convert each pixel to palette index
+    let pixel_count = rgba_data.len() / 4;
+    let mut indices = Vec::with_capacity(pixel_count);
+    for i in 0..pixel_count {
+        let idx = i * 4;
+        let key = (rgba_data[idx], rgba_data[idx + 1], rgba_data[idx + 2], rgba_data[idx + 3]);
+        indices.push(*color_to_index.get(&key).unwrap_or(&0));
+    }
+    indices
+}
+
 // ============================================================================
 // Binary Format Encoding (takes final u8 data)
 // ============================================================================

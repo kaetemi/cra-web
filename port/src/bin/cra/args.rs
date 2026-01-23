@@ -405,6 +405,11 @@ pub struct Args {
     #[arg(long)]
     pub output_raw_a: Option<PathBuf>,
 
+    /// Output raw palette file path (optional) - for paletted output modes only
+    /// Writes the palette as ARGB8888 binary (4 bytes per color, up to 256 colors)
+    #[arg(long)]
+    pub output_raw_palette: Option<PathBuf>,
+
     /// Output metadata JSON file path (optional)
     #[arg(long)]
     pub output_meta: Option<PathBuf>,

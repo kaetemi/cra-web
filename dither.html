@@ -581,6 +581,18 @@
             font-size: 13px;
         }
 
+        .palette-downloads {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e0e0e0;
+        }
+
+        .palette-downloads h5 {
+            margin: 0 0 10px 0;
+            color: #666;
+            font-size: 13px;
+        }
+
         .loading {
             display: none;
             text-align: center;
@@ -1047,6 +1059,14 @@
                     <button class="download-btn secondary" id="download-a-btn" disabled style="display: none;">Alpha Channel</button>
                 </div>
             </div>
+
+            <div class="palette-downloads" id="palette-downloads" style="display: none;">
+                <h5>Palette Data</h5>
+                <div class="download-row">
+                    <button class="download-btn secondary" id="download-palette-indices-btn" disabled>Palette Indices</button>
+                    <button class="download-btn secondary" id="download-palette-colors-btn" disabled>Palette Colors (ARGB8888)</button>
+                </div>
+            </div>
         </div>
 
         <div class="cli-command-section" id="cli-command-section" style="margin-top: 20px;">
@@ -1072,7 +1092,9 @@
             encode_png_rgb_wasm,
             encode_png_rgba_wasm,
             encode_png_gray_wasm,
-            encode_png_gray_alpha_wasm
+            encode_png_gray_alpha_wasm,
+            get_palette_colors_wasm,
+            rgba_to_palette_indices_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Worker for background processing
@@ -1156,6 +1178,11 @@
             downloadBtn.disabled = false;
 
             // Store dither result for binary downloads
+            const outputMode = document.getElementById('output-mode').value;
+            const paletteType = outputMode === 'palette-cga-5153' ? 1 :
+                               outputMode === 'palette-cga-bios' ? 2 :
+                               outputMode === 'palette-cga-mode5' ? 3 :
+                               outputMode === 'palette-cga-palette1-5153' ? 4 : 0;
             lastDitherResult = {
                 width: processWidth,
                 height: processHeight,
@@ -1172,7 +1199,9 @@
                 rgbaInterleaved: result.rgbaInterleaved,
                 grayChannel: result.grayChannel,
                 laInterleaved: result.laInterleaved,
-                hasAlpha: result.hasAlpha
+                hasAlpha: result.hasAlpha,
+                paletteType: paletteType,
+                isPaletted: outputMode.startsWith('palette-')
             };
 
             // Update download buttons
@@ -1499,6 +1528,20 @@
                     alphaBtn.disabled = true;
                 }
             }
+
+            // Palette downloads - only show for palette output modes
+            const paletteDownloads = document.getElementById('palette-downloads');
+            const outputMode = document.getElementById('output-mode').value;
+            const isPaletted = outputMode.startsWith('palette-');
+            if (isPaletted) {
+                paletteDownloads.style.display = 'block';
+                document.getElementById('download-palette-indices-btn').disabled = false;
+                document.getElementById('download-palette-colors-btn').disabled = false;
+            } else {
+                paletteDownloads.style.display = 'none';
+                document.getElementById('download-palette-indices-btn').disabled = true;
+                document.getElementById('download-palette-colors-btn').disabled = true;
+            }
         }
 
         // Download helper function
@@ -1688,7 +1731,9 @@
             const name = `cra_${ts}_${lastDitherResult.width}x${lastDitherResult.height}_${format}`;
 
             // Calculate raw output size (matches CLI calculation)
-            const bitsPerPixel = format_total_bits_wasm(format);
+            // For palette formats, use 8 bits per pixel (palette indices)
+            const isPaletteFormatForSize = format.startsWith('PALETTE_');
+            const bitsPerPixel = isPaletteFormatForSize ? 8 : format_total_bits_wasm(format);
             const packedRowBits = lastDitherResult.width * bitsPerPixel;
             const packedRowBytes = Math.ceil(packedRowBits / 8);
             const rowStride = stride > 1 ? Math.ceil(packedRowBytes / stride) * stride : packedRowBytes;
@@ -1696,25 +1741,34 @@
 
             // Build metadata object matching CLI format
             // Order matches CLI: name, type, width, height, format fields, dither fields, raw fields, seed
+            const isPaletteFormat = format.startsWith('PALETTE_');
             const metadata = {
                 name: name,
                 type: 'bitmap',
                 width: lastDitherResult.width,
-                height: lastDitherResult.height,
-                format: format,
-                bits_per_pixel: bitsPerPixel
+                height: lastDitherResult.height
             };
 
-            // Bit depth fields (grayscale uses bits_l, RGB uses bits_r/g/b)
-            if (lastDitherResult.isGrayscale) {
-                metadata.bits_l = lastDitherResult.bitsR;
+            // For palette formats, output PALETTED8 and include palette name
+            if (isPaletteFormat) {
+                metadata.format = 'PALETTED8';
+                metadata.bits_per_pixel = 8;
+                metadata.palette = format;
             } else {
-                metadata.bits_r = lastDitherResult.bitsR;
-                metadata.bits_g = lastDitherResult.bitsG;
-                metadata.bits_b = lastDitherResult.bitsB;
-            }
-            if (lastDitherResult.hasAlpha) {
-                metadata.bits_a = lastDitherResult.bitsA;
+                metadata.format = format;
+                metadata.bits_per_pixel = bitsPerPixel;
+
+                // Bit depth fields (grayscale uses bits_l, RGB uses bits_r/g/b)
+                if (lastDitherResult.isGrayscale) {
+                    metadata.bits_l = lastDitherResult.bitsR;
+                } else {
+                    metadata.bits_r = lastDitherResult.bitsR;
+                    metadata.bits_g = lastDitherResult.bitsG;
+                    metadata.bits_b = lastDitherResult.bitsB;
+                }
+                if (lastDitherResult.hasAlpha) {
+                    metadata.bits_a = lastDitherResult.bitsA;
+                }
             }
 
             // Dither settings
@@ -2260,6 +2314,55 @@
             downloadChannel('B', 2, lastDitherResult?.bitsB));
         document.getElementById('download-a-btn').addEventListener('click', () =>
             downloadAlphaChannel());
+
+        // Download palette indices (for paletted output modes)
+        document.getElementById('download-palette-indices-btn').addEventListener('click', () => {
+            if (!lastDitherResult || !lastDitherResult.isPaletted || !lastDitherResult.rgbaInterleaved) return;
+
+            const stride = parseInt(document.getElementById('stride-select').value) || 1;
+            const fill = parseInt(document.getElementById('stride-fill-select').value) || 0;
+
+            // Convert RGBA to palette indices
+            const indices = rgba_to_palette_indices_wasm(
+                lastDitherResult.rgbaInterleaved,
+                lastDitherResult.paletteType
+            );
+
+            // Apply row alignment if stride > 1
+            let rawData;
+            if (stride > 1) {
+                rawData = encode_channel_row_aligned_stride_wasm(
+                    indices,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    1,  // num_channels
+                    0,  // channel_index
+                    8,  // bits (palette indices are 8-bit)
+                    stride,
+                    fill
+                );
+            } else {
+                rawData = indices;
+            }
+
+            const blob = new Blob([rawData], { type: 'application/octet-stream' });
+            const strideSuffix = stride > 1 ? `_stride${stride}` : '';
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, `PALETTED8${strideSuffix}`, 'raw');
+            downloadBlob(blob, filename);
+        });
+
+        // Download palette colors as ARGB8888
+        document.getElementById('download-palette-colors-btn').addEventListener('click', () => {
+            if (!lastDitherResult || !lastDitherResult.isPaletted) return;
+
+            const paletteData = get_palette_colors_wasm(lastDitherResult.paletteType);
+
+            const blob = new Blob([paletteData], { type: 'application/octet-stream' });
+            const paletteNames = ['websafe', 'cga5153', 'cgabios', 'cgapalette1', 'cgapalette1_5153'];
+            const paletteName = paletteNames[lastDitherResult.paletteType] || 'palette';
+            const filename = `cra_${paletteName}_ARGB8888.pal`;
+            downloadBlob(blob, filename);
+        });
 
         // Initialize
         initWasm();
