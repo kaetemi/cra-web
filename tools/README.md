@@ -39,7 +39,7 @@ Generates 1-bit noise images using various hash functions for spectral compariso
 - `*_coord.png` - Coordinate-based hashing (GPU-friendly)
 - `*_seq.png` - Sequential hashing
 
-Hash functions tested: Wang, Double Wang, Triple32, Lowbias32, xxHash32, IQ Int1, IQ Int3, Murmur3, PCG, SplitMix32, Xorshift32, LCG, NumPy random.
+Hash functions tested: Wang, Double Wang, Triple32, Lowbias32, Lowbias32_old, xxHash32, IQ Int1, IQ Int3, Murmur3, PCG, SplitMix32, Xorshift32, LCG, NumPy random.
 
 ```bash
 source /root/venv/bin/activate
@@ -74,7 +74,7 @@ Generates Fourier analysis charts (like Zhou-Fang paper Figure 5):
 
 **Outputs** (`tools/test_images/analysis/`):
 - `{image}_serpentine.png` - Comparison of serpentine dither methods
-- `{image}_hash_comparison.png` - Comparison of boon hash functions (lowbias32 vs wang)
+- `{image}_hash_comparison.png` - Comparison of boon hash functions (lowbias32 vs lowbias32_old vs wang)
 - `rng_noise_*.png` - RNG spectral analysis
 
 ```bash

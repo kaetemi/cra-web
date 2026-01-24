@@ -285,15 +285,15 @@ def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
     """Compare boon hash function variants: lowbias32 (new) vs lowbias32_old vs wang_hash."""
     # Standard variants
     standard_methods = [
-        ('boon-standard', 'Boon (lowbias32)'),
-        ('boon-lowbias', 'Boon (lowbias32_old)'),
-        ('boon-wanghash', 'Boon (wang)'),
+        ('boon-standard', 'Our Method (lowbias32)'),
+        ('boon-lowbias', 'Our Method (lowbias32_old)'),
+        ('boon-wanghash', 'Our Method (wang hash)'),
     ]
     # Serpentine variants
     serpentine_methods = [
-        ('boon-serpentine', 'Boon Serp. (lowbias32)'),
-        ('boon-lowbias-serpentine', 'Boon Serp. (lowbias32_old)'),
-        ('boon-wanghash-serpentine', 'Boon Serp. (wang)'),
+        ('boon-serpentine', 'Our Method Serp. (lowbias32)'),
+        ('boon-lowbias-serpentine', 'Our Method Serp. (lowbias32_old)'),
+        ('boon-wanghash-serpentine', 'Our Method Serp. (wang hash)'),
     ]
 
     images = {}
