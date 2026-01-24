@@ -169,3 +169,42 @@ The Boon dithering method uses a hash function for per-pixel kernel selection:
 Reference: https://github.com/skeeto/hash-prospector/issues/19
 
 Use `--hash` analysis to compare their spectral characteristics.
+
+## Blue Noise Reference
+
+The file `test_images/blue_noise_256.png` is a 256x256 blue noise dither array generated using the void-and-cluster algorithm. It serves as a "gold standard" reference for spectral analysis comparisons.
+
+**Generation method:**
+- Algorithm: Void-and-cluster (Ulichney 1993)
+- Implementation: [MomentsInGraphics/BlueNoise](https://github.com/MomentsInGraphics/BlueNoise) by Christoph Peters (CC0 Public Domain)
+- Parameters: StandardDeviation=1.5, seed=42
+- Output: 8-bit grayscale PNG with pixel values representing dither thresholds (0-255)
+
+**To regenerate:**
+```bash
+# Download generator (requires scipy, pypng)
+curl -sL "https://raw.githubusercontent.com/MomentsInGraphics/BlueNoise/master/BlueNoise.py" -o /tmp/BlueNoise.py
+# Fix for modern numpy
+sed -i 's/np\.int\b/np.int64/g; s/np\.bool\b/np.bool_/g' /tmp/BlueNoise.py
+
+source /root/venv/bin/activate
+pip install scipy pypng
+python3 << 'EOF'
+import sys; sys.path.insert(0, '/tmp')
+from BlueNoise import GetVoidAndClusterBlueNoise
+import numpy as np
+from PIL import Image
+
+np.random.seed(42)
+dither_array = GetVoidAndClusterBlueNoise((256, 256), StandardDeviation=1.5)
+dither_array = (dither_array * 255.0 / (256*256 - 1)).astype(np.uint8)
+Image.fromarray(dither_array, mode='L').save('tools/test_images/blue_noise_256.png')
+EOF
+```
+
+**Usage for comparison:** Threshold at gray level G to get ideal blue noise pattern at that density:
+```python
+blue_noise = load_image('blue_noise_256.png')
+threshold = G  # e.g., 127 for 50% density
+ideal_pattern = (blue_noise < threshold) * 255
+```
