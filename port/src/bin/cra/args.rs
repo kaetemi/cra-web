@@ -43,15 +43,15 @@ pub enum DitherMethod {
     JjnStandard,
     /// Jarvis-Judice-Ninke with serpentine scanning
     JjnSerpentine,
-    /// Mixed (Our method): randomly selects FS or JJN per-pixel, standard scanning
-    #[value(alias = "boon-standard", alias = "boon")]
-    MixedStandard,
-    /// Mixed (Our method): randomly selects FS or JJN per-pixel, serpentine scanning
-    #[value(alias = "boon-serpentine")]
-    MixedSerpentine,
-    /// Mixed (Our method): randomly selects kernel AND scan direction per-row
-    #[value(alias = "boon-random")]
-    MixedRandom,
+    /// Boon (Our method): randomly selects FS or JJN per-pixel, standard scanning
+    #[value(name = "boon-standard", alias = "mixed-standard", alias = "boon")]
+    BoonStandard,
+    /// Boon (Our method): randomly selects FS or JJN per-pixel, serpentine scanning
+    #[value(name = "boon-serpentine", alias = "mixed-serpentine")]
+    BoonSerpentine,
+    /// Boon (Our method): randomly selects kernel AND scan direction per-row
+    #[value(name = "boon-random", alias = "mixed-random")]
+    BoonRandom,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, standard scanning
     OstroStandard,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, serpentine scanning
@@ -71,9 +71,9 @@ impl DitherMethod {
             DitherMethod::FsSerpentine => DitherMode::Serpentine,
             DitherMethod::JjnStandard => DitherMode::JarvisStandard,
             DitherMethod::JjnSerpentine => DitherMode::JarvisSerpentine,
-            DitherMethod::MixedStandard => DitherMode::MixedStandard,
-            DitherMethod::MixedSerpentine => DitherMode::MixedSerpentine,
-            DitherMethod::MixedRandom => DitherMode::MixedRandom,
+            DitherMethod::BoonStandard => DitherMode::MixedStandard,
+            DitherMethod::BoonSerpentine => DitherMode::MixedSerpentine,
+            DitherMethod::BoonRandom => DitherMode::MixedRandom,
             DitherMethod::OstroStandard => DitherMode::OstromoukhovStandard,
             DitherMethod::OstroSerpentine => DitherMode::OstromoukhovSerpentine,
             DitherMethod::ZhouFangStandard => DitherMode::ZhouFangStandard,
@@ -88,9 +88,9 @@ impl DitherMethod {
             DitherMethod::FsSerpentine => CSDitherMode::Serpentine,
             DitherMethod::JjnStandard => CSDitherMode::JarvisStandard,
             DitherMethod::JjnSerpentine => CSDitherMode::JarvisSerpentine,
-            DitherMethod::MixedStandard => CSDitherMode::MixedStandard,
-            DitherMethod::MixedSerpentine => CSDitherMode::MixedSerpentine,
-            DitherMethod::MixedRandom => CSDitherMode::MixedRandom,
+            DitherMethod::BoonStandard => CSDitherMode::MixedStandard,
+            DitherMethod::BoonSerpentine => CSDitherMode::MixedSerpentine,
+            DitherMethod::BoonRandom => CSDitherMode::MixedRandom,
             DitherMethod::OstroStandard => CSDitherMode::OstromoukhovStandard,
             DitherMethod::OstroSerpentine => CSDitherMode::OstromoukhovSerpentine,
             DitherMethod::ZhouFangStandard => CSDitherMode::ZhouFangStandard,
@@ -456,7 +456,7 @@ pub struct Args {
     pub safetensors_no_alpha: bool,
 
     /// Dithering method for safetensors FP16/BF16 output quantization (FP32 ignores this)
-    #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
     pub safetensors_dither: DitherMethod,
 
     /// Perceptual space for safetensors dithering distance metric
@@ -504,7 +504,7 @@ pub struct Args {
     pub histogram_mode: HistogramMode,
 
     /// Dithering method for final output quantization
-    #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
     pub output_dither: DitherMethod,
 
     /// Dithering method for alpha channel output quantization (defaults to same as --output-dither)
@@ -513,7 +513,7 @@ pub struct Args {
     pub output_alpha_dither: Option<DitherMethod>,
 
     /// Dithering method for histogram processing (only used with --histogram-mode=binned)
-    #[arg(long, value_enum, default_value_t = DitherMethod::MixedStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
     pub histogram_dither: DitherMethod,
 
     /// Disable colorspace-aware dithering for histogram quantization (use per-channel instead)
@@ -564,7 +564,7 @@ pub struct Args {
     #[arg(long, value_name = "FACTOR")]
     pub hull_error_decay: Option<f32>,
 
-    /// Random seed for mixed dithering modes
+    /// Random seed for boon dithering modes
     #[arg(short, long, default_value_t = 12345)]
     pub seed: u32,
 

@@ -36,10 +36,9 @@ python tools/generate_test_images.py
 Runs all test images through CRA with every dithering mode.
 
 **Modes tested:**
-- `none` - No error diffusion (banding baseline)
 - `fs-standard`, `fs-serpentine` - Floyd-Steinberg
 - `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
-- `mixed-standard`, `mixed-serpentine` - Mixed FS/JJN per-pixel
+- `boon-standard`, `boon-serpentine` - Boon (Our method): FS/JJN per-pixel
 - `ostro-standard`, `ostro-serpentine` - Ostromoukhov variable coefficients
 - `zhou-fang-standard`, `zhou-fang-serpentine` - Zhou-Fang threshold modulation
 
@@ -98,13 +97,12 @@ tools/
 ├── test_images/
 │   ├── *.png                    # Source test images
 │   ├── dithered/
-│   │   ├── none/                # No dithering (baseline)
 │   │   ├── fs-standard/         # Floyd-Steinberg standard
 │   │   ├── fs-serpentine/       # Floyd-Steinberg serpentine
 │   │   ├── jjn-standard/        # Jarvis-Judice-Ninke standard
 │   │   ├── jjn-serpentine/      # Jarvis-Judice-Ninke serpentine
-│   │   ├── mixed-standard/      # Mixed standard
-│   │   ├── mixed-serpentine/    # Mixed serpentine
+│   │   ├── boon-standard/      # Boon (Our method) standard
+│   │   ├── boon-serpentine/    # Boon (Our method) serpentine
 │   │   ├── ostro-standard/      # Ostromoukhov standard
 │   │   ├── ostro-serpentine/    # Ostromoukhov serpentine
 │   │   ├── zhou-fang-standard/  # Zhou-Fang standard

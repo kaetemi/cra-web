@@ -190,15 +190,20 @@ def analyze_single(input_path: Path, output_path: Path):
 def analyze_comparison(base_dir: Path, image_name: str, output_dir: Path):
     """Compare all dither methods for a single source image."""
     methods = [
-        'none',
         'fs-standard', 'fs-serpentine',
         'jjn-standard', 'jjn-serpentine',
-        'mixed-standard', 'mixed-serpentine',
+        'boon-standard', 'boon-serpentine',
         'ostro-standard', 'ostro-serpentine',
         'zhou-fang-standard', 'zhou-fang-serpentine',
     ]
 
     images = {}
+
+    # First, add the original source image
+    source_file = base_dir.parent / f"{image_name}.png"
+    if source_file.exists():
+        images['Original'] = load_image(source_file)
+
     for method in methods:
         # Find the dithered file
         method_dir = base_dir / method
@@ -219,15 +224,20 @@ def analyze_comparison(base_dir: Path, image_name: str, output_dir: Path):
 def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     """Compare serpentine variants only (cleaner comparison)."""
     methods = [
-        ('none', 'None'),
         ('fs-serpentine', 'Floyd-Steinberg'),
         ('jjn-serpentine', 'Jarvis-Judice-Ninke'),
-        ('mixed-serpentine', 'Our Method'),
+        ('boon-serpentine', 'Our Method'),
         ('ostro-serpentine', 'Ostromoukhov'),
         ('zhou-fang-serpentine', 'Zhou-Fang'),
     ]
 
     images = {}
+
+    # First, add the original source image
+    source_file = base_dir.parent / f"{image_name}.png"
+    if source_file.exists():
+        images['Original'] = load_image(source_file)
+
     for method_key, method_name in methods:
         method_dir = base_dir / method_key
         dithered_file = method_dir / f"{image_name}_{method_key}.png"
