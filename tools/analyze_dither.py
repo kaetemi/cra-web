@@ -537,15 +537,62 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
         print(f"  {output_path.name}")
 
 
+def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
+    """
+    Experimental: Compare standard dithering vs blue-noise kernel selection.
+
+    Standard: hash(x,y) selects FS vs JJN kernel (white noise selection)
+    Blue-kernel: Pre-dithered 50% pattern selects kernel (blue noise selection)
+
+    Tests at multiple gray levels to see if blue noise kernel selection improves results.
+    """
+    import sys
+    sys.path.insert(0, str(base_dir.parent / 'tools'))
+    from our_method_dither import our_method_dither, our_method_dither_with_blue_noise_kernel
+
+    size = 256
+    gray_levels = [64, 85, 127, 170, 191]  # Various densities
+
+    for gray_level in gray_levels:
+        images = {}
+
+        # Standard method (hash-based kernel selection)
+        standard = our_method_dither(float(gray_level), size, size, seed=0)
+        images[f'Standard (hash)'] = standard.astype(np.float32)
+
+        # Blue kernel method (blue noise kernel selection)
+        blue_kernel = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0)
+        images[f'Blue Kernel'] = blue_kernel.astype(np.float32)
+
+        # Blue noise reference (thresholded)
+        blue_noise_path = base_dir / 'blue_noise_256.png'
+        if blue_noise_path.exists():
+            blue_noise = load_image(blue_noise_path)
+            blue_ref = np.where(blue_noise < gray_level, 255.0, 0.0)
+            images['Blue Noise Ref'] = blue_ref
+
+        # Generate comparison
+        output_path = output_dir / f"blue_kernel_exp_gray_{gray_level:03d}.png"
+        plot_comparison(images, f"Blue Kernel Experiment: Gray {gray_level} ({gray_level/255*100:.0f}%)", output_path)
+        print(f"  {output_path.name}")
+
+        # Print stats
+        std_white = np.mean(standard == 255) * 100
+        blue_white = np.mean(blue_kernel == 255) * 100
+        diff_pct = np.sum(standard != blue_kernel) / (size * size) * 100
+        print(f"    Standard white: {std_white:.2f}%, Blue kernel white: {blue_white:.2f}%, Pixel diff: {diff_pct:.1f}%")
+
+
 def analyze_sanity_check(base_dir: Path, output_dir: Path):
     """
-    Sanity check: compare coin flip, blue noise, CRA tool, and Python replication at 50% gray.
+    Sanity check: compare coin flip, blue noise, CRA tool, Python replication, and blue-kernel experiment at 50% gray.
 
     Verifies that our Python replication matches CRA output and shows the quality spectrum:
     - Coin flip (white noise) - worst
     - Blue noise reference - best
     - CRA tool output
-    - Python replication
+    - Python replication (standard hash-based kernel)
+    - Python blue-kernel (experimental: blue noise kernel selection)
     """
     import subprocess
     import sys
@@ -558,31 +605,34 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
     # 1. Coin flip at 50%
     rng = np.random.default_rng(seed=42)
     coin_flip = np.where(rng.random((size, size)) < 0.5, 255.0, 0.0)
-    images['Coin Flip (50%)'] = coin_flip
+    images['Coin Flip'] = coin_flip
 
     # 2. Blue noise reference at 50%
     blue_noise_path = base_dir / 'blue_noise_256.png'
     if blue_noise_path.exists():
         blue_noise = load_image(blue_noise_path)
         blue_ref = np.where(blue_noise < gray_level, 255.0, 0.0)
-        images['Blue Noise Ref (50%)'] = blue_ref
+        images['Blue Noise Ref'] = blue_ref
     else:
         print(f"  Warning: {blue_noise_path} not found, skipping blue noise reference")
 
     # 3. CRA tool output for gray_127
     cra_path = base_dir / 'dithered' / 'boon-serpentine' / 'gray_127_boon-serpentine.png'
     if cra_path.exists():
-        images['CRA Tool (boon-serp)'] = load_image(cra_path)
+        images['CRA Tool'] = load_image(cra_path)
     else:
         print(f"  Warning: {cra_path} not found, skipping CRA output")
 
-    # 4. Python replication
-    # Import and run our method
+    # 4. Python replication (standard)
     sys.path.insert(0, str(base_dir.parent / 'tools'))
     try:
-        from our_method_dither import our_method_dither
+        from our_method_dither import our_method_dither, our_method_dither_with_blue_noise_kernel
         py_result = our_method_dither(float(gray_level), size, size, seed=0)
-        images['Python Replication'] = py_result.astype(np.float32)
+        images['Python (hash)'] = py_result.astype(np.float32)
+
+        # 5. Python blue-kernel (experimental)
+        py_blue_kernel = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0)
+        images['Python (blue kernel)'] = py_blue_kernel.astype(np.float32)
     except ImportError as e:
         print(f"  Warning: Could not import our_method_dither: {e}")
 
@@ -595,21 +645,26 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
     plot_comparison(images, "Sanity Check: 50% Gray Level Comparison", output_path)
     print(f"  {output_path.name}")
 
-    # Print pixel-wise comparison if we have both CRA and Python
-    # Note: Exact pixel match isn't expected due to:
-    # - CRA has edge seeding (duplicates edge pixels into buffer padding)
-    # - CRA processes seeding rows/cols first, accumulating error before real image
-    # - Python version is simplified without edge seeding
+    # Print comparison stats
+    # Note: Exact pixel match between CRA and Python isn't expected due to edge seeding
     # What matters is spectral similarity, not exact pixel match
-    if 'CRA Tool (boon-serp)' in images and 'Python Replication' in images:
-        cra_img = images['CRA Tool (boon-serp)']
-        py_img = images['Python Replication']
-        match_pct = np.mean(cra_img == py_img) * 100
-        print(f"  CRA vs Python pixel match: {match_pct:.2f}% (not expected to be high due to edge seeding)")
-        # Compare white pixel percentages (should be similar)
-        cra_white = np.mean(cra_img == 255) * 100
-        py_white = np.mean(py_img == 255) * 100
-        print(f"  CRA white pixels: {cra_white:.2f}%, Python: {py_white:.2f}% (should be ~50%)")
+    if 'CRA Tool' in images and 'Python (hash)' in images:
+        cra_img = images['CRA Tool']
+        py_hash = images['Python (hash)']
+        match_pct = np.mean(cra_img == py_hash) * 100
+        print(f"  CRA vs Python (hash) pixel match: {match_pct:.2f}%")
+
+    if 'Python (hash)' in images and 'Python (blue kernel)' in images:
+        py_hash = images['Python (hash)']
+        py_blue = images['Python (blue kernel)']
+        diff_pct = np.sum(py_hash != py_blue) / py_hash.size * 100
+        print(f"  Python (hash) vs (blue kernel) pixel diff: {diff_pct:.1f}%")
+
+    # White pixel percentages
+    print("  White pixel percentages:")
+    for name, img in images.items():
+        white_pct = np.mean(img == 255) * 100
+        print(f"    {name}: {white_pct:.2f}%")
 
 
 def main():
@@ -621,6 +676,7 @@ def main():
     parser.add_argument('--rng', action='store_true', help='Analyze RNG noise images')
     parser.add_argument('--hash', action='store_true', help='Compare boon hash functions (lowbias32 vs wang)')
     parser.add_argument('--sanity', action='store_true', help='Sanity check: compare coin flip, blue noise, CRA, Python replication')
+    parser.add_argument('--blue-kernel', action='store_true', help='Experimental: compare standard vs blue-noise kernel selection')
     args = parser.parse_args()
 
     base_dir = Path(__file__).parent / "test_images"
@@ -632,6 +688,11 @@ def main():
         # Single image analysis
         output_path = args.output or output_dir / f"{args.input.stem}_analysis.png"
         analyze_single(args.input, output_path)
+    elif args.blue_kernel:
+        # Blue kernel experiment
+        print("Running blue kernel experiment...")
+        analyze_blue_kernel_experiment(base_dir, output_dir)
+        print(f"\nDone! Blue kernel experiment saved to {output_dir}")
     elif args.sanity:
         # Sanity check comparison
         print("Running sanity check comparison...")
