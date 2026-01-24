@@ -639,20 +639,12 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
     else:
         print(f"  Warning: {cra_path} not found, skipping CRA output")
 
-    # 4. Python replication (standard)
+    # 4. Python replication
     sys.path.insert(0, str(base_dir.parent / 'tools'))
     try:
-        from our_method_dither import our_method_dither, our_method_dither_with_blue_noise_kernel
+        from our_method_dither import our_method_dither
         py_result = our_method_dither(float(gray_level), size, size, seed=0)
-        images['Python (hash)'] = py_result.astype(np.float32)
-
-        # 5. Python blue-kernel depth=1 (experimental)
-        py_blue_d1 = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0, recursion_depth=1)
-        images['Blue kernel d=1'] = py_blue_d1.astype(np.float32)
-
-        # 6. Python blue-kernel depth=2 (experimental)
-        py_blue_d2 = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0, recursion_depth=2)
-        images['Blue kernel d=2'] = py_blue_d2.astype(np.float32)
+        images['Python Replication'] = py_result.astype(np.float32)
     except ImportError as e:
         print(f"  Warning: Could not import our_method_dither: {e}")
 
@@ -668,30 +660,14 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
     # Print comparison stats
     # Note: Exact pixel match between CRA and Python isn't expected due to edge seeding
     # What matters is spectral similarity, not exact pixel match
-    if 'CRA Tool' in images and 'Python (hash)' in images:
+    if 'CRA Tool' in images and 'Python Replication' in images:
         cra_img = images['CRA Tool']
-        py_hash = images['Python (hash)']
-        match_pct = np.mean(cra_img == py_hash) * 100
-        print(f"  CRA vs Python (hash) pixel match: {match_pct:.2f}%")
-
-    # Compare recursion depths
-    if 'Python (hash)' in images and 'Blue kernel d=1' in images:
-        py_hash = images['Python (hash)']
-        py_d1 = images['Blue kernel d=1']
-        diff_pct = np.sum(py_hash != py_d1) / py_hash.size * 100
-        print(f"  Python (hash) vs d=1 pixel diff: {diff_pct:.1f}%")
-
-    if 'Blue kernel d=1' in images and 'Blue kernel d=2' in images:
-        py_d1 = images['Blue kernel d=1']
-        py_d2 = images['Blue kernel d=2']
-        diff_pct = np.sum(py_d1 != py_d2) / py_d1.size * 100
-        print(f"  d=1 vs d=2 pixel diff: {diff_pct:.1f}%")
-
-    # White pixel percentages
-    print("  White pixel percentages:")
-    for name, img in images.items():
-        white_pct = np.mean(img == 255) * 100
-        print(f"    {name}: {white_pct:.2f}%")
+        py_img = images['Python Replication']
+        match_pct = np.mean(cra_img == py_img) * 100
+        print(f"  CRA vs Python pixel match: {match_pct:.2f}% (edge seeding causes diff)")
+        cra_white = np.mean(cra_img == 255) * 100
+        py_white = np.mean(py_img == 255) * 100
+        print(f"  CRA white: {cra_white:.2f}%, Python white: {py_white:.2f}%")
 
 
 def main():
