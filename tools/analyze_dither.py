@@ -249,6 +249,36 @@ def analyze_comparison(base_dir: Path, image_name: str, output_dir: Path):
     print(f"  {output_path.name}")
 
 
+def get_blue_noise_reference(base_dir: Path, image_name: str) -> np.ndarray | None:
+    """Generate ideal blue noise pattern for gray_XXX images.
+
+    Thresholds the blue noise dither array at the appropriate gray level.
+    Returns None for non-gray images.
+    """
+    # Check if this is a gray_XXX image
+    if not image_name.startswith('gray_'):
+        return None
+
+    try:
+        gray_level = int(image_name.split('_')[1])
+    except (IndexError, ValueError):
+        return None
+
+    # Load blue noise dither array
+    blue_noise_path = base_dir.parent / 'blue_noise_256.png'
+    if not blue_noise_path.exists():
+        return None
+
+    blue_noise = load_image(blue_noise_path)
+
+    # Threshold at gray level to get ideal pattern at this density
+    # blue_noise values are 0-255, representing dither thresholds
+    # Pixels with threshold < gray_level become white (255)
+    ideal_pattern = np.where(blue_noise < gray_level, 255.0, 0.0)
+
+    return ideal_pattern
+
+
 def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     """Compare serpentine variants only (cleaner comparison)."""
     methods = [
@@ -265,6 +295,11 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     source_file = base_dir.parent / f"{image_name}.png"
     if source_file.exists():
         images['Original'] = load_image(source_file)
+
+    # Add ideal blue noise reference for gray images
+    blue_noise_ref = get_blue_noise_reference(base_dir, image_name)
+    if blue_noise_ref is not None:
+        images['Blue Noise Reference (Christoph Peters)'] = blue_noise_ref
 
     for method_key, method_name in methods:
         method_dir = base_dir / method_key
