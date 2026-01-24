@@ -281,12 +281,86 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     print(f"  {output_path.name}")
 
 
+def analyze_rng_noise(base_dir: Path, output_dir: Path):
+    """Compare RNG noise generators."""
+    rng_dir = base_dir / "rng_noise"
+    if not rng_dir.exists():
+        print(f"RNG noise directory not found: {rng_dir}")
+        return
+
+    # GPU-friendly coordinate-based methods
+    gpu_coord_methods = [
+        ('wang_hash_coord.png', 'Wang'),
+        ('double_wang_coord.png', 'Double Wang'),
+        ('triple32_coord.png', 'Triple32'),
+        ('lowbias32_coord.png', 'Lowbias32'),
+        ('xxhash32_coord.png', 'xxHash32'),
+        ('iqint1_coord.png', 'IQ Int1'),
+        ('iqint3_coord.png', 'IQ Int3'),
+    ]
+
+    images = {}
+    for filename, label in gpu_coord_methods:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_gpu_coord.png"
+        plot_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path)
+        print(f"  {output_path.name}")
+
+    # Other coordinate-based methods
+    other_coord_methods = [
+        ('murmur3_coord.png', 'Murmur3'),
+        ('pcg_coord.png', 'PCG'),
+        ('splitmix32_coord.png', 'SplitMix32'),
+        ('xorshift32_coord.png', 'Xorshift32'),
+        ('lcg_coord.png', 'LCG'),
+        ('numpy_random.png', 'NumPy'),
+    ]
+
+    images = {}
+    for filename, label in other_coord_methods:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_other_coord.png"
+        plot_comparison(images, "Other RNG (Coordinate-based)", output_path)
+        print(f"  {output_path.name}")
+
+    # Sequential methods (GPU-friendly)
+    gpu_seq_methods = [
+        ('wang_hash_seq.png', 'Wang'),
+        ('double_wang_seq.png', 'Double Wang'),
+        ('triple32_seq.png', 'Triple32'),
+        ('lowbias32_seq.png', 'Lowbias32'),
+        ('xxhash32_seq.png', 'xxHash32'),
+        ('iqint1_seq.png', 'IQ Int1'),
+        ('iqint3_seq.png', 'IQ Int3'),
+    ]
+
+    images = {}
+    for filename, label in gpu_seq_methods:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_gpu_seq.png"
+        plot_comparison(images, "GPU-Friendly RNG (Sequential)", output_path)
+        print(f"  {output_path.name}")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Analyze dithered images with Fourier methods')
     parser.add_argument('--input', '-i', type=Path, help='Single input image to analyze')
     parser.add_argument('--output', '-o', type=Path, help='Output path for single image analysis')
     parser.add_argument('--compare', '-c', action='store_true', help='Generate comparison charts for all test images')
     parser.add_argument('--serpentine', '-s', action='store_true', help='Compare serpentine variants only')
+    parser.add_argument('--rng', action='store_true', help='Analyze RNG noise images')
     args = parser.parse_args()
 
     base_dir = Path(__file__).parent / "test_images"
@@ -298,6 +372,11 @@ def main():
         # Single image analysis
         output_path = args.output or output_dir / f"{args.input.stem}_analysis.png"
         analyze_single(args.input, output_path)
+    elif args.rng:
+        # Analyze RNG noise images
+        print("Analyzing RNG noise images...")
+        analyze_rng_noise(base_dir, output_dir)
+        print(f"\nDone! Analysis saved to {output_dir}")
     elif args.compare or args.serpentine:
         # Find all source images
         source_images = [p.stem for p in base_dir.glob("*.png")]
