@@ -279,6 +279,31 @@ def get_blue_noise_reference(base_dir: Path, image_name: str) -> np.ndarray | No
     return ideal_pattern
 
 
+def get_coin_flip_reference(image_name: str, size: tuple = (256, 256)) -> np.ndarray | None:
+    """Generate white noise (coin flip) pattern for gray_XXX images.
+
+    Creates random noise at the appropriate density for comparison.
+    Returns None for non-gray images.
+    """
+    # Check if this is a gray_XXX image
+    if not image_name.startswith('gray_'):
+        return None
+
+    try:
+        gray_level = int(image_name.split('_')[1])
+    except (IndexError, ValueError):
+        return None
+
+    # Use fixed seed for reproducibility
+    rng = np.random.default_rng(seed=42)
+
+    # Probability of white pixel = gray_level / 255
+    probability = gray_level / 255.0
+    coin_flips = rng.random(size) < probability
+
+    return np.where(coin_flips, 255.0, 0.0)
+
+
 def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     """Compare serpentine variants only (cleaner comparison)."""
     methods = [
@@ -296,7 +321,11 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     if source_file.exists():
         images['Original'] = load_image(source_file)
 
-    # Add ideal blue noise reference for gray images
+    # Add reference patterns for gray images
+    coin_flip_ref = get_coin_flip_reference(image_name)
+    if coin_flip_ref is not None:
+        images['Coin Flip (white noise)'] = coin_flip_ref
+
     blue_noise_ref = get_blue_noise_reference(base_dir, image_name)
     if blue_noise_ref is not None:
         images['Blue Noise Reference (Christoph Peters)'] = blue_noise_ref
@@ -312,7 +341,7 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         return
 
     output_path = output_dir / f"{image_name}_serpentine.png"
-    plot_comparison(images, f"Serpentine Dither Comparison: {image_name}", output_path)
+    plot_comparison(images, f"Dither Comparison: {image_name}", output_path)
     print(f"  {output_path.name}")
 
 
