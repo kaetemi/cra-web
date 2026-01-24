@@ -81,14 +81,25 @@ def triple32(seed: np.uint32) -> np.uint32:
     return seed
 
 
-def lowbias32(seed: np.uint32) -> np.uint32:
-    """Lowbias32 - optimized for low bias, GPU friendly."""
+def lowbias32_old(seed: np.uint32) -> np.uint32:
+    """Original lowbias32 (bias 0.174) - kept for comparison."""
     seed = np.uint32(seed)
     seed ^= seed >> np.uint32(16)
     seed = seed * np.uint32(0x7feb352d)
     seed ^= seed >> np.uint32(15)
     seed = seed * np.uint32(0x846ca68b)
     seed ^= seed >> np.uint32(16)
+    return seed
+
+
+def lowbias32(seed: np.uint32) -> np.uint32:
+    """Improved lowbias32 (bias 0.107) - better spectral properties."""
+    seed = np.uint32(seed)
+    seed ^= seed >> np.uint32(16)
+    seed = seed * np.uint32(0x21f0aaad)
+    seed ^= seed >> np.uint32(15)
+    seed = seed * np.uint32(0x735a2d97)
+    seed ^= seed >> np.uint32(15)
     return seed
 
 
@@ -167,6 +178,7 @@ def main():
         (double_wang_hash, "double_wang"),
         (triple32, "triple32"),
         (lowbias32, "lowbias32"),
+        (lowbias32_old, "lowbias32_old"),
         (xxhash32_avalanche, "xxhash32"),
         (iqint1, "iqint1"),
         (iqint3, "iqint3"),

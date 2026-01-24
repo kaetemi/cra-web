@@ -282,15 +282,17 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
 
 
 def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
-    """Compare boon (lowbias32) vs boon-wanghash for hash function comparison."""
+    """Compare boon hash function variants: lowbias32 (new) vs lowbias32_old vs wang_hash."""
     # Standard variants
     standard_methods = [
         ('boon-standard', 'Boon (lowbias32)'),
+        ('boon-lowbias', 'Boon (lowbias32_old)'),
         ('boon-wanghash', 'Boon (wang)'),
     ]
     # Serpentine variants
     serpentine_methods = [
         ('boon-serpentine', 'Boon Serp. (lowbias32)'),
+        ('boon-lowbias-serpentine', 'Boon Serp. (lowbias32_old)'),
         ('boon-wanghash-serpentine', 'Boon Serp. (wang)'),
     ]
 
@@ -337,6 +339,7 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
         ('double_wang_coord.png', 'Double Wang'),
         ('triple32_coord.png', 'Triple32'),
         ('lowbias32_coord.png', 'Lowbias32'),
+        ('lowbias32_old_coord.png', 'Lowbias32_old'),
         ('xxhash32_coord.png', 'xxHash32'),
         ('iqint1_coord.png', 'IQ Int1'),
         ('iqint3_coord.png', 'IQ Int3'),
@@ -380,6 +383,7 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
         ('double_wang_seq.png', 'Double Wang'),
         ('triple32_seq.png', 'Triple32'),
         ('lowbias32_seq.png', 'Lowbias32'),
+        ('lowbias32_old_seq.png', 'Lowbias32_old'),
         ('xxhash32_seq.png', 'xxHash32'),
         ('iqint1_seq.png', 'IQ Int1'),
         ('iqint3_seq.png', 'IQ Int3'),

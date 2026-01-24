@@ -224,6 +224,11 @@ pub enum DitherMode {
     /// Mixed with Wang hash (legacy): Same as MixedSerpentine but uses wang_hash
     /// instead of lowbias32. Kept for comparison/testing.
     MixedWangSerpentine,
+    /// Mixed with original lowbias32 (bias 0.174): Kept for comparison testing.
+    /// Default boon mode uses the improved lowbias32 (bias 0.107).
+    MixedLowbiasOldStandard,
+    /// Mixed with original lowbias32 serpentine: Kept for comparison testing.
+    MixedLowbiasOldSerpentine,
 }
 
 /// Wang hash for deterministic randomization.
@@ -241,9 +246,22 @@ pub fn wang_hash(mut x: u32) -> u32 {
 
 /// Lowbias32 hash - optimized for low bias, excellent for coordinate-based hashing.
 /// Better spectral properties than wang_hash for spatial randomization.
-/// Reference: https://nullprogram.com/blog/2018/07/31/
+/// This is the improved version with bias 0.107 (vs 0.174 for the original).
+/// Reference: https://github.com/skeeto/hash-prospector/issues/19
 #[inline]
 pub fn lowbias32(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x21f0aaad);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x735a2d97);
+    x ^= x >> 15;
+    x
+}
+
+/// Original lowbias32 hash (bias 0.174) - kept for comparison testing.
+/// Reference: https://nullprogram.com/blog/2018/07/31/
+#[inline]
+pub fn lowbias32_old(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x7feb352d);
     x ^= x >> 15;

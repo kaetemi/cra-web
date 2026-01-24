@@ -1430,7 +1430,7 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_paletted(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1438,7 +1438,7 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_paletted(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1597,7 +1597,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_paletted_extended(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1605,7 +1605,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_paletted_extended(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,

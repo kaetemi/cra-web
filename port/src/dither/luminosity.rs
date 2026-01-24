@@ -671,13 +671,13 @@ pub fn colorspace_aware_dither_gray_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,

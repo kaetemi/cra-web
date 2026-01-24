@@ -55,6 +55,7 @@ Runs all test images through CRA with every dithering mode.
 - `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
 - `boon-standard`, `boon-serpentine` - Boon (Our method): FS/JJN per-pixel with lowbias32 hash
 - `boon-wanghash`, `boon-wanghash-serpentine` - Boon with legacy wang_hash (for comparison)
+- `boon-lowbias`, `boon-lowbias-serpentine` - Boon with original lowbias32 (bias 0.174, for comparison)
 - `ostro-standard`, `ostro-serpentine` - Ostromoukhov variable coefficients
 - `zhou-fang-standard`, `zhou-fang-serpentine` - Zhou-Fang threshold modulation
 
@@ -133,6 +134,8 @@ tools/
 │   │   ├── boon-serpentine/     # Boon (lowbias32) serpentine
 │   │   ├── boon-wanghash/       # Boon (wang_hash) standard
 │   │   ├── boon-wanghash-serpentine/  # Boon (wang_hash) serpentine
+│   │   ├── boon-lowbias/        # Boon (lowbias32_old) standard
+│   │   ├── boon-lowbias-serpentine/  # Boon (lowbias32_old) serpentine
 │   │   ├── ostro-standard/      # Ostromoukhov standard
 │   │   ├── ostro-serpentine/    # Ostromoukhov serpentine
 │   │   ├── zhou-fang-standard/  # Zhou-Fang standard
@@ -159,7 +162,10 @@ Key test cases:
 ## Hash Function Notes
 
 The Boon dithering method uses a hash function for per-pixel kernel selection:
-- **lowbias32** (default): Better spectral properties, minimal diagonal artifacts
+- **lowbias32** (default): Improved version with bias 0.107, best spectral properties
+- **lowbias32_old** (comparison): Original version with bias 0.174
 - **wang_hash** (legacy): Slight diagonal bias visible in spectral analysis
+
+Reference: https://github.com/skeeto/hash-prospector/issues/19
 
 Use `--hash` analysis to compare their spectral characteristics.
