@@ -37,6 +37,7 @@ def compute_segmented_radial_power(img: np.ndarray) -> tuple[np.ndarray, np.ndar
     Compute segmented radially averaged power spectrum.
 
     Returns (frequencies, horizontal, diagonal, vertical) power curves.
+    - Frequencies: in cycles/pixel (0 = DC, 0.5 = Nyquist)
     - Horizontal: 0° ± 22.5° (red in plots)
     - Diagonal: 45° ± 22.5° (green in plots)
     - Vertical: 90° ± 22.5° (blue in plots)
@@ -47,6 +48,7 @@ def compute_segmented_radial_power(img: np.ndarray) -> tuple[np.ndarray, np.ndar
 
     cy, cx = h // 2, w // 2
     max_radius = min(cx, cy)
+    img_size = min(h, w)  # for normalizing to cycles/pixel
 
     # Pre-compute coordinates
     y_coords, x_coords = np.ogrid[:h, :w]
@@ -89,7 +91,9 @@ def compute_segmented_radial_power(img: np.ndarray) -> tuple[np.ndarray, np.ndar
         diagonal.append(d_power)
         vertical.append(v_power)
 
-    freqs = np.arange(1, max_radius)
+    # Convert radius to cycles/pixel: radius / img_size
+    # Range: 0 to 0.5 (Nyquist limit)
+    freqs = np.arange(1, max_radius) / img_size
     return freqs, np.array(horizontal), np.array(diagonal), np.array(vertical)
 
 
@@ -119,11 +123,11 @@ def plot_analysis(img: np.ndarray, title: str, output_path: Path):
     axes[2].plot(freqs, h_db, 'r-', label='Horizontal (0°)', alpha=0.8)
     axes[2].plot(freqs, d_db, 'g-', label='Diagonal (45°)', alpha=0.8)
     axes[2].plot(freqs, v_db, 'b-', label='Vertical (90°)', alpha=0.8)
-    axes[2].set_xlabel('Frequency (pixels⁻¹)')
+    axes[2].set_xlabel('Spatial Frequency (cycles/pixel)')
     axes[2].set_ylabel('Power (dB)')
     axes[2].set_title('Segmented Radial Power')
     axes[2].legend(loc='upper right')
-    axes[2].set_xlim(0, len(freqs))
+    axes[2].set_xlim(0, 0.5)  # 0 = DC, 0.5 = Nyquist
     axes[2].grid(True, alpha=0.3)
 
     fig.suptitle(title, fontsize=14, fontweight='bold')
@@ -140,6 +144,28 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
     if n_methods == 1:
         axes = axes.reshape(3, 1)
 
+    # First pass: compute all power spectra and find global min/max for dithered images
+    all_power_db = {}
+    global_min_db = float('inf')
+    global_max_db = float('-inf')
+
+    for method_name, img in images.items():
+        freqs, h, d, v = compute_segmented_radial_power(img)
+        h_db = 10 * np.log10(h + 1e-10)
+        d_db = 10 * np.log10(d + 1e-10)
+        v_db = 10 * np.log10(v + 1e-10)
+        all_power_db[method_name] = (freqs, h_db, d_db, v_db)
+
+        # Only include non-Original in global scale
+        if method_name != 'Original':
+            global_min_db = min(global_min_db, h_db.min(), d_db.min(), v_db.min())
+            global_max_db = max(global_max_db, h_db.max(), d_db.max(), v_db.max())
+
+    # Add some padding to the range
+    y_padding = (global_max_db - global_min_db) * 0.05
+    global_min_db -= y_padding
+    global_max_db += y_padding
+
     for col, (method_name, img) in enumerate(images.items()):
         # Row 1: Dithered image
         axes[0, col].imshow(img, cmap='gray', vmin=0, vmax=255)
@@ -152,18 +178,19 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
         axes[1, col].axis('off')
 
         # Row 3: Radial power curves (log scale)
-        freqs, h, d, v = compute_segmented_radial_power(img)
-
-        # Convert to log scale (dB)
-        h_db = 10 * np.log10(h + 1e-10)
-        d_db = 10 * np.log10(d + 1e-10)
-        v_db = 10 * np.log10(v + 1e-10)
+        freqs, h_db, d_db, v_db = all_power_db[method_name]
 
         axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
         axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
         axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
-        axes[2, col].set_xlim(0, len(freqs))
+        axes[2, col].set_xlim(0, 0.5)  # 0 = DC, 0.5 = Nyquist
+        axes[2, col].set_xlabel('cycles/px')
         axes[2, col].grid(True, alpha=0.3)
+
+        # Use global scale for dithered images, auto scale for Original
+        if method_name != 'Original':
+            axes[2, col].set_ylim(global_min_db, global_max_db)
+
         if col == 0:
             axes[2, col].set_ylabel('Power (dB)')
         if col == n_methods - 1:
