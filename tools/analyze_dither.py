@@ -550,7 +550,12 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
     """
     import sys
     sys.path.insert(0, str(base_dir.parent / 'tools'))
-    from our_method_dither import our_method_dither, our_method_dither_with_blue_noise_kernel
+    from our_method_dither import (
+        our_method_dither, our_method_dither_with_blue_noise_kernel,
+        our_method_dither_fs_sierra, our_method_dither_fs_sierra_lite,
+        our_method_dither_fs_stucki, our_method_dither_stucki_sierra,
+        our_method_dither_jjn_stucki, our_method_dither_jjn_sierra
+    )
 
     size = 256
     gray_levels = [64, 85, 127, 170, 191]  # Various densities
@@ -560,14 +565,31 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
 
         # Standard method (hash-based kernel selection)
         standard = our_method_dither(float(gray_level), size, size, seed=0)
-        images['Standard (hash)'] = standard.astype(np.float32)
+        images['FS/JJN'] = standard.astype(np.float32)
 
-        # Blue kernel at various recursion depths
-        for depth in [1, 2, 3]:
-            blue_kernel = our_method_dither_with_blue_noise_kernel(
-                float(gray_level), size, size, seed=0, recursion_depth=depth
-            )
-            images[f'Blue kernel d={depth}'] = blue_kernel.astype(np.float32)
+        # FS/Stucki alternation
+        fs_stucki = our_method_dither_fs_stucki(float(gray_level), size, size, seed=0)
+        images['FS/Stucki'] = fs_stucki.astype(np.float32)
+
+        # FS/Sierra (full) alternation
+        fs_sierra = our_method_dither_fs_sierra(float(gray_level), size, size, seed=0)
+        images['FS/Sierra'] = fs_sierra.astype(np.float32)
+
+        # FS/Sierra Lite alternation
+        fs_sierra_lite = our_method_dither_fs_sierra_lite(float(gray_level), size, size, seed=0)
+        images['FS/SierraLite'] = fs_sierra_lite.astype(np.float32)
+
+        # Stucki/Sierra alternation (no FS)
+        stucki_sierra = our_method_dither_stucki_sierra(float(gray_level), size, size, seed=0)
+        images['Stucki/Sierra'] = stucki_sierra.astype(np.float32)
+
+        # JJN/Stucki alternation (no FS)
+        jjn_stucki = our_method_dither_jjn_stucki(float(gray_level), size, size, seed=0)
+        images['JJN/Stucki'] = jjn_stucki.astype(np.float32)
+
+        # JJN/Sierra alternation (no FS)
+        jjn_sierra = our_method_dither_jjn_sierra(float(gray_level), size, size, seed=0)
+        images['JJN/Sierra'] = jjn_sierra.astype(np.float32)
 
         # Blue noise reference (thresholded)
         blue_noise_path = base_dir / 'blue_noise_256.png'
@@ -577,26 +599,41 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
             images['Blue Noise Ref'] = blue_ref
 
         # Generate comparison
-        output_path = output_dir / f"blue_kernel_exp_gray_{gray_level:03d}.png"
-        plot_comparison(images, f"Blue Kernel Experiment: Gray {gray_level} ({gray_level/255*100:.0f}%)", output_path)
+        output_path = output_dir / f"kernel_exp_gray_{gray_level:03d}.png"
+        plot_comparison(images, f"Kernel Experiment: Gray {gray_level} ({gray_level/255*100:.0f}%)", output_path)
         print(f"  {output_path.name}")
 
-        # Print stats
-        print(f"    White pixels: Standard={np.mean(standard == 255) * 100:.2f}%", end="")
-        for depth in [1, 2, 3]:
-            img = images[f'Blue kernel d={depth}']
-            print(f", d={depth}={np.mean(img == 255) * 100:.2f}%", end="")
-        print()
+        # Print white pixel stats (abbreviated)
+        print(f"    All methods ~{np.mean(standard == 255) * 100:.1f}% white")
 
-        # Pixel differences between consecutive depths
-        prev_img = standard
-        prev_name = "hash"
+        # Compare variants vs FS/JJN
+        diffs = {
+            'FS/Stucki': np.sum(standard != fs_stucki) / (size * size) * 100,
+            'FS/Sierra': np.sum(standard != fs_sierra) / (size * size) * 100,
+            'FS/SierraLite': np.sum(standard != fs_sierra_lite) / (size * size) * 100,
+            'Stucki/Sierra': np.sum(standard != stucki_sierra) / (size * size) * 100,
+            'JJN/Stucki': np.sum(standard != jjn_stucki) / (size * size) * 100,
+            'JJN/Sierra': np.sum(standard != jjn_sierra) / (size * size) * 100,
+        }
+        print(f"    vs FS/JJN: " + ", ".join(f"{k}={v:.1f}%" for k, v in diffs.items()))
+
+    # Also generate blue kernel depth experiment
+    print("\n  Blue kernel depth experiment:")
+    for gray_level in gray_levels:
+        images = {}
+        images['FS/JJN'] = our_method_dither(float(gray_level), size, size, seed=0).astype(np.float32)
         for depth in [1, 2, 3]:
-            curr_img = images[f'Blue kernel d={depth}']
-            diff_pct = np.sum(prev_img != curr_img) / (size * size) * 100
-            print(f"    {prev_name} vs d={depth}: {diff_pct:.1f}% diff")
-            prev_img = curr_img
-            prev_name = f"d={depth}"
+            blue_kernel = our_method_dither_with_blue_noise_kernel(
+                float(gray_level), size, size, seed=0, recursion_depth=depth
+            )
+            images[f'Blue d={depth}'] = blue_kernel.astype(np.float32)
+        blue_noise_path = base_dir / 'blue_noise_256.png'
+        if blue_noise_path.exists():
+            blue_noise = load_image(blue_noise_path)
+            images['Blue Noise Ref'] = np.where(blue_noise < gray_level, 255.0, 0.0)
+        output_path = output_dir / f"blue_kernel_depth_gray_{gray_level:03d}.png"
+        plot_comparison(images, f"Blue Kernel Depth: Gray {gray_level} ({gray_level/255*100:.0f}%)", output_path)
+        print(f"    {output_path.name}")
 
 
 def analyze_sanity_check(base_dir: Path, output_dir: Path):

@@ -84,6 +84,7 @@ python tools/analyze_dither.py --compare      # All images, all modes
 python tools/analyze_dither.py --hash         # Hash function comparison (lowbias32 vs wang)
 python tools/analyze_dither.py --rng          # RNG noise spectral analysis
 python tools/analyze_dither.py --sanity       # Sanity check: coin flip vs blue noise vs CRA vs Python
+python tools/analyze_dither.py --blue-kernel  # Kernel mixing experiments (see below)
 python tools/analyze_dither.py -i path/to/image.png  # Single image analysis
 ```
 
@@ -94,9 +95,19 @@ Standalone Python replication of "Our Method" for testing/hacking purposes.
 Generates 1-bit dithered images from arbitrary gray levels (including fractional values like 127.5).
 
 **Features:**
-- Mixed FS/JJN kernel selection using lowbias32 hash
+- Mixed FS/JJN kernel selection using lowbias32 hash (standard method)
 - Serpentine scanning
 - Accepts any gray level 0-255
+
+**Experimental kernel combinations:**
+- `our_method_dither()` - FS/JJN (standard)
+- `our_method_dither_fs_stucki()` - FS/Stucki
+- `our_method_dither_fs_sierra()` - FS/Sierra
+- `our_method_dither_fs_sierra_lite()` - FS/Sierra Lite
+- `our_method_dither_jjn_stucki()` - JJN/Stucki (no FS)
+- `our_method_dither_jjn_sierra()` - JJN/Sierra (no FS)
+- `our_method_dither_stucki_sierra()` - Stucki/Sierra (no FS)
+- `our_method_dither_with_blue_noise_kernel()` - Uses pre-dithered blue noise pattern for kernel selection
 
 **Note:** Simplified implementation without edge seeding. Produces equivalent spectral characteristics but not exact pixel match with CRA tool.
 
@@ -135,6 +146,8 @@ python tools/generate_rng_noise.py
 python tools/analyze_dither.py --serpentine
 python tools/analyze_dither.py --hash
 python tools/analyze_dither.py --rng
+python tools/analyze_dither.py --sanity
+python tools/analyze_dither.py --blue-kernel
 ```
 
 ## Output Structure
@@ -162,9 +175,12 @@ tools/
 │   │   ├── zhou-fang-standard/  # Zhou-Fang standard
 │   │   └── zhou-fang-serpentine/# Zhou-Fang serpentine
 │   └── analysis/
-│       ├── *_serpentine.png     # Dither method comparison
-│       ├── *_hash_comparison.png # Hash function comparison
-│       └── rng_noise_*.png      # RNG spectral analysis
+│       ├── *_serpentine.png           # Dither method comparison
+│       ├── *_hash_comparison.png      # Hash function comparison
+│       ├── rng_noise_*.png            # RNG spectral analysis
+│       ├── sanity_check_50pct.png     # Sanity check comparison
+│       ├── kernel_exp_gray_*.png      # Kernel mixing experiments
+│       └── blue_kernel_depth_gray_*.png # Blue kernel recursion depth
 ```
 
 ## Interpreting Analysis Charts
@@ -190,6 +206,26 @@ The Boon dithering method uses a hash function for per-pixel kernel selection:
 Reference: https://github.com/skeeto/hash-prospector/issues/19
 
 Use `--hash` analysis to compare their spectral characteristics.
+
+## Kernel Mixing Experiments
+
+The `--blue-kernel` analysis compares different error diffusion kernel combinations:
+
+**Kernel sizes:**
+- **Floyd-Steinberg (FS)**: 4 coefficients, 1 row forward
+- **Jarvis-Judice-Ninke (JJN)**: 12 coefficients, 3 rows
+- **Stucki**: 12 coefficients, 3 rows
+- **Sierra**: 10 coefficients, 3 rows
+- **Sierra Lite**: 3 coefficients, 1 row forward
+
+**Outputs:**
+- `kernel_exp_gray_*.png` - Compares FS/JJN, FS/Stucki, FS/Sierra, FS/SierraLite, Stucki/Sierra, JJN/Stucki, JJN/Sierra
+- `blue_kernel_depth_gray_*.png` - Compares recursion depths for blue noise kernel selection
+
+**Key findings:**
+- Mixing a small kernel (FS) with a large kernel (JJN/Stucki/Sierra) produces good blue noise
+- Mixing two large kernels (e.g., Stucki/Sierra, JJN/Stucki) produces harsh linear patterns in radial spectrum
+- The asymmetry between kernel sizes appears important for pattern disruption
 
 ## Blue Noise Reference
 

@@ -126,6 +126,467 @@ def apply_jjn_rtl(buf: np.ndarray, x: int, y: int, err: float):
             buf[y + 2, x - 2] += err * (1.0 / 48.0)
 
 
+def apply_stucki_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Stucki kernel, left-to-right.
+
+    Kernel:     * 8 4
+            2 4 8 4 2
+            1 2 4 2 1
+    Divided by 42.
+    """
+    h, w = buf.shape
+    # Row 0: * 8 4
+    if x + 1 < w:
+        buf[y, x + 1] += err * (8.0 / 42.0)
+    if x + 2 < w:
+        buf[y, x + 2] += err * (4.0 / 42.0)
+    # Row 1: 2 4 8 4 2
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (2.0 / 42.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (4.0 / 42.0)
+        buf[y + 1, x] += err * (8.0 / 42.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (4.0 / 42.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (2.0 / 42.0)
+    # Row 2: 1 2 4 2 1
+    if y + 2 < h:
+        if x >= 2:
+            buf[y + 2, x - 2] += err * (1.0 / 42.0)
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (2.0 / 42.0)
+        buf[y + 2, x] += err * (4.0 / 42.0)
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (2.0 / 42.0)
+        if x + 2 < w:
+            buf[y + 2, x + 2] += err * (1.0 / 42.0)
+
+
+def apply_stucki_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Stucki kernel, right-to-left.
+
+    Kernel: 4 8 *
+            2 4 8 4 2
+            1 2 4 2 1
+    Divided by 42.
+    """
+    h, w = buf.shape
+    # Row 0: 4 8 *
+    if x >= 1:
+        buf[y, x - 1] += err * (8.0 / 42.0)
+    if x >= 2:
+        buf[y, x - 2] += err * (4.0 / 42.0)
+    # Row 1: 2 4 8 4 2
+    if y + 1 < h:
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (2.0 / 42.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (4.0 / 42.0)
+        buf[y + 1, x] += err * (8.0 / 42.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (4.0 / 42.0)
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (2.0 / 42.0)
+    # Row 2: 1 2 4 2 1
+    if y + 2 < h:
+        if x + 2 < w:
+            buf[y + 2, x + 2] += err * (1.0 / 42.0)
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (2.0 / 42.0)
+        buf[y + 2, x] += err * (4.0 / 42.0)
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (2.0 / 42.0)
+        if x >= 2:
+            buf[y + 2, x - 2] += err * (1.0 / 42.0)
+
+
+def apply_sierra_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Sierra (full) kernel, left-to-right.
+
+    Kernel:     * 5 3
+            2 4 5 4 2
+              2 3 2
+    Divided by 32.
+    """
+    h, w = buf.shape
+    # Row 0: * 5 3
+    if x + 1 < w:
+        buf[y, x + 1] += err * (5.0 / 32.0)
+    if x + 2 < w:
+        buf[y, x + 2] += err * (3.0 / 32.0)
+    # Row 1: 2 4 5 4 2
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (2.0 / 32.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (4.0 / 32.0)
+        buf[y + 1, x] += err * (5.0 / 32.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (4.0 / 32.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (2.0 / 32.0)
+    # Row 2: 2 3 2
+    if y + 2 < h:
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (2.0 / 32.0)
+        buf[y + 2, x] += err * (3.0 / 32.0)
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (2.0 / 32.0)
+
+
+def apply_sierra_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Sierra (full) kernel, right-to-left.
+
+    Kernel: 3 5 *
+            2 4 5 4 2
+              2 3 2
+    Divided by 32.
+    """
+    h, w = buf.shape
+    # Row 0: 3 5 *
+    if x >= 1:
+        buf[y, x - 1] += err * (5.0 / 32.0)
+    if x >= 2:
+        buf[y, x - 2] += err * (3.0 / 32.0)
+    # Row 1: 2 4 5 4 2
+    if y + 1 < h:
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (2.0 / 32.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (4.0 / 32.0)
+        buf[y + 1, x] += err * (5.0 / 32.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (4.0 / 32.0)
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (2.0 / 32.0)
+    # Row 2: 2 3 2
+    if y + 2 < h:
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (2.0 / 32.0)
+        buf[y + 2, x] += err * (3.0 / 32.0)
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (2.0 / 32.0)
+
+
+def apply_sierra_lite_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Sierra Lite kernel, left-to-right.
+
+    Kernel:   * 2
+             1 1
+    Divided by 4.
+    """
+    h, w = buf.shape
+    if x + 1 < w:
+        buf[y, x + 1] += err * (2.0 / 4.0)
+    if y + 1 < h:
+        if x > 0:
+            buf[y + 1, x - 1] += err * (1.0 / 4.0)
+        buf[y + 1, x] += err * (1.0 / 4.0)
+
+
+def apply_sierra_lite_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Sierra Lite kernel, right-to-left.
+
+    Kernel: 2 *
+            1 1
+    Divided by 4.
+    """
+    h, w = buf.shape
+    if x > 0:
+        buf[y, x - 1] += err * (2.0 / 4.0)
+    if y + 1 < h:
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (1.0 / 4.0)
+        buf[y + 1, x] += err * (1.0 / 4.0)
+
+
+def our_method_dither_fs_sierra(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Sierra (full) dithering.
+
+    Like our standard method but alternates between Floyd-Steinberg and Sierra
+    kernels instead of FS and JJN.
+
+    Sierra has 10 coefficients (vs JJN's 12), similar complexity.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_sierra = (coord_hash & 1) == 1
+
+            if use_sierra:
+                if is_rtl:
+                    apply_sierra_rtl(buf, x, y, err)
+                else:
+                    apply_sierra_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_fs_sierra_lite(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Sierra-Lite dithering.
+
+    Like our standard method but alternates between Floyd-Steinberg and Sierra Lite
+    kernels instead of FS and JJN.
+
+    Sierra Lite is much simpler (only 3 coefficients vs JJN's 12).
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_sierra = (coord_hash & 1) == 1
+
+            if use_sierra:
+                if is_rtl:
+                    apply_sierra_lite_rtl(buf, x, y, err)
+                else:
+                    apply_sierra_lite_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_fs_stucki(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Stucki dithering.
+
+    Alternates between Floyd-Steinberg and Stucki kernels.
+    Stucki is similar to JJN (12 coefficients, 3 rows) but with different weights.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_stucki = (coord_hash & 1) == 1
+
+            if use_stucki:
+                if is_rtl:
+                    apply_stucki_rtl(buf, x, y, err)
+                else:
+                    apply_stucki_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_jjn_sierra(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed JJN/Sierra dithering.
+
+    Alternates between two large kernels (no Floyd-Steinberg).
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_sierra = (coord_hash & 1) == 1
+
+            if use_sierra:
+                if is_rtl:
+                    apply_sierra_rtl(buf, x, y, err)
+                else:
+                    apply_sierra_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_jjn_rtl(buf, x, y, err)
+                else:
+                    apply_jjn_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_jjn_stucki(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed JJN/Stucki dithering.
+
+    Alternates between two large kernels (no Floyd-Steinberg).
+    Both have 12 coefficients across 3 rows.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_stucki = (coord_hash & 1) == 1
+
+            if use_stucki:
+                if is_rtl:
+                    apply_stucki_rtl(buf, x, y, err)
+                else:
+                    apply_stucki_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_jjn_rtl(buf, x, y, err)
+                else:
+                    apply_jjn_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_stucki_sierra(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed Stucki/Sierra dithering.
+
+    Alternates between two large kernels (no Floyd-Steinberg).
+    Both have similar complexity (10-12 coefficients, 3 rows).
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_sierra = (coord_hash & 1) == 1
+
+            if use_sierra:
+                if is_rtl:
+                    apply_sierra_rtl(buf, x, y, err)
+                else:
+                    apply_sierra_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_stucki_rtl(buf, x, y, err)
+                else:
+                    apply_stucki_ltr(buf, x, y, err)
+
+    return output
+
+
 def our_method_dither_with_blue_noise_kernel(
     gray_level: float,
     width: int = 256,
