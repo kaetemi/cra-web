@@ -104,9 +104,8 @@ impl DitherMethod {
             DitherMethod::ZhouFangStandard => CSDitherMode::ZhouFangStandard,
             DitherMethod::ZhouFangSerpentine => CSDitherMode::ZhouFangSerpentine,
             DitherMethod::None => CSDitherMode::None,
-            // Wang hash variants map to the same CS modes (colorspace-aware doesn't use mixed hash anyway)
-            DitherMethod::BoonWangStandard => CSDitherMode::MixedStandard,
-            DitherMethod::BoonWangSerpentine => CSDitherMode::MixedSerpentine,
+            DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
+            DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,
         }
     }
 }
