@@ -48,3 +48,9 @@ Support re-using the palette of the input file as output palett, option PALETTE_
 Could be possible to re-dither pngquant outputs, but pngquant generates mid-cluster palettes, which are inherently gamut limiting
 --no-hull-tracing --hull-error-decay 0.95
 ^ this works as a workaround for now, but ideally we should generate a secondary concave hull to pre-limit the input image gamut to the generated palette
+
+---
+
+For the stochastic jinc resampling, check if we can use the /x (like the sinc falloff) itself as a warping function and use our blue noise to select the sampling set then warp it into the window and do just the wobbly
+
+---

@@ -554,7 +554,8 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
         our_method_dither, our_method_dither_with_blue_noise_kernel,
         our_method_dither_fs_sierra, our_method_dither_fs_sierra_lite,
         our_method_dither_fs_stucki, our_method_dither_stucki_sierra,
-        our_method_dither_jjn_stucki, our_method_dither_jjn_sierra
+        our_method_dither_jjn_stucki, our_method_dither_jjn_sierra,
+        our_method_dither_fs_symmetric24
     )
 
     size = 256
@@ -578,6 +579,10 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
         # FS/Sierra Lite alternation
         fs_sierra_lite = our_method_dither_fs_sierra_lite(float(gray_level), size, size, seed=0)
         images['FS/SierraLite'] = fs_sierra_lite.astype(np.float32)
+
+        # FS/Symmetric24 alternation
+        fs_sym24 = our_method_dither_fs_symmetric24(float(gray_level), size, size, seed=0)
+        images['FS/Sym24'] = fs_sym24.astype(np.float32)
 
         # Stucki/Sierra alternation (no FS)
         stucki_sierra = our_method_dither_stucki_sierra(float(gray_level), size, size, seed=0)
@@ -611,6 +616,7 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
             'FS/Stucki': np.sum(standard != fs_stucki) / (size * size) * 100,
             'FS/Sierra': np.sum(standard != fs_sierra) / (size * size) * 100,
             'FS/SierraLite': np.sum(standard != fs_sierra_lite) / (size * size) * 100,
+            'FS/Sym24': np.sum(standard != fs_sym24) / (size * size) * 100,
             'Stucki/Sierra': np.sum(standard != stucki_sierra) / (size * size) * 100,
             'JJN/Stucki': np.sum(standard != jjn_stucki) / (size * size) * 100,
             'JJN/Sierra': np.sum(standard != jjn_sierra) / (size * size) * 100,
