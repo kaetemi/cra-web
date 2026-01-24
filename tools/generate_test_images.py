@@ -68,11 +68,11 @@ def generate_pathological_grays(output_dir: Path):
 
 
 def generate_continuous_ramp(output_dir: Path):
-    """Generate continuous 0-255 gray ramp, 32px high, 1024px wide."""
-    print("Generating continuous ramp (32x1024)...")
+    """Generate continuous 0-255 gray ramp, 64px high, 4096px wide."""
+    print("Generating continuous ramp (64x4096)...")
 
-    height = 32
-    width = 1024
+    height = 64
+    width = 4096
 
     # Create horizontal gradient from 0 to 255
     ramp = np.linspace(0, 255, width, dtype=np.float32)
@@ -82,10 +82,10 @@ def generate_continuous_ramp(output_dir: Path):
 
 
 def generate_step_ramp(output_dir: Path):
-    """Generate step ramp jumping 32 values, 32px high, 1024px wide."""
-    print("Generating step ramp (32x1024, 32-value steps)...")
+    """Generate step ramp jumping 32 values, 64px high, 1024px wide."""
+    print("Generating step ramp (64x1024, 32-value steps)...")
 
-    height = 32
+    height = 64
     width = 1024
 
     # 1024px / 32 steps = 32px per step, values 0, 32, 64, 96, 128, 160, 192, 224
@@ -106,7 +106,7 @@ def generate_step_ramp(output_dir: Path):
     save_gray(arr, output_dir / "ramp_step_32.png")
 
     # Also generate a finer step ramp with 16-value jumps
-    print("Generating step ramp (32x1024, 16-value steps)...")
+    print("Generating step ramp (64x1024, 16-value steps)...")
     num_steps = 16
     step_width = width // num_steps
 
