@@ -539,10 +539,12 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
 def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
     """
-    Experimental: Compare standard dithering vs blue-noise kernel selection.
+    Experimental: Compare standard dithering vs blue-noise kernel selection at various recursion depths.
 
     Standard: hash(x,y) selects FS vs JJN kernel (white noise selection)
-    Blue-kernel: Pre-dithered 50% pattern selects kernel (blue noise selection)
+    Blue-kernel d=1: Pre-dithered 50% pattern (using hash) selects kernel
+    Blue-kernel d=2: Pre-dithered 50% pattern (using d=1) selects kernel
+    Blue-kernel d=3: Pre-dithered 50% pattern (using d=2) selects kernel
 
     Tests at multiple gray levels to see if blue noise kernel selection improves results.
     """
@@ -558,11 +560,14 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
 
         # Standard method (hash-based kernel selection)
         standard = our_method_dither(float(gray_level), size, size, seed=0)
-        images[f'Standard (hash)'] = standard.astype(np.float32)
+        images['Standard (hash)'] = standard.astype(np.float32)
 
-        # Blue kernel method (blue noise kernel selection)
-        blue_kernel = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0)
-        images[f'Blue Kernel'] = blue_kernel.astype(np.float32)
+        # Blue kernel at various recursion depths
+        for depth in [1, 2, 3]:
+            blue_kernel = our_method_dither_with_blue_noise_kernel(
+                float(gray_level), size, size, seed=0, recursion_depth=depth
+            )
+            images[f'Blue kernel d={depth}'] = blue_kernel.astype(np.float32)
 
         # Blue noise reference (thresholded)
         blue_noise_path = base_dir / 'blue_noise_256.png'
@@ -577,10 +582,21 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
         print(f"  {output_path.name}")
 
         # Print stats
-        std_white = np.mean(standard == 255) * 100
-        blue_white = np.mean(blue_kernel == 255) * 100
-        diff_pct = np.sum(standard != blue_kernel) / (size * size) * 100
-        print(f"    Standard white: {std_white:.2f}%, Blue kernel white: {blue_white:.2f}%, Pixel diff: {diff_pct:.1f}%")
+        print(f"    White pixels: Standard={np.mean(standard == 255) * 100:.2f}%", end="")
+        for depth in [1, 2, 3]:
+            img = images[f'Blue kernel d={depth}']
+            print(f", d={depth}={np.mean(img == 255) * 100:.2f}%", end="")
+        print()
+
+        # Pixel differences between consecutive depths
+        prev_img = standard
+        prev_name = "hash"
+        for depth in [1, 2, 3]:
+            curr_img = images[f'Blue kernel d={depth}']
+            diff_pct = np.sum(prev_img != curr_img) / (size * size) * 100
+            print(f"    {prev_name} vs d={depth}: {diff_pct:.1f}% diff")
+            prev_img = curr_img
+            prev_name = f"d={depth}"
 
 
 def analyze_sanity_check(base_dir: Path, output_dir: Path):
@@ -630,9 +646,13 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
         py_result = our_method_dither(float(gray_level), size, size, seed=0)
         images['Python (hash)'] = py_result.astype(np.float32)
 
-        # 5. Python blue-kernel (experimental)
-        py_blue_kernel = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0)
-        images['Python (blue kernel)'] = py_blue_kernel.astype(np.float32)
+        # 5. Python blue-kernel depth=1 (experimental)
+        py_blue_d1 = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0, recursion_depth=1)
+        images['Blue kernel d=1'] = py_blue_d1.astype(np.float32)
+
+        # 6. Python blue-kernel depth=2 (experimental)
+        py_blue_d2 = our_method_dither_with_blue_noise_kernel(float(gray_level), size, size, seed=0, recursion_depth=2)
+        images['Blue kernel d=2'] = py_blue_d2.astype(np.float32)
     except ImportError as e:
         print(f"  Warning: Could not import our_method_dither: {e}")
 
@@ -654,11 +674,18 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
         match_pct = np.mean(cra_img == py_hash) * 100
         print(f"  CRA vs Python (hash) pixel match: {match_pct:.2f}%")
 
-    if 'Python (hash)' in images and 'Python (blue kernel)' in images:
+    # Compare recursion depths
+    if 'Python (hash)' in images and 'Blue kernel d=1' in images:
         py_hash = images['Python (hash)']
-        py_blue = images['Python (blue kernel)']
-        diff_pct = np.sum(py_hash != py_blue) / py_hash.size * 100
-        print(f"  Python (hash) vs (blue kernel) pixel diff: {diff_pct:.1f}%")
+        py_d1 = images['Blue kernel d=1']
+        diff_pct = np.sum(py_hash != py_d1) / py_hash.size * 100
+        print(f"  Python (hash) vs d=1 pixel diff: {diff_pct:.1f}%")
+
+    if 'Blue kernel d=1' in images and 'Blue kernel d=2' in images:
+        py_d1 = images['Blue kernel d=1']
+        py_d2 = images['Blue kernel d=2']
+        diff_pct = np.sum(py_d1 != py_d2) / py_d1.size * 100
+        print(f"  d=1 vs d=2 pixel diff: {diff_pct:.1f}%")
 
     # White pixel percentages
     print("  White pixel percentages:")

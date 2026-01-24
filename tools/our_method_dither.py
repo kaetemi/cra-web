@@ -131,7 +131,8 @@ def our_method_dither_with_blue_noise_kernel(
     width: int = 256,
     height: int = 256,
     seed: int = 0,
-    kernel_pattern: np.ndarray = None
+    kernel_pattern: np.ndarray = None,
+    recursion_depth: int = 1
 ) -> np.ndarray:
     """
     Experimental: Use a pre-computed blue noise pattern for kernel selection.
@@ -145,7 +146,11 @@ def our_method_dither_with_blue_noise_kernel(
         height: Output image height
         seed: Random seed for generating kernel pattern if not provided
         kernel_pattern: Pre-computed binary pattern for kernel selection.
-                       If None, generates one using our_method_dither at 50%.
+                       If None, generates one recursively.
+        recursion_depth: How many levels of blue noise kernel to use.
+                        1 = use standard dither for kernel pattern
+                        2 = use level-1 blue kernel dither for kernel pattern
+                        etc.
 
     Returns:
         np.ndarray: 1-bit dithered image (values 0 or 255)
@@ -154,7 +159,15 @@ def our_method_dither_with_blue_noise_kernel(
     if kernel_pattern is None:
         # Use a different seed for kernel pattern to avoid correlation
         kernel_seed = seed ^ 0xDEADBEEF
-        kernel_pattern = our_method_dither(127.5, width, height, kernel_seed)
+        if recursion_depth <= 1:
+            # Base case: use standard hash-based dither for kernel pattern
+            kernel_pattern = our_method_dither(127.5, width, height, kernel_seed)
+        else:
+            # Recursive case: use blue-kernel dither at lower depth
+            kernel_pattern = our_method_dither_with_blue_noise_kernel(
+                127.5, width, height, kernel_seed,
+                recursion_depth=recursion_depth - 1
+            )
 
     # Initialize buffer with uniform gray level
     buf = np.full((height, width), gray_level, dtype=np.float32)
