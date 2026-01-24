@@ -110,20 +110,20 @@ def plot_analysis(img: np.ndarray, title: str, output_path: Path):
 
     # Panel 3: Segmented radial power
     freqs, h, d, v = compute_segmented_radial_power(img)
-    # Normalize for comparison
-    max_power = max(h.max(), d.max(), v.max())
-    if max_power > 0:
-        h, d, v = h / max_power, d / max_power, v / max_power
 
-    axes[2].plot(freqs, h, 'r-', label='Horizontal (0°)', alpha=0.8)
-    axes[2].plot(freqs, d, 'g-', label='Diagonal (45°)', alpha=0.8)
-    axes[2].plot(freqs, v, 'b-', label='Vertical (90°)', alpha=0.8)
-    axes[2].set_xlabel('Frequency (pixels)')
-    axes[2].set_ylabel('Normalized Power')
+    # Convert to log scale (dB) for better visualization
+    h_db = 10 * np.log10(h + 1e-10)
+    d_db = 10 * np.log10(d + 1e-10)
+    v_db = 10 * np.log10(v + 1e-10)
+
+    axes[2].plot(freqs, h_db, 'r-', label='Horizontal (0°)', alpha=0.8)
+    axes[2].plot(freqs, d_db, 'g-', label='Diagonal (45°)', alpha=0.8)
+    axes[2].plot(freqs, v_db, 'b-', label='Vertical (90°)', alpha=0.8)
+    axes[2].set_xlabel('Frequency (pixels⁻¹)')
+    axes[2].set_ylabel('Power (dB)')
     axes[2].set_title('Segmented Radial Power')
     axes[2].legend(loc='upper right')
     axes[2].set_xlim(0, len(freqs))
-    axes[2].set_ylim(0, 1.1)
     axes[2].grid(True, alpha=0.3)
 
     fig.suptitle(title, fontsize=14, fontweight='bold')
@@ -151,20 +151,21 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
         axes[1, col].imshow(spectrum, cmap='gray')
         axes[1, col].axis('off')
 
-        # Row 3: Radial power curves
+        # Row 3: Radial power curves (log scale)
         freqs, h, d, v = compute_segmented_radial_power(img)
-        max_power = max(h.max(), d.max(), v.max())
-        if max_power > 0:
-            h, d, v = h / max_power, d / max_power, v / max_power
 
-        axes[2, col].plot(freqs, h, 'r-', label='H', alpha=0.8, linewidth=1)
-        axes[2, col].plot(freqs, d, 'g-', label='D', alpha=0.8, linewidth=1)
-        axes[2, col].plot(freqs, v, 'b-', label='V', alpha=0.8, linewidth=1)
+        # Convert to log scale (dB)
+        h_db = 10 * np.log10(h + 1e-10)
+        d_db = 10 * np.log10(d + 1e-10)
+        v_db = 10 * np.log10(v + 1e-10)
+
+        axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
         axes[2, col].set_xlim(0, len(freqs))
-        axes[2, col].set_ylim(0, 1.1)
         axes[2, col].grid(True, alpha=0.3)
         if col == 0:
-            axes[2, col].set_ylabel('Power')
+            axes[2, col].set_ylabel('Power (dB)')
         if col == n_methods - 1:
             axes[2, col].legend(loc='upper right', fontsize=8)
 
