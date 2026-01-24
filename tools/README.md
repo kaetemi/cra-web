@@ -83,7 +83,28 @@ python tools/analyze_dither.py --serpentine   # All images, serpentine modes
 python tools/analyze_dither.py --compare      # All images, all modes
 python tools/analyze_dither.py --hash         # Hash function comparison (lowbias32 vs wang)
 python tools/analyze_dither.py --rng          # RNG noise spectral analysis
+python tools/analyze_dither.py --sanity       # Sanity check: coin flip vs blue noise vs CRA vs Python
 python tools/analyze_dither.py -i path/to/image.png  # Single image analysis
+```
+
+### 5. `our_method_dither.py`
+
+Standalone Python replication of "Our Method" for testing/hacking purposes.
+
+Generates 1-bit dithered images from arbitrary gray levels (including fractional values like 127.5).
+
+**Features:**
+- Mixed FS/JJN kernel selection using lowbias32 hash
+- Serpentine scanning
+- Accepts any gray level 0-255
+
+**Note:** Simplified implementation without edge seeding. Produces equivalent spectral characteristics but not exact pixel match with CRA tool.
+
+```bash
+source /root/venv/bin/activate
+python tools/our_method_dither.py 127.5                    # 50% gray
+python tools/our_method_dither.py 64 -o my_output.png      # 25% gray, custom output
+python tools/our_method_dither.py 127.5 --size 512         # Larger image
 ```
 
 ## Full Regeneration Sequence

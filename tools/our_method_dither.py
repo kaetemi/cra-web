@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+"""
+Standalone Python replication of "Our Method" (mixed FS/JJN dithering with lowbias32).
+
+For testing/hacking purposes - generates 1-bit dithered images from arbitrary gray levels.
+
+Usage:
+    python our_method_dither.py 127.5                    # 50% gray, default output
+    python our_method_dither.py 64 -o my_output.png      # 25% gray, custom output
+    python our_method_dither.py 127.5 --size 512         # Larger image
+
+Note: This is a simplified implementation that doesn't include edge seeding.
+The CRA Rust implementation has edge seeding (duplicating edge pixels into buffer padding)
+which normalizes edge behavior. This causes exact pixel-level differences but the
+spectral characteristics and density are equivalent.
+"""
+
+import numpy as np
+from PIL import Image
+from pathlib import Path
+import argparse
+
+
+def lowbias32(x: np.uint32) -> np.uint32:
+    """Lowbias32 hash - improved version with bias 0.107.
+
+    Reference: https://github.com/skeeto/hash-prospector/issues/19
+    Constants: [16 21f0aaad 15 735a2d97 15]
+    """
+    x = np.uint32(x)
+    x ^= x >> np.uint32(16)
+    x = np.uint32(np.uint64(x) * np.uint64(0x21f0aaad) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(15)
+    x = np.uint32(np.uint64(x) * np.uint64(0x735a2d97) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(15)
+    return x
+
+
+def apply_fs_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Floyd-Steinberg kernel, left-to-right."""
+    h, w = buf.shape
+    if x + 1 < w:
+        buf[y, x + 1] += err * (7.0 / 16.0)
+    if y + 1 < h:
+        if x > 0:
+            buf[y + 1, x - 1] += err * (3.0 / 16.0)
+        buf[y + 1, x] += err * (5.0 / 16.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (1.0 / 16.0)
+
+
+def apply_fs_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Floyd-Steinberg kernel, right-to-left."""
+    h, w = buf.shape
+    if x > 0:
+        buf[y, x - 1] += err * (7.0 / 16.0)
+    if y + 1 < h:
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (3.0 / 16.0)
+        buf[y + 1, x] += err * (5.0 / 16.0)
+        if x > 0:
+            buf[y + 1, x - 1] += err * (1.0 / 16.0)
+
+
+def apply_jjn_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Jarvis-Judice-Ninke kernel, left-to-right."""
+    h, w = buf.shape
+    # Row 0: * 7 5
+    if x + 1 < w:
+        buf[y, x + 1] += err * (7.0 / 48.0)
+    if x + 2 < w:
+        buf[y, x + 2] += err * (5.0 / 48.0)
+    # Row 1: 3 5 7 5 3
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (3.0 / 48.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (5.0 / 48.0)
+        buf[y + 1, x] += err * (7.0 / 48.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (5.0 / 48.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (3.0 / 48.0)
+    # Row 2: 1 3 5 3 1
+    if y + 2 < h:
+        if x >= 2:
+            buf[y + 2, x - 2] += err * (1.0 / 48.0)
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (3.0 / 48.0)
+        buf[y + 2, x] += err * (5.0 / 48.0)
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (3.0 / 48.0)
+        if x + 2 < w:
+            buf[y + 2, x + 2] += err * (1.0 / 48.0)
+
+
+def apply_jjn_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Jarvis-Judice-Ninke kernel, right-to-left."""
+    h, w = buf.shape
+    # Row 0: 5 7 *
+    if x >= 1:
+        buf[y, x - 1] += err * (7.0 / 48.0)
+    if x >= 2:
+        buf[y, x - 2] += err * (5.0 / 48.0)
+    # Row 1: 3 5 7 5 3
+    if y + 1 < h:
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (3.0 / 48.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (5.0 / 48.0)
+        buf[y + 1, x] += err * (7.0 / 48.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (5.0 / 48.0)
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (3.0 / 48.0)
+    # Row 2: 1 3 5 3 1
+    if y + 2 < h:
+        if x + 2 < w:
+            buf[y + 2, x + 2] += err * (1.0 / 48.0)
+        if x + 1 < w:
+            buf[y + 2, x + 1] += err * (3.0 / 48.0)
+        buf[y + 2, x] += err * (5.0 / 48.0)
+        if x >= 1:
+            buf[y + 2, x - 1] += err * (3.0 / 48.0)
+        if x >= 2:
+            buf[y + 2, x - 2] += err * (1.0 / 48.0)
+
+
+def our_method_dither(gray_level: float, width: int = 256, height: int = 256, seed: int = 0) -> np.ndarray:
+    """
+    Apply 'Our Method' dithering to a uniform gray level.
+
+    Algorithm:
+    - Mixed FS/JJN kernel selection per-pixel using lowbias32 hash
+    - Serpentine scanning (alternating direction each row)
+    - 1-bit quantization (0 or 255)
+
+    Args:
+        gray_level: Input gray value (0-255, can be fractional like 127.5)
+        width: Output image width
+        height: Output image height
+        seed: Random seed for hash
+
+    Returns:
+        np.ndarray: 1-bit dithered image (values 0 or 255)
+    """
+    # Initialize buffer with uniform gray level
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+
+    # Hash the seed
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    # Output array
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        # Serpentine: alternate direction each row
+        if y % 2 == 0:
+            # Left-to-right
+            x_range = range(width)
+            is_rtl = False
+        else:
+            # Right-to-left
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+
+            # 1-bit quantization: threshold at 127.5
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+
+            # Compute error
+            err = old_val - new_val
+
+            # Hash coordinates to select kernel
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            # Apply kernel
+            if use_jjn:
+                if is_rtl:
+                    apply_jjn_rtl(buf, x, y, err)
+                else:
+                    apply_jjn_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate 1-bit dithered image using Our Method (mixed FS/JJN with lowbias32)"
+    )
+    parser.add_argument("gray_level", type=float, help="Gray level (0-255, e.g., 127.5 for 50%%)")
+    parser.add_argument("-o", "--output", type=str, help="Output path (default: our_method_{level}.png)")
+    parser.add_argument("--size", type=int, default=256, help="Image size (default: 256)")
+    parser.add_argument("--seed", type=int, default=0, help="Random seed (default: 0)")
+
+    args = parser.parse_args()
+
+    output_path = args.output or f"our_method_{args.gray_level:.1f}.png"
+
+    print(f"Generating {args.size}x{args.size} dithered image at gray level {args.gray_level}...")
+
+    result = our_method_dither(args.gray_level, args.size, args.size, args.seed)
+
+    Image.fromarray(result, mode='L').save(output_path)
+    print(f"Saved to {output_path}")
+
+    # Print statistics
+    white_pct = np.mean(result == 255) * 100
+    print(f"White pixels: {white_pct:.2f}% (expected: {args.gray_level / 255 * 100:.2f}%)")
+
+
+if __name__ == "__main__":
+    main()
