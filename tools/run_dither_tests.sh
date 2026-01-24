@@ -8,13 +8,18 @@ CRA="/root/cra-web/port/target/release/cra"
 INPUT_DIR="/root/cra-web/tools/test_images"
 OUTPUT_BASE="/root/cra-web/tools/test_images/dithered"
 
-# All serpentine dither modes (plus none for comparison)
+# All dither modes: standard and serpentine variants (plus none for comparison)
 DITHER_MODES=(
     "none"
+    "fs-standard"
     "fs-serpentine"
+    "jjn-standard"
     "jjn-serpentine"
+    "mixed-standard"
     "mixed-serpentine"
+    "ostro-standard"
     "ostro-serpentine"
+    "zhou-fang-standard"
     "zhou-fang-serpentine"
 )
 
