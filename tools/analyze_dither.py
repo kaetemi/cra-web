@@ -326,12 +326,84 @@ def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
     print(f"  {output_path.name}")
 
 
+def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_from_scale: set):
+    """Generate comparison figure for RNG methods with fixed scale for good hashes.
+
+    Args:
+        images: dict of method_name -> image array
+        title: plot title
+        output_path: where to save
+        excluded_from_scale: set of method names that should use auto-scale (e.g., Wang, IQ)
+    """
+    n_methods = len(images)
+    fig, axes = plt.subplots(3, n_methods, figsize=(4 * n_methods, 12))
+
+    if n_methods == 1:
+        axes = axes.reshape(3, 1)
+
+    # Compute all power spectra
+    all_power_db = {}
+    for method_name, img in images.items():
+        freqs, h, d, v = compute_segmented_radial_power(img)
+        h_db = 10 * np.log10(h + 1e-10)
+        d_db = 10 * np.log10(d + 1e-10)
+        v_db = 10 * np.log10(v + 1e-10)
+        all_power_db[method_name] = (freqs, h_db, d_db, v_db)
+
+    # Fixed scale for good hashes (75-100 dB range)
+    fixed_min_db = 75
+    fixed_max_db = 100
+
+    for col, (method_name, img) in enumerate(images.items()):
+        # Row 1: Noise image
+        axes[0, col].imshow(img, cmap='gray', vmin=0, vmax=255)
+        axes[0, col].set_title(method_name, fontsize=10)
+        axes[0, col].axis('off')
+
+        # Row 2: FFT spectrum
+        spectrum = compute_power_spectrum(img)
+        axes[1, col].imshow(spectrum, cmap='gray')
+        axes[1, col].axis('off')
+
+        # Row 3: Radial power curves (log scale)
+        freqs, h_db, d_db, v_db = all_power_db[method_name]
+
+        axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
+        axes[2, col].set_xlim(0, 0.5)
+        axes[2, col].set_xlabel('cycles/px')
+        axes[2, col].grid(True, alpha=0.3)
+
+        # Use fixed scale unless excluded
+        if method_name not in excluded_from_scale:
+            axes[2, col].set_ylim(fixed_min_db, fixed_max_db)
+
+        if col == 0:
+            axes[2, col].set_ylabel('Power (dB)')
+        if col == n_methods - 1:
+            axes[2, col].legend(loc='upper right', fontsize=8)
+
+    # Row labels
+    fig.text(0.02, 0.83, 'Halftone', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.02, 0.5, 'Spectrum', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.02, 0.17, 'Radial', va='center', rotation='vertical', fontsize=12)
+
+    fig.suptitle(title, fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0.03, 0, 1, 0.96])
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+
+
 def analyze_rng_noise(base_dir: Path, output_dir: Path):
     """Compare RNG noise generators."""
     rng_dir = base_dir / "rng_noise"
     if not rng_dir.exists():
         print(f"RNG noise directory not found: {rng_dir}")
         return
+
+    # Methods to exclude from fixed 75-100 scale (they have different characteristics)
+    excluded_from_scale = {'Wang', 'IQ Int1', 'IQ Int3'}
 
     # GPU-friendly coordinate-based methods
     gpu_coord_methods = [
@@ -353,7 +425,7 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
     if images:
         output_path = output_dir / "rng_noise_gpu_coord.png"
-        plot_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path)
+        plot_rng_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path, excluded_from_scale)
         print(f"  {output_path.name}")
 
     # Other coordinate-based methods
@@ -397,7 +469,7 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
     if images:
         output_path = output_dir / "rng_noise_gpu_seq.png"
-        plot_comparison(images, "GPU-Friendly RNG (Sequential)", output_path)
+        plot_rng_comparison(images, "GPU-Friendly RNG (Sequential)", output_path, excluded_from_scale)
         print(f"  {output_path.name}")
 
 

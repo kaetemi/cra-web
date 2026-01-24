@@ -93,12 +93,12 @@ def lowbias32_old(seed: np.uint32) -> np.uint32:
 
 
 def lowbias32(seed: np.uint32) -> np.uint32:
-    """Improved lowbias32 (bias 0.107) - better spectral properties."""
+    """Improved lowbias32 (bias 0.108) - better spectral properties."""
     seed = np.uint32(seed)
     seed ^= seed >> np.uint32(16)
     seed = seed * np.uint32(0x21f0aaad)
     seed ^= seed >> np.uint32(15)
-    seed = seed * np.uint32(0x735a2d97)
+    seed = seed * np.uint32(0xd35a2d97)
     seed ^= seed >> np.uint32(15)
     return seed
 
