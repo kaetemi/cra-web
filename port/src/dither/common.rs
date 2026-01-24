@@ -246,14 +246,14 @@ pub fn wang_hash(mut x: u32) -> u32 {
 
 /// Lowbias32 hash - optimized for low bias, excellent for coordinate-based hashing.
 /// Better spectral properties than wang_hash for spatial randomization.
-/// This is the improved version with bias 0.108 (vs 0.174 for the original).
+/// This is the improved version with bias 0.107 (vs 0.174 for the original).
 /// Reference: https://github.com/skeeto/hash-prospector/issues/19
 #[inline]
 pub fn lowbias32(mut x: u32) -> u32 {
     x ^= x >> 16;
     x = x.wrapping_mul(0x21f0aaad);
     x ^= x >> 15;
-    x = x.wrapping_mul(0xd35a2d97);
+    x = x.wrapping_mul(0x735a2d97);
     x ^= x >> 15;
     x
 }
