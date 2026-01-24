@@ -555,7 +555,8 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
         our_method_dither_fs_sierra, our_method_dither_fs_sierra_lite,
         our_method_dither_fs_stucki, our_method_dither_stucki_sierra,
         our_method_dither_jjn_stucki, our_method_dither_jjn_sierra,
-        our_method_dither_fs_symmetric24
+        our_method_dither_fs_symmetric24, our_method_dither_fs_asym24,
+        our_method_dither_fs_wide20, our_method_dither_fs_wide32
     )
 
     size = 256
@@ -583,6 +584,18 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
         # FS/Symmetric24 alternation
         fs_sym24 = our_method_dither_fs_symmetric24(float(gray_level), size, size, seed=0)
         images['FS/Sym24'] = fs_sym24.astype(np.float32)
+
+        # FS/Asym24 alternation
+        fs_asym24 = our_method_dither_fs_asym24(float(gray_level), size, size, seed=0)
+        images['FS/Asym24'] = fs_asym24.astype(np.float32)
+
+        # FS/Wide20 alternation
+        fs_wide20 = our_method_dither_fs_wide20(float(gray_level), size, size, seed=0)
+        images['FS/Wide20'] = fs_wide20.astype(np.float32)
+
+        # FS/Wide32 alternation
+        fs_wide32 = our_method_dither_fs_wide32(float(gray_level), size, size, seed=0)
+        images['FS/Wide32'] = fs_wide32.astype(np.float32)
 
         # Stucki/Sierra alternation (no FS)
         stucki_sierra = our_method_dither_stucki_sierra(float(gray_level), size, size, seed=0)
@@ -617,6 +630,7 @@ def analyze_blue_kernel_experiment(base_dir: Path, output_dir: Path):
             'FS/Sierra': np.sum(standard != fs_sierra) / (size * size) * 100,
             'FS/SierraLite': np.sum(standard != fs_sierra_lite) / (size * size) * 100,
             'FS/Sym24': np.sum(standard != fs_sym24) / (size * size) * 100,
+            'FS/Asym24': np.sum(standard != fs_asym24) / (size * size) * 100,
             'Stucki/Sierra': np.sum(standard != stucki_sierra) / (size * size) * 100,
             'JJN/Stucki': np.sum(standard != jjn_stucki) / (size * size) * 100,
             'JJN/Sierra': np.sum(standard != jjn_sierra) / (size * size) * 100,

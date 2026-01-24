@@ -126,6 +126,170 @@ def apply_jjn_rtl(buf: np.ndarray, x: int, y: int, err: float):
             buf[y + 2, x - 2] += err * (1.0 / 48.0)
 
 
+def apply_wide20_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Wide 20 kernel, left-to-right.
+
+    Kernel:         * 7
+            1 3 5 3 1
+    Positions: row 0: +1
+               row 1: -2, -1, 0, +1, +2
+    Divided by 20.
+    """
+    h, w = buf.shape
+    # Row 0: * 7
+    if x + 1 < w:
+        buf[y, x + 1] += err * (7.0 / 20.0)
+    # Row 1: 1 3 5 3 1 at positions -2, -1, 0, +1, +2
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (1.0 / 20.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (3.0 / 20.0)
+        buf[y + 1, x] += err * (5.0 / 20.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (3.0 / 20.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (1.0 / 20.0)
+
+
+def apply_wide20_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Wide 20 kernel, right-to-left.
+
+    Kernel: 7 *
+            1 3 5 3 1
+    Positions: row 0: -1
+               row 1: -2, -1, 0, +1, +2
+    Divided by 20.
+    """
+    h, w = buf.shape
+    # Row 0: 7 *
+    if x >= 1:
+        buf[y, x - 1] += err * (7.0 / 20.0)
+    # Row 1: 1 3 5 3 1 at positions -2, -1, 0, +1, +2
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (1.0 / 20.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (3.0 / 20.0)
+        buf[y + 1, x] += err * (5.0 / 20.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (3.0 / 20.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (1.0 / 20.0)
+
+
+def apply_wide32_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Wide 32 kernel, left-to-right.
+
+    Kernel:           * 7 3
+            1 3 5 7 5 1
+    Positions: row 0: +1, +2
+               row 1: -3, -2, -1, 0, +1, +2
+    Divided by 32.
+    """
+    h, w = buf.shape
+    # Row 0: * 7 3
+    if x + 1 < w:
+        buf[y, x + 1] += err * (7.0 / 32.0)
+    if x + 2 < w:
+        buf[y, x + 2] += err * (3.0 / 32.0)
+    # Row 1: 1 3 5 7 5 1 at positions -3, -2, -1, 0, +1, +2
+    if y + 1 < h:
+        if x >= 3:
+            buf[y + 1, x - 3] += err * (1.0 / 32.0)
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (3.0 / 32.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (5.0 / 32.0)
+        buf[y + 1, x] += err * (7.0 / 32.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (5.0 / 32.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (1.0 / 32.0)
+
+
+def apply_wide32_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Wide 32 kernel, right-to-left.
+
+    Kernel: 3 7 *
+            1 5 7 5 3 1
+    Positions: row 0: -2, -1
+               row 1: -2, -1, 0, +1, +2, +3
+    Divided by 32.
+    """
+    h, w = buf.shape
+    # Row 0: 3 7 *
+    if x >= 1:
+        buf[y, x - 1] += err * (7.0 / 32.0)
+    if x >= 2:
+        buf[y, x - 2] += err * (3.0 / 32.0)
+    # Row 1: 1 5 7 5 3 1 at positions -2, -1, 0, +1, +2, +3
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (1.0 / 32.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (5.0 / 32.0)
+        buf[y + 1, x] += err * (7.0 / 32.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (5.0 / 32.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (3.0 / 32.0)
+        if x + 3 < w:
+            buf[y + 1, x + 3] += err * (1.0 / 32.0)
+
+
+def apply_asym24_ltr(buf: np.ndarray, x: int, y: int, err: float):
+    """Asymmetric 24 kernel, left-to-right.
+
+    Kernel:       * 7 5
+            1 3 5 3
+    Positions: row 0: +1, +2
+               row 1: -2, -1, 0, +1
+    Divided by 24.
+    """
+    h, w = buf.shape
+    # Row 0: * 7 5
+    if x + 1 < w:
+        buf[y, x + 1] += err * (7.0 / 24.0)
+    if x + 2 < w:
+        buf[y, x + 2] += err * (5.0 / 24.0)
+    # Row 1: 1 3 5 3 at positions -2, -1, 0, +1
+    if y + 1 < h:
+        if x >= 2:
+            buf[y + 1, x - 2] += err * (1.0 / 24.0)
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (3.0 / 24.0)
+        buf[y + 1, x] += err * (5.0 / 24.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (3.0 / 24.0)
+
+
+def apply_asym24_rtl(buf: np.ndarray, x: int, y: int, err: float):
+    """Asymmetric 24 kernel, right-to-left.
+
+    Kernel: 5 7 *
+            3 5 3 1
+    Positions: row 0: -1, -2
+               row 1: -1, 0, +1, +2
+    Divided by 24.
+    """
+    h, w = buf.shape
+    # Row 0: 5 7 *
+    if x >= 1:
+        buf[y, x - 1] += err * (7.0 / 24.0)
+    if x >= 2:
+        buf[y, x - 2] += err * (5.0 / 24.0)
+    # Row 1: 3 5 3 1 at positions -1, 0, +1, +2
+    if y + 1 < h:
+        if x >= 1:
+            buf[y + 1, x - 1] += err * (3.0 / 24.0)
+        buf[y + 1, x] += err * (5.0 / 24.0)
+        if x + 1 < w:
+            buf[y + 1, x + 1] += err * (3.0 / 24.0)
+        if x + 2 < w:
+            buf[y + 1, x + 2] += err * (1.0 / 24.0)
+
+
 def apply_symmetric24_ltr(buf: np.ndarray, x: int, y: int, err: float):
     """Symmetric 24 kernel, left-to-right.
 
@@ -499,6 +663,53 @@ def our_method_dither_fs_stucki(
     return output
 
 
+def our_method_dither_fs_asym24(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Asym24 dithering.
+
+    Alternates between Floyd-Steinberg (4 coeff, 1 row) and
+    Asym24 (6 coeff, 2 rows: * 7 5 / 1 3 5 3) kernels.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_asym24 = (coord_hash & 1) == 1
+
+            if use_asym24:
+                if is_rtl:
+                    apply_asym24_rtl(buf, x, y, err)
+                else:
+                    apply_asym24_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
 def our_method_dither_fs_symmetric24(
     gray_level: float,
     width: int = 256,
@@ -537,6 +748,100 @@ def our_method_dither_fs_symmetric24(
                     apply_symmetric24_rtl(buf, x, y, err)
                 else:
                     apply_symmetric24_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_fs_wide20(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Wide20 dithering.
+
+    Alternates between Floyd-Steinberg (4 coeff, 1 row) and
+    Wide20 (6 coeff, 2 rows: * 7 / 1 3 5 3 1) kernels.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_wide20 = (coord_hash & 1) == 1
+
+            if use_wide20:
+                if is_rtl:
+                    apply_wide20_rtl(buf, x, y, err)
+                else:
+                    apply_wide20_ltr(buf, x, y, err)
+            else:
+                if is_rtl:
+                    apply_fs_rtl(buf, x, y, err)
+                else:
+                    apply_fs_ltr(buf, x, y, err)
+
+    return output
+
+
+def our_method_dither_fs_wide32(
+    gray_level: float,
+    width: int = 256,
+    height: int = 256,
+    seed: int = 0
+) -> np.ndarray:
+    """
+    Experimental: Mixed FS/Wide32 dithering.
+
+    Alternates between Floyd-Steinberg (4 coeff, 1 row) and
+    Wide32 (8 coeff, 2 rows: * 7 3 / 1 3 5 7 5 1) kernels.
+    """
+    buf = np.full((height, width), gray_level, dtype=np.float32)
+    hashed_seed = lowbias32(np.uint32(seed))
+    output = np.zeros((height, width), dtype=np.uint8)
+
+    for y in range(height):
+        if y % 2 == 0:
+            x_range = range(width)
+            is_rtl = False
+        else:
+            x_range = range(width - 1, -1, -1)
+            is_rtl = True
+
+        for x in x_range:
+            old_val = buf[y, x]
+            new_val = 255.0 if old_val >= 127.5 else 0.0
+            output[y, x] = int(new_val)
+            err = old_val - new_val
+
+            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            use_wide32 = (coord_hash & 1) == 1
+
+            if use_wide32:
+                if is_rtl:
+                    apply_wide32_rtl(buf, x, y, err)
+                else:
+                    apply_wide32_ltr(buf, x, y, err)
             else:
                 if is_rtl:
                     apply_fs_rtl(buf, x, y, err)
