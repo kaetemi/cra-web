@@ -814,8 +814,8 @@
                     <option value="1">Floyd-Steinberg (Serpentine)</option>
                     <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                    <option value="4" selected>* Our method (Standard)</option>
-                    <option value="5">Our method (Serpentine)</option>
+                    <option value="4">Our method (Standard)</option>
+                    <option value="5" selected>* Our method (Serpentine)</option>
                     <option value="6">Our method (Random Direction)</option>
                     <option value="8">Ostromoukhov (Standard)</option>
                     <option value="9">Ostromoukhov (Serpentine)</option>
@@ -833,8 +833,8 @@
                     <option value="1">Floyd-Steinberg (Serpentine)</option>
                     <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                    <option value="4">* Our method (Standard)</option>
-                    <option value="5">Our method (Serpentine)</option>
+                    <option value="4">Our method (Standard)</option>
+                    <option value="5">* Our method (Serpentine)</option>
                     <option value="6">Our method (Random Direction)</option>
                     <option value="8">Ostromoukhov (Standard)</option>
                     <option value="9">Ostromoukhov (Serpentine)</option>
@@ -1657,8 +1657,8 @@
                 }
             }
 
-            // Add dither mode (only if not default mixed-standard)
-            if (mode !== 4) {
+            // Add dither mode (only if not default mixed-serpentine)
+            if (mode !== 5) {
                 cmd += ` --output-dither ${modeMap[mode]}`;
             }
 

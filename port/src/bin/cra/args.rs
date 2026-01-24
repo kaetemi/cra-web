@@ -476,7 +476,7 @@ pub struct Args {
     pub safetensors_no_alpha: bool,
 
     /// Dithering method for safetensors FP16/BF16 output quantization (FP32 ignores this)
-    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonSerpentine)]
     pub safetensors_dither: DitherMethod,
 
     /// Perceptual space for safetensors dithering distance metric
@@ -524,7 +524,7 @@ pub struct Args {
     pub histogram_mode: HistogramMode,
 
     /// Dithering method for final output quantization
-    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonSerpentine)]
     pub output_dither: DitherMethod,
 
     /// Dithering method for alpha channel output quantization (defaults to same as --output-dither)
@@ -533,7 +533,7 @@ pub struct Args {
     pub output_alpha_dither: Option<DitherMethod>,
 
     /// Dithering method for histogram processing (only used with --histogram-mode=binned)
-    #[arg(long, value_enum, default_value_t = DitherMethod::BoonStandard)]
+    #[arg(long, value_enum, default_value_t = DitherMethod::BoonSerpentine)]
     pub histogram_dither: DitherMethod,
 
     /// Disable colorspace-aware dithering for histogram quantization (use per-channel instead)

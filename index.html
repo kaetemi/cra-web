@@ -516,12 +516,12 @@
         <div class="implementation-section" id="histogram-dither-section">
             <label for="histogram-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Histogram Dithering:</label>
             <select id="histogram-dither-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0">* Floyd-Steinberg (Standard)</option>
+                <option value="0">Floyd-Steinberg (Standard)</option>
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4" selected>* Our method (Standard)</option>
-                <option value="5">Our method (Serpentine)</option>
+                <option value="4">Our method (Standard)</option>
+                <option value="5" selected>* Our method (Serpentine)</option>
                 <option value="6">Our method (Random Direction)</option>
                 <option value="8">Ostromoukhov (Standard)</option>
                 <option value="9">Ostromoukhov (Serpentine)</option>
@@ -530,7 +530,7 @@
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="histogram-dither-description">
-                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel. Used for histogram processing quantization (when not using f32 histogram).
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).
             </p>
         </div>
 
@@ -565,12 +565,12 @@
         <div class="implementation-section" id="output-dither-section">
             <label for="output-dither-select" class="toggle-label" style="display: block; margin-bottom: 10px;">Output Dithering:</label>
             <select id="output-dither-select" class="method-select" style="margin-bottom: 10px;">
-                <option value="0">* Floyd-Steinberg (Standard)</option>
+                <option value="0">Floyd-Steinberg (Standard)</option>
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4" selected>* Our method (Standard, Recommended)</option>
-                <option value="5">Our method (Serpentine)</option>
+                <option value="4">Our method (Standard)</option>
+                <option value="5" selected>* Our method (Serpentine, Recommended)</option>
                 <option value="6">Our method (Random Direction)</option>
                 <option value="8">Ostromoukhov (Standard)</option>
                 <option value="9">Ostromoukhov (Serpentine)</option>
@@ -579,7 +579,7 @@
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
-                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with standard scanning. Used for final output quantization.
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for final output quantization.
             </p>
         </div>
 
