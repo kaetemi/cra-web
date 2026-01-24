@@ -37,6 +37,7 @@ pub mod bf16;
 // Re-export common types at the dither module level for convenience
 pub use bitdepth::{bit_replicate, build_linear_lut, QuantLevelParams};
 pub use common::{
+    lowbias32,
     wang_hash,
     ColorCorrectionMethod,
     DitherMode,

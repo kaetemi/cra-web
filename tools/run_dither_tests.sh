@@ -16,6 +16,8 @@ DITHER_MODES=(
     "jjn-serpentine"
     "boon-standard"
     "boon-serpentine"
+    "boon-wanghash"
+    "boon-wanghash-serpentine"
     "ostro-standard"
     "ostro-serpentine"
     "zhou-fang-standard"

@@ -823,7 +823,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard => {
             dither_mixed_standard_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
@@ -831,7 +831,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine => {
             dither_mixed_serpentine_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,

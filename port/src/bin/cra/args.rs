@@ -62,6 +62,12 @@ pub enum DitherMethod {
     ZhouFangSerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
+    /// Boon with legacy wang_hash (for testing) - hidden from help
+    #[value(name = "boon-wanghash", hide = true)]
+    BoonWangStandard,
+    /// Boon with legacy wang_hash serpentine (for testing) - hidden from help
+    #[value(name = "boon-wanghash-serpentine", hide = true)]
+    BoonWangSerpentine,
 }
 
 impl DitherMethod {
@@ -79,6 +85,8 @@ impl DitherMethod {
             DitherMethod::ZhouFangStandard => DitherMode::ZhouFangStandard,
             DitherMethod::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
             DitherMethod::None => DitherMode::None,
+            DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
+            DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
         }
     }
 
@@ -96,6 +104,9 @@ impl DitherMethod {
             DitherMethod::ZhouFangStandard => CSDitherMode::ZhouFangStandard,
             DitherMethod::ZhouFangSerpentine => CSDitherMode::ZhouFangSerpentine,
             DitherMethod::None => CSDitherMode::None,
+            // Wang hash variants map to the same CS modes (colorspace-aware doesn't use mixed hash anyway)
+            DitherMethod::BoonWangStandard => CSDitherMode::MixedStandard,
+            DitherMethod::BoonWangSerpentine => CSDitherMode::MixedSerpentine,
         }
     }
 }

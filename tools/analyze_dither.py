@@ -281,6 +281,49 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
     print(f"  {output_path.name}")
 
 
+def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
+    """Compare boon (lowbias32) vs boon-wanghash for hash function comparison."""
+    # Standard variants
+    standard_methods = [
+        ('boon-standard', 'Boon (lowbias32)'),
+        ('boon-wanghash', 'Boon (wang)'),
+    ]
+    # Serpentine variants
+    serpentine_methods = [
+        ('boon-serpentine', 'Boon Serp. (lowbias32)'),
+        ('boon-wanghash-serpentine', 'Boon Serp. (wang)'),
+    ]
+
+    images = {}
+
+    # First, add the original source image
+    source_file = base_dir.parent / f"{image_name}.png"
+    if source_file.exists():
+        images['Original'] = load_image(source_file)
+
+    # Add standard variants
+    for method_key, method_name in standard_methods:
+        method_dir = base_dir / method_key
+        dithered_file = method_dir / f"{image_name}_{method_key}.png"
+        if dithered_file.exists():
+            images[method_name] = load_image(dithered_file)
+
+    # Add serpentine variants
+    for method_key, method_name in serpentine_methods:
+        method_dir = base_dir / method_key
+        dithered_file = method_dir / f"{image_name}_{method_key}.png"
+        if dithered_file.exists():
+            images[method_name] = load_image(dithered_file)
+
+    if len(images) <= 1:  # Only original or nothing
+        print(f"  No boon dithered images found for {image_name}")
+        return
+
+    output_path = output_dir / f"{image_name}_hash_comparison.png"
+    plot_comparison(images, f"Hash Function Comparison: {image_name}", output_path)
+    print(f"  {output_path.name}")
+
+
 def analyze_rng_noise(base_dir: Path, output_dir: Path):
     """Compare RNG noise generators."""
     rng_dir = base_dir / "rng_noise"
@@ -361,6 +404,7 @@ def main():
     parser.add_argument('--compare', '-c', action='store_true', help='Generate comparison charts for all test images')
     parser.add_argument('--serpentine', '-s', action='store_true', help='Compare serpentine variants only')
     parser.add_argument('--rng', action='store_true', help='Analyze RNG noise images')
+    parser.add_argument('--hash', action='store_true', help='Compare boon hash functions (lowbias32 vs wang)')
     args = parser.parse_args()
 
     base_dir = Path(__file__).parent / "test_images"
@@ -372,6 +416,13 @@ def main():
         # Single image analysis
         output_path = args.output or output_dir / f"{args.input.stem}_analysis.png"
         analyze_single(args.input, output_path)
+    elif args.hash:
+        # Hash comparison (lowbias32 vs wang)
+        source_images = [p.stem for p in base_dir.glob("*.png")]
+        print(f"Generating hash comparison for {len(source_images)} images...")
+        for image_name in sorted(source_images):
+            analyze_hash_comparison(dithered_dir, image_name, output_dir)
+        print(f"\nDone! Hash comparison saved to {output_dir}")
     elif args.rng:
         # Analyze RNG noise images
         print("Analyzing RNG noise images...")

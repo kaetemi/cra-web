@@ -12,8 +12,8 @@ pub use super::common::DitherMode;
 
 // Import shared utilities from common
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, wang_hash, FloydSteinberg, JarvisJudiceNinke,
-    NoneKernel, Ostromoukhov, SingleChannelKernel,
+    apply_single_channel_kernel, bit_replicate, lowbias32, wang_hash, FloydSteinberg,
+    JarvisJudiceNinke, NoneKernel, Ostromoukhov, SingleChannelKernel,
 };
 
 /// Quantization parameters for reduced bit depth dithering.
@@ -347,6 +347,7 @@ fn apply_mixed_kernel(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, use_j
 
 /// Mixed dithering with standard left-to-right scanning.
 /// Randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke kernels per pixel.
+/// Uses lowbias32 hash for better spectral properties.
 fn mixed_dither_standard(
     img: &[f32],
     width: usize,
@@ -355,7 +356,7 @@ fn mixed_dither_standard(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
     // Use JJN reach (larger) to accommodate both kernels
     let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
     let mut buf = create_seeded_buffer(img, width, height, reach);
@@ -370,6 +371,44 @@ fn mixed_dither_standard(
             let bx = bx_start + px;
             let err = process_pixel(&mut buf, bx, y, &quant);
             // Use original image coordinates for hash (adjusted for seeding offset)
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+            apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Mixed dithering with standard scanning using legacy wang_hash.
+/// Kept for comparison testing; prefer mixed_dither_standard for production.
+fn mixed_dither_wang_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let err = process_pixel(&mut buf, bx, y, &quant);
             let img_x = px.saturating_sub(reach);
             let img_y = y.saturating_sub(reach);
             let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
@@ -388,7 +427,60 @@ fn mixed_dither_standard(
 
 /// Mixed dithering with serpentine scanning.
 /// Randomly selects kernel per pixel, alternates scan direction each row.
+/// Uses lowbias32 hash for better spectral properties.
 fn mixed_dither_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Mixed dithering with serpentine scanning using legacy wang_hash.
+/// Kept for comparison testing; prefer mixed_dither_serpentine for production.
+fn mixed_dither_wang_serpentine(
     img: &[f32],
     width: usize,
     height: usize,
@@ -406,7 +498,6 @@ fn mixed_dither_serpentine(
 
     for y in 0..process_height {
         if y % 2 == 1 {
-            // Right-to-left on odd rows
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
@@ -417,7 +508,6 @@ fn mixed_dither_serpentine(
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
-            // Left-to-right on even rows
             for px in 0..process_width {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
@@ -440,6 +530,7 @@ fn mixed_dither_serpentine(
 
 /// Mixed dithering with random scan direction per row.
 /// Randomly selects kernel per pixel AND scan direction per row.
+/// Uses lowbias32 hash for better spectral properties.
 fn mixed_dither_random(
     img: &[f32],
     width: usize,
@@ -448,7 +539,7 @@ fn mixed_dither_random(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
     let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 
@@ -458,14 +549,14 @@ fn mixed_dither_random(
 
     for y in 0..process_height {
         let img_y = y.saturating_sub(reach);
-        let row_hash = wang_hash((img_y as u32) ^ hashed_seed);
+        let row_hash = lowbias32((img_y as u32) ^ hashed_seed);
         if row_hash & 1 == 1 {
             // Right-to-left (randomly selected)
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.saturating_sub(reach);
-                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
@@ -475,7 +566,7 @@ fn mixed_dither_random(
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.saturating_sub(reach);
-                let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
@@ -725,6 +816,8 @@ pub fn dither_with_mode_bits(
         DitherMode::MixedStandard => mixed_dither_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedSerpentine => mixed_dither_serpentine(img, width, height, seed, quant, progress),
         DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant, progress),
+        DitherMode::MixedWangStandard => mixed_dither_wang_standard(img, width, height, seed, quant, progress),
+        DitherMode::MixedWangSerpentine => mixed_dither_wang_serpentine(img, width, height, seed, quant, progress),
         DitherMode::OstromoukhovStandard => dither_standard::<Ostromoukhov>(img, width, height, quant, progress),
         DitherMode::OstromoukhovSerpentine => dither_serpentine::<Ostromoukhov>(img, width, height, quant, progress),
         DitherMode::ZhouFangStandard => zhou_fang_standard(img, width, height, seed, quant, progress),

@@ -806,6 +806,8 @@ fn dither_grayscale(
             CSDitherMode::MixedStandard => DitherMode::MixedStandard,
             CSDitherMode::MixedSerpentine => DitherMode::MixedSerpentine,
             CSDitherMode::MixedRandom => DitherMode::MixedRandom,
+            CSDitherMode::MixedWangStandard => DitherMode::MixedWangStandard,
+            CSDitherMode::MixedWangSerpentine => DitherMode::MixedWangSerpentine,
             CSDitherMode::OstromoukhovStandard => DitherMode::OstromoukhovStandard,
             CSDitherMode::OstromoukhovSerpentine => DitherMode::OstromoukhovSerpentine,
             CSDitherMode::ZhouFangStandard => DitherMode::ZhouFangStandard,

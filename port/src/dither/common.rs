@@ -218,10 +218,17 @@ pub enum DitherMode {
     /// Zhou-Fang: Variable-coefficient kernel with threshold modulation
     /// Serpentine scanning (alternating direction each row)
     ZhouFangSerpentine,
+    /// Mixed with Wang hash (legacy): Same as MixedStandard but uses wang_hash
+    /// instead of lowbias32. Kept for comparison/testing.
+    MixedWangStandard,
+    /// Mixed with Wang hash (legacy): Same as MixedSerpentine but uses wang_hash
+    /// instead of lowbias32. Kept for comparison/testing.
+    MixedWangSerpentine,
 }
 
-/// Wang hash for deterministic randomization - excellent avalanche properties.
-/// Each bit of input affects all bits of output.
+/// Wang hash for deterministic randomization.
+/// Has some diagonal artifacts when used for coordinate-based hashing.
+/// Kept for backwards compatibility; prefer lowbias32 for new code.
 #[inline]
 pub fn wang_hash(mut x: u32) -> u32 {
     x = (x ^ 61) ^ (x >> 16);
@@ -229,6 +236,19 @@ pub fn wang_hash(mut x: u32) -> u32 {
     x = x ^ (x >> 4);
     x = x.wrapping_mul(0x27d4eb2d);
     x = x ^ (x >> 15);
+    x
+}
+
+/// Lowbias32 hash - optimized for low bias, excellent for coordinate-based hashing.
+/// Better spectral properties than wang_hash for spatial randomization.
+/// Reference: https://nullprogram.com/blog/2018/07/31/
+#[inline]
+pub fn lowbias32(mut x: u32) -> u32 {
+    x ^= x >> 16;
+    x = x.wrapping_mul(0x7feb352d);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x846ca68b);
+    x ^= x >> 16;
     x
 }
 
