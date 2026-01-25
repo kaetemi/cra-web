@@ -431,6 +431,65 @@ def generate_xor_chain_threshold_map(width: int = 256, height: int = 256, base_s
     return threshold_map
 
 
+def generate_weighted_stack_threshold_map(width: int = 256, height: int = 256, base_seed: int = 0,
+                                          pattern_density: float = 50.0) -> np.ndarray:
+    """
+    Generate threshold map by stacking weighted patterns.
+
+    For i in 1..255:
+        Generate pattern at pattern_density gray level
+        Add i to pixels that are ON
+
+    Then normalize the sum to 0-255.
+
+    Args:
+        pattern_density: Gray level for each pattern (default 50 = ~20% density)
+    """
+    total = np.zeros((height, width), dtype=np.float64)
+
+    for i in range(1, 256):
+        pattern = our_method_dither(pattern_density, width, height, seed=base_seed + i)
+        total += (pattern == 255).astype(np.float64) * i
+
+    # Normalize to 0-255
+    threshold_map = ((total - total.min()) / (total.max() - total.min()) * 255).astype(np.uint8)
+    return threshold_map
+
+
+def generate_recursive_subdiv_threshold_map(width: int = 256, height: int = 256, base_seed: int = 0) -> np.ndarray:
+    """
+    Generate threshold map using recursive subdivision.
+
+    Algorithm:
+    1. Generate 50% blue noise mask. ON pixels → "low" group (0-127), OFF → "high" group (128-255)
+    2. Within each group, generate another 50% mask to subdivide further
+    3. Recurse 8 times until every pixel has a unique threshold value
+
+    This preserves perfect density at all gray levels and strong blue noise at 50%.
+    """
+    seed_counter = base_seed
+
+    def get_pattern():
+        nonlocal seed_counter
+        p = our_method_dither(127.5, width, height, seed=seed_counter)
+        seed_counter += 1
+        return (p == 255)
+
+    # Track the low bound for each pixel's threshold range
+    low_bound = np.zeros((height, width), dtype=np.float32)
+    range_size = 256.0
+
+    for level in range(8):
+        # Generate a 50% blue noise pattern
+        split_mask = get_pattern()
+
+        # ON pixels stay in lower half, OFF pixels move to upper half
+        low_bound = np.where(split_mask, low_bound, low_bound + range_size / 2)
+        range_size /= 2
+
+    return low_bound.astype(np.uint8)
+
+
 def generate_and_not_or_threshold_map(width: int = 256, height: int = 256, base_seed: int = 0,
                                        base_pct: float = 50.0, or_pct: float = 25.0,
                                        xor_prev: bool = False, return_bits: bool = False):
@@ -717,6 +776,8 @@ def main():
                         help="Generate threshold map using boundary XOR only")
     parser.add_argument("--generate-xor-chain", action="store_true",
                         help="Generate threshold map using XOR chain degradation")
+    parser.add_argument("--generate-recursive-subdiv", action="store_true",
+                        help="Generate threshold map using recursive subdivision")
     parser.add_argument("--generate-and-not-or", action="store_true",
                         help="Generate threshold map using AND NOT OR logic")
     parser.add_argument("--base-pct", type=float, default=50.0,
@@ -778,6 +839,28 @@ def main():
             white_pct = np.mean(result == 255) * 100
             expected_pct = g / 255 * 100
             print(f"  Gray {g:3d}: {white_pct:5.1f}% white (expected {expected_pct:.1f}%)")
+
+    elif args.generate_recursive_subdiv:
+        # Generate recursive subdivision threshold map
+        print(f"Generating recursive subdivision threshold map ({args.size}x{args.size})...")
+        threshold_map = generate_recursive_subdiv_threshold_map(args.size, args.size, args.seed)
+
+        output_path = args.output or f"threshold_map_recursive_subdiv_{args.size}.png"
+        Image.fromarray(threshold_map, mode='L').save(output_path)
+
+        print(f"\nSaved: {output_path}")
+        print(f"  Value range: {threshold_map.min()} - {threshold_map.max()}")
+        print(f"  Mean: {threshold_map.mean():.1f} (ideal: 127.5)")
+        print(f"  Unique values: {len(np.unique(threshold_map))}")
+
+        # Test at a few gray levels
+        print(f"\nTesting threshold map:")
+        for g in [32, 64, 85, 127, 128, 170, 191, 224]:
+            result = test_threshold_map(threshold_map, g)
+            white_pct = np.mean(result == 255) * 100
+            expected_pct = g / 255 * 100
+            err = white_pct - expected_pct
+            print(f"  Gray {g:3d}: {white_pct:5.1f}% white (expected {expected_pct:.1f}%, err {err:+.1f}%)")
 
     elif args.generate_and_not_or:
         # Generate AND NOT OR threshold map
