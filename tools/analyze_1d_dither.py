@@ -353,7 +353,7 @@ def main():
 
     # Linear analysis for detailed per-gray-level view
     if args.all or not args.log:
-        analyze_linear(gray_levels[:4], count, output_dir)
+        analyze_linear(gray_levels, count, output_dir)
 
     analyze_comparison(gray_levels, count, output_dir)
 

@@ -121,17 +121,61 @@ python tools/our_method_dither.py 64 -o my_output.png      # 25% gray, custom ou
 python tools/our_method_dither.py 127.5 --size 512         # Larger image
 ```
 
-### 6. `int_blue_dither.c`
+### 6. `blue_dither.h` - Header-Only C Library
 
-Minimal C implementation using integer-only arithmetic. Demonstrates that blue noise dithering can be implemented without floating point.
+Single-header library for blue noise dithering using integer-only arithmetic. Suitable for embedded systems, FPGAs, or anywhere floating point is expensive.
+
+**The Technique:**
+Traditional error diffusion (Floyd-Steinberg, Jarvis-Judice-Ninke) produces structured patterns because each kernel has characteristic periodicities. Our method randomly selects between two kernels (FS and JJN) at each pixel using a hash function. This breaks up the periodic structures, producing blue noise characteristics: energy concentrated at high frequencies with suppressed low-frequency content.
 
 **Key design:**
 - Uses 48 as common denominator (LCM of FS=16 and JJN=48)
 - FS coefficients scaled: 21/48, 9/48, 15/48, 3/48
 - JJN coefficients native: 7/48, 5/48, etc.
-- 16-bit signed integers sufficient for error accumulation
-- Three-line circular buffer for error diffusion
-- 256-line warmup for clean initialization
+- All arithmetic uses 32-bit integers, no floating point required
+- Three-row circular buffer for 2D error diffusion
+- Serpentine scanning for optimal quality
+
+**APIs:**
+
+| Mode | Struct | Functions | Use Case |
+|------|--------|-----------|----------|
+| 1D Temporal | `BlueDither1D` | `_init()`, `_next()`, `_reset()` | LED PWM, audio DAC |
+| 2D Spatial | `BlueDither2D` | `_init()`, `_row()`, `_free()`, `_reset()` | Image dithering |
+
+**1D Kernel (Optimized):**
+The 1D mode mixes two kernels for blue noise temporal dithering:
+- K1: `[48]` - 100% error to t+1 (tight response)
+- K2: `[38,10]` - 79% to t+1, 21% to t+2 (spread response)
+
+The `[38,10]` ratio (~4:1) was determined optimal through spectral analysis. Note: 38 = 2×19 and 10 = 2×5, so this equals 2×[19,5] where both 19 and 5 are prime.
+
+**Usage:**
+```c
+#define BLUE_DITHER_IMPLEMENTATION
+#include "blue_dither.h"
+
+// 1D LED PWM example
+BlueDither1D bd;
+blue_dither_1d_init(&bd, seed);
+while (1) {
+    int on = blue_dither_1d_next(&bd, brightness);  // brightness 0-255
+    set_led(on);
+    delay_us(100);  // 10kHz update rate
+}
+
+// 2D image example
+BlueDither2D bd;
+blue_dither_2d_init(&bd, width, seed);
+for (int y = 0; y < height; y++) {
+    blue_dither_2d_row(&bd, input_row, output_row, y);
+}
+blue_dither_2d_free(&bd);
+```
+
+### 7. `int_blue_dither.c`
+
+Command-line tool demonstrating both 1D and 2D dithering modes using `blue_dither.h`.
 
 **Build:**
 ```bash
@@ -140,14 +184,64 @@ gcc -O2 -o tools/int_blue_dither tools/int_blue_dither.c
 
 **Usage:**
 ```bash
-# Generate 256x256 at 50% gray
+# 2D mode: Generate 256x256 at 50% gray
 ./tools/int_blue_dither 256 256 127 output.bin
 
 # Convert to PNG using CRA
 cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o output.png
+
+# 1D mode: Demo temporal dithering
+./tools/int_blue_dither --1d 1000 127
 ```
 
 **Validation:** Included in `--sanity` check, producing identical white pixel ratio to CRA and Python implementations.
+
+### 8. `analyze_1d_dither.py`
+
+Spectral analysis of 1D temporal dithering. Compares our method against ideal blue noise (+6 dB/octave slope) and white noise (flat spectrum).
+
+**Outputs** (`tools/test_images/analysis/`):
+- `spectrum_1d_logscale.png` - Log-frequency spectrum across gray levels
+- `spectrum_1d_gray_*.png` - Detailed per-gray-level analysis
+- `spectrum_1d_comparison.png` - All gray levels overlaid
+
+```bash
+source /root/venv/bin/activate
+python tools/analyze_1d_dither.py              # All analyses
+python tools/analyze_1d_dither.py --log        # Log-scale only
+python tools/analyze_1d_dither.py --low-gray   # Focus on low gray levels (1,2,5,10,20,42,64,85,127)
+python tools/analyze_1d_dither.py --count 262144  # Custom sample count
+```
+
+### 9. `analyze_1d_kernels.py`
+
+Compares different 1D kernel configurations for spectral quality.
+
+**Kernels tested:**
+- `[48]+[38,10]` - Optimal (~4:1 ratio), avg +5.52 dB/octave
+- `[48]+[43,5]` - Prime pair (8.6:1 ratio)
+- `[48]+[41,7]` - Prime pair (5.9:1 ratio)
+- `[48]+[37,11]` - Prime pair (3.4:1 ratio)
+- `[48]+[31,17]` - Prime pair (1.8:1 ratio)
+- Length-3 variants (generally worse at low gray levels)
+
+**Output:** `spectrum_1d_kernel_comparison.png`
+
+```bash
+source /root/venv/bin/activate
+python tools/analyze_1d_kernels.py
+```
+
+### 10. `experiments/analyze_1d_prime_pairs.py`
+
+Tests all prime pairs [p, q] where p + q = 48 for spectral quality.
+
+**Output:** `spectrum_1d_prime_pairs.png`
+
+```bash
+source /root/venv/bin/activate
+python tools/experiments/analyze_1d_prime_pairs.py
+```
 
 ## Full Regeneration Sequence
 
@@ -166,12 +260,16 @@ python tools/generate_rng_noise.py
 # 4. Run dither tests
 ./tools/run_dither_tests.sh
 
-# 5. Generate analysis charts
+# 5. Generate 2D analysis charts
 python tools/analyze_dither.py --serpentine
 python tools/analyze_dither.py --hash
 python tools/analyze_dither.py --rng
 python tools/analyze_dither.py --sanity
 python tools/analyze_dither.py --blue-kernel
+
+# 6. Generate 1D temporal analysis charts
+python tools/analyze_1d_dither.py --all
+python tools/analyze_1d_kernels.py
 ```
 
 ## Output Structure
@@ -210,7 +308,14 @@ tools/
 │       ├── rng_noise_*.png            # RNG spectral analysis
 │       ├── sanity_check_50pct.png     # Sanity check comparison
 │       ├── kernel_exp_gray_*.png      # Kernel mixing experiments
-│       └── blue_kernel_depth_gray_*.png # Blue kernel recursion depth
+│       ├── blue_kernel_depth_gray_*.png # Blue kernel recursion depth
+│       ├── blue_noise_vs_our_method_*.png # Comparison vs void-and-cluster
+│       ├── ideal_blue_noise.png       # Ideal blue noise reference
+│       ├── spectrum_1d_logscale.png   # 1D temporal: log-frequency analysis
+│       ├── spectrum_1d_gray_*.png     # 1D temporal: per-gray-level analysis
+│       ├── spectrum_1d_comparison.png # 1D temporal: all gray levels overlaid
+│       ├── spectrum_1d_kernel_comparison.png # 1D kernel comparison
+│       └── spectrum_1d_prime_pairs.png # 1D prime pair kernel analysis
 ```
 
 ## Interpreting Analysis Charts
@@ -225,6 +330,21 @@ Key test cases:
 - `gray_085` (33%) - 1/3 density
 - `gray_127` (50%) - Maximum pattern complexity
 - `david` - Real-world image with gradients and detail
+
+### 1D Temporal Spectrum Charts
+
+The 1D analysis charts show:
+- **Log-frequency plot**: Power spectrum vs frequency on log scale
+- **Ideal blue noise reference**: +6 dB/octave slope (black dashed line)
+- **Spectral slope**: Measured in dB/octave between 0.01 and 0.1 cycles/sample
+
+**Quality ratings** based on spectral slope:
+- **Excellent**: >5 dB/octave (close to ideal +6)
+- **Good**: 4-5 dB/octave
+- **OK**: 2-4 dB/octave
+- **Poor**: <2 dB/octave
+
+Blue noise temporal dithering produces less perceptible flicker than white noise (random threshold) because it concentrates energy at high frequencies where the eye is less sensitive.
 
 ## Hash Function Notes
 
