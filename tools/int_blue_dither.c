@@ -1,219 +1,49 @@
 /*
- * int_blue_dither.c - Integer-only blue noise ditherer
+ * int_blue_dither.c - Integer-only blue noise dithering tool
  *
- * Implements Boon dithering using integer math with 48 as the common denominator.
- * FS coefficients (×3): 21, 9, 15, 3
- * JJN coefficients: 7,5 / 3,5,7,5,3 / 1,3,5,3,1
+ * Demonstrates both 1D (temporal) and 2D (spatial) dithering modes.
  *
- * Usage: int_blue_dither <width> <height> <gray_level> <output.bin>
- * Convert to PNG: cra -i output.bin --input-metadata '{"format":"L1","width":W,"height":H}' -o output.png
+ * Usage:
+ *   2D mode: int_blue_dither <width> <height> <gray_level> <output.bin>
+ *   1D mode: int_blue_dither --1d <count> <gray_level>
+ *
+ * Convert 2D output to PNG:
+ *   cra -i output.bin --input-metadata '{"format":"L1","width":W,"height":H}' -o output.png
  */
+
+#define BLUE_DITHER_IMPLEMENTATION
+#include "blue_dither.h"
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <string.h>
 
-/* lowbias32 hash function - same as CRA uses */
-static inline uint32_t lowbias32(uint32_t x) {
-    x ^= x >> 16;
-    x *= 0x21f0aaad;
-    x ^= x >> 15;
-    x *= 0x735a2d97;
-    x ^= x >> 15;
-    return x;
-}
-
-typedef struct {
-    int width;              /* Image width (stride) */
-    int32_t *err[3];        /* Three circular error buffers, each width+4 for padding */
-    int cur_row;            /* Current row index in circular buffer (0, 1, or 2) */
-    int y;                  /* Current y coordinate */
-    uint32_t seed;          /* Random seed for hash */
-} BlueDither;
-
-/* Initialize ditherer with given width */
-BlueDither *blue_dither_init(int width, uint32_t seed) {
-    BlueDither *bd = (BlueDither *)malloc(sizeof(BlueDither));
-    if (!bd) return NULL;
-
-    bd->width = width;
-    bd->seed = seed;
-    bd->cur_row = 0;
-    bd->y = 0;
-
-    /* Allocate error buffers with padding (2 pixels each side for JJN) */
-    int buf_width = width + 4;
-    for (int i = 0; i < 3; i++) {
-        bd->err[i] = (int32_t *)calloc(buf_width, sizeof(int32_t));
-        if (!bd->err[i]) {
-            for (int j = 0; j < i; j++) free(bd->err[j]);
-            free(bd);
-            return NULL;
-        }
+/* Generate 2D image with warmup */
+static void generate_2d_image(int width, int height, uint8_t gray, uint8_t *output_bits) {
+    BlueDither2D bd;
+    if (blue_dither_2d_init(&bd, width, 12345) != 0) {
+        fprintf(stderr, "Failed to initialize 2D ditherer\n");
+        return;
     }
 
-    return bd;
-}
-
-void blue_dither_free(BlueDither *bd) {
-    if (!bd) return;
-    for (int i = 0; i < 3; i++) {
-        free(bd->err[i]);
-    }
-    free(bd);
-}
-
-/* Clear all error buffers */
-void blue_dither_reset(BlueDither *bd) {
-    int buf_width = bd->width + 4;
-    for (int i = 0; i < 3; i++) {
-        memset(bd->err[i], 0, buf_width * sizeof(int32_t));
-    }
-    bd->cur_row = 0;
-    bd->y = 0;
-}
-
-/*
- * Process one row of pixels
- * Input: gray values 0-255
- * Output: 1-bit values (0 or 1)
- * Uses serpentine scanning (alternates direction each row)
- */
-void blue_dither_row(BlueDither *bd, const uint8_t *input, uint8_t *output, int row_y) {
-    int width = bd->width;
-    int r0 = bd->cur_row;
-    int r1 = (bd->cur_row + 1) % 3;
-    int r2 = (bd->cur_row + 2) % 3;
-
-    /* Offset by 2 for padding */
-    int32_t *e0 = bd->err[r0] + 2;
-    int32_t *e1 = bd->err[r1] + 2;
-    int32_t *e2 = bd->err[r2] + 2;
-
-    /* Serpentine: even rows L->R, odd rows R->L */
-    int ltr = (row_y & 1) == 0;
-
-    /* Threshold at 127.5 * 48 = 6120 (balanced) */
-    const int32_t threshold = 6120;
-    const int32_t white_val = 255 * 48;  /* 12240 */
-
-    if (ltr) {
-        /* Left to right */
-        for (int x = 0; x < width; x++) {
-            int32_t pixel = (int32_t)input[x] * 48 + e0[x];
-
-            int32_t quant_err;
-            if (pixel >= threshold) {
-                output[x] = 1;
-                quant_err = pixel - white_val;
-            } else {
-                output[x] = 0;
-                quant_err = pixel;
-            }
-
-            /* Select kernel based on hash */
-            uint32_t hash = lowbias32((uint32_t)x ^ ((uint32_t)row_y << 16) ^ bd->seed);
-
-            if (hash & 1) {
-                /* Floyd-Steinberg (scaled to /48): 21, 9, 15, 3 */
-                e0[x + 1] += (quant_err * 21) / 48;
-                e1[x - 1] += (quant_err * 9) / 48;
-                e1[x]     += (quant_err * 15) / 48;
-                e1[x + 1] += (quant_err * 3) / 48;
-            } else {
-                /* JJN: 7,5 / 3,5,7,5,3 / 1,3,5,3,1 */
-                e0[x + 1] += (quant_err * 7) / 48;
-                e0[x + 2] += (quant_err * 5) / 48;
-                e1[x - 2] += (quant_err * 3) / 48;
-                e1[x - 1] += (quant_err * 5) / 48;
-                e1[x]     += (quant_err * 7) / 48;
-                e1[x + 1] += (quant_err * 5) / 48;
-                e1[x + 2] += (quant_err * 3) / 48;
-                e2[x - 2] += (quant_err * 1) / 48;
-                e2[x - 1] += (quant_err * 3) / 48;
-                e2[x]     += (quant_err * 5) / 48;
-                e2[x + 1] += (quant_err * 3) / 48;
-                e2[x + 2] += (quant_err * 1) / 48;
-            }
-        }
-    } else {
-        /* Right to left */
-        for (int x = width - 1; x >= 0; x--) {
-            int32_t pixel = (int32_t)input[x] * 48 + e0[x];
-
-            int32_t quant_err;
-            if (pixel >= threshold) {
-                output[x] = 1;
-                quant_err = pixel - white_val;
-            } else {
-                output[x] = 0;
-                quant_err = pixel;
-            }
-
-            /* Select kernel based on hash */
-            uint32_t hash = lowbias32((uint32_t)x ^ ((uint32_t)row_y << 16) ^ bd->seed);
-
-            if (hash & 1) {
-                /* Floyd-Steinberg RTL: 21, 3, 15, 9 */
-                e0[x - 1] += (quant_err * 21) / 48;
-                e1[x + 1] += (quant_err * 9) / 48;
-                e1[x]     += (quant_err * 15) / 48;
-                e1[x - 1] += (quant_err * 3) / 48;
-            } else {
-                /* JJN RTL */
-                e0[x - 1] += (quant_err * 7) / 48;
-                e0[x - 2] += (quant_err * 5) / 48;
-                e1[x + 2] += (quant_err * 3) / 48;
-                e1[x + 1] += (quant_err * 5) / 48;
-                e1[x]     += (quant_err * 7) / 48;
-                e1[x - 1] += (quant_err * 5) / 48;
-                e1[x - 2] += (quant_err * 3) / 48;
-                e2[x + 2] += (quant_err * 1) / 48;
-                e2[x + 1] += (quant_err * 3) / 48;
-                e2[x]     += (quant_err * 5) / 48;
-                e2[x - 1] += (quant_err * 3) / 48;
-                e2[x - 2] += (quant_err * 1) / 48;
-            }
-        }
-    }
-
-    /* Rotate circular buffer: current becomes available for row+2 */
-    memset(bd->err[r0] + 2, 0, width * sizeof(int32_t));
-    bd->cur_row = r1;
-    bd->y++;
-}
-
-/*
- * Generate a full image with constant gray level
- * Includes 256-line warmup for clean initialization
- */
-void blue_dither_generate(BlueDither *bd, uint8_t gray, int height,
-                          uint8_t *output_bits) {
-    int width = bd->width;
     int stride_bytes = (width + 7) / 8;
-
     uint8_t *input_row = (uint8_t *)malloc(width);
     uint8_t *output_row = (uint8_t *)malloc(width);
 
     memset(input_row, gray, width);
 
-    blue_dither_reset(bd);
-
-    /* Warmup: run 256 rows to initialize error buffers */
+    /* Warmup: 256 rows to initialize error buffers */
     for (int y = 0; y < 256; y++) {
-        blue_dither_row(bd, input_row, output_row, y);
+        blue_dither_2d_row(&bd, input_row, output_row, y);
     }
 
-    /* Reset row counter but keep error state */
     /* Generate actual output */
     for (int y = 0; y < height; y++) {
-        blue_dither_row(bd, input_row, output_row, 256 + y);
+        blue_dither_2d_row(&bd, input_row, output_row, 256 + y);
 
-        /* Pack into bits (MSB first, matching CRA L1 format) */
+        /* Pack into bits (MSB first) */
         uint8_t *out_byte = output_bits + y * stride_bytes;
         memset(out_byte, 0, stride_bytes);
-
         for (int x = 0; x < width; x++) {
             if (output_row[x]) {
                 out_byte[x / 8] |= (0x80 >> (x % 8));
@@ -223,15 +53,106 @@ void blue_dither_generate(BlueDither *bd, uint8_t gray, int height,
 
     free(input_row);
     free(output_row);
+    blue_dither_2d_free(&bd);
 }
 
-/* Command line tool */
+/* Demo 1D mode - prints pattern and statistics */
+static void demo_1d(int count, uint8_t gray) {
+    BlueDither1D bd;
+    blue_dither_1d_init(&bd, 12345);
+
+    int ones = 0;
+    int runs = 0;
+    int last = -1;
+    int max_run = 0;
+    int cur_run = 0;
+
+    printf("1D Blue Noise Dithering Demo\n");
+    printf("Gray level: %d (%.1f%%)\n", gray, gray * 100.0 / 255.0);
+    printf("Sample count: %d\n\n", count);
+
+    /* Warmup */
+    for (int i = 0; i < 256; i++) {
+        blue_dither_1d_next(&bd, gray);
+    }
+    blue_dither_1d_reset(&bd);
+
+    /* Generate and analyze */
+    printf("Pattern (first 80): ");
+    for (int i = 0; i < count; i++) {
+        int bit = blue_dither_1d_next(&bd, gray);
+        ones += bit;
+
+        /* Track runs */
+        if (bit == last) {
+            cur_run++;
+        } else {
+            if (cur_run > max_run) max_run = cur_run;
+            if (last >= 0) runs++;
+            cur_run = 1;
+            last = bit;
+        }
+
+        if (i < 80) putchar(bit ? '#' : '.');
+    }
+    if (cur_run > max_run) max_run = cur_run;
+
+    printf("\n\n");
+    printf("Statistics:\n");
+    printf("  Target duty: %.2f%%\n", gray * 100.0 / 255.0);
+    printf("  Actual duty: %.2f%%\n", ones * 100.0 / count);
+    printf("  Run changes: %d\n", runs);
+    printf("  Max run len: %d\n", max_run);
+    printf("  Avg run len: %.2f\n", (float)count / runs);
+
+    /* Show LED PWM example */
+    printf("\nLED PWM Example Code:\n");
+    printf("  BlueDither1D bd;\n");
+    printf("  blue_dither_1d_init(&bd, seed);\n");
+    printf("  while (1) {\n");
+    printf("      int on = blue_dither_1d_next(&bd, %d);\n", gray);
+    printf("      GPIO_SET(LED_PIN, on);\n");
+    printf("      delay_us(100);  // 10kHz update rate\n");
+    printf("  }\n");
+}
+
+static void print_usage(const char *prog) {
+    fprintf(stderr, "Usage:\n");
+    fprintf(stderr, "  2D mode: %s <width> <height> <gray_level> <output.bin>\n", prog);
+    fprintf(stderr, "  1D mode: %s --1d <count> <gray_level>\n", prog);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "2D mode generates L1 (1-bit) raw binary for image dithering.\n");
+    fprintf(stderr, "1D mode demonstrates temporal dithering for LED PWM.\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Convert 2D output to PNG:\n");
+    fprintf(stderr, "  cra -i output.bin --input-metadata '{\"format\":\"L1\",\"width\":W,\"height\":H}' -o output.png\n");
+}
+
 int main(int argc, char *argv[]) {
+    if (argc < 2) {
+        print_usage(argv[0]);
+        return 1;
+    }
+
+    /* 1D mode */
+    if (strcmp(argv[1], "--1d") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "Error: --1d requires <count> <gray_level>\n");
+            return 1;
+        }
+        int count = atoi(argv[2]);
+        int gray = atoi(argv[3]);
+        if (count <= 0 || gray < 0 || gray > 255) {
+            fprintf(stderr, "Error: invalid parameters\n");
+            return 1;
+        }
+        demo_1d(count, (uint8_t)gray);
+        return 0;
+    }
+
+    /* 2D mode */
     if (argc < 5) {
-        fprintf(stderr, "Usage: %s <width> <height> <gray_level> <output.bin>\n", argv[0]);
-        fprintf(stderr, "\nGenerates 1-bit blue noise dithered image using integer math.\n");
-        fprintf(stderr, "Convert to PNG with:\n");
-        fprintf(stderr, "  cra -i output.bin --input-metadata '{\"format\":\"L1\",\"width\":W,\"height\":H}' -o output.png\n");
+        print_usage(argv[0]);
         return 1;
     }
 
@@ -249,27 +170,19 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
-    BlueDither *bd = blue_dither_init(width, 12345);
-    if (!bd) {
-        fprintf(stderr, "Error: failed to initialize ditherer\n");
-        return 1;
-    }
-
     int stride_bytes = (width + 7) / 8;
     uint8_t *output = (uint8_t *)malloc(stride_bytes * height);
     if (!output) {
         fprintf(stderr, "Error: failed to allocate output buffer\n");
-        blue_dither_free(bd);
         return 1;
     }
 
-    blue_dither_generate(bd, (uint8_t)gray, height, output);
+    generate_2d_image(width, height, (uint8_t)gray, output);
 
     FILE *fp = fopen(output_path, "wb");
     if (!fp) {
         fprintf(stderr, "Error: failed to open output file\n");
         free(output);
-        blue_dither_free(bd);
         return 1;
     }
 
@@ -281,6 +194,5 @@ int main(int argc, char *argv[]) {
            output_path, width, height);
 
     free(output);
-    blue_dither_free(bd);
     return 0;
 }
