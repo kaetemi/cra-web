@@ -65,20 +65,21 @@ def blue_dither_1d(brightness, count, seed=12345):
 
     return output
 
-def simple_error_diffusion_1d(brightness, count):
-    """Simple 1D error diffusion (100% forward) for comparison."""
-    err = 0
+def pwm_dither(brightness, count):
+    """Traditional PWM - regular on/off pattern at fixed frequency."""
     output = np.zeros(count, dtype=np.uint8)
-    threshold = 127.5
+    if brightness == 0:
+        return output
+    if brightness >= 255:
+        return np.ones(count, dtype=np.uint8)
+
+    # PWM with period 256 (8-bit resolution)
+    period = 256
+    on_time = brightness
 
     for i in range(count):
-        pixel = brightness + err
-        if pixel >= threshold:
-            output[i] = 1
-            err = pixel - 255
-        else:
-            output[i] = 0
-            err = pixel
+        phase = i % period
+        output[i] = 1 if phase < on_time else 0
 
     return output
 
@@ -154,7 +155,7 @@ def analyze_linear(gray_levels, count, output_dir):
 
         signals = {
             'Our 1D Method': blue_dither_1d(gray, count),
-            'Simple ED': simple_error_diffusion_1d(gray, count),
+            'PWM': pwm_dither(gray, count),
             'White Noise': white_noise_dither(gray, count),
         }
 
@@ -165,40 +166,58 @@ def analyze_linear(gray_levels, count, output_dir):
                 break
             ax = axes[idx // 2, idx % 2]
             freqs, power_db = compute_spectrum(sig)
-            freqs_smooth, power_smooth = smooth_spectrum(freqs, power_db, window=100)
+            f_log, p_log = smooth_spectrum_log(freqs, power_db)
 
             duty = np.mean(sig) * 100
 
-            ax.plot(freqs[1:], power_db[1:], alpha=0.3, color=colors[idx], linewidth=0.5)
-            ax.plot(freqs_smooth[1:], power_smooth[1:], color=colors[idx], linewidth=2,
-                    label=f'{name} ({duty:.1f}%)')
+            if name == 'PWM':
+                # Show raw spectrum for PWM to reveal harmonic spikes
+                ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.5,
+                            label=f'{name} ({duty:.1f}%)', alpha=0.8)
+            else:
+                # Show raw spectrum as light envelope, smoothed as solid line
+                ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.3, alpha=0.3)
+                ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2,
+                            label=f'{name} ({duty:.1f}%)')
 
-            # Ideal blue noise reference
-            f_ref = freqs_smooth[1:]
-            idx_quarter = len(f_ref) // 2
-            blue_ref = 20 * np.log10(f_ref / f_ref[idx_quarter]) + power_smooth[1:][idx_quarter]
-            ax.plot(f_ref, blue_ref, 'k--', alpha=0.5, linewidth=1, label='Ideal Blue (+6dB/oct)')
+            # Ideal blue noise reference (+6 dB/octave)
+            f_ref = np.logspace(-3, np.log10(0.5), 100)
+            anchor_idx = np.argmin(np.abs(f_log - 0.1)) if len(f_log) > 0 else 0
+            anchor_db = p_log[anchor_idx] if len(p_log) > anchor_idx else -20
+            ideal_blue = anchor_db + 20 * np.log10(f_ref / 0.1)
+            ax.semilogx(f_ref, ideal_blue, 'k--', alpha=0.5, linewidth=1, label='Ideal (+6dB/oct)')
 
-            ax.set_xlabel('Frequency (cycles/sample)')
+            ax.set_xlabel('Frequency (log scale)')
             ax.set_ylabel('Power (dB)')
             ax.set_title(name)
-            ax.set_xlim(0, 0.5)
+            ax.set_xlim(1e-3, 0.5)
+            ax.set_ylim(-60, 50)
             ax.legend(loc='lower right', fontsize=8)
-            ax.grid(True, alpha=0.3)
+            ax.grid(True, alpha=0.3, which='both')
 
         # Summary in fourth panel
         ax = axes[1, 1]
         for idx, (name, sig) in enumerate(signals.items()):
             freqs, power_db = compute_spectrum(sig)
-            freqs_smooth, power_smooth = smooth_spectrum(freqs, power_db, window=100)
-            ax.plot(freqs_smooth[1:], power_smooth[1:], color=colors[idx], linewidth=2, label=name)
+            if name == 'PWM':
+                ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.5, label=name, alpha=0.8)
+            else:
+                f_log, p_log = smooth_spectrum_log(freqs, power_db)
+                ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.3, alpha=0.3)
+                ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2, label=name)
 
-        ax.set_xlabel('Frequency (cycles/sample)')
+        # Ideal reference
+        f_ref = np.logspace(-3, np.log10(0.5), 100)
+        ideal_blue = -30 + 20 * np.log10(f_ref / 0.01)
+        ax.semilogx(f_ref, ideal_blue, 'k--', alpha=0.5, linewidth=1, label='Ideal (+6dB/oct)')
+
+        ax.set_xlabel('Frequency (log scale)')
         ax.set_ylabel('Power (dB)')
         ax.set_title('Comparison')
-        ax.set_xlim(0, 0.5)
+        ax.set_xlim(1e-3, 0.5)
+        ax.set_ylim(-60, 50)
         ax.legend(loc='lower right', fontsize=8)
-        ax.grid(True, alpha=0.3)
+        ax.grid(True, alpha=0.3, which='both')
 
         plt.tight_layout()
         output_path = output_dir / f'spectrum_1d_gray_{gray:03d}.png'
