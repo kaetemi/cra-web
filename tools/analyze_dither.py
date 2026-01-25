@@ -115,7 +115,7 @@ def plot_analysis(img: np.ndarray, title: str, output_path: Path):
     # Panel 3: Segmented radial power
     freqs, h, d, v = compute_segmented_radial_power(img)
 
-    # Convert to log scale (dB) for better visualization
+    # Convert to dB scale for power (linear frequency axis)
     h_db = 10 * np.log10(h + 1e-10)
     d_db = 10 * np.log10(d + 1e-10)
     v_db = 10 * np.log10(v + 1e-10)
@@ -127,7 +127,7 @@ def plot_analysis(img: np.ndarray, title: str, output_path: Path):
     axes[2].set_ylabel('Power (dB)')
     axes[2].set_title('Segmented Radial Power')
     axes[2].legend(loc='upper right')
-    axes[2].set_xlim(0, 0.5)  # 0 = DC, 0.5 = Nyquist
+    axes[2].set_xlim(0, 0.5)
     axes[2].grid(True, alpha=0.3)
 
     fig.suptitle(title, fontsize=14, fontweight='bold')
@@ -162,9 +162,10 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
             global_max_db = max(global_max_db, h_db.max(), d_db.max(), v_db.max())
 
     # Add some padding to the range
-    y_padding = (global_max_db - global_min_db) * 0.05
-    global_min_db -= y_padding
-    global_max_db += y_padding
+    if global_min_db < float('inf') and global_max_db > float('-inf'):
+        y_padding = (global_max_db - global_min_db) * 0.05
+        global_min_db -= y_padding
+        global_max_db += y_padding
 
     for col, (method_name, img) in enumerate(images.items()):
         # Row 1: Dithered image
@@ -177,18 +178,18 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
         axes[1, col].imshow(spectrum, cmap='gray')
         axes[1, col].axis('off')
 
-        # Row 3: Radial power curves (log scale)
+        # Row 3: Radial power curves (linear freq, dB power)
         freqs, h_db, d_db, v_db = all_power_db[method_name]
 
         axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
         axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
         axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
-        axes[2, col].set_xlim(0, 0.5)  # 0 = DC, 0.5 = Nyquist
+        axes[2, col].set_xlim(0, 0.5)
         axes[2, col].set_xlabel('cycles/px')
         axes[2, col].grid(True, alpha=0.3)
 
         # Use global scale for dithered images, auto scale for Original
-        if method_name != 'Original':
+        if method_name != 'Original' and global_min_db < float('inf'):
             axes[2, col].set_ylim(global_min_db, global_max_db)
 
         if col == 0:
@@ -407,16 +408,24 @@ def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_fr
 
     # Compute all power spectra
     all_power_db = {}
+    global_min_db = float('inf')
+    global_max_db = float('-inf')
     for method_name, img in images.items():
         freqs, h, d, v = compute_segmented_radial_power(img)
         h_db = 10 * np.log10(h + 1e-10)
         d_db = 10 * np.log10(d + 1e-10)
         v_db = 10 * np.log10(v + 1e-10)
         all_power_db[method_name] = (freqs, h_db, d_db, v_db)
+        # Track global range for methods not excluded
+        if method_name not in excluded_from_scale:
+            global_min_db = min(global_min_db, h_db.min(), d_db.min(), v_db.min())
+            global_max_db = max(global_max_db, h_db.max(), d_db.max(), v_db.max())
 
-    # Fixed scale for good hashes (75-100 dB range)
-    fixed_min_db = 75
-    fixed_max_db = 100
+    # Add padding
+    if global_min_db < float('inf') and global_max_db > float('-inf'):
+        y_padding = (global_max_db - global_min_db) * 0.05
+        global_min_db -= y_padding
+        global_max_db += y_padding
 
     for col, (method_name, img) in enumerate(images.items()):
         # Row 1: Noise image
@@ -429,7 +438,7 @@ def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_fr
         axes[1, col].imshow(spectrum, cmap='gray')
         axes[1, col].axis('off')
 
-        # Row 3: Radial power curves (log scale)
+        # Row 3: Radial power curves (linear freq, dB power)
         freqs, h_db, d_db, v_db = all_power_db[method_name]
 
         axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
@@ -439,9 +448,9 @@ def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_fr
         axes[2, col].set_xlabel('cycles/px')
         axes[2, col].grid(True, alpha=0.3)
 
-        # Use fixed scale unless excluded
-        if method_name not in excluded_from_scale:
-            axes[2, col].set_ylim(fixed_min_db, fixed_max_db)
+        # Use global scale unless excluded
+        if method_name not in excluded_from_scale and global_min_db < float('inf'):
+            axes[2, col].set_ylim(global_min_db, global_max_db)
 
         if col == 0:
             axes[2, col].set_ylabel('Power (dB)')
