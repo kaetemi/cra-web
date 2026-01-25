@@ -98,9 +98,10 @@ extern "C" {
 /* ============================================================================
  * 1D Temporal Dithering (LED PWM, audio DAC, etc.)
  * ============================================================================
- * Minimal state for streaming single bits. Uses FS/JJN mixing in 1D:
- * - FS-like: 100% error to t+1
- * - JJN-like: 58% to t+1, 42% to t+2 (approximates 7:5 ratio)
+ * Minimal state for streaming single bits. Mixes two 1D kernels:
+ * - K1: [48] - 100% error to t+1 (tight)
+ * - K2: [38,10] - 79% to t+1, 21% to t+2 (spread) = 2×[19,5] (both prime)
+ * The 38:10 ratio (~4:1) was found optimal through spectral analysis.
  */
 
 typedef struct {
@@ -216,12 +217,12 @@ int blue_dither_1d_next(BlueDither1D *bd, uint8_t brightness) {
     bd->err1 = 0;
 
     if (hash & 1) {
-        /* FS-like: 100% to next (scaled as 48/48) */
+        /* FS-like: 100% to next (48/48) */
         bd->err0 += quant_err;
     } else {
-        /* JJN-like: split 7:5 to next two positions (7/12 ≈ 58%, 5/12 ≈ 42%) */
-        bd->err0 += (quant_err * 7) / 12;
-        bd->err1 += (quant_err * 5) / 12;
+        /* Optimal 1D kernel: 38:10 ratio = 2×[19,5] (both prime) */
+        bd->err0 += (quant_err * 38) / 48;
+        bd->err1 += (quant_err * 10) / 48;
     }
 
     return output;

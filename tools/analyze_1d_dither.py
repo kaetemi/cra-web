@@ -34,7 +34,7 @@ def lowbias32(x):
 def blue_dither_1d(brightness, count, seed=12345):
     """
     1D blue noise dithering - replicates C implementation.
-    Uses FS/JJN-like kernel mixing in 1D.
+    Mixes [48] with [38,10] kernels (ratio ~4:1, optimal for 1D).
     """
     err0, err1 = 0, 0
     output = np.zeros(count, dtype=np.uint8)
@@ -59,9 +59,9 @@ def blue_dither_1d(brightness, count, seed=12345):
             # FS-like: 100% to next
             err0 += quant_err
         else:
-            # JJN-like: 7:5 split to next two
-            err0 += (quant_err * 7) // 12
-            err1 += (quant_err * 5) // 12
+            # Optimal 1D kernel: 38:10 ratio = 2×[19,5] (both prime)
+            err0 += (quant_err * 38) // 48
+            err1 += (quant_err * 10) // 48
 
     return output
 
