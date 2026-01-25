@@ -520,9 +520,9 @@
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4">Our method (Standard)</option>
-                <option value="5" selected>* Our method (Serpentine)</option>
-                <option value="6">Our method (Random Direction)</option>
+                <option value="4">Our method (FS/JJN/lowbias32, Standard)</option>
+                <option value="5" selected>* Our method (FS/JJN/lowbias32, Serpentine)</option>
+                <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
                 <option value="8">Ostromoukhov (Standard)</option>
                 <option value="9">Ostromoukhov (Serpentine)</option>
                 <option value="10">Zhou-Fang (Standard)</option>
@@ -530,7 +530,7 @@
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="histogram-dither-description">
-                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel using lowbias32 hash, with serpentine scanning. Used for histogram processing quantization (when not using f32 histogram).
             </p>
         </div>
 
@@ -569,9 +569,9 @@
                 <option value="1">Floyd-Steinberg (Serpentine)</option>
                 <option value="2">Jarvis-Judice-Ninke (Standard)</option>
                 <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                <option value="4">Our method (Standard)</option>
-                <option value="5" selected>* Our method (Serpentine, Recommended)</option>
-                <option value="6">Our method (Random Direction)</option>
+                <option value="4">Our method (FS/JJN/lowbias32, Standard)</option>
+                <option value="5" selected>* Our method (FS/JJN/lowbias32, Serpentine, Recommended)</option>
+                <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
                 <option value="8">Ostromoukhov (Standard)</option>
                 <option value="9">Ostromoukhov (Serpentine)</option>
                 <option value="10">Zhou-Fang (Standard)</option>
@@ -579,7 +579,7 @@
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
-                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel with serpentine scanning. Used for final output quantization.
+                Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel using lowbias32 hash, with serpentine scanning. Used for final output quantization.
             </p>
         </div>
 
