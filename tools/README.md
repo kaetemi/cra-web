@@ -18,13 +18,14 @@ pip install numpy pillow matplotlib
 
 ### 1. `generate_test_images.py`
 
-Generates synthetic test images for dithering experiments.
+Generates synthetic test images and downloads reference images for dithering experiments.
 
-**Outputs** (`tools/test_images/`):
+**Outputs** (`tools/test_images/sources/`):
 - `gray_XXX.png` - Pathological gray levels (256x256) at values like 0, 1, 42, 64, 85, 127, 128, 170, 191, 212, 213, 254, 255
 - `ramp_continuous.png` - Smooth 0-255 gradient (64x4096)
 - `ramp_step_32.png` - 8-step ramp, 32-value jumps (64x1024)
 - `ramp_step_16.png` - 16-step ramp, 16-value jumps (64x1024)
+- `david.png`, `gradient.png`, `gradient_steps.png` - Reference images (downloaded)
 
 ```bash
 source /root/venv/bin/activate
@@ -127,24 +128,17 @@ python tools/our_method_dither.py 127.5 --size 512         # Larger image
 cd /root/cra-web/port
 cargo build --release --bin cra --features cli
 
-# 2. Generate test images
+# 2. Generate test images (includes downloading reference images)
 source /root/venv/bin/activate
 python tools/generate_test_images.py
 
-# 3. Download reference images (optional)
-cd tools/test_images
-curl -sL "https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/gradient-steps/original.png" -o gradient_steps.png
-curl -sL "https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/gradient/original.png" -o gradient.png
-curl -sL "https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/david-original.png" -o david.png
-cd ../..
-
-# 4. Generate RNG noise images
+# 3. Generate RNG noise images
 python tools/generate_rng_noise.py
 
-# 5. Run dither tests
+# 4. Run dither tests
 ./tools/run_dither_tests.sh
 
-# 6. Generate analysis charts
+# 5. Generate analysis charts
 python tools/analyze_dither.py --serpentine
 python tools/analyze_dither.py --hash
 python tools/analyze_dither.py --rng
@@ -157,8 +151,14 @@ python tools/analyze_dither.py --blue-kernel
 ```
 tools/
 ├── test_images/
-│   ├── *.png                    # Source test images
-│   ├── rng_noise/               # RNG noise test images
+│   ├── blue_noise_256.png       # Reference blue noise (not processed)
+│   ├── sources/                 # Source test images (processed by run_dither_tests.sh)
+│   │   ├── gray_*.png           # Pathological gray levels
+│   │   ├── ramp_*.png           # Gradient ramps
+│   │   ├── david.png            # Reference image
+│   │   ├── gradient.png         # Reference image
+│   │   └── gradient_steps.png   # Reference image
+│   ├── rng_noise/               # RNG noise test images (not processed)
 │   │   ├── *_coord.png          # Coordinate-based hashing
 │   │   └── *_seq.png            # Sequential hashing
 │   ├── dithered/
@@ -231,7 +231,7 @@ The `--blue-kernel` analysis compares different error diffusion kernel combinati
 
 ## Blue Noise Reference
 
-The file `test_images/blue_noise_256.png` is a 256x256 blue noise dither array generated using the void-and-cluster algorithm. It serves as a "gold standard" reference for spectral analysis comparisons.
+The file `test_images/blue_noise_256.png` is a 256x256 blue noise dither array generated using the void-and-cluster algorithm. It serves as a "gold standard" reference for spectral analysis comparisons. This file is kept in `test_images/` (not `sources/`) so it is not processed by `run_dither_tests.sh`.
 
 **Generation method:**
 - Algorithm: Void-and-cluster (Ulichney 1993)

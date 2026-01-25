@@ -3,6 +3,8 @@
 
 import numpy as np
 from pathlib import Path
+import urllib.request
+import shutil
 
 # PIL for image output
 from PIL import Image
@@ -120,9 +122,33 @@ def generate_step_ramp(output_dir: Path):
     save_gray(arr, output_dir / "ramp_step_16.png")
 
 
+def download_reference_images(output_dir: Path):
+    """Download reference images from structure-aware-dithering repo."""
+    print("Downloading reference images...")
+
+    urls = [
+        ("https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/gradient-steps/original.png", "gradient_steps.png"),
+        ("https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/gradient/original.png", "gradient.png"),
+        ("https://raw.githubusercontent.com/dalpil/structure-aware-dithering/main/examples/david-original.png", "david.png"),
+    ]
+
+    for url, filename in urls:
+        output_path = output_dir / filename
+        if output_path.exists():
+            print(f"  {filename} (already exists)")
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=30) as response:
+                with open(output_path, 'wb') as f:
+                    shutil.copyfileobj(response, f)
+            print(f"  {filename}")
+        except Exception as e:
+            print(f"  {filename} FAILED: {e}")
+
+
 def main():
-    output_dir = Path(__file__).parent / "test_images"
-    output_dir.mkdir(exist_ok=True)
+    output_dir = Path(__file__).parent / "test_images" / "sources"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"Output directory: {output_dir}\n")
 
@@ -131,6 +157,8 @@ def main():
     generate_continuous_ramp(output_dir)
     print()
     generate_step_ramp(output_dir)
+    print()
+    download_reference_images(output_dir)
 
     print(f"\nDone! Generated images in {output_dir}")
 

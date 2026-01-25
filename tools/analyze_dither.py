@@ -228,8 +228,8 @@ def analyze_comparison(base_dir: Path, image_name: str, output_dir: Path):
 
     images = {}
 
-    # First, add the original source image
-    source_file = base_dir.parent / f"{image_name}.png"
+    # First, add the original source image (from sources/ subfolder)
+    source_file = base_dir.parent / "sources" / f"{image_name}.png"
     if source_file.exists():
         images['Original'] = load_image(source_file)
 
@@ -265,7 +265,8 @@ def get_blue_noise_reference(base_dir: Path, image_name: str) -> np.ndarray | No
     except (IndexError, ValueError):
         return None
 
-    # Load blue noise dither array
+    # Load blue noise dither array (reference image in test_images/, not processed)
+    # base_dir is dithered_dir (test_images/dithered), so go up one level
     blue_noise_path = base_dir.parent / 'blue_noise_256.png'
     if not blue_noise_path.exists():
         return None
@@ -317,8 +318,8 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
 
     images = {}
 
-    # First, add the original source image
-    source_file = base_dir.parent / f"{image_name}.png"
+    # First, add the original source image (from sources/ subfolder)
+    source_file = base_dir.parent / "sources" / f"{image_name}.png"
     if source_file.exists():
         images['Original'] = load_image(source_file)
 
@@ -363,8 +364,8 @@ def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
 
     images = {}
 
-    # First, add the original source image
-    source_file = base_dir.parent / f"{image_name}.png"
+    # First, add the original source image (from sources/ subfolder)
+    source_file = base_dir.parent / "sources" / f"{image_name}.png"
     if source_file.exists():
         images['Original'] = load_image(source_file)
 
@@ -895,7 +896,7 @@ def main():
         print(f"\nDone! Comparison saved to {output_dir}")
     elif args.hash:
         # Hash comparison (lowbias32 vs wang)
-        source_images = [p.stem for p in base_dir.glob("*.png")]
+        source_images = [p.stem for p in (base_dir / "sources").glob("*.png")]
         print(f"Generating hash comparison for {len(source_images)} images...")
         for image_name in sorted(source_images):
             analyze_hash_comparison(dithered_dir, image_name, output_dir)
@@ -906,8 +907,8 @@ def main():
         analyze_rng_noise(base_dir, output_dir)
         print(f"\nDone! Analysis saved to {output_dir}")
     elif args.compare or args.serpentine:
-        # Find all source images
-        source_images = [p.stem for p in base_dir.glob("*.png")]
+        # Find all source images (from sources/ subfolder)
+        source_images = [p.stem for p in (base_dir / "sources").glob("*.png")]
         print(f"Analyzing {len(source_images)} images...")
 
         for image_name in sorted(source_images):
