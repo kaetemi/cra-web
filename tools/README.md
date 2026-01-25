@@ -121,6 +121,34 @@ python tools/our_method_dither.py 64 -o my_output.png      # 25% gray, custom ou
 python tools/our_method_dither.py 127.5 --size 512         # Larger image
 ```
 
+### 6. `int_blue_dither.c`
+
+Minimal C implementation using integer-only arithmetic. Demonstrates that blue noise dithering can be implemented without floating point.
+
+**Key design:**
+- Uses 48 as common denominator (LCM of FS=16 and JJN=48)
+- FS coefficients scaled: 21/48, 9/48, 15/48, 3/48
+- JJN coefficients native: 7/48, 5/48, etc.
+- 16-bit signed integers sufficient for error accumulation
+- Three-line circular buffer for error diffusion
+- 256-line warmup for clean initialization
+
+**Build:**
+```bash
+gcc -O2 -o tools/int_blue_dither tools/int_blue_dither.c
+```
+
+**Usage:**
+```bash
+# Generate 256x256 at 50% gray
+./tools/int_blue_dither 256 256 127 output.bin
+
+# Convert to PNG using CRA
+cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o output.png
+```
+
+**Validation:** Included in `--sanity` check, producing identical white pixel ratio to CRA and Python implementations.
+
 ## Full Regeneration Sequence
 
 ```bash

@@ -695,6 +695,36 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
     except ImportError as e:
         print(f"  Warning: Could not import our_method_dither: {e}")
 
+    # 5. C integer implementation
+    c_tool = base_dir.parent / 'int_blue_dither'
+    cra_tool = Path('/root/cra-web/port/target/release/cra')
+    if c_tool.exists() and cra_tool.exists():
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            bin_path = Path(tmpdir) / 'c_output.bin'
+            png_path = Path(tmpdir) / 'c_output.png'
+            # Run C tool
+            result = subprocess.run(
+                [str(c_tool), str(size), str(size), str(gray_level), str(bin_path)],
+                capture_output=True, text=True
+            )
+            if result.returncode == 0 and bin_path.exists():
+                # Convert to PNG using CRA
+                metadata = f'{{"format":"L1","width":{size},"height":{size}}}'
+                result = subprocess.run(
+                    [str(cra_tool), '-i', str(bin_path), '--input-metadata', metadata, '-o', str(png_path)],
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0 and png_path.exists():
+                    images['C Integer'] = load_image(png_path)
+                else:
+                    print(f"  Warning: CRA conversion failed: {result.stderr}")
+            else:
+                print(f"  Warning: C tool failed: {result.stderr}")
+    else:
+        if not c_tool.exists():
+            print(f"  Warning: {c_tool} not found, skipping C implementation")
+
     if len(images) < 2:
         print("  Not enough images for sanity check comparison")
         return
@@ -715,6 +745,14 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
         cra_white = np.mean(cra_img == 255) * 100
         py_white = np.mean(py_img == 255) * 100
         print(f"  CRA white: {cra_white:.2f}%, Python white: {py_white:.2f}%")
+
+    if 'C Integer' in images:
+        c_img = images['C Integer']
+        c_white = np.mean(c_img == 255) * 100
+        print(f"  C Integer white: {c_white:.2f}%")
+        if 'CRA Tool' in images:
+            match_pct = np.mean(images['CRA Tool'] == c_img) * 100
+            print(f"  CRA vs C Integer pixel match: {match_pct:.2f}%")
 
 
 def plot_ideal_blue_noise(output_dir: Path):
