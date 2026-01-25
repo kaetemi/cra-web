@@ -1,7 +1,7 @@
 /*
  * int_blue_dither.c - Integer-only blue noise dithering tool
  *
- * Demonstrates both 1D (temporal) and 2D (spatial) dithering modes.
+ * Demonstrates both streaming (1D) and row (2D) modes.
  *
  * Usage:
  *   2D mode: int_blue_dither <width> <height> <gray_level> <output.bin>
@@ -20,9 +20,9 @@
 
 /* Generate 2D image with warmup */
 static void generate_2d_image(int width, int height, uint8_t gray, uint8_t *output_bits) {
-    BlueDither2D bd;
-    if (blue_dither_2d_init(&bd, width, 12345) != 0) {
-        fprintf(stderr, "Failed to initialize 2D ditherer\n");
+    BlueDither bd;
+    if (blue_dither_init(&bd, width, 12345) != 0) {
+        fprintf(stderr, "Failed to initialize ditherer\n");
         return;
     }
 
@@ -34,12 +34,12 @@ static void generate_2d_image(int width, int height, uint8_t gray, uint8_t *outp
 
     /* Warmup: 256 rows to initialize error buffers */
     for (int y = 0; y < 256; y++) {
-        blue_dither_2d_row(&bd, input_row, output_row, y);
+        blue_dither_row(&bd, input_row, output_row);
     }
 
     /* Generate actual output */
     for (int y = 0; y < height; y++) {
-        blue_dither_2d_row(&bd, input_row, output_row, 256 + y);
+        blue_dither_row(&bd, input_row, output_row);
 
         /* Pack into bits (MSB first) */
         uint8_t *out_byte = output_bits + y * stride_bytes;
@@ -53,13 +53,18 @@ static void generate_2d_image(int width, int height, uint8_t gray, uint8_t *outp
 
     free(input_row);
     free(output_row);
-    blue_dither_2d_free(&bd);
+    blue_dither_free(&bd);
 }
 
 /* Demo 1D mode - prints pattern and statistics */
 static void demo_1d(int count, uint8_t gray) {
-    BlueDither1D bd;
-    blue_dither_1d_init(&bd, 12345);
+    BlueDither bd;
+    int row_width = 256;
+
+    if (blue_dither_init(&bd, row_width, 12345) != 0) {
+        fprintf(stderr, "Failed to initialize ditherer\n");
+        return;
+    }
 
     int ones = 0;
     int runs = 0;
@@ -67,20 +72,19 @@ static void demo_1d(int count, uint8_t gray) {
     int max_run = 0;
     int cur_run = 0;
 
-    printf("1D Blue Noise Dithering Demo\n");
+    printf("1D Blue Noise Dithering Demo (width=%d)\n", row_width);
     printf("Gray level: %d (%.1f%%)\n", gray, gray * 100.0 / 255.0);
     printf("Sample count: %d\n\n", count);
 
-    /* Warmup */
-    for (int i = 0; i < 256; i++) {
-        blue_dither_1d_next(&bd, gray);
+    /* Warmup: run through one full row */
+    for (int i = 0; i < row_width; i++) {
+        blue_dither_next(&bd, gray);
     }
-    blue_dither_1d_reset(&bd);
 
     /* Generate and analyze */
     printf("Pattern (first 80): ");
     for (int i = 0; i < count; i++) {
-        int bit = blue_dither_1d_next(&bd, gray);
+        int bit = blue_dither_next(&bd, gray);
         ones += bit;
 
         /* Track runs */
@@ -107,13 +111,15 @@ static void demo_1d(int count, uint8_t gray) {
 
     /* Show LED PWM example */
     printf("\nLED PWM Example Code:\n");
-    printf("  BlueDither1D bd;\n");
-    printf("  blue_dither_1d_init(&bd, seed);\n");
+    printf("  BlueDither bd;\n");
+    printf("  blue_dither_init(&bd, 256, seed);\n");
     printf("  while (1) {\n");
-    printf("      int on = blue_dither_1d_next(&bd, %d);\n", gray);
+    printf("      int on = blue_dither_next(&bd, %d);\n", gray);
     printf("      GPIO_SET(LED_PIN, on);\n");
     printf("      delay_us(100);  // 10kHz update rate\n");
     printf("  }\n");
+
+    blue_dither_free(&bd);
 }
 
 static void print_usage(const char *prog) {
@@ -122,7 +128,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  1D mode: %s --1d <count> <gray_level>\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "2D mode generates L1 (1-bit) raw binary for image dithering.\n");
-    fprintf(stderr, "1D mode demonstrates temporal dithering for LED PWM.\n");
+    fprintf(stderr, "1D mode demonstrates streaming for LED PWM.\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Convert 2D output to PNG:\n");
     fprintf(stderr, "  cra -i output.bin --input-metadata '{\"format\":\"L1\",\"width\":W,\"height\":H}' -o output.png\n");

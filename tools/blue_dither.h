@@ -28,31 +28,40 @@
  *   JJN coefficients: already in 48ths (7/48, 5/48, 3/48, 1/48)
  * All arithmetic uses 32-bit integers. No floating point required.
  *
- * MODES
- * =====
- *   1. 2D spatial dithering (images) - full FS/JJN with serpentine scan
- *   2. 1D temporal dithering (LED PWM, audio) - simplified 1D diffusion
+ * BUFFER MODEL
+ * ============
+ * The error buffer is a single circular array of (width * 4) elements.
+ * Width must be a power of two for fast modulo via bitmask. There are no
+ * boundaries - error wraps seamlessly from row end to row start. Processing
+ * is always left-to-right with continuous flow.
+ *
+ * API
+ * ===
+ * Two usage modes with a single implementation:
+ *   - Row mode: process entire rows (images)
+ *   - Streaming mode: get one bit at a time (LED PWM, audio, etc.)
  *
  * Usage:
  *   #define BLUE_DITHER_IMPLEMENTATION
  *   #include "blue_dither.h"
  *
- * Example - LED PWM:
- *   BlueDither1D bd;
- *   blue_dither_1d_init(&bd, 12345);
+ * Example - LED PWM (streaming):
+ *   BlueDither bd;
+ *   blue_dither_init(&bd, 256, seed);  // width must be power of 2
  *   while (1) {
- *       int on = blue_dither_1d_next(&bd, brightness);  // brightness 0-255
+ *       int on = blue_dither_next(&bd, brightness);  // 0-255
  *       set_led(on);
  *       delay_us(100);
  *   }
+ *   blue_dither_free(&bd);
  *
- * Example - Image row:
- *   BlueDither2D bd;
- *   blue_dither_2d_init(&bd, width, 12345);
+ * Example - Image (row mode):
+ *   BlueDither bd;
+ *   blue_dither_init(&bd, width, seed);  // width must be power of 2
  *   for (int y = 0; y < height; y++) {
- *       blue_dither_2d_row(&bd, input_row, output_row, y);
+ *       blue_dither_row(&bd, input_row, output_row);
  *   }
- *   blue_dither_2d_free(&bd);
+ *   blue_dither_free(&bd);
  *
  * BSD 3-Clause License
  *
@@ -95,56 +104,31 @@
 extern "C" {
 #endif
 
-/* ============================================================================
- * 1D Temporal Dithering (LED PWM, audio DAC, etc.)
- * ============================================================================
- * Minimal state for streaming single bits. Uses FS/JJN mixing in 1D:
- * - FS-like: 100% error to t+1
- * - JJN-like: 58% to t+1, 42% to t+2 (approximates 7:5 ratio)
- */
-
 typedef struct {
-    int32_t err0;       /* Error for current step */
-    int32_t err1;       /* Error for next step */
-    uint32_t state;     /* Hash state (position counter) */
+    int32_t *err;       /* Circular error buffer: 4 rows × width */
+    int width;          /* Row width (must be power of 2) */
+    int width_mask;     /* width - 1, for fast modulo */
+    int row_shift;      /* log2(width), for row indexing */
+    int cur_row;        /* Current row (0-3) */
+    int x;              /* Current x position in row */
+    int y;              /* Current logical row number */
     uint32_t seed;      /* Random seed */
-} BlueDither1D;
+} BlueDither;
 
-/* Initialize 1D ditherer */
-void blue_dither_1d_init(BlueDither1D *bd, uint32_t seed);
+/* Initialize ditherer. Width must be power of 2. Returns 0 on success, -1 on failure. */
+int blue_dither_init(BlueDither *bd, int width, uint32_t seed);
 
-/* Generate next bit. brightness: 0-255, returns: 0 or 1 */
-int blue_dither_1d_next(BlueDither1D *bd, uint8_t brightness);
+/* Free ditherer resources */
+void blue_dither_free(BlueDither *bd);
 
-/* Reset state (clears accumulated error) */
-void blue_dither_1d_reset(BlueDither1D *bd);
+/* Reset state (clears error buffer, restarts position) */
+void blue_dither_reset(BlueDither *bd);
 
+/* Process one complete row. input: 0-255 per pixel, output: 0 or 1 per pixel */
+void blue_dither_row(BlueDither *bd, const uint8_t *input, uint8_t *output);
 
-/* ============================================================================
- * 2D Spatial Dithering (images)
- * ============================================================================
- * Full FS/JJN kernel mixing with serpentine scanning.
- * Uses 48 as common denominator (LCM of 16 and 48).
- */
-
-typedef struct {
-    int width;          /* Image width */
-    int32_t *err[3];    /* Three error buffer rows (circular) */
-    int cur_row;        /* Current row in circular buffer */
-    uint32_t seed;      /* Random seed */
-} BlueDither2D;
-
-/* Initialize 2D ditherer. Returns 0 on success, -1 on allocation failure. */
-int blue_dither_2d_init(BlueDither2D *bd, int width, uint32_t seed);
-
-/* Free 2D ditherer resources */
-void blue_dither_2d_free(BlueDither2D *bd);
-
-/* Process one row. input: 0-255 per pixel, output: 0 or 1 per pixel */
-void blue_dither_2d_row(BlueDither2D *bd, const uint8_t *input, uint8_t *output, int y);
-
-/* Reset state (clears error buffers) */
-void blue_dither_2d_reset(BlueDither2D *bd);
+/* Get next dithered bit for streaming use. brightness: 0-255, returns: 0 or 1 */
+int blue_dither_next(BlueDither *bd, uint8_t brightness);
 
 
 /* ============================================================================
@@ -171,34 +155,71 @@ static inline uint32_t blue_dither_hash(uint32_t x) {
 #include <stdlib.h>
 #include <string.h>
 
-/* --------------------------------------------------------------------------
- * 1D Implementation
- * -------------------------------------------------------------------------- */
+/* Check if n is a power of 2 */
+static inline int is_power_of_2(int n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
 
-void blue_dither_1d_init(BlueDither1D *bd, uint32_t seed) {
-    bd->err0 = 0;
-    bd->err1 = 0;
-    bd->state = 0;
+/* Compute log2 for power of 2 */
+static inline int log2_pow2(int n) {
+    int shift = 0;
+    while ((1 << shift) < n) shift++;
+    return shift;
+}
+
+int blue_dither_init(BlueDither *bd, int width, uint32_t seed) {
+    if (!is_power_of_2(width)) {
+        return -1;  /* Width must be power of 2 */
+    }
+
+    bd->width = width;
+    bd->width_mask = width - 1;
+    bd->row_shift = log2_pow2(width);
     bd->seed = seed;
+    bd->cur_row = 0;
+    bd->x = 0;
+    bd->y = 0;
+
+    /* Allocate circular buffer: 4 rows */
+    bd->err = (int32_t *)calloc(width * 4, sizeof(int32_t));
+    if (!bd->err) {
+        return -1;
+    }
+    return 0;
 }
 
-void blue_dither_1d_reset(BlueDither1D *bd) {
-    bd->err0 = 0;
-    bd->err1 = 0;
-    bd->state = 0;
+void blue_dither_free(BlueDither *bd) {
+    if (bd && bd->err) {
+        free(bd->err);
+        bd->err = NULL;
+    }
 }
 
-int blue_dither_1d_next(BlueDither1D *bd, uint8_t brightness) {
-    /* Scale to 48ths: 0-255 -> 0-12240 */
-    int32_t pixel = (int32_t)brightness * 48 + bd->err0;
+void blue_dither_reset(BlueDither *bd) {
+    memset(bd->err, 0, bd->width * 4 * sizeof(int32_t));
+    bd->cur_row = 0;
+    bd->x = 0;
+    bd->y = 0;
+}
 
-    /* Threshold at 127.5 * 48 = 6120 */
-    const int32_t threshold = 6120;
-    const int32_t white_val = 255 * 48;
+/* Internal: get error buffer index with circular wrap */
+static inline int err_idx(BlueDither *bd, int row, int x) {
+    return ((row & 3) << bd->row_shift) | (x & bd->width_mask);
+}
+
+/* Internal: process a single pixel */
+static inline int blue_dither_pixel(BlueDither *bd, int x, int y, uint8_t brightness) {
+    int r0 = bd->cur_row;
+    int r1 = (bd->cur_row + 1) & 3;
+    int r2 = (bd->cur_row + 2) & 3;
+
+    const int32_t threshold = 6120;  /* 127.5 * 48 */
+    const int32_t white_val = 12240; /* 255 * 48 */
+
+    int32_t pixel = (int32_t)brightness * 48 + bd->err[err_idx(bd, r0, x)];
 
     int output;
     int32_t quant_err;
-
     if (pixel >= threshold) {
         output = 1;
         quant_err = pixel - white_val;
@@ -207,158 +228,64 @@ int blue_dither_1d_next(BlueDither1D *bd, uint8_t brightness) {
         quant_err = pixel;
     }
 
-    /* Select diffusion kernel based on hash */
-    uint32_t hash = blue_dither_hash(bd->state ^ bd->seed);
-    bd->state++;
-
-    /* Shift error buffer */
-    bd->err0 = bd->err1;
-    bd->err1 = 0;
+    uint32_t hash = blue_dither_hash((uint32_t)x ^ ((uint32_t)y << 16) ^ bd->seed);
 
     if (hash & 1) {
-        /* FS-like: 100% to next (scaled as 48/48) */
-        bd->err0 += quant_err;
+        /* Floyd-Steinberg: 21/48, 9/48, 15/48, 3/48 */
+        bd->err[err_idx(bd, r0, x + 1)] += (quant_err * 21) / 48;
+        bd->err[err_idx(bd, r1, x - 1)] += (quant_err * 9) / 48;
+        bd->err[err_idx(bd, r1, x)]     += (quant_err * 15) / 48;
+        bd->err[err_idx(bd, r1, x + 1)] += (quant_err * 3) / 48;
     } else {
-        /* JJN-like: split 7:5 to next two positions (7/12 ≈ 58%, 5/12 ≈ 42%) */
-        bd->err0 += (quant_err * 7) / 12;
-        bd->err1 += (quant_err * 5) / 12;
+        /* Jarvis-Judice-Ninke */
+        bd->err[err_idx(bd, r0, x + 1)] += (quant_err * 7) / 48;
+        bd->err[err_idx(bd, r0, x + 2)] += (quant_err * 5) / 48;
+        bd->err[err_idx(bd, r1, x - 2)] += (quant_err * 3) / 48;
+        bd->err[err_idx(bd, r1, x - 1)] += (quant_err * 5) / 48;
+        bd->err[err_idx(bd, r1, x)]     += (quant_err * 7) / 48;
+        bd->err[err_idx(bd, r1, x + 1)] += (quant_err * 5) / 48;
+        bd->err[err_idx(bd, r1, x + 2)] += (quant_err * 3) / 48;
+        bd->err[err_idx(bd, r2, x - 2)] += (quant_err * 1) / 48;
+        bd->err[err_idx(bd, r2, x - 1)] += (quant_err * 3) / 48;
+        bd->err[err_idx(bd, r2, x)]     += (quant_err * 5) / 48;
+        bd->err[err_idx(bd, r2, x + 1)] += (quant_err * 3) / 48;
+        bd->err[err_idx(bd, r2, x + 2)] += (quant_err * 1) / 48;
     }
 
     return output;
 }
 
-/* --------------------------------------------------------------------------
- * 2D Implementation
- * -------------------------------------------------------------------------- */
+/* Internal: advance to next row */
+static inline void blue_dither_next_row(BlueDither *bd) {
+    /* Clear the row we're leaving (it will be reused as row+3) */
+    int row_start = (bd->cur_row & 3) << bd->row_shift;
+    memset(bd->err + row_start, 0, bd->width * sizeof(int32_t));
 
-int blue_dither_2d_init(BlueDither2D *bd, int width, uint32_t seed) {
-    bd->width = width;
-    bd->seed = seed;
-    bd->cur_row = 0;
-
-    /* Allocate with padding (2 pixels each side for JJN kernel) */
-    int buf_width = width + 4;
-    for (int i = 0; i < 3; i++) {
-        bd->err[i] = (int32_t *)calloc(buf_width, sizeof(int32_t));
-        if (!bd->err[i]) {
-            for (int j = 0; j < i; j++) free(bd->err[j]);
-            return -1;
-        }
-    }
-    return 0;
+    bd->cur_row = (bd->cur_row + 1) & 3;
+    bd->y++;
+    bd->x = 0;
 }
 
-void blue_dither_2d_free(BlueDither2D *bd) {
-    if (!bd) return;
-    for (int i = 0; i < 3; i++) {
-        if (bd->err[i]) free(bd->err[i]);
-    }
-}
-
-void blue_dither_2d_reset(BlueDither2D *bd) {
-    int buf_width = bd->width + 4;
-    for (int i = 0; i < 3; i++) {
-        memset(bd->err[i], 0, buf_width * sizeof(int32_t));
-    }
-    bd->cur_row = 0;
-}
-
-void blue_dither_2d_row(BlueDither2D *bd, const uint8_t *input, uint8_t *output, int y) {
+void blue_dither_row(BlueDither *bd, const uint8_t *input, uint8_t *output) {
     int width = bd->width;
-    int r0 = bd->cur_row;
-    int r1 = (bd->cur_row + 1) % 3;
-    int r2 = (bd->cur_row + 2) % 3;
+    int y = bd->y;
 
-    /* Offset by 2 for padding */
-    int32_t *e0 = bd->err[r0] + 2;
-    int32_t *e1 = bd->err[r1] + 2;
-    int32_t *e2 = bd->err[r2] + 2;
-
-    /* Serpentine: even rows L->R, odd rows R->L */
-    int ltr = (y & 1) == 0;
-
-    const int32_t threshold = 6120;  /* 127.5 * 48 */
-    const int32_t white_val = 12240; /* 255 * 48 */
-
-    if (ltr) {
-        for (int x = 0; x < width; x++) {
-            int32_t pixel = (int32_t)input[x] * 48 + e0[x];
-
-            int32_t quant_err;
-            if (pixel >= threshold) {
-                output[x] = 1;
-                quant_err = pixel - white_val;
-            } else {
-                output[x] = 0;
-                quant_err = pixel;
-            }
-
-            uint32_t hash = blue_dither_hash((uint32_t)x ^ ((uint32_t)y << 16) ^ bd->seed);
-
-            if (hash & 1) {
-                /* Floyd-Steinberg: 21/48, 9/48, 15/48, 3/48 */
-                e0[x + 1] += (quant_err * 21) / 48;
-                e1[x - 1] += (quant_err * 9) / 48;
-                e1[x]     += (quant_err * 15) / 48;
-                e1[x + 1] += (quant_err * 3) / 48;
-            } else {
-                /* JJN: 7,5 / 3,5,7,5,3 / 1,3,5,3,1 */
-                e0[x + 1] += (quant_err * 7) / 48;
-                e0[x + 2] += (quant_err * 5) / 48;
-                e1[x - 2] += (quant_err * 3) / 48;
-                e1[x - 1] += (quant_err * 5) / 48;
-                e1[x]     += (quant_err * 7) / 48;
-                e1[x + 1] += (quant_err * 5) / 48;
-                e1[x + 2] += (quant_err * 3) / 48;
-                e2[x - 2] += (quant_err * 1) / 48;
-                e2[x - 1] += (quant_err * 3) / 48;
-                e2[x]     += (quant_err * 5) / 48;
-                e2[x + 1] += (quant_err * 3) / 48;
-                e2[x + 2] += (quant_err * 1) / 48;
-            }
-        }
-    } else {
-        for (int x = width - 1; x >= 0; x--) {
-            int32_t pixel = (int32_t)input[x] * 48 + e0[x];
-
-            int32_t quant_err;
-            if (pixel >= threshold) {
-                output[x] = 1;
-                quant_err = pixel - white_val;
-            } else {
-                output[x] = 0;
-                quant_err = pixel;
-            }
-
-            uint32_t hash = blue_dither_hash((uint32_t)x ^ ((uint32_t)y << 16) ^ bd->seed);
-
-            if (hash & 1) {
-                /* Floyd-Steinberg RTL */
-                e0[x - 1] += (quant_err * 21) / 48;
-                e1[x + 1] += (quant_err * 9) / 48;
-                e1[x]     += (quant_err * 15) / 48;
-                e1[x - 1] += (quant_err * 3) / 48;
-            } else {
-                /* JJN RTL */
-                e0[x - 1] += (quant_err * 7) / 48;
-                e0[x - 2] += (quant_err * 5) / 48;
-                e1[x + 2] += (quant_err * 3) / 48;
-                e1[x + 1] += (quant_err * 5) / 48;
-                e1[x]     += (quant_err * 7) / 48;
-                e1[x - 1] += (quant_err * 5) / 48;
-                e1[x - 2] += (quant_err * 3) / 48;
-                e2[x + 2] += (quant_err * 1) / 48;
-                e2[x + 1] += (quant_err * 3) / 48;
-                e2[x]     += (quant_err * 5) / 48;
-                e2[x - 1] += (quant_err * 3) / 48;
-                e2[x - 2] += (quant_err * 1) / 48;
-            }
-        }
+    for (int x = 0; x < width; x++) {
+        output[x] = blue_dither_pixel(bd, x, y, input[x]);
     }
 
-    /* Rotate buffer and clear for reuse */
-    memset(bd->err[r0] + 2, 0, width * sizeof(int32_t));
-    bd->cur_row = r1;
+    blue_dither_next_row(bd);
+}
+
+int blue_dither_next(BlueDither *bd, uint8_t brightness) {
+    int result = blue_dither_pixel(bd, bd->x, bd->y, brightness);
+
+    bd->x++;
+    if (bd->x >= bd->width) {
+        blue_dither_next_row(bd);
+    }
+
+    return result;
 }
 
 #endif /* BLUE_DITHER_IMPLEMENTATION */
