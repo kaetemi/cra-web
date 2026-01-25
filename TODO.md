@@ -54,13 +54,3 @@ Could be possible to re-dither pngquant outputs, but pngquant generates mid-clus
 For the stochastic jinc resampling, check if we can use the /x (like the sinc falloff) itself as a warping function and use our blue noise to select the sampling set then warp it into the window and do just the wobbly
 
 ---
-
-Investigate native 1D error diffusion kernels for temporal dithering (LED PWM, audio DAC).
-Current approach uses 2D kernels treating the stream as virtual rows, which works but may not be optimal.
-Potential 1D kernel pairs to test:
-- "FS-like": 100% error to t+1
-- "JJN-like": diffuse to t+1, t+2, t+3 with weights matching JJN's column sums (7:5:3 or similar)
-The key question: what 1D kernel ratio produces the best temporal blue noise characteristics?
-Could analyze by generating 1D streams and computing their power spectrum.
-
----
