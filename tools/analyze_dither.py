@@ -716,6 +716,140 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
         print(f"  CRA white: {cra_white:.2f}%, Python white: {py_white:.2f}%")
 
 
+def plot_ideal_blue_noise(output_dir: Path):
+    """Plot ideal blue noise vs white noise reference curve."""
+    # Frequency range (cycles/pixel): 0 to 0.5 (Nyquist)
+    freqs = np.linspace(0.004, 0.5, 500)  # Start slightly above 0 to avoid log(0)
+
+    # Ideal blue noise: power ∝ f^2
+    # This gives +6 dB per octave (doubling frequency = 4x power = +6 dB)
+    # Normalize so it matches typical dither power levels (~90 dB at f=0.5)
+    P_ref = 1e9  # Reference power at f=0.5
+    power = P_ref * (freqs / 0.5) ** 2
+    power_db = 10 * np.log10(power + 1e-10)
+
+    # White noise (flat) for comparison
+    white_db = np.full_like(freqs, 10 * np.log10(P_ref))
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.plot(freqs, power_db, 'b-', linewidth=2, label='Ideal Blue Noise (f²)')
+    ax.plot(freqs, white_db, 'gray', linestyle='--', linewidth=1.5, label='White Noise (flat)')
+
+    # Mark octaves
+    octaves = [0.0625, 0.125, 0.25, 0.5]
+    for oct in octaves:
+        ax.axvline(x=oct, color='lightgray', linestyle=':', alpha=0.7)
+        ax.text(oct, power_db.min() + 2, f'{oct}', ha='center', fontsize=8, color='gray')
+
+    # Annotations
+    ax.annotate('+6 dB/octave', xy=(0.2, 10*np.log10(P_ref * (0.2/0.5)**2)),
+                xytext=(0.1, 75), fontsize=10,
+                arrowprops=dict(arrowstyle='->', color='blue', alpha=0.7))
+
+    ax.set_xlabel('Spatial Frequency (cycles/pixel)', fontsize=12)
+    ax.set_ylabel('Power (dB)', fontsize=12)
+    ax.set_title('Ideal Blue Noise vs White Noise Power Spectrum', fontsize=14)
+    ax.set_xlim(0, 0.5)
+    ax.set_ylim(50, 95)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='lower right', fontsize=10)
+
+    plt.tight_layout()
+    output_path = output_dir / "ideal_blue_noise.png"
+    plt.savefig(output_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"  {output_path.name}")
+
+
+def analyze_vs_blue_noise(base_dir: Path, output_dir: Path):
+    """Compare our method vs void-and-cluster blue noise at various gray levels."""
+    blue_noise_path = base_dir / "blue_noise_256.png"
+    if not blue_noise_path.exists():
+        print(f"  Blue noise reference not found: {blue_noise_path}")
+        return
+
+    blue_noise_raw = load_image(blue_noise_path)
+    dithered_dir = base_dir / "dithered" / "boon-serpentine"
+
+    # Gray levels to test
+    gray_levels = [42, 85, 127, 170, 191]
+
+    for gray in gray_levels:
+        our_method_path = dithered_dir / f"gray_{gray:03d}_boon-serpentine.png"
+        if not our_method_path.exists():
+            print(f"  Skipping gray_{gray:03d}: not found")
+            continue
+
+        # Threshold blue noise at this gray level
+        blue_noise_thresh = (blue_noise_raw < gray).astype(np.float32) * 255
+        our_method = load_image(our_method_path)
+
+        # Compute spectra
+        freqs_bn, h_bn, d_bn, v_bn = compute_segmented_radial_power(blue_noise_thresh)
+        freqs_om, h_om, d_om, v_om = compute_segmented_radial_power(our_method)
+
+        # Convert to dB
+        h_bn_db = 10 * np.log10(h_bn + 1e-10)
+        d_bn_db = 10 * np.log10(d_bn + 1e-10)
+        v_bn_db = 10 * np.log10(v_bn + 1e-10)
+
+        h_om_db = 10 * np.log10(h_om + 1e-10)
+        d_om_db = 10 * np.log10(d_om + 1e-10)
+        v_om_db = 10 * np.log10(v_om + 1e-10)
+
+        # Ideal f² curve for reference
+        freqs_ideal = np.linspace(0.004, 0.5, 500)
+        P_ref = 10 ** (h_bn_db.max() / 10)
+        power_ideal_db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+
+        # Calculate stats
+        bn_avg_db = (h_bn_db + d_bn_db + v_bn_db) / 3
+        om_avg_db = (h_om_db + d_om_db + v_om_db) / 3
+        low_freq_diff = om_avg_db[freqs_om < 0.1].mean() - bn_avg_db[freqs_bn < 0.1].mean()
+
+        # Plot side by side
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        y_min = min(h_bn_db.min(), h_om_db.min()) - 5
+        y_max = max(h_bn_db.max(), h_om_db.max()) + 5
+
+        # Left: Blue Noise (void-and-cluster)
+        axes[0].plot(freqs_bn, h_bn_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[0].plot(freqs_bn, d_bn_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[0].plot(freqs_bn, v_bn_db, 'b-', label='V', alpha=0.8, linewidth=1)
+        axes[0].plot(freqs_ideal, power_ideal_db, 'k--', linewidth=1, alpha=0.5, label='Ideal f²')
+        axes[0].set_xlabel('Spatial Frequency (cycles/pixel)')
+        axes[0].set_ylabel('Power (dB)')
+        axes[0].set_title(f'Void-and-Cluster Blue Noise\n(thresholded at {gray})', fontsize=12, fontweight='bold')
+        axes[0].set_xlim(0, 0.5)
+        axes[0].set_ylim(y_min, y_max)
+        axes[0].grid(True, alpha=0.3)
+        axes[0].legend(loc='lower right')
+
+        # Right: Our Method
+        axes[1].plot(freqs_om, h_om_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[1].plot(freqs_om, d_om_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[1].plot(freqs_om, v_om_db, 'b-', label='V', alpha=0.8, linewidth=1)
+        axes[1].plot(freqs_ideal, power_ideal_db, 'k--', linewidth=1, alpha=0.5, label='Ideal f²')
+        axes[1].set_xlabel('Spatial Frequency (cycles/pixel)')
+        axes[1].set_ylabel('Power (dB)')
+        axes[1].set_title(f'Our Method (FS/JJN/lowbias32)\ngray_{gray:03d}', fontsize=12, fontweight='bold')
+        axes[1].set_xlim(0, 0.5)
+        axes[1].set_ylim(y_min, y_max)
+        axes[1].grid(True, alpha=0.3)
+        axes[1].legend(loc='lower right')
+
+        gray_pct = gray / 255 * 100
+        plt.suptitle(f'Void-and-Cluster vs Our Method @ {gray_pct:.1f}% gray (low-freq diff: {low_freq_diff:.1f} dB)',
+                     fontsize=14, fontweight='bold')
+        plt.tight_layout()
+
+        output_path = output_dir / f"blue_noise_vs_our_method_{gray:03d}.png"
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"  {output_path.name} (low-freq diff: {low_freq_diff:.1f} dB)")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Analyze dithered images with Fourier methods')
     parser.add_argument('--input', '-i', type=Path, help='Single input image to analyze')
@@ -726,6 +860,8 @@ def main():
     parser.add_argument('--hash', action='store_true', help='Compare boon hash functions (lowbias32 vs wang)')
     parser.add_argument('--sanity', action='store_true', help='Sanity check: compare coin flip, blue noise, CRA, Python replication')
     parser.add_argument('--blue-kernel', action='store_true', help='Experimental: compare standard vs blue-noise kernel selection')
+    parser.add_argument('--ideal', action='store_true', help='Plot ideal blue noise vs white noise reference curve')
+    parser.add_argument('--vs-blue-noise', action='store_true', help='Compare our method vs void-and-cluster blue noise')
     args = parser.parse_args()
 
     base_dir = Path(__file__).parent / "test_images"
@@ -747,6 +883,16 @@ def main():
         print("Running sanity check comparison...")
         analyze_sanity_check(base_dir, output_dir)
         print(f"\nDone! Sanity check saved to {output_dir}")
+    elif args.ideal:
+        # Plot ideal blue noise reference
+        print("Plotting ideal blue noise reference...")
+        plot_ideal_blue_noise(output_dir)
+        print(f"\nDone! Ideal blue noise plot saved to {output_dir}")
+    elif args.vs_blue_noise:
+        # Compare our method vs void-and-cluster
+        print("Comparing our method vs void-and-cluster blue noise...")
+        analyze_vs_blue_noise(base_dir, output_dir)
+        print(f"\nDone! Comparison saved to {output_dir}")
     elif args.hash:
         # Hash comparison (lowbias32 vs wang)
         source_images = [p.stem for p in base_dir.glob("*.png")]

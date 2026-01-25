@@ -85,6 +85,8 @@ python tools/analyze_dither.py --hash         # Hash function comparison (lowbia
 python tools/analyze_dither.py --rng          # RNG noise spectral analysis
 python tools/analyze_dither.py --sanity       # Sanity check: coin flip vs blue noise vs CRA vs Python
 python tools/analyze_dither.py --blue-kernel  # Kernel mixing experiments (see below)
+python tools/analyze_dither.py --ideal        # Plot ideal blue noise vs white noise reference
+python tools/analyze_dither.py --vs-blue-noise # Compare our method vs void-and-cluster blue noise
 python tools/analyze_dither.py -i path/to/image.png  # Single image analysis
 ```
 
