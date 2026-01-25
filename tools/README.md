@@ -146,9 +146,9 @@ Traditional error diffusion (Floyd-Steinberg, Jarvis-Judice-Ninke) produces stru
 **1D Kernel (Optimized):**
 The 1D mode mixes two kernels for blue noise temporal dithering:
 - K1: `[48]` - 100% error to t+1 (tight response)
-- K2: `[38,10]` - 79% to t+1, 21% to t+2 (spread response)
+- K2: `[38,10]` - 79% to t+1, 21% to t+2 (spread response) = 2×[19,5]
 
-The `[38,10]` ratio (~4:1) was determined optimal through spectral analysis. Note: 38 = 2×19 and 10 = 2×5, so this equals 2×[19,5] where both 19 and 5 are prime.
+The `[38,10]` ratio (~4:1) was determined optimal through spectral analysis, achieving +5.52 dB/octave average (ideal is +6.0). Note: 38 = 2×19 and 10 = 2×5, where both 19 and 5 are prime.
 
 **Usage:**
 ```c
@@ -218,11 +218,12 @@ python tools/analyze_1d_dither.py --count 262144  # Custom sample count
 Compares different 1D kernel configurations for spectral quality.
 
 **Kernels tested:**
-- `[48]+[38,10]` - Optimal (~4:1 ratio), avg +5.52 dB/octave
+- `[48]+[38,10]` - **Best** (~4:1 ratio), avg +5.52 dB/octave
 - `[48]+[43,5]` - Prime pair (8.6:1 ratio)
 - `[48]+[41,7]` - Prime pair (5.9:1 ratio)
 - `[48]+[37,11]` - Prime pair (3.4:1 ratio)
 - `[48]+[31,17]` - Prime pair (1.8:1 ratio)
+- `[48]+[28,20]` - Original (1.4:1 ratio)
 - Length-3 variants (generally worse at low gray levels)
 
 **Output:** `spectrum_1d_kernel_comparison.png`
