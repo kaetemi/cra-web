@@ -115,9 +115,10 @@ pub enum ScaleMode {
     UniformHeight,
 }
 
-/// Tent-space coordinate mapping mode
+/// Tent-space coordinate mapping mode (internal use only)
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-pub enum TentMode {
+pub(crate) enum TentMode {
     /// Standard box-to-box mapping (pixel centers to pixel centers)
     #[default]
     Off,
@@ -380,13 +381,8 @@ pub fn rescale_with_progress(
     rescale_with_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, progress)
 }
 
-/// Rescale Pixel4 image with tent-mode support for supersampling
-///
-/// `tent_mode` controls coordinate mapping:
-/// - `TentMode::Off`: Standard box-to-box mapping (pixel centers to pixel centers)
-/// - `TentMode::SampleToSample`: Sample-to-sample mapping for tent-space (position 0→0, N-1→M-1)
-/// - `TentMode::Prescale`: Tent-to-box prescale (integrates tent_contract into rescale)
-pub fn rescale_with_progress_tent(
+/// Rescale Pixel4 image with tent-mode support (internal implementation)
+fn rescale_with_progress_tent(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,
@@ -539,8 +535,8 @@ pub fn rescale_with_alpha_progress(
     rescale_with_alpha_progress_tent(src, src_width, src_height, dst_width, dst_height, method, scale_mode, TentMode::Off, progress)
 }
 
-/// Alpha-aware rescale with tent-mode support for supersampling
-pub fn rescale_with_alpha_progress_tent(
+/// Alpha-aware rescale with tent-mode support (internal implementation)
+fn rescale_with_alpha_progress_tent(
     src: &[Pixel4],
     src_width: usize,
     src_height: usize,

@@ -360,7 +360,7 @@ pub fn oklab_to_linear_rgb_pixel(p: Pixel4) -> Pixel4 {
 /// Formula: Lr = 0.5 * (k3*L - k1 + sqrt((k3*L - k1)² + 4*k2*k3*L))
 /// where k1 = 0.206, k2 = 0.03, k3 = (1+k1)/(1+k2)
 #[inline]
-pub fn oklab_L_to_Lr(l: f32) -> f32 {
+pub fn oklab_l_to_lr(l: f32) -> f32 {
     const K1: f32 = 0.206;
     const K2: f32 = 0.03;
     const K3: f32 = (1.0 + K1) / (1.0 + K2); // ≈ 1.170873786
@@ -376,7 +376,7 @@ pub fn oklab_L_to_Lr(l: f32) -> f32 {
 #[inline]
 pub fn linear_rgb_to_oklab_lr(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
     let (l, a, b_ch) = linear_rgb_to_oklab(r, g, b);
-    (oklab_L_to_Lr(l), a, b_ch)
+    (oklab_l_to_lr(l), a, b_ch)
 }
 
 // ============== Y'CbCr color space ==============
