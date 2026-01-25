@@ -121,20 +121,31 @@ KERNEL_SETS = {
         [28, 20],       # 7:5 ratio to t+1,t+2 (JJN-like)
     ],
 
-    # Ratio experiments - varying the t+1:t+2 split
+    # Best performer
     '[48]+[38,10]': [
         [48],
-        [38, 10],       # ~4:1 ratio - BEST performer
+        [38, 10],       # ratio 3.8:1 - BEST overall
     ],
 
-    '[48]+[34,14]': [
+    # Prime pairs (both coefficients are prime, sum to 48)
+    '[48]+[43,5] prime': [
         [48],
-        [34, 14],       # ~2.4:1 ratio
+        [43, 5],        # ratio 8.6:1, both prime - BEST prime pair
     ],
 
-    '[48]+[40,8]': [
+    '[48]+[41,7] prime': [
         [48],
-        [40, 8],        # 5:1 ratio
+        [41, 7],        # ratio 5.9:1, both prime
+    ],
+
+    '[48]+[37,11] prime': [
+        [48],
+        [37, 11],       # ratio 3.4:1, both prime
+    ],
+
+    '[48]+[31,17] prime': [
+        [48],
+        [31, 17],       # ratio 1.8:1, both prime
     ],
 
     # Length-3 experiments (both hurt low gray)
@@ -146,18 +157,6 @@ KERNEL_SETS = {
     '[48]+[28,12,8]': [
         [48],
         [28, 12, 8],    # Length-3, more balanced - even worse
-    ],
-
-    # Prime coefficient variants
-    '[48]+[29,19] prime': [
-        [48],
-        [29, 19],       # Both prime
-    ],
-
-    # All-prime length-4 (elegant but worse at low gray)
-    '[48]+[17,13,11,7]': [
-        [48],
-        [17, 13, 11, 7],  # All prime, sum=48
     ],
 }
 
