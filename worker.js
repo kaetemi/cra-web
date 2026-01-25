@@ -172,13 +172,9 @@ async function encodePng(data, width, height, isRgba = false) {
     return new Uint8Array(await blob.arrayBuffer());
 }
 
-// Supersample mode constants
-const SUPERSAMPLE_NONE = 0;
-const SUPERSAMPLE_TENT_VOLUME = 1;
-
 // Process images using WASM with precise 16-bit and ICC support
 // Pipeline: file bytes → decode (16-bit preserved) → ICC transform if needed → linear RGB → color_correct → sRGB → dither
-async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty = true, supersample = SUPERSAMPLE_NONE) {
+async function processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty = true) {
     sendProgress('process', 'Decoding images (precise)...', 5);
 
     // First decode input to check for alpha
@@ -253,9 +249,6 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
             5: "Y'CbCr"
         };
         sendConsole(`Color-aware output: ON (${distanceSpaceNames[outputDistanceSpace] || distanceSpaceNames[1]})`);
-    }
-    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
-        sendConsole('Supersampling: Tent Volume');
     }
 
     // Method mapping: method name -> [methodCode, luminosityFlag, description]
@@ -353,41 +346,15 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         craWasm.unpremultiply_alpha_wasm(inputBuffer);
     }
 
-    // Track dimensions for potential supersampling
-    let processWidth = inputImg.width;
-    let processHeight = inputImg.height;
-    let refProcessWidth = refImg.width;
-    let refProcessHeight = refImg.height;
-    let processInputBuffer = inputBuffer;
-    let processRefBuffer = refBuffer;
-
-    // Tent-volume supersampling: expand to tent-space before processing
-    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
-        sendProgress('process', 'Expanding to tent-space...', 28);
-        sendConsole('  Expanding input to tent-space...');
-        const inputExpanded = craWasm.tent_expand_wasm(inputBuffer, inputImg.width, inputImg.height);
-        processInputBuffer = inputExpanded.buffer;
-        processWidth = inputExpanded.width;
-        processHeight = inputExpanded.height;
-        sendConsole(`    ${inputImg.width}x${inputImg.height} -> ${processWidth}x${processHeight}`);
-
-        sendConsole('  Expanding reference to tent-space...');
-        const refExpanded = craWasm.tent_expand_wasm(refBuffer, refImg.width, refImg.height);
-        processRefBuffer = refExpanded.buffer;
-        refProcessWidth = refExpanded.width;
-        refProcessHeight = refExpanded.height;
-        sendConsole(`    ${refImg.width}x${refImg.height} -> ${refProcessWidth}x${refProcessHeight}`);
-    }
-
     // Color correction (in linear RGB space)
     sendProgress('process', 'Running color correction...', 30);
-    let resultBuffer = craWasm.color_correct_with_progress_wasm(
-        processInputBuffer,
-        processRefBuffer,
-        processWidth,
-        processHeight,
-        refProcessWidth,
-        refProcessHeight,
+    const resultBuffer = craWasm.color_correct_with_progress_wasm(
+        inputBuffer,
+        refBuffer,
+        inputImg.width,
+        inputImg.height,
+        refImg.width,
+        refImg.height,
         methodCode,
         luminosityFlag,
         histogramMode,
@@ -397,20 +364,8 @@ async function processImagesWasm(inputData, refData, method, config, histogramMo
         (progress) => sendProgress('process', 'Running color correction...', 30 + Math.round(progress * 20))
     );
 
-    // Track final dimensions (may change if contracting from tent-space)
-    let finalWidth = processWidth;
-    let finalHeight = processHeight;
-
-    // Tent-volume supersampling: contract back from tent-space
-    if (supersample === SUPERSAMPLE_TENT_VOLUME) {
-        sendProgress('process', 'Contracting from tent-space...', 52);
-        sendConsole('  Contracting result from tent-space...');
-        const contracted = craWasm.tent_contract_wasm(resultBuffer, processWidth, processHeight);
-        resultBuffer = contracted.buffer;
-        finalWidth = contracted.width;
-        finalHeight = contracted.height;
-        sendConsole(`    ${processWidth}x${processHeight} -> ${finalWidth}x${finalHeight}`);
-    }
+    const finalWidth = inputImg.width;
+    const finalHeight = inputImg.height;
 
     // Convert linear back to sRGB (0-1) in-place
     sendProgress('process', 'Converting to sRGB...', 55);
@@ -502,12 +457,12 @@ async function processImagesPython(inputData, refData, method, config) {
 }
 
 // Process images (dispatcher)
-async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty, supersample) {
+async function processImages(inputData, refData, method, config, useWasm, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty) {
     try {
         let outputData;
 
         if (useWasm && wasmCraReady) {
-            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty, supersample);
+            outputData = await processImagesWasm(inputData, refData, method, config, histogramMode, histogramDitherMode, outputDitherMode, colorAwareHistogram, histogramDistanceSpace, colorAwareOutput, outputDistanceSpace, overshootPenalty);
         } else {
             outputData = await processImagesPython(inputData, refData, method, config);
         }
@@ -542,8 +497,7 @@ self.onmessage = async function(e) {
                 data.histogramDistanceSpace !== undefined ? data.histogramDistanceSpace : 1,
                 data.colorAwareOutput !== undefined ? data.colorAwareOutput : true,
                 data.outputDistanceSpace !== undefined ? data.outputDistanceSpace : 1,
-                data.overshootPenalty !== undefined ? data.overshootPenalty : true,
-                data.supersample !== undefined ? data.supersample : 0
+                data.overshootPenalty !== undefined ? data.overshootPenalty : true
             );
             break;
     }

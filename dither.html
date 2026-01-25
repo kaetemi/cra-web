@@ -945,13 +945,6 @@
                     </select>
                 </div>
 
-                <div class="option-row" id="supersample-row" style="display: none;">
-                    <label for="supersample">Supersampling:</label>
-                    <select id="supersample">
-                        <option value="none" selected>None</option>
-                        <option value="tent-volume">Tent Volume</option>
-                    </select>
-                </div>
             </div>
 
             <div class="toggle-row">
@@ -1399,7 +1392,6 @@
             const overshootPenalty = document.getElementById('overshoot-penalty-toggle').checked;
             const seed = parseInt(document.getElementById('seed-input').value) || 0;
             const tonemapping = document.getElementById('tonemapping').value;
-            const supersample = document.getElementById('supersample').value;
 
             // Determine target dimensions
             let processWidth = originalWidth;
@@ -1447,8 +1439,7 @@
                 perceptualSpace: perceptualSpace,
                 overshootPenalty: overshootPenalty,
                 seed: seed,
-                tonemapping: tonemapping,
-                supersample: supersample
+                tonemapping: tonemapping
             });
         }
 
@@ -1721,12 +1712,6 @@
                 cmd += ` --tonemapping ${tonemapping}`;
             }
 
-            // Add supersampling option
-            const supersample = document.getElementById('supersample').value;
-            if (supersample !== 'none') {
-                cmd += ` --supersample ${supersample}`;
-            }
-
             return cmd;
         }
 
@@ -1993,12 +1978,10 @@
             alphaDitherRow.classList.toggle('hidden', !hasAlphaOutput);
         }
 
-        // HDR options visibility (tonemapping + supersampling)
+        // HDR options visibility (tonemapping)
         function updateHdrOptionsVisibility() {
             const hdrOptions = document.getElementById('hdr-options');
             const tonemappingSelect = document.getElementById('tonemapping');
-            const supersampleRow = document.getElementById('supersample-row');
-            const supersampleSelect = document.getElementById('supersample');
 
             // Show HDR options only for HDR (f32) images
             hdrOptions.style.display = inputIsHdr ? 'block' : 'none';
@@ -2006,28 +1989,8 @@
             // Reset selections when hiding
             if (!inputIsHdr) {
                 tonemappingSelect.value = 'none';
-                supersampleSelect.value = 'none';
-                supersampleRow.style.display = 'none';
             }
         }
-
-        // Update supersample visibility based on tonemapping selection
-        function updateSupersampleVisibility() {
-            const tonemapping = document.getElementById('tonemapping').value;
-            const supersampleRow = document.getElementById('supersample-row');
-            const supersampleSelect = document.getElementById('supersample');
-
-            // Show supersampling only when tonemapping is active
-            const showSupersample = tonemapping !== 'none';
-            supersampleRow.style.display = showSupersample ? 'flex' : 'none';
-
-            // Reset supersample when hiding
-            if (!showSupersample) {
-                supersampleSelect.value = 'none';
-            }
-        }
-
-        document.getElementById('tonemapping').addEventListener('change', updateSupersampleVisibility);
 
         // Color space aware toggle
         function updatePerceptualMode() {

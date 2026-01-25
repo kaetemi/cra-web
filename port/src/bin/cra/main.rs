@@ -41,7 +41,6 @@ use cra_wasm::dither::common::{DitherMode, OutputTechnique, PerceptualSpace};
 use cra_wasm::color::{denormalize_inplace_clamped, linear_to_srgb_inplace};
 use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
 use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
-use cra_wasm::supersample::{tent_expand, tent_contract, supersample_target_dimensions};
 
 // ============================================================================
 // Progress Bar
@@ -661,7 +660,6 @@ fn convert_to_srgb_255(img: &DynamicImage, verbose: bool) -> (Vec<Pixel4>, u32, 
 /// When has_alpha is true, uses alpha-aware rescaling to prevent transparent pixels
 /// from bleeding their color into opaque regions.
 /// When force_exact is true, disables automatic uniform scaling detection.
-/// When use_supersample is true, the resizer targets (2*target+1) dimensions for tent-volume supersampling.
 fn resize_linear(
     pixels: &[Pixel4],
     src_width: u32,
@@ -671,29 +669,20 @@ fn resize_linear(
     method: cra_wasm::rescale::RescaleMethod,
     has_alpha: bool,
     force_exact: bool,
-    tent_mode: cra_wasm::rescale::TentMode,
     verbose: bool,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Result<(Vec<Pixel4>, u32, u32), String> {
-    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress_tent, rescale_with_alpha_progress_tent, ScaleMode, TentMode};
+    use cra_wasm::rescale::{calculate_target_dimensions_exact, rescale_with_progress, rescale_with_alpha_progress, ScaleMode};
 
     let tw = target_width.map(|w| w as usize);
     let th = target_height.map(|h| h as usize);
-    let (base_dst_width, base_dst_height) = calculate_target_dimensions_exact(
+    let (dst_width, dst_height) = calculate_target_dimensions_exact(
         src_width as usize,
         src_height as usize,
         tw,
         th,
         force_exact,
     );
-
-    // When in SampleToSample mode (tent-volume), target dimensions are (2*requested+1) so contraction gives requested size
-    // When in Prescale mode, target dimensions are the final requested size (contract integrated into rescale)
-    let (dst_width, dst_height) = if tent_mode == TentMode::SampleToSample {
-        supersample_target_dimensions(base_dst_width, base_dst_height)
-    } else {
-        (base_dst_width, base_dst_height)
-    };
 
     if dst_width == src_width as usize && dst_height == src_height as usize {
         return Ok((pixels.to_vec(), src_width, src_height));
@@ -726,37 +715,30 @@ fn resize_linear(
             cra_wasm::rescale::RescaleMethod::HybridLanczos3 => "Hybrid Lanczos3 (sep→EWA 2x)",
         };
         let alpha_note = if has_alpha { " (alpha-aware)" } else { "" };
-        let ss_note = match tent_mode {
-            TentMode::SampleToSample => " (supersample target)",
-            TentMode::Prescale => " (prescale)",
-            TentMode::Off => "",
-        };
         eprintln!(
-            "Resizing in linear RGB ({}{}{}): {}x{} -> {}x{}",
-            method_name, alpha_note, ss_note, src_width, src_height, dst_width, dst_height
+            "Resizing in linear RGB ({}{}): {}x{} -> {}x{}",
+            method_name, alpha_note, src_width, src_height, dst_width, dst_height
         );
     }
 
     // Use alpha-aware rescaling when image has alpha channel to prevent
     // transparent pixels from bleeding their color into opaque regions
     let dst_pixels = if has_alpha {
-        rescale_with_alpha_progress_tent(
+        rescale_with_alpha_progress(
             pixels,
             src_width as usize, src_height as usize,
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
-            tent_mode,
             progress,
         )
     } else {
-        rescale_with_progress_tent(
+        rescale_with_progress(
             pixels,
             src_width as usize, src_height as usize,
             dst_width, dst_height,
             method,
             ScaleMode::Independent,
-            tent_mode,
             progress,
         )
     };
@@ -1900,26 +1882,7 @@ fn main() -> Result<(), String> {
 
         let (input_pixels, src_width, src_height, original_has_alpha) = convert_to_linear(&input_img, &input_icc, &input_cicp, args.input_profile, needs_unpremultiply, args.verbose)?;
 
-        // Determine supersampling mode
-        let (tent_mode, needs_expansion) = match args.supersample {
-            Supersample::TentVolume if needs_resize => (cra_wasm::rescale::TentMode::SampleToSample, true),
-            Supersample::TentVolumePrescale => (cra_wasm::rescale::TentMode::Prescale, true),
-            _ => (cra_wasm::rescale::TentMode::Off, false),
-        };
-
-        // Apply tent-space expansion before input tonemapping (if enabled)
-        let (input_pixels, expanded_width, expanded_height) = if needs_expansion {
-            if args.verbose {
-                eprintln!("Tent-space supersampling (volume): expanding {}x{} -> {}x{}",
-                    src_width, src_height, src_width * 2 + 1, src_height * 2 + 1);
-            }
-            let (expanded, w, h) = tent_expand(&input_pixels, src_width as usize, src_height as usize);
-            (expanded, w as u32, h as u32)
-        } else {
-            (input_pixels, src_width, src_height)
-        };
-
-        // Apply input tonemapping in tent-space (if specified)
+        // Apply input tonemapping (if specified)
         let input_pixels = if let Some(tm) = args.input_tonemapping {
             let mut p = input_pixels;
             match tm {
@@ -1946,12 +1909,11 @@ fn main() -> Result<(), String> {
         let mut resize_progress = |p: f32| print_progress("Resize", p);
         let (input_pixels, width, height) = resize_linear(
             &input_pixels,
-            expanded_width, expanded_height,
+            src_width, src_height,
             args.width, args.height,
             effective_method,
             original_has_alpha,
             args.non_uniform,
-            tent_mode,
             args.verbose,
             if args.progress { Some(&mut resize_progress) } else { None },
         )?;
@@ -1997,7 +1959,7 @@ fn main() -> Result<(), String> {
 
         // Process differently based on output format (grayscale vs RGB)
         let result = if is_grayscale_format {
-            // GRAYSCALE PATH: Convert to grayscale, then tonemapping, then tent_contract, then safetensors, then dither
+            // GRAYSCALE PATH: Convert to grayscale, then tonemapping, then safetensors, then dither
 
             // Step 1: Convert linear RGB to linear grayscale
             let linear_gray = linear_pixels_to_grayscale(&pixels_to_dither);
@@ -2026,33 +1988,9 @@ fn main() -> Result<(), String> {
                 linear_gray
             };
 
-            // Step 5: Apply tent-space contraction after tonemapping (only for SampleToSample mode)
-            // Prescale mode integrates contraction into rescale, so no explicit contract needed
-            let (linear_gray, alpha, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
-                if args.verbose {
-                    eprintln!("Tent-space supersampling (volume): contracting {}x{} -> {}x{}",
-                        width, height, (width - 1) / 2, (height - 1) / 2);
-                }
-                // Contract grayscale by reconstructing as single-channel Pixel4
-                let gray_pixels: Vec<Pixel4> = linear_gray.iter()
-                    .zip(alpha.as_ref().map(|a| a.iter()).into_iter().flatten().chain(std::iter::repeat(&1.0f32)))
-                    .map(|(&l, &a)| Pixel4::new(l, l, l, a))
-                    .collect();
-                let (contracted, w, h) = tent_contract(&gray_pixels, width_usize, height_usize);
-                let new_gray: Vec<f32> = contracted.iter().map(|p| p[0]).collect();
-                let new_alpha: Option<Vec<f32>> = if alpha.is_some() {
-                    Some(contracted.iter().map(|p| p[3]).collect())
-                } else {
-                    None
-                };
-                (new_gray, new_alpha, w as u32, h as u32)
-            } else {
-                (linear_gray, alpha, width, height)
-            };
+            // Step 5: Write safetensors output (grayscale as R=G=B=L)
             let width_usize = width as usize;
             let height_usize = height as usize;
-
-            // Step 6: Write safetensors output (grayscale as R=G=B=L)
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && alpha.is_some();
                 let transfer = match args.safetensors_transfer {
@@ -2066,7 +2004,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 7: Dither grayscale
+            // Step 6: Dither grayscale
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
 
@@ -2103,7 +2041,7 @@ fn main() -> Result<(), String> {
                 None
             }
         } else {
-            // RGB PATH: Exposure, tonemapping, tent_contract, then safetensors, then dither
+            // RGB PATH: Exposure, tonemapping, then safetensors, then dither
 
             // Step 1: Apply exposure (linear multiplier)
             let pixels_to_dither = if let Some(exp) = args.exposure {
@@ -2126,22 +2064,7 @@ fn main() -> Result<(), String> {
                 pixels_to_dither
             };
 
-            // Step 3: Apply tent-space contraction after tonemapping (only for SampleToSample mode)
-            // Prescale mode integrates contraction into rescale, so no explicit contract needed
-            let (pixels_to_dither, width, height) = if tent_mode == cra_wasm::rescale::TentMode::SampleToSample {
-                if args.verbose {
-                    eprintln!("Tent-space supersampling (volume): contracting {}x{} -> {}x{}",
-                        width, height, (width - 1) / 2, (height - 1) / 2);
-                }
-                let (contracted, w, h) = tent_contract(&pixels_to_dither, width_usize, height_usize);
-                (contracted, w as u32, h as u32)
-            } else {
-                (pixels_to_dither, width, height)
-            };
-            let width_usize = width as usize;
-            let height_usize = height as usize;
-
-            // Step 4: Write safetensors output
+            // Step 3: Write safetensors output
             if let Some(ref sfi_path) = args.output_safetensors {
                 let include_alpha = !args.safetensors_no_alpha && input_has_alpha;
                 let transfer = match args.safetensors_transfer {
@@ -2155,7 +2078,7 @@ fn main() -> Result<(), String> {
                 )?);
             }
 
-            // Step 5: Dither RGB (or palette)
+            // Step 4: Dither RGB (or palette)
             if has_integer_output {
                 let mut dither_progress = |p: f32| print_progress("Dither", p);
                 let result = if let Some(ref pf) = palette_format {

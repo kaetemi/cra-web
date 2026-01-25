@@ -296,21 +296,6 @@ pub enum Tonemapping {
     AcesInverse,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum, PartialEq, Default)]
-pub enum Supersample {
-    /// No supersampling (default)
-    #[default]
-    None,
-    /// Tent-volume supersampling: expands to (2N+1)×(2M+1), adjusts pixel values
-    /// using pyramid tent volume matching, then contracts back after processing.
-    /// Preserves total light energy during resizing operations.
-    TentVolume,
-    /// Tent-volume prescale: expands to tent-space, then rescales directly to
-    /// final dimensions with integrated contraction. If no resize is specified,
-    /// uses box filter to input size. More efficient than TentVolume.
-    TentVolumePrescale,
-}
-
 /// Build ColorCorrectionMethod from CLI arguments
 pub fn build_correction_method(
     histogram: Histogram,
@@ -607,16 +592,6 @@ pub struct Args {
     /// Scaling method for resize operations
     #[arg(long, value_enum, default_value_t = ScaleMethod::EwaLanczos3)]
     pub scale_method: ScaleMethod,
-
-    /// Supersampling method for resize operations
-    ///
-    /// tent-volume: Before resizing, expands image to (2N+1)×(2M+1) with linear
-    /// interpolation between pixels. Adjusts carried-over mid pixels using pyramid
-    /// tent volume matching. After processing, contracts back using tent volumes.
-    /// The resizer targets (2*target+1) dimensions and uses second-pixel-from-edge
-    /// midpoints as scaling corners.
-    #[arg(long, value_enum, default_value_t = Supersample::None)]
-    pub supersample: Supersample,
 
     /// Input tonemapping: applied before histogram matching (color correction)
     #[arg(long, value_enum)]

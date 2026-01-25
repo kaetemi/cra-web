@@ -37,10 +37,6 @@ const SCALE_MODE_INDEPENDENT = 0;
 const SCALE_MODE_UNIFORM_WIDTH = 1;
 const SCALE_MODE_UNIFORM_HEIGHT = 2;
 
-// Supersample mode constants
-const SUPERSAMPLE_NONE = 'none';
-const SUPERSAMPLE_TENT_VOLUME = 'tent-volume';
-
 // Process dither request
 // Uses single-load pattern following CLI's dual-path approach:
 // - Linear path: load normalized (0-1) + ICC profile, process, then dither
@@ -77,8 +73,7 @@ function processDither(params) {
             perceptualSpace,
             overshootPenalty = true,  // Penalize quantization choices that cause overshoot
             seed,
-            tonemapping = 'none',  // 'none', 'aces', 'aces-inverse'
-            supersample = 'none'   // 'none', 'tent-volume'
+            tonemapping = 'none'  // 'none', 'aces', 'aces-inverse'
         } = params;
 
         sendProgress(5, 'Loading image...');
@@ -156,18 +151,7 @@ function processDither(params) {
                 craWasm.unpremultiply_alpha_wasm(buffer);
             }
 
-            // Step 2: Tent-volume expansion (if supersampling enabled)
-            // Must happen before resize to match CLI order
-            const useSupersampling = supersample === SUPERSAMPLE_TENT_VOLUME && tonemapping !== 'none';
-            if (useSupersampling) {
-                sendProgress(28, 'Expanding to tent-space...');
-                const expanded = craWasm.tent_expand_wasm(buffer, currentWidth, currentHeight);
-                buffer = expanded.buffer;
-                currentWidth = expanded.width;
-                currentHeight = expanded.height;
-            }
-
-            // Step 3: Rescale in linear space (if needed)
+            // Step 2: Rescale in linear space (if needed)
             // Use alpha-aware rescaling when image has alpha to prevent transparent pixels
             // from bleeding their color into opaque regions
             if (doDownscale) {
@@ -183,38 +167,20 @@ function processDither(params) {
             }
 
             if (isGrayscale) {
-                // GRAYSCALE PATH: grayscale → tonemapping → tent_contract → sRGB → dither
-                // (matches CLI grayscale path order)
+                // GRAYSCALE PATH: grayscale → tonemapping → sRGB → dither
                 const preserveGrayAlpha = hasAlpha && bitsGrayA > 0;
 
-                // Step 4a: Convert to grayscale (in tent-space if supersampling)
+                // Step 3a: Convert to grayscale
                 sendProgress(40, 'Converting to grayscale...');
-                let grayBuffer = craWasm.rgb_to_grayscale_wasm(buffer);
+                const grayBuffer = craWasm.rgb_to_grayscale_wasm(buffer);
 
-                // Step 5a: Apply tonemapping to grayscale (in tent-space if supersampling)
+                // Step 4a: Apply tonemapping to grayscale
                 if (tonemapping === 'aces') {
                     sendProgress(45, 'Applying tonemapping (ACES)...');
                     craWasm.gray_tonemap_aces_wasm(grayBuffer);
                 } else if (tonemapping === 'aces-inverse') {
                     sendProgress(45, 'Applying tonemapping (ACES inverse)...');
                     craWasm.gray_tonemap_aces_inverse_wasm(grayBuffer);
-                }
-
-                // Step 6a: Tent-volume contraction (if supersampling enabled)
-                // For grayscale, reconstruct as Pixel4, contract, extract back
-                if (useSupersampling) {
-                    sendProgress(50, 'Contracting from tent-space...');
-                    // Reconstruct grayscale as RGB (R=G=B=L) for contraction
-                    const grayAsRgb = craWasm.grayscale_to_rgb_wasm(grayBuffer, preserveGrayAlpha ? buffer : null);
-                    const contracted = craWasm.tent_contract_wasm(grayAsRgb, currentWidth, currentHeight);
-                    // Extract grayscale back from contracted RGB
-                    grayBuffer = craWasm.rgb_to_grayscale_wasm(contracted.buffer);
-                    if (preserveGrayAlpha) {
-                        // Also contract alpha
-                        buffer = contracted.buffer;
-                    }
-                    currentWidth = contracted.width;
-                    currentHeight = contracted.height;
                 }
 
                 sendProgress(55, 'Applying gamma correction...');
@@ -269,25 +235,16 @@ function processDither(params) {
                     }
                 }
             } else if (isPaletted) {
-                // PALETTED PATH: tonemapping → tent_contract → sRGB → paletted dither
+                // PALETTED PATH: tonemapping → sRGB → paletted dither
                 // Uses fixed palette (e.g., web-safe 216 colors) with integrated alpha distance
 
-                // Step 4b: Apply tonemapping (in tent-space if supersampling)
+                // Step 3b: Apply tonemapping
                 if (tonemapping === 'aces') {
                     sendProgress(45, 'Applying tonemapping (ACES)...');
                     craWasm.tonemap_aces_wasm(buffer);
                 } else if (tonemapping === 'aces-inverse') {
                     sendProgress(45, 'Applying tonemapping (ACES inverse)...');
                     craWasm.tonemap_aces_inverse_wasm(buffer);
-                }
-
-                // Step 5b: Tent-volume contraction (if supersampling enabled)
-                if (useSupersampling) {
-                    sendProgress(50, 'Contracting from tent-space...');
-                    const contracted = craWasm.tent_contract_wasm(buffer, currentWidth, currentHeight);
-                    buffer = contracted.buffer;
-                    currentWidth = contracted.width;
-                    currentHeight = contracted.height;
                 }
 
                 sendProgress(55, 'Converting to sRGB...');
@@ -317,25 +274,15 @@ function processDither(params) {
                     outputData[i * 4 + 3] = ditheredData[i * 4 + 3];
                 }
             } else {
-                // RGB PATH: tonemapping → tent_contract → sRGB → dither
-                // (matches CLI RGB path order)
+                // RGB PATH: tonemapping → sRGB → dither
 
-                // Step 4b: Apply tonemapping (in tent-space if supersampling)
+                // Step 3b: Apply tonemapping
                 if (tonemapping === 'aces') {
                     sendProgress(45, 'Applying tonemapping (ACES)...');
                     craWasm.tonemap_aces_wasm(buffer);
                 } else if (tonemapping === 'aces-inverse') {
                     sendProgress(45, 'Applying tonemapping (ACES inverse)...');
                     craWasm.tonemap_aces_inverse_wasm(buffer);
-                }
-
-                // Step 5b: Tent-volume contraction (if supersampling enabled)
-                if (useSupersampling) {
-                    sendProgress(50, 'Contracting from tent-space...');
-                    const contracted = craWasm.tent_contract_wasm(buffer, currentWidth, currentHeight);
-                    buffer = contracted.buffer;
-                    currentWidth = contracted.width;
-                    currentHeight = contracted.height;
                 }
 
                 sendProgress(55, 'Converting to sRGB...');
