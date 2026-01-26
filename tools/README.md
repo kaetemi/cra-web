@@ -203,11 +203,14 @@ cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o
 ### 8. `analyze_1d_dither.py`
 
 Spectral analysis of 1D temporal dithering. Compares our method against:
+- **ΣΔ 1st order** - First-order sigma-delta modulation (+6 dB/octave, violet noise shaping)
+- **ΣΔ 2nd order** - Second-order sigma-delta modulation (+12 dB/octave noise shaping)
 - **PWM** - Traditional pulse width modulation (shows harmonic spikes that cause flicker)
 - **White noise** - Random threshold dithering (flat spectrum)
-- **Ideal blue noise** - +6 dB/octave reference slope
 
-All charts use log frequency scale to clearly show blue noise characteristics.
+Reference lines for +6 dB/octave (violet) and +12 dB/octave are shown on all charts.
+
+All charts use log frequency scale to clearly show noise shaping characteristics.
 
 **Outputs** (`tools/test_images/analysis/`):
 - `spectrum_1d_logscale.png` - Log-frequency spectrum across gray levels
@@ -267,6 +270,27 @@ Tests all prime pairs [p, q] where p + q = 48 for spectral quality.
 ```bash
 source /root/venv/bin/activate
 python tools/experiments/analyze_1d_prime_pairs.py
+```
+
+### 11. `noise_color_comparison.py`
+
+Generates reference charts comparing noise color spectra using audio terminology:
+- **White**: 0 dB/octave (flat)
+- **Blue (audio)**: +3 dB/octave
+- **Violet**: +6 dB/octave (what graphics calls "blue noise")
+- **+12 dB/octave**: (unnamed, f⁴)
+
+Note: Graphics "blue noise" (+6 dB/octave) is actually "violet noise" in audio terminology.
+
+**Outputs** (`tools/test_images/analysis/`):
+- `noise_color_comparison.png` - Log frequency scale
+- `noise_color_comparison_linear.png` - Linear frequency scale
+
+```bash
+source /root/venv/bin/activate
+python tools/noise_color_comparison.py          # Both charts
+python tools/noise_color_comparison.py --log    # Log scale only
+python tools/noise_color_comparison.py --linear # Linear scale only
 ```
 
 ## Full Regeneration Sequence
@@ -349,7 +373,9 @@ tools/
 │       ├── spectrum_1d_kernel_full_comparison.png # 1D kernel full gray range
 │       ├── spectrum_1d_top8_kernels.png # Top 8 kernels (sum=48)
 │       ├── spectrum_1d_top8_kernels_sum*.png # Top 8 kernels for various sums
-│       └── spectrum_1d_prime_pairs.png # 1D prime pair kernel analysis
+│       ├── spectrum_1d_prime_pairs.png # 1D prime pair kernel analysis
+│       ├── noise_color_comparison.png # Noise color spectra (log scale)
+│       └── noise_color_comparison_linear.png # Noise color spectra (linear scale)
 ```
 
 ## Interpreting Analysis Charts
@@ -367,16 +393,19 @@ Key test cases:
 
 ### 1D Temporal Spectrum Charts
 
-The 1D analysis charts (`spectrum_1d_gray_*.png`) show four panels:
+The 1D analysis charts (`spectrum_1d_gray_*.png`) show six panels:
 1. **Our 1D Method** - Blue noise dithering with smoothed spectrum + raw envelope
-2. **PWM** - Traditional PWM showing harmonic spikes (comb pattern)
-3. **White Noise** - Random threshold with flat spectrum
-4. **Comparison** - All methods overlaid
+2. **ΣΔ 1st Order** - First-order sigma-delta (+6 dB/octave violet noise shaping)
+3. **ΣΔ 2nd Order** - Second-order sigma-delta (+12 dB/octave noise shaping)
+4. **PWM** - Traditional PWM showing harmonic spikes (comb pattern)
+5. **White Noise** - Random threshold with flat spectrum
+6. **Comparison** - All methods overlaid
 
 Key features:
-- **Log-frequency scale**: Makes +6 dB/octave slope appear as straight diagonal line
-- **Ideal blue noise reference**: Black dashed line at +6 dB/octave
+- **Log-frequency scale**: Makes dB/octave slopes appear as straight diagonal lines
+- **Reference lines**: Dashed line at +6 dB/octave (violet); +12 dB/octave shown only on 2nd order panel
 - **PWM harmonics**: Vertical spikes at f = 1/256, 3/256, 5/256... (the cause of visible flicker)
+- **Sigma-delta tonal spikes**: ΣΔ modulators show periodic artifacts despite good average slopes
 
 **Quality ratings** based on spectral slope:
 - **Excellent**: >5 dB/octave (close to ideal +6)

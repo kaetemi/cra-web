@@ -104,6 +104,47 @@ def white_noise_dither(brightness, count, seed=42):
     threshold = brightness / 255.0
     return (rng.random(count) < threshold).astype(np.uint8)
 
+
+def sigma_delta_1st(brightness, count):
+    """First-order sigma-delta modulation. Should produce +6 dB/octave (violet)."""
+    vin = (brightness / 255.0) * 2 - 1  # scale to -1..+1 range
+    vref = 1.0
+    output = np.zeros(count, dtype=np.uint8)
+    integrator = 0.0
+
+    for i in range(count):
+        # sum input with feedback
+        if i == 0:
+            feedback = 0
+        else:
+            feedback = vref if output[i-1] == 1 else -vref
+
+        sum_val = vin - feedback
+
+        # integrate
+        integrator = integrator + sum_val
+
+        # compare
+        output[i] = 1 if integrator >= 0 else 0
+
+    return output
+
+
+def sigma_delta_2nd(brightness, count):
+    """Second-order sigma-delta modulation. Should produce +12 dB/octave."""
+    threshold = brightness / 255.0
+    output = np.zeros(count, dtype=np.uint8)
+    e1 = 0.0
+    e2 = 0.0
+
+    for i in range(count):
+        value = threshold + 2*e1 - e2
+        output[i] = 1 if value >= 0.5 else 0
+        e2 = e1
+        e1 = value - output[i]
+
+    return output
+
 # =============================================================================
 # Spectrum Analysis
 # =============================================================================
@@ -165,21 +206,23 @@ def analyze_linear(gray_levels, count, output_dir):
     print(f"Analyzing {len(gray_levels)} gray levels (linear scale)...")
 
     for gray in gray_levels:
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
         fig.suptitle(f'1D Temporal Dithering Spectrum - Gray {gray} ({gray*100/255:.1f}%)', fontsize=14)
 
         signals = {
             'Our 1D Method': blue_dither_1d(gray, count),
+            'ΣΔ 1st Order (+6dB/oct)': sigma_delta_1st(gray, count),
+            'ΣΔ 2nd Order (+12dB/oct)': sigma_delta_2nd(gray, count),
             'PWM': pwm_dither(gray, count),
             'White Noise': white_noise_dither(gray, count),
         }
 
-        colors = ['#2ecc71', '#3498db', '#e74c3c']
+        colors = ['#2ecc71', '#9b59b6', '#8e44ad', '#3498db', '#e74c3c']
 
         for idx, (name, sig) in enumerate(signals.items()):
-            if idx >= 3:
+            if idx >= 5:
                 break
-            ax = axes[idx // 2, idx % 2]
+            ax = axes[idx // 3, idx % 3]
             freqs, power_db = compute_spectrum(sig)
             f_log, p_log = smooth_spectrum_log(freqs, power_db)
 
@@ -195,43 +238,46 @@ def analyze_linear(gray_levels, count, output_dir):
                 ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2,
                             label=f'{name} ({duty:.1f}%)')
 
-            # Ideal blue noise reference (+6 dB/octave)
+            # Reference lines
             f_ref = np.logspace(-3, np.log10(0.5), 100)
             anchor_idx = np.argmin(np.abs(f_log - 0.1)) if len(f_log) > 0 else 0
             anchor_db = p_log[anchor_idx] if len(p_log) > anchor_idx else -20
-            ideal_blue = anchor_db + 20 * np.log10(f_ref / 0.1)
-            ax.semilogx(f_ref, ideal_blue, 'k--', alpha=0.5, linewidth=1, label='Ideal (+6dB/oct)')
+            ideal_6db = anchor_db + 20 * np.log10(f_ref / 0.1)
+            ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Violet (+6dB/oct)')
+            # Only show +12dB/oct line on 2nd order sigma-delta panel
+            if '2nd Order' in name:
+                ideal_12db = anchor_db + 40 * np.log10(f_ref / 0.1)
+                ax.semilogx(f_ref, ideal_12db, 'k:', alpha=0.5, linewidth=1, label='+12dB/oct')
 
             ax.set_xlabel('Frequency (log scale)')
             ax.set_ylabel('Power (dB)')
             ax.set_title(name)
             ax.set_xlim(1e-3, 0.5)
             ax.set_ylim(-60, 50)
-            ax.legend(loc='lower right', fontsize=8)
+            ax.legend(loc='lower right', fontsize=7)
             ax.grid(True, alpha=0.3, which='both')
 
-        # Summary in fourth panel
-        ax = axes[1, 1]
+        # Summary in sixth panel
+        ax = axes[1, 2]
         for idx, (name, sig) in enumerate(signals.items()):
             freqs, power_db = compute_spectrum(sig)
             if name == 'PWM':
                 ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.5, label=name, alpha=0.8)
             else:
                 f_log, p_log = smooth_spectrum_log(freqs, power_db)
-                ax.semilogx(freqs[1:], power_db[1:], color=colors[idx], linewidth=0.3, alpha=0.3)
-                ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2, label=name)
+                ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2, label=name, alpha=0.8)
 
-        # Ideal reference
+        # Reference line (only +6dB/oct for comparison panel)
         f_ref = np.logspace(-3, np.log10(0.5), 100)
-        ideal_blue = -30 + 20 * np.log10(f_ref / 0.01)
-        ax.semilogx(f_ref, ideal_blue, 'k--', alpha=0.5, linewidth=1, label='Ideal (+6dB/oct)')
+        ideal_6db = -30 + 20 * np.log10(f_ref / 0.01)
+        ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Violet (+6dB/oct)')
 
         ax.set_xlabel('Frequency (log scale)')
         ax.set_ylabel('Power (dB)')
         ax.set_title('Comparison')
         ax.set_xlim(1e-3, 0.5)
         ax.set_ylim(-60, 50)
-        ax.legend(loc='lower right', fontsize=8)
+        ax.legend(loc='lower right', fontsize=7)
         ax.grid(True, alpha=0.3, which='both')
 
         plt.tight_layout()
