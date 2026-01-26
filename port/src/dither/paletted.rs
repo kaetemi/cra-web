@@ -1504,6 +1504,23 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, progress,
             );
         }
+        // FS+TPDF: fall back to Floyd-Steinberg for colorspace-aware dithering
+        DitherMode::FsTpdfStandard => {
+            dither_standard_paletted::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::FsTpdfSerpentine => {
+            dither_serpentine_paletted::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     (r_out, g_out, b_out, a_out)
@@ -1681,6 +1698,23 @@ pub fn paletted_dither_rgba_gamut_mapped(
             );
         }
         DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
+            dither_serpentine_paletted_extended::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        // FS+TPDF: fall back to Floyd-Steinberg for colorspace-aware dithering
+        DitherMode::FsTpdfStandard => {
+            dither_standard_paletted_extended::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::FsTpdfSerpentine => {
             dither_serpentine_paletted_extended::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,

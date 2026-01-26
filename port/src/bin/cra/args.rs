@@ -72,6 +72,12 @@ pub enum DitherMethod {
     /// Ulichney weight perturbation: FS with ±50% paired weight noise, serpentine scanning (1-bit only)
     #[value(name = "ulichney-weight-serpentine")]
     UlichneyWeightSerpentine,
+    /// Floyd-Steinberg with TPDF threshold dither, standard scanning (1-bit only)
+    #[value(name = "fs-tpdf-standard")]
+    FsTpdfStandard,
+    /// Floyd-Steinberg with TPDF threshold dither, serpentine scanning (1-bit only)
+    #[value(name = "fs-tpdf-serpentine")]
+    FsTpdfSerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
     /// Boon with legacy wang_hash (for testing) - hidden from help
@@ -106,6 +112,8 @@ impl DitherMethod {
             DitherMethod::UlichneySerpentine => DitherMode::UlichneySerpentine,
             DitherMethod::UlichneyWeightStandard => DitherMode::UlichneyWeightStandard,
             DitherMethod::UlichneyWeightSerpentine => DitherMode::UlichneyWeightSerpentine,
+            DitherMethod::FsTpdfStandard => DitherMode::FsTpdfStandard,
+            DitherMethod::FsTpdfSerpentine => DitherMode::FsTpdfSerpentine,
             DitherMethod::None => DitherMode::None,
             DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
@@ -131,6 +139,8 @@ impl DitherMethod {
             DitherMethod::UlichneySerpentine => CSDitherMode::UlichneySerpentine,
             DitherMethod::UlichneyWeightStandard => CSDitherMode::UlichneyWeightStandard,
             DitherMethod::UlichneyWeightSerpentine => CSDitherMode::UlichneyWeightSerpentine,
+            DitherMethod::FsTpdfStandard => CSDitherMode::FsTpdfStandard,
+            DitherMethod::FsTpdfSerpentine => CSDitherMode::FsTpdfSerpentine,
             DitherMethod::None => CSDitherMode::None,
             DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,

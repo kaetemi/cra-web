@@ -28,6 +28,8 @@ DITHER_MODES=(
     "ulichney-serpentine"
     "ulichney-weight-standard"
     "ulichney-weight-serpentine"
+    "fs-tpdf-standard"
+    "fs-tpdf-serpentine"
 )
 
 # Create output directories

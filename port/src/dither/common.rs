@@ -247,6 +247,14 @@ pub enum DitherMode {
     /// Ulichney Weight Perturbation: Floyd-Steinberg with ±50% paired weight noise
     /// Serpentine scanning (alternating direction each row)
     UlichneyWeightSerpentine,
+    /// Floyd-Steinberg with TPDF (Triangular PDF) threshold dither
+    /// Standard left-to-right scanning
+    /// Uses two hashes summed for triangular distribution, similar to audio dithering.
+    /// Designed for 1-bit halftoning. For higher bit depths, falls back to standard FS.
+    FsTpdfStandard,
+    /// Floyd-Steinberg with TPDF threshold dither
+    /// Serpentine scanning (alternating direction each row)
+    FsTpdfSerpentine,
 }
 
 /// Wang hash for deterministic randomization.

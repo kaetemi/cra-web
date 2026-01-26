@@ -800,6 +800,8 @@ fn dither_grayscale(
             CSDitherMode::UlichneySerpentine => DitherMode::UlichneySerpentine,
             CSDitherMode::UlichneyWeightStandard => DitherMode::UlichneyWeightStandard,
             CSDitherMode::UlichneyWeightSerpentine => DitherMode::UlichneyWeightSerpentine,
+            CSDitherMode::FsTpdfStandard => DitherMode::FsTpdfStandard,
+            CSDitherMode::FsTpdfSerpentine => DitherMode::FsTpdfSerpentine,
             CSDitherMode::None => DitherMode::None,
         };
         dither_with_mode_bits(gray, width, height, basic_mode, seed, bits, progress)

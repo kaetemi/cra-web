@@ -1130,6 +1130,144 @@ fn ulichney_weight_serpentine(
 }
 
 // ============================================================================
+// Floyd-Steinberg with TPDF (Triangular PDF) threshold dither
+// ============================================================================
+
+/// Generate TPDF-perturbed threshold using two hashes summed for triangular distribution.
+/// Returns threshold centered at 127.5 with triangular distribution.
+#[inline]
+fn fs_tpdf_threshold(x: usize, y: usize, seed: u32, amplitude: f32) -> f32 {
+    // Use two independent hashes for TPDF
+    let hash1 = lowbias32((x as u32).wrapping_mul(2) ^ ((y as u32) << 16) ^ seed);
+    let hash2 = lowbias32((x as u32).wrapping_mul(2).wrapping_add(1) ^ ((y as u32) << 16) ^ seed);
+    // Map each to [0, 1] range
+    let r1 = (hash1 as f32) / (u32::MAX as f32);
+    let r2 = (hash2 as f32) / (u32::MAX as f32);
+    // TPDF: sum of two uniform randoms minus 1 gives triangular [-1, 1]
+    let tpdf = r1 + r2 - 1.0;
+    127.5 + tpdf * amplitude
+}
+
+/// Floyd-Steinberg with TPDF threshold dithering - standard scanning.
+/// Designed for 1-bit output. For higher bit depths, falls back to standard FS.
+fn fs_tpdf_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    // Only apply TPDF for 1-bit output
+    if quant.bits != 1 {
+        return dither_standard::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
+    let hashed_seed = lowbias32(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+    let amplitude = 64.0; // ~0.5 LSB in terms of decision threshold
+
+    for y in reach..(height + reach) {
+        for px in reach..(width + reach) {
+            let bx = px;
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+
+            let old = buf[y][bx];
+            let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+            let new = if old > threshold { 255.0 } else { 0.0 };
+            buf[y][bx] = new;
+
+            let err = old - new;
+
+            // Floyd-Steinberg weights: 7/16, 3/16, 5/16, 1/16
+            buf[y][bx + 1] += err * (7.0 / 16.0);
+            buf[y + 1][bx - 1] += err * (3.0 / 16.0);
+            buf[y + 1][bx] += err * (5.0 / 16.0);
+            buf[y + 1][bx + 1] += err * (1.0 / 16.0);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Floyd-Steinberg with TPDF threshold dithering - serpentine scanning.
+fn fs_tpdf_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    // Only apply TPDF for 1-bit output
+    if quant.bits != 1 {
+        return dither_serpentine::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
+    let hashed_seed = lowbias32(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+    let amplitude = 64.0; // ~0.5 LSB in terms of decision threshold
+
+    for y in reach..(height + reach) {
+        let left_to_right = (y - reach) % 2 == 0;
+
+        if left_to_right {
+            for px in reach..(width + reach) {
+                let bx = px;
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+
+                let old = buf[y][bx];
+                let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+                let new = if old > threshold { 255.0 } else { 0.0 };
+                buf[y][bx] = new;
+
+                let err = old - new;
+
+                buf[y][bx + 1] += err * (7.0 / 16.0);
+                buf[y + 1][bx - 1] += err * (3.0 / 16.0);
+                buf[y + 1][bx] += err * (5.0 / 16.0);
+                buf[y + 1][bx + 1] += err * (1.0 / 16.0);
+            }
+        } else {
+            for px in (reach..(width + reach)).rev() {
+                let bx = px;
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+
+                let old = buf[y][bx];
+                let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+                let new = if old > threshold { 255.0 } else { 0.0 };
+                buf[y][bx] = new;
+
+                let err = old - new;
+
+                // Mirror for RTL
+                buf[y][bx - 1] += err * (7.0 / 16.0);
+                buf[y + 1][bx + 1] += err * (3.0 / 16.0);
+                buf[y + 1][bx] += err * (5.0 / 16.0);
+                buf[y + 1][bx - 1] += err * (1.0 / 16.0);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -1235,6 +1373,8 @@ pub fn dither_with_mode_bits(
         DitherMode::UlichneySerpentine => ulichney_threshold_serpentine(img, width, height, seed, quant, progress),
         DitherMode::UlichneyWeightStandard => ulichney_weight_standard(img, width, height, seed, quant, progress),
         DitherMode::UlichneyWeightSerpentine => ulichney_weight_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::FsTpdfStandard => fs_tpdf_standard(img, width, height, seed, quant, progress),
+        DitherMode::FsTpdfSerpentine => fs_tpdf_serpentine(img, width, height, seed, quant, progress),
     }
 }
 

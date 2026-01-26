@@ -349,6 +349,13 @@ fn dither_alpha_f16_with_mode(
         DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_alpha_f16::<FloydSteinberg>(alpha, width, height, true)
         }
+        // FS+TPDF: fall back to Floyd-Steinberg
+        DitherMode::FsTpdfStandard => {
+            dither_alpha_f16::<FloydSteinberg>(alpha, width, height, false)
+        }
+        DitherMode::FsTpdfSerpentine => {
+            dither_alpha_f16::<FloydSteinberg>(alpha, width, height, true)
+        }
     }
 }
 
@@ -1213,6 +1220,25 @@ pub fn dither_rgba_f16_with_options(
             );
         }
         DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
+            dither_serpentine_f16::<FloydSteinberg>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        // FS+TPDF: fall back to Floyd-Steinberg
+        DitherMode::FsTpdfStandard => {
+            dither_standard_f16::<FloydSteinberg>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        DitherMode::FsTpdfSerpentine => {
             dither_serpentine_f16::<FloydSteinberg>(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,

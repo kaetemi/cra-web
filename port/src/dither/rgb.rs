@@ -897,6 +897,23 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, progress,
             );
         }
+        // FS+TPDF: fall back to Floyd-Steinberg for colorspace-aware dithering
+        DitherMode::FsTpdfStandard => {
+            dither_standard_rgb::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::FsTpdfSerpentine => {
+            dither_serpentine_rgb::<FloydSteinberg>(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     (r_out, g_out, b_out)

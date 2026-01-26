@@ -61,6 +61,7 @@ Runs all test images through CRA with every dithering mode.
 - `zhou-fang-standard`, `zhou-fang-serpentine` - Zhou-Fang threshold modulation
 - `ulichney-standard`, `ulichney-serpentine` - Ulichney threshold perturbation: FS with ±30% threshold noise (1-bit only)
 - `ulichney-weight-standard`, `ulichney-weight-serpentine` - Ulichney weight perturbation: FS with ±50% paired weight noise (1-bit only)
+- `fs-tpdf-standard`, `fs-tpdf-serpentine` - Floyd-Steinberg with TPDF threshold dither: FS with triangular PDF noise on threshold (1-bit only)
 
 **Outputs** (`tools/test_images/dithered/{mode}/`):
 - L1 (1-bit) dithered versions of all test images
@@ -356,7 +357,9 @@ tools/
 │   │   ├── ulichney-standard/   # Ulichney threshold perturbation standard
 │   │   ├── ulichney-serpentine/ # Ulichney threshold perturbation serpentine
 │   │   ├── ulichney-weight-standard/   # Ulichney weight perturbation standard
-│   │   └── ulichney-weight-serpentine/ # Ulichney weight perturbation serpentine
+│   │   ├── ulichney-weight-serpentine/ # Ulichney weight perturbation serpentine
+│   │   ├── fs-tpdf-standard/           # FS-TPDF threshold dither standard
+│   │   └── fs-tpdf-serpentine/         # FS-TPDF threshold dither serpentine
 │   └── analysis/
 │       ├── *_serpentine.png           # Dither method comparison
 │       ├── *_hash_comparison.png      # Hash function comparison

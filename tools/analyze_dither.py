@@ -317,6 +317,7 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         ('zhou-fang-serpentine', 'Zhou-Fang'),
         ('ulichney-serpentine', 'Ulichney (Thresh 30%)'),
         ('ulichney-weight-serpentine', 'Ulichney (Weight 50%)'),
+        ('fs-tpdf-serpentine', 'FS-TPDF'),
     ]
 
     images = {}
