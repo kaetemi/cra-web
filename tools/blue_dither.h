@@ -100,8 +100,8 @@ extern "C" {
  * ============================================================================
  * Minimal state for streaming single bits. Mixes two 1D kernels:
  * - K1: [48] - 100% error to t+1 (tight)
- * - K2: [38,10] - 79% to t+1, 21% to t+2 (spread) = 2×[19,5] (both prime)
- * The 38:10 ratio (~4:1) was found optimal through spectral analysis.
+ * - K2: [46,2] - 96% to t+1, 4% to t+2 (23:1 ratio)
+ * The 46:2 ratio (23:1) was found optimal through exhaustive spectral analysis.
  */
 
 typedef struct {
@@ -220,9 +220,9 @@ int blue_dither_1d_next(BlueDither1D *bd, uint8_t brightness) {
         /* FS-like: 100% to next (48/48) */
         bd->err0 += quant_err;
     } else {
-        /* Optimal 1D kernel: 38:10 ratio = 2×[19,5] (both prime) */
-        bd->err0 += (quant_err * 38) / 48;
-        bd->err1 += (quant_err * 10) / 48;
+        /* Optimal 1D kernel: 46:2 ratio (23:1) - best spectral performance */
+        bd->err0 += (quant_err * 46) / 48;
+        bd->err1 += (quant_err * 2) / 48;
     }
 
     return output;
