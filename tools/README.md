@@ -204,8 +204,8 @@ cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o
 ### 8. `analyze_1d_dither.py`
 
 Spectral analysis of 1D temporal dithering. Compares our method against:
-- **ΣΔ 1st order** - First-order sigma-delta modulation (+6 dB/octave noise shaping, tonal spikes)
-- **ΣΔ 1st + TPDF dither** - First-order sigma-delta with triangular dither (cleaner spectrum)
+- **ΣΔ 2nd + TPDF** - Second-order sigma-delta with triangular dither (+12 dB/octave noise shaping)
+- **ΣΔ 1st + TPDF** - First-order sigma-delta with triangular dither (+6 dB/octave)
 - **PWM** - Traditional pulse width modulation (shows harmonic spikes that cause flicker)
 - **White noise** - Random threshold dithering (flat spectrum)
 
@@ -398,8 +398,8 @@ Key test cases:
 
 The 1D analysis charts (`spectrum_1d_gray_*.png`) show six panels:
 1. **Our 1D Method** - Blue noise dithering with smoothed spectrum + raw envelope
-2. **ΣΔ 1st Order** - First-order sigma-delta (+6 dB/octave, shows tonal spikes)
-3. **ΣΔ 1st + TPDF Dither** - First-order sigma-delta with triangular dither (cleaner)
+2. **ΣΔ 2nd + TPDF** - Second-order sigma-delta with triangular dither (+12 dB/octave)
+3. **ΣΔ 1st + TPDF** - First-order sigma-delta with triangular dither (+6 dB/octave)
 4. **PWM** - Traditional PWM showing harmonic spikes (comb pattern)
 5. **White Noise** - Random threshold with flat spectrum
 6. **Comparison** - All methods overlaid
@@ -408,7 +408,7 @@ Key features:
 - **Log-frequency scale**: Makes dB/octave slopes appear as straight diagonal lines
 - **Reference line**: Dashed line at +6 dB/octave (ideal blue noise)
 - **PWM harmonics**: Vertical spikes at f = 1/256, 3/256, 5/256... (the cause of visible flicker)
-- **Sigma-delta tonal spikes**: Standard ΣΔ shows periodic artifacts; TPDF dither eliminates them
+- **Sigma-delta noise shaping**: 1st order = +6 dB/oct, 2nd order = +12 dB/oct; TPDF dither cleans up tonal artifacts
 
 **Quality ratings** based on spectral slope:
 - **Excellent**: >5 dB/octave (close to ideal +6)
