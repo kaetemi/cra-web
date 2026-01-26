@@ -31,14 +31,13 @@ def lowbias32(x):
     x ^= x >> 15
     return x
 
-def blue_dither_1d(brightness, count, seed=12345, kernel='46_2'):
+def blue_dither_1d(brightness, count, seed=12345, kernel='38_10'):
     """
     1D blue noise dithering - replicates C implementation.
     Mixes [48] with configurable second kernel.
 
     kernel options:
-        '46_2' - ratio 23:1 (current best)
-        '38_10' - ratio ~4:1 (previous best)
+        '38_10' - ratio ~4:1 (current best)
         '36_12' - ratio 3:1 ([3,1] scaled)
         '28_20' - ratio 7:5 (original JJN-like)
     """
@@ -48,16 +47,14 @@ def blue_dither_1d(brightness, count, seed=12345, kernel='46_2'):
     white_val = 255 * 48
 
     # Kernel coefficients
-    if kernel == '46_2':
-        k1_coeff, k2_coeff = 46, 2
-    elif kernel == '38_10':
+    if kernel == '38_10':
         k1_coeff, k2_coeff = 38, 10
     elif kernel == '36_12':
         k1_coeff, k2_coeff = 36, 12
     elif kernel == '28_20':
         k1_coeff, k2_coeff = 28, 20
     else:
-        k1_coeff, k2_coeff = 46, 2
+        k1_coeff, k2_coeff = 38, 10
 
     for i in range(count):
         pixel = brightness * 48 + err0
@@ -528,12 +525,11 @@ def analyze_kernel_comparison(gray_levels, count, output_dir):
     print("Comparing kernels across all gray levels...")
 
     kernels = {
-        '[46,2] (23:1)': '46_2',
         '[38,10] (3.8:1)': '38_10',
         '[36,12] (3:1)': '36_12',
         '[28,20] (1.4:1)': '28_20',
     }
-    colors = {'46_2': '#9b59b6', '38_10': '#2ecc71', '36_12': '#3498db', '28_20': '#e74c3c'}
+    colors = {'38_10': '#2ecc71', '36_12': '#3498db', '28_20': '#e74c3c'}
 
     # Print table header
     print(f"\n  {'Kernel':<20}", end="")

@@ -115,14 +115,8 @@ def measure_slope(freqs, power_db, f_low=0.01, f_high=0.1):
 # Notation: [coeff_t+1, coeff_t+2, ...] where coefficients are /48
 
 KERNEL_SETS = {
-    # Current best - determined by exhaustive search
-    '[48]+[46,2] BEST': [
-        [48],           # 100% to t+1 (FS-like)
-        [46, 2],        # ratio 23:1 - optimal spectral performance
-    ],
-
-    # Previous best
-    '[48]+[38,10]': [
+    # Current best
+    '[48]+[38,10] BEST': [
         [48],           # 100% to t+1 (FS-like)
         [38, 10],       # ratio 3.8:1 = 2×[19,5] (both prime)
     ],

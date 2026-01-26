@@ -148,9 +148,11 @@ Traditional error diffusion (Floyd-Steinberg, Jarvis-Judice-Ninke) produces stru
 **1D Kernel (Optimized):**
 The 1D mode mixes two kernels for blue noise temporal dithering:
 - K1: `[48]` - 100% error to t+1 (tight response)
-- K2: `[46,2]` - 96% to t+1, 4% to t+2 (23:1 ratio)
+- K2: `[38,10]` - 79% to t+1, 21% to t+2 (spread response) = 2×[19,5]
 
-The `[46,2]` ratio (23:1) achieves +6.00 dB/octave average and +4.84 minimum (ideal is +6.0). This was determined optimal through exhaustive spectral analysis of all possible kernel ratios across multiple kernel sums (28, 36, 48, 60). See `analyze_1d_dither.py --find-best` for details.
+The `[38,10]` ratio (~4:1) achieves +5.62 dB/octave average (ideal is +6.0). Note: 38 = 2×19 and 10 = 2×5, where both 19 and 5 are prime.
+
+**Note:** Exhaustive testing shows `[46,2]` (23:1 ratio) achieves slightly better results (+5.67 avg, +4.84 min) compared to `[38,10]` (+5.62 avg, +4.69 min). See `analyze_1d_dither.py --find-best` for details.
 
 **Usage:**
 ```c
