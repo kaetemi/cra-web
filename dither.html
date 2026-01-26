@@ -2085,8 +2085,8 @@
             // Check if output is 1-bit
             let is1BitOutput = false;
             if (outputMode === 'grayscale') {
-                const bitsL = parseInt(document.getElementById('bits-l').value);
-                is1BitOutput = bitsL === 1;
+                const bitsGray = parseInt(document.getElementById('bits-gray').value);
+                is1BitOutput = bitsGray === 1;
             } else if (outputMode === 'rgb') {
                 const bitsR = parseInt(document.getElementById('bits-r').value);
                 const bitsG = parseInt(document.getElementById('bits-g').value);
@@ -2109,7 +2109,7 @@
         document.getElementById('dither-mode').addEventListener('change', updateDitherModeWarning);
         document.getElementById('perceptual-toggle').addEventListener('change', updateDitherModeWarning);
         document.getElementById('output-mode').addEventListener('change', updateDitherModeWarning);
-        document.getElementById('bits-l').addEventListener('change', updateDitherModeWarning);
+        document.getElementById('bits-gray').addEventListener('change', updateDitherModeWarning);
         document.getElementById('bits-r').addEventListener('change', updateDitherModeWarning);
         document.getElementById('bits-g').addEventListener('change', updateDitherModeWarning);
         document.getElementById('bits-b').addEventListener('change', updateDitherModeWarning);
