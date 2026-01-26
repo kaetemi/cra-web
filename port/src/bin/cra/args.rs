@@ -60,9 +60,9 @@ pub enum DitherMethod {
     ZhouFangStandard,
     /// Zhou-Fang: variable-coefficient kernel with threshold modulation, serpentine scanning
     ZhouFangSerpentine,
-    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5), standard scanning
+    /// Ulichney perturbed FS: Floyd-Steinberg with random threshold modulation (±0.5), standard scanning
     UlichneyStandard,
-    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5), serpentine scanning
+    /// Ulichney perturbed FS: Floyd-Steinberg with random threshold modulation (±0.5), serpentine scanning
     UlichneySerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,

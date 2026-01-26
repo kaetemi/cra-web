@@ -315,7 +315,7 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         ('boon-serpentine', 'Our Method'),
         ('ostro-serpentine', 'Ostromoukhov'),
         ('zhou-fang-serpentine', 'Zhou-Fang'),
-        ('ulichney-serpentine', 'Ulichney'),
+        ('ulichney-serpentine', 'Ulichney (Perturbed FS)'),
     ]
 
     images = {}
@@ -332,7 +332,7 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
 
     blue_noise_ref = get_blue_noise_reference(base_dir, image_name)
     if blue_noise_ref is not None:
-        images['Blue Noise Reference (Christoph Peters)'] = blue_noise_ref
+        images['Blue Noise (Void-and-Cluster)'] = blue_noise_ref
 
     for method_key, method_name in methods:
         method_dir = base_dir / method_key

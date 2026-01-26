@@ -59,7 +59,7 @@ Runs all test images through CRA with every dithering mode.
 - `boon-lowbias`, `boon-lowbias-serpentine` - Boon with original lowbias32 (bias 0.174, for comparison)
 - `ostro-standard`, `ostro-serpentine` - Ostromoukhov variable coefficients
 - `zhou-fang-standard`, `zhou-fang-serpentine` - Zhou-Fang threshold modulation
-- `ulichney-standard`, `ulichney-serpentine` - Ulichney: FS with random threshold modulation (±0.5)
+- `ulichney-standard`, `ulichney-serpentine` - Ulichney perturbed FS: Floyd-Steinberg with random threshold modulation (±0.5)
 
 **Outputs** (`tools/test_images/dithered/{mode}/`):
 - L1 (1-bit) dithered versions of all test images
@@ -310,8 +310,8 @@ tools/
 │   │   ├── ostro-serpentine/    # Ostromoukhov serpentine
 │   │   ├── zhou-fang-standard/  # Zhou-Fang standard
 │   │   ├── zhou-fang-serpentine/# Zhou-Fang serpentine
-│   │   ├── ulichney-standard/   # Ulichney standard
-│   │   └── ulichney-serpentine/ # Ulichney serpentine
+│   │   ├── ulichney-standard/   # Ulichney perturbed FS standard
+│   │   └── ulichney-serpentine/ # Ulichney perturbed FS serpentine
 │   └── analysis/
 │       ├── *_serpentine.png           # Dither method comparison
 │       ├── *_hash_comparison.png      # Hash function comparison
