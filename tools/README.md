@@ -273,7 +273,50 @@ source /root/venv/bin/activate
 python tools/experiments/analyze_1d_prime_pairs.py
 ```
 
-### 11. `noise_color_comparison.py`
+### 11. `principal_frequency_comparison.py`
+
+Shows how blue noise principal frequency (f_c) scales with gray level.
+
+**Key insight:** For Poisson disk / blue noise patterns, dot spacing ~ 1/sqrt(density), so f_c ~ sqrt(g). This is fundamental to understanding why blue noise dithering works.
+
+**Formulation (Mitsa-Parker):**
+```
+f_c = K * sqrt(g)      for g < 0.5
+f_c = K * sqrt(1-g)    for g >= 0.5
+```
+
+Where K is a constant:
+- Mitsa-Parker optimal: K = 1/sqrt(2) ~ 0.707
+- Error diffusion: K = 1
+
+**Output:** `principal_frequency_comparison.png`
+
+```bash
+source /root/venv/bin/activate
+python tools/principal_frequency_comparison.py
+```
+
+### 12. `spectrum_shape_comparison.py`
+
+Compares the Mitsa-Parker blue noise model vs simple power law models.
+
+**Mitsa-Parker model proposes a BANDPASS shape:**
+- Near zero below ~0.5*f_c (low frequency suppression)
+- Steep rise to peak at principal frequency f_c
+- Plateau after peak (does NOT keep rising)
+
+This is fundamentally different from simple power laws (+3 or +6 dB/oct) which keep rising toward Nyquist.
+
+Note: This is a theoretical model, not necessarily what empirical blue noise looks like. The plateau essentially acts like a blur filter on high frequencies.
+
+**Output:** `spectrum_shape_comparison.png`
+
+```bash
+source /root/venv/bin/activate
+python tools/spectrum_shape_comparison.py
+```
+
+### 13. `noise_color_comparison.py`
 
 Generates reference charts comparing noise color spectra:
 - **White**: 0 dB/octave (flat)
@@ -322,6 +365,11 @@ python tools/analyze_dither.py --blue-kernel
 python tools/analyze_1d_dither.py --all              # Default gray levels (42-213)
 python tools/analyze_1d_dither.py --low-gray --all   # Low gray levels (1-127)
 python tools/analyze_1d_kernels.py
+
+# 7. Generate reference charts
+python tools/principal_frequency_comparison.py       # f_c vs gray level
+python tools/spectrum_shape_comparison.py            # Bandpass vs power law
+python tools/noise_color_comparison.py               # Noise color spectra
 ```
 
 ## Output Structure
@@ -377,6 +425,8 @@ tools/
 │       ├── spectrum_1d_top8_kernels.png # Top 8 kernels (sum=48)
 │       ├── spectrum_1d_top8_kernels_sum*.png # Top 8 kernels for various sums
 │       ├── spectrum_1d_prime_pairs.png # 1D prime pair kernel analysis
+│       ├── principal_frequency_comparison.png # f_c vs gray level
+│       ├── spectrum_shape_comparison.png # Blue noise vs power law spectra
 │       ├── noise_color_comparison.png # Noise color spectra (log scale)
 │       └── noise_color_comparison_linear.png # Noise color spectra (linear scale)
 ```
