@@ -315,7 +315,8 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         ('boon-serpentine', 'Our Method'),
         ('ostro-serpentine', 'Ostromoukhov'),
         ('zhou-fang-serpentine', 'Zhou-Fang'),
-        ('ulichney-serpentine', 'Ulichney (Perturbed FS)'),
+        ('ulichney-serpentine', 'Ulichney (Thresh 30%)'),
+        ('ulichney-weight-serpentine', 'Ulichney (Weight 50%)'),
     ]
 
     images = {}

@@ -26,6 +26,8 @@ DITHER_MODES=(
     "zhou-fang-serpentine"
     "ulichney-standard"
     "ulichney-serpentine"
+    "ulichney-weight-standard"
+    "ulichney-weight-serpentine"
 )
 
 # Create output directories

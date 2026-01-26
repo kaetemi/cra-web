@@ -229,14 +229,24 @@ pub enum DitherMode {
     MixedLowbiasOldStandard,
     /// Mixed with original lowbias32 serpentine: Kept for comparison testing.
     MixedLowbiasOldSerpentine,
-    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5)
+    /// Ulichney Threshold Perturbation: Floyd-Steinberg with ±30% threshold noise
     /// Standard left-to-right scanning
-    /// Adds uniform noise to the quantization threshold to break up patterns.
+    /// Perturbs the decision threshold by ±30% of 255 (uniform random).
+    /// Designed for 1-bit halftoning. For higher bit depths, falls back to standard FS.
     /// Reference: Robert Ulichney, "Digital Halftoning", MIT Press, 1987.
     UlichneyStandard,
-    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5)
+    /// Ulichney Threshold Perturbation: Floyd-Steinberg with ±30% threshold noise
     /// Serpentine scanning (alternating direction each row)
     UlichneySerpentine,
+    /// Ulichney Weight Perturbation: Floyd-Steinberg with ±50% paired weight noise
+    /// Standard left-to-right scanning
+    /// Perturbs FS kernel weights in pairs (7/16±5/16, 3/16±1/16) while maintaining sum=1.
+    /// Designed for 1-bit halftoning. For higher bit depths, falls back to standard FS.
+    /// Reference: Robert Ulichney, "Digital Halftoning", MIT Press, 1987.
+    UlichneyWeightStandard,
+    /// Ulichney Weight Perturbation: Floyd-Steinberg with ±50% paired weight noise
+    /// Serpentine scanning (alternating direction each row)
+    UlichneyWeightSerpentine,
 }
 
 /// Wang hash for deterministic randomization.

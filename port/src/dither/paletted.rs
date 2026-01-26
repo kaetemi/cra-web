@@ -1488,7 +1488,7 @@ pub fn paletted_dither_rgba_with_mode(
             );
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_standard_paletted::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1496,7 +1496,7 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, progress,
             );
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_serpentine_paletted::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1672,7 +1672,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
             );
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_standard_paletted_extended::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1680,7 +1680,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 width, height, reach, progress,
             );
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_serpentine_paletted_extended::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,

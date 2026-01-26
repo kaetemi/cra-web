@@ -60,10 +60,18 @@ pub enum DitherMethod {
     ZhouFangStandard,
     /// Zhou-Fang: variable-coefficient kernel with threshold modulation, serpentine scanning
     ZhouFangSerpentine,
-    /// Ulichney perturbed FS: Floyd-Steinberg with random threshold modulation (±0.5), standard scanning
+    /// Ulichney threshold perturbation: FS with ±30% threshold noise, standard scanning (1-bit only)
+    #[value(name = "ulichney-standard")]
     UlichneyStandard,
-    /// Ulichney perturbed FS: Floyd-Steinberg with random threshold modulation (±0.5), serpentine scanning
+    /// Ulichney threshold perturbation: FS with ±30% threshold noise, serpentine scanning (1-bit only)
+    #[value(name = "ulichney-serpentine")]
     UlichneySerpentine,
+    /// Ulichney weight perturbation: FS with ±50% paired weight noise, standard scanning (1-bit only)
+    #[value(name = "ulichney-weight-standard")]
+    UlichneyWeightStandard,
+    /// Ulichney weight perturbation: FS with ±50% paired weight noise, serpentine scanning (1-bit only)
+    #[value(name = "ulichney-weight-serpentine")]
+    UlichneyWeightSerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
     /// Boon with legacy wang_hash (for testing) - hidden from help
@@ -96,6 +104,8 @@ impl DitherMethod {
             DitherMethod::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
             DitherMethod::UlichneyStandard => DitherMode::UlichneyStandard,
             DitherMethod::UlichneySerpentine => DitherMode::UlichneySerpentine,
+            DitherMethod::UlichneyWeightStandard => DitherMode::UlichneyWeightStandard,
+            DitherMethod::UlichneyWeightSerpentine => DitherMode::UlichneyWeightSerpentine,
             DitherMethod::None => DitherMode::None,
             DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
@@ -119,6 +129,8 @@ impl DitherMethod {
             DitherMethod::ZhouFangSerpentine => CSDitherMode::ZhouFangSerpentine,
             DitherMethod::UlichneyStandard => CSDitherMode::UlichneyStandard,
             DitherMethod::UlichneySerpentine => CSDitherMode::UlichneySerpentine,
+            DitherMethod::UlichneyWeightStandard => CSDitherMode::UlichneyWeightStandard,
+            DitherMethod::UlichneyWeightSerpentine => CSDitherMode::UlichneyWeightSerpentine,
             DitherMethod::None => CSDitherMode::None,
             DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,

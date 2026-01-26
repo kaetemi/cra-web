@@ -811,54 +811,29 @@ fn zhou_fang_serpentine(
 }
 
 // ============================================================================
-// Ulichney dithering (Floyd-Steinberg with random threshold modulation)
+// Ulichney dithering methods from "Digital Halftoning" (1987)
 // ============================================================================
 
-/// Generate a random threshold in [0, 1] for Ulichney dithering.
-/// Uses lowbias32 hash for position-based randomization.
+/// Ulichney Method 1: Threshold Perturbation (30%)
+///
+/// For 1-bit halftoning: perturbs the decision threshold by ±30% of 255.
+/// Base threshold = 127.5, noise = (random - 0.5) * 0.30 * 255 = ±38.25 max.
+/// For higher bit depths, falls back to standard Floyd-Steinberg.
+
+/// Generate perturbed threshold for Ulichney Method 1.
+/// Returns threshold in range [~89, ~166] centered at 127.5.
 #[inline]
-fn ulichney_threshold(x: usize, y: usize, seed: u32) -> f32 {
+fn ulichney_perturbed_threshold(x: usize, y: usize, seed: u32) -> f32 {
     let hash = lowbias32((x as u32) ^ ((y as u32) << 16) ^ seed);
-    // Map to [0, 1] range (this gives uniform distribution)
-    (hash as f32) / (u32::MAX as f32)
+    // Map to [-0.5, 0.5] range
+    let random_01 = (hash as f32) / (u32::MAX as f32);
+    let noise = (random_01 - 0.5) * 0.30 * 255.0;
+    127.5 + noise
 }
 
-/// Quantize with threshold modulation for Ulichney dithering.
-/// For 8-bit output, uses floor/ceil of the f32 value directly.
-/// threshold should be in [0, 1] range.
-#[inline]
-fn ulichney_quantize(quant: &QuantParams, value: f32, threshold: f32) -> f32 {
-    // For 8-bit, we need to use the actual f32 floor/ceil
-    if quant.bits == 8 {
-        let floor_val = value.floor();
-        let ceil_val = value.ceil();
-        if floor_val == ceil_val {
-            floor_val.clamp(0.0, 255.0)
-        } else {
-            let frac = value - floor_val;
-            if frac > threshold {
-                ceil_val.clamp(0.0, 255.0)
-            } else {
-                floor_val.clamp(0.0, 255.0)
-            }
-        }
-    } else {
-        // For reduced bit depths, use the LUT-based floor/ceil
-        let floor_val = quant.quantize_floor(value);
-        let ceil_val = quant.quantize_ceil(value);
-        if floor_val == ceil_val {
-            floor_val
-        } else {
-            let frac = (value - floor_val) / (ceil_val - floor_val);
-            if frac > threshold { ceil_val } else { floor_val }
-        }
-    }
-}
-
-/// Ulichney dithering with standard left-to-right scanning.
-/// Uses Floyd-Steinberg kernel with random threshold modulation (±0.5).
-/// The threshold for choosing between floor and ceil is randomized per-pixel.
-fn ulichney_standard(
+/// Ulichney threshold perturbation dithering with standard scanning.
+/// Designed for 1-bit output. For higher bit depths, falls back to standard FS.
+fn ulichney_threshold_standard(
     img: &[f32],
     width: usize,
     height: usize,
@@ -866,8 +841,12 @@ fn ulichney_standard(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
+    // Only apply threshold perturbation for 1-bit output
+    if quant.bits != 1 {
+        return dither_standard::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
     let hashed_seed = lowbias32(seed);
-    // Same reach as Floyd-Steinberg
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 
@@ -880,13 +859,13 @@ fn ulichney_standard(
             let bx = bx_start + px;
             let old = buf[y][bx];
 
-            // Compute randomized threshold based on position
+            // Compute perturbed threshold based on position
             let img_x = px.saturating_sub(reach);
             let img_y = y.saturating_sub(reach);
-            let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+            let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
 
-            // Quantize using modulated threshold
-            let new = ulichney_quantize(&quant, old, threshold);
+            // Binary decision: output 255 (white) if value > threshold, else 0 (black)
+            let new = if old > threshold { 255.0 } else { 0.0 };
             buf[y][bx] = new;
 
             let err = old - new;
@@ -902,9 +881,8 @@ fn ulichney_standard(
     extract_result_seeded(&buf, width, height, reach)
 }
 
-/// Ulichney dithering with serpentine scanning.
-/// Uses Floyd-Steinberg kernel with random threshold modulation (±0.5).
-fn ulichney_serpentine(
+/// Ulichney threshold perturbation dithering with serpentine scanning.
+fn ulichney_threshold_serpentine(
     img: &[f32],
     width: usize,
     height: usize,
@@ -912,6 +890,11 @@ fn ulichney_serpentine(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
+    // Only apply threshold perturbation for 1-bit output
+    if quant.bits != 1 {
+        return dither_serpentine::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
     let hashed_seed = lowbias32(seed);
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
@@ -929,9 +912,9 @@ fn ulichney_serpentine(
 
                 let img_x = px.saturating_sub(reach);
                 let img_y = y.saturating_sub(reach);
-                let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+                let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
 
-                let new = ulichney_quantize(&quant, old, threshold);
+                let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
 
                 let err = old - new;
@@ -945,13 +928,195 @@ fn ulichney_serpentine(
 
                 let img_x = px.saturating_sub(reach);
                 let img_y = y.saturating_sub(reach);
-                let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+                let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
 
-                let new = ulichney_quantize(&quant, old, threshold);
+                let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
 
                 let err = old - new;
                 FloydSteinberg::apply_ltr(&mut buf, bx, y, err, old);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Ulichney Method 2: Paired Weight Perturbation (50%)
+///
+/// For 1-bit halftoning: perturbs FS kernel weights in pairs while maintaining sum=1.
+/// Big pair: 7/16 and 5/16, noise amplitude = 50% of 5/16 = 2.5/16
+/// Small pair: 3/16 and 1/16, noise amplitude = 50% of 1/16 = 0.5/16
+/// For higher bit depths, falls back to standard Floyd-Steinberg.
+
+/// Generate perturbed FS weights for Ulichney Method 2.
+/// Returns (w_right, w_down, w_down_left, w_down_right).
+#[inline]
+fn ulichney_perturbed_weights(x: usize, y: usize, seed: u32) -> (f32, f32, f32, f32) {
+    // Use two independent random values for the two pairs
+    let hash1 = lowbias32((x as u32) ^ ((y as u32) << 16) ^ seed);
+    let hash2 = lowbias32(hash1 ^ 0xDEADBEEF);
+
+    // Map to [-0.5, 0.5] range
+    let random1 = (hash1 as f32) / (u32::MAX as f32) - 0.5;
+    let random2 = (hash2 as f32) / (u32::MAX as f32) - 0.5;
+
+    // Big pair noise: ±50% of 5/16 = ±2.5/16
+    // noise1 = random * 2 * (2.5/16) = random * (5/16)
+    let noise1 = random1 * 2.0 * (2.5 / 16.0);
+
+    // Small pair noise: ±50% of 1/16 = ±0.5/16
+    // noise2 = random * 2 * (0.5/16) = random * (1/16)
+    let noise2 = random2 * 2.0 * (0.5 / 16.0);
+
+    // Perturbed weights (add to one, subtract from other in each pair)
+    let w_right = 7.0 / 16.0 + noise1;
+    let w_down = 5.0 / 16.0 - noise1;
+    let w_down_left = 3.0 / 16.0 + noise2;
+    let w_down_right = 1.0 / 16.0 - noise2;
+
+    (w_right, w_down, w_down_left, w_down_right)
+}
+
+/// Apply Ulichney perturbed weights (left-to-right).
+#[inline]
+fn apply_ulichney_weights_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, weights: (f32, f32, f32, f32)) {
+    let (w_right, w_down, w_down_left, w_down_right) = weights;
+    buf[y][bx + 1] += err * w_right;
+    buf[y + 1][bx - 1] += err * w_down_left;
+    buf[y + 1][bx] += err * w_down;
+    buf[y + 1][bx + 1] += err * w_down_right;
+}
+
+/// Apply Ulichney perturbed weights (right-to-left, mirrored).
+#[inline]
+fn apply_ulichney_weights_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32, weights: (f32, f32, f32, f32)) {
+    let (w_right, w_down, w_down_left, w_down_right) = weights;
+    // Mirror horizontally: right becomes left, down-left becomes down-right
+    buf[y][bx - 1] += err * w_right;
+    buf[y + 1][bx + 1] += err * w_down_left;
+    buf[y + 1][bx] += err * w_down;
+    buf[y + 1][bx - 1] += err * w_down_right;
+}
+
+/// Ulichney weight perturbation dithering with standard scanning.
+/// Designed for 1-bit output. For higher bit depths, falls back to standard FS.
+fn ulichney_weight_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    // Only apply weight perturbation for 1-bit output
+    if quant.bits != 1 {
+        return dither_standard::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
+    let hashed_seed = lowbias32(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    // Fixed threshold for weight perturbation method
+    let threshold = 127.5;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let old = buf[y][bx];
+
+            // Binary decision with fixed threshold
+            let new = if old > threshold { 255.0 } else { 0.0 };
+            buf[y][bx] = new;
+
+            let err = old - new;
+
+            // Get perturbed weights for this pixel
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+
+            apply_ulichney_weights_ltr(&mut buf, bx, y, err, weights);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Ulichney weight perturbation dithering with serpentine scanning.
+fn ulichney_weight_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    // Only apply weight perturbation for 1-bit output
+    if quant.bits != 1 {
+        return dither_serpentine::<FloydSteinberg>(img, width, height, quant, progress);
+    }
+
+    let hashed_seed = lowbias32(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    // Fixed threshold for weight perturbation method
+    let threshold = 127.5;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+
+                let new = if old > threshold { 255.0 } else { 0.0 };
+                buf[y][bx] = new;
+
+                let err = old - new;
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+
+                apply_ulichney_weights_rtl(&mut buf, bx, y, err, weights);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+
+                let new = if old > threshold { 255.0 } else { 0.0 };
+                buf[y][bx] = new;
+
+                let err = old - new;
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+
+                apply_ulichney_weights_ltr(&mut buf, bx, y, err, weights);
             }
         }
         if let Some(ref mut cb) = progress {
@@ -1066,8 +1231,10 @@ pub fn dither_with_mode_bits(
         DitherMode::OstromoukhovSerpentine => dither_serpentine::<Ostromoukhov>(img, width, height, quant, progress),
         DitherMode::ZhouFangStandard => zhou_fang_standard(img, width, height, seed, quant, progress),
         DitherMode::ZhouFangSerpentine => zhou_fang_serpentine(img, width, height, seed, quant, progress),
-        DitherMode::UlichneyStandard => ulichney_standard(img, width, height, seed, quant, progress),
-        DitherMode::UlichneySerpentine => ulichney_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::UlichneyStandard => ulichney_threshold_standard(img, width, height, seed, quant, progress),
+        DitherMode::UlichneySerpentine => ulichney_threshold_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::UlichneyWeightStandard => ulichney_weight_standard(img, width, height, seed, quant, progress),
+        DitherMode::UlichneyWeightSerpentine => ulichney_weight_serpentine(img, width, height, seed, quant, progress),
     }
 }
 
@@ -1506,8 +1673,11 @@ mod tests {
             DitherMode::MixedStandard,
             DitherMode::MixedSerpentine,
             DitherMode::MixedRandom,
+            // Note: Ulichney modes fall back to FS for non-1-bit output
             DitherMode::UlichneyStandard,
             DitherMode::UlichneySerpentine,
+            DitherMode::UlichneyWeightStandard,
+            DitherMode::UlichneyWeightSerpentine,
         ];
         let valid_levels = [0u8, 85, 170, 255]; // 2-bit levels
         for mode in modes {
@@ -1520,70 +1690,128 @@ mod tests {
     }
 
     #[test]
-    fn test_ulichney_standard() {
-        // Test that Ulichney standard mode produces valid output
+    fn test_ulichney_threshold_1bit() {
+        // Test Ulichney threshold perturbation with 1-bit output
         let img = vec![127.5; 100]; // 10x10 gray image
-        let result = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        let result = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
         assert_eq!(result.len(), 100);
-        // All values should be valid uint8
+        // 1-bit output should only produce 0 or 255
         for &v in &result {
-            assert!(v == 127 || v == 128);
+            assert!(v == 0 || v == 255, "1-bit Ulichney should only produce 0 or 255, got {}", v);
         }
     }
 
     #[test]
-    fn test_ulichney_serpentine() {
-        // Test that Ulichney serpentine mode produces valid output
+    fn test_ulichney_threshold_serpentine_1bit() {
+        // Test Ulichney threshold perturbation serpentine with 1-bit output
         let img = vec![127.5; 100]; // 10x10 gray image
-        let result = dither_with_mode(&img, 10, 10, DitherMode::UlichneySerpentine, 42);
+        let result = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneySerpentine, 42, 1, None);
         assert_eq!(result.len(), 100);
         for &v in &result {
-            assert!(v == 127 || v == 128);
+            assert!(v == 0 || v == 255, "1-bit Ulichney should only produce 0 or 255, got {}", v);
         }
     }
 
     #[test]
-    fn test_ulichney_vs_standard_fs() {
-        // Ulichney should produce different results from standard Floyd-Steinberg
+    fn test_ulichney_threshold_vs_standard_fs_1bit() {
+        // Ulichney threshold perturbation should differ from standard FS at 1-bit
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let fs = dither_with_mode(&img, 10, 10, DitherMode::Standard, 0);
-        let ulichney = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        let fs = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 1, None);
+        let ulichney = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
         assert_eq!(fs.len(), 100);
         assert_eq!(ulichney.len(), 100);
-        // They should produce different results due to threshold modulation
+        // They should produce different results due to threshold perturbation
         assert_ne!(fs, ulichney);
     }
 
     #[test]
-    fn test_ulichney_deterministic_with_same_seed() {
+    fn test_ulichney_threshold_deterministic() {
         // Same seed should produce identical results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result1 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
-        let result2 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
-        assert_eq!(result1.len(), 100);
-        assert_eq!(result2.len(), 100);
+        let result1 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
+        let result2 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
         assert_eq!(result1, result2);
     }
 
     #[test]
-    fn test_ulichney_different_seeds_produce_different_results() {
+    fn test_ulichney_threshold_different_seeds() {
         // Different seeds should produce different results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let result1 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
-        let result2 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 99);
-        assert_eq!(result1.len(), 100);
-        assert_eq!(result2.len(), 100);
+        let result1 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
+        let result2 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 99, 1, None);
         assert_ne!(result1, result2);
     }
 
     #[test]
-    fn test_ulichney_serpentine_vs_standard() {
-        // Ulichney serpentine and standard should produce different results
+    fn test_ulichney_threshold_serpentine_vs_standard() {
+        // Serpentine and standard should produce different results
         let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
-        let standard = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
-        let serpentine = dither_with_mode(&img, 10, 10, DitherMode::UlichneySerpentine, 42);
-        assert_eq!(standard.len(), 100);
-        assert_eq!(serpentine.len(), 100);
+        let standard = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
+        let serpentine = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneySerpentine, 42, 1, None);
         assert_ne!(standard, serpentine);
+    }
+
+    #[test]
+    fn test_ulichney_weight_1bit() {
+        // Test Ulichney weight perturbation with 1-bit output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightStandard, 42, 1, None);
+        assert_eq!(result.len(), 100);
+        // 1-bit output should only produce 0 or 255
+        for &v in &result {
+            assert!(v == 0 || v == 255, "1-bit Ulichney should only produce 0 or 255, got {}", v);
+        }
+    }
+
+    #[test]
+    fn test_ulichney_weight_serpentine_1bit() {
+        // Test Ulichney weight perturbation serpentine with 1-bit output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightSerpentine, 42, 1, None);
+        assert_eq!(result.len(), 100);
+        for &v in &result {
+            assert!(v == 0 || v == 255, "1-bit Ulichney should only produce 0 or 255, got {}", v);
+        }
+    }
+
+    #[test]
+    fn test_ulichney_weight_vs_standard_fs_1bit() {
+        // Ulichney weight perturbation should differ from standard FS at 1-bit
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let fs = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 1, None);
+        let ulichney = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightStandard, 42, 1, None);
+        assert_eq!(fs.len(), 100);
+        assert_eq!(ulichney.len(), 100);
+        // They should produce different results due to weight perturbation
+        assert_ne!(fs, ulichney);
+    }
+
+    #[test]
+    fn test_ulichney_weight_vs_threshold() {
+        // Weight perturbation should differ from threshold perturbation
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let threshold = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 1, None);
+        let weight = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightStandard, 42, 1, None);
+        // The two methods should produce different results
+        assert_ne!(threshold, weight);
+    }
+
+    #[test]
+    fn test_ulichney_weight_deterministic() {
+        // Same seed should produce identical results
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result1 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightStandard, 42, 1, None);
+        let result2 = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyWeightStandard, 42, 1, None);
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_ulichney_fallback_to_fs_for_8bit() {
+        // Ulichney methods fall back to standard FS for non-1-bit output
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let fs_standard = dither_with_mode_bits(&img, 10, 10, DitherMode::Standard, 0, 8, None);
+        let ulichney_8bit = dither_with_mode_bits(&img, 10, 10, DitherMode::UlichneyStandard, 42, 8, None);
+        // For 8-bit, Ulichney falls back to standard FS (no seed effect)
+        assert_eq!(fs_standard, ulichney_8bit);
     }
 }

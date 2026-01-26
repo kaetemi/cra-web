@@ -971,7 +971,7 @@ pub fn colorspace_aware_dither_rgba_with_options(
             );
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_standard_rgba::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
@@ -979,7 +979,7 @@ pub fn colorspace_aware_dither_rgba_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_serpentine_rgba::<FloydSteinberg>(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,

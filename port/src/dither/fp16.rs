@@ -343,10 +343,10 @@ fn dither_alpha_f16_with_mode(
             dither_alpha_f16::<Ostromoukhov>(alpha, width, height, true)
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_alpha_f16::<FloydSteinberg>(alpha, width, height, false)
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_alpha_f16::<FloydSteinberg>(alpha, width, height, true)
         }
     }
@@ -1203,7 +1203,7 @@ pub fn dither_rgba_f16_with_options(
             );
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_standard_f16::<FloydSteinberg>(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,
@@ -1212,7 +1212,7 @@ pub fn dither_rgba_f16_with_options(
                 width, height, reach, overshoot_penalty, progress,
             );
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_serpentine_f16::<FloydSteinberg>(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,

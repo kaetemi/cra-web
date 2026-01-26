@@ -771,13 +771,13 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
             );
         }
         // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
-        DitherMode::UlichneyStandard => {
+        DitherMode::UlichneyStandard | DitherMode::UlichneyWeightStandard => {
             dither_standard_gray_alpha::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, progress,
             );
         }
-        DitherMode::UlichneySerpentine => {
+        DitherMode::UlichneySerpentine | DitherMode::UlichneyWeightSerpentine => {
             dither_serpentine_gray_alpha::<FloydSteinberg>(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, progress,
