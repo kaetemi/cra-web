@@ -796,6 +796,8 @@ fn dither_grayscale(
             CSDitherMode::OstromoukhovSerpentine => DitherMode::OstromoukhovSerpentine,
             CSDitherMode::ZhouFangStandard => DitherMode::ZhouFangStandard,
             CSDitherMode::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
+            CSDitherMode::UlichneyStandard => DitherMode::UlichneyStandard,
+            CSDitherMode::UlichneySerpentine => DitherMode::UlichneySerpentine,
             CSDitherMode::None => DitherMode::None,
         };
         dither_with_mode_bits(gray, width, height, basic_mode, seed, bits, progress)
@@ -1625,14 +1627,25 @@ fn main() -> Result<(), String> {
     let output_dither_mode = args.output_dither.to_cs_dither_mode();
     let output_alpha_mode = args.output_alpha_dither.map(|m| m.to_cs_dither_mode());
 
-    // Warn about Zhou-Fang limitations
-    let is_zhou_fang = matches!(
+    // Warn about threshold modulation limitations (Zhou-Fang and Ulichney)
+    let is_threshold_modulation = matches!(
         output_dither_mode,
-        CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine
+        CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine |
+        CSDitherMode::UlichneyStandard | CSDitherMode::UlichneySerpentine
     );
-    if is_zhou_fang && !args.no_colorspace_aware_output {
-        eprintln!("Warning: Zhou-Fang threshold modulation only works with --no-colorspace-aware-output.");
-        eprintln!("         With colorspace-aware dithering, Zhou-Fang falls back to Ostromoukhov (variable coefficients only).");
+    if is_threshold_modulation && !args.no_colorspace_aware_output {
+        let method_name = if matches!(output_dither_mode, CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine) {
+            "Zhou-Fang"
+        } else {
+            "Ulichney"
+        };
+        let fallback = if matches!(output_dither_mode, CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine) {
+            "Ostromoukhov"
+        } else {
+            "Floyd-Steinberg"
+        };
+        eprintln!("Warning: {} threshold modulation only works with --no-colorspace-aware-output.", method_name);
+        eprintln!("         With colorspace-aware dithering, {} falls back to {} (no threshold modulation).", method_name, fallback);
     }
 
     // Build the correction method (None if histogram is None)
@@ -1771,8 +1784,13 @@ fn main() -> Result<(), String> {
         if args.output_alpha_dither.is_some() {
             eprintln!("Warning: --output-alpha-dither is ignored for palette formats (alpha is integrated into main dithering)");
         }
-        if is_zhou_fang {
-            eprintln!("Warning: Zhou-Fang falls back to Ostromoukhov for palette formats (threshold modulation not applicable).");
+        if is_threshold_modulation {
+            let (method, fallback) = if matches!(output_dither_mode, CSDitherMode::ZhouFangStandard | CSDitherMode::ZhouFangSerpentine) {
+                ("Zhou-Fang", "Ostromoukhov")
+            } else {
+                ("Ulichney", "Floyd-Steinberg")
+            };
+            eprintln!("Warning: {} falls back to {} for palette formats (threshold modulation not applicable).", method, fallback);
         }
     } else {
         // --output-raw-palette is only valid for palette formats

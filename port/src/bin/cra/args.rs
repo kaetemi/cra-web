@@ -60,6 +60,10 @@ pub enum DitherMethod {
     ZhouFangStandard,
     /// Zhou-Fang: variable-coefficient kernel with threshold modulation, serpentine scanning
     ZhouFangSerpentine,
+    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5), standard scanning
+    UlichneyStandard,
+    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5), serpentine scanning
+    UlichneySerpentine,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
     /// Boon with legacy wang_hash (for testing) - hidden from help
@@ -90,6 +94,8 @@ impl DitherMethod {
             DitherMethod::OstroSerpentine => DitherMode::OstromoukhovSerpentine,
             DitherMethod::ZhouFangStandard => DitherMode::ZhouFangStandard,
             DitherMethod::ZhouFangSerpentine => DitherMode::ZhouFangSerpentine,
+            DitherMethod::UlichneyStandard => DitherMode::UlichneyStandard,
+            DitherMethod::UlichneySerpentine => DitherMode::UlichneySerpentine,
             DitherMethod::None => DitherMode::None,
             DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
@@ -111,6 +117,8 @@ impl DitherMethod {
             DitherMethod::OstroSerpentine => CSDitherMode::OstromoukhovSerpentine,
             DitherMethod::ZhouFangStandard => CSDitherMode::ZhouFangStandard,
             DitherMethod::ZhouFangSerpentine => CSDitherMode::ZhouFangSerpentine,
+            DitherMethod::UlichneyStandard => CSDitherMode::UlichneyStandard,
+            DitherMethod::UlichneySerpentine => CSDitherMode::UlichneySerpentine,
             DitherMethod::None => CSDitherMode::None,
             DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,

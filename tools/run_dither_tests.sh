@@ -24,6 +24,8 @@ DITHER_MODES=(
     "ostro-serpentine"
     "zhou-fang-standard"
     "zhou-fang-serpentine"
+    "ulichney-standard"
+    "ulichney-serpentine"
 )
 
 # Create output directories

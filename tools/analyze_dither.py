@@ -224,6 +224,7 @@ def analyze_comparison(base_dir: Path, image_name: str, output_dir: Path):
         'boon-standard', 'boon-serpentine',
         'ostro-standard', 'ostro-serpentine',
         'zhou-fang-standard', 'zhou-fang-serpentine',
+        'ulichney-standard', 'ulichney-serpentine',
     ]
 
     images = {}
@@ -314,6 +315,7 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         ('boon-serpentine', 'Our Method'),
         ('ostro-serpentine', 'Ostromoukhov'),
         ('zhou-fang-serpentine', 'Zhou-Fang'),
+        ('ulichney-serpentine', 'Ulichney'),
     ]
 
     images = {}
