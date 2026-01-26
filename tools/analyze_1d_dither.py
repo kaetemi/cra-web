@@ -131,13 +131,13 @@ def sigma_delta_1st(brightness, count):
 
 
 def sigma_delta_1st_dithered(brightness, count, seed=12345):
-    """First-order sigma-delta with TPDF dither. Should reduce tonal artifacts."""
+    """First-order sigma-delta with TPDF dither using lowbias32. Should reduce tonal artifacts."""
     vin = (brightness / 255.0) * 2 - 1  # scale to -1..+1 range
     vref = 1.0
     output = np.zeros(count, dtype=np.uint8)
     integrator = 0.0
     dither_amplitude = 0.5  # ~1 LSB
-    rng = np.random.default_rng(seed)
+    hashed_seed = lowbias32(np.uint32(seed))
 
     for i in range(count):
         # sum input with feedback
@@ -148,8 +148,12 @@ def sigma_delta_1st_dithered(brightness, count, seed=12345):
 
         integrator = integrator + (vin - feedback)
 
-        # TPDF dither: triangular PDF, zero mean
-        dither = (rng.random() + rng.random() - 1.0) * dither_amplitude
+        # TPDF dither using lowbias32: two hashes for triangular PDF, zero mean
+        h1 = lowbias32(np.uint32(i * 2) ^ hashed_seed)
+        h2 = lowbias32(np.uint32(i * 2 + 1) ^ hashed_seed)
+        r1 = (h1 & 0xFFFF) / 65535.0  # 0..1
+        r2 = (h2 & 0xFFFF) / 65535.0  # 0..1
+        dither = (r1 + r2 - 1.0) * dither_amplitude
 
         # compare with dither
         output[i] = 1 if (integrator + dither) >= 0 else 0
@@ -294,7 +298,7 @@ def analyze_linear(gray_levels, count, output_dir):
         print(f"  {output_path.name}")
 
 
-def analyze_log_scale(gray_levels, count, output_dir):
+def analyze_log_scale(gray_levels, count, output_dir, suffix=''):
     """Log frequency axis analysis - ideal for seeing blue noise slope."""
     print(f"Analyzing {len(gray_levels)} gray levels (log scale)...")
 
@@ -348,7 +352,8 @@ def analyze_log_scale(gray_levels, count, output_dir):
         axes[idx // n_cols, idx % n_cols].set_visible(False)
 
     plt.tight_layout()
-    output_path = output_dir / 'spectrum_1d_logscale.png'
+    filename = f'spectrum_1d_logscale{suffix}.png' if suffix else 'spectrum_1d_logscale.png'
+    output_path = output_dir / filename
     plt.savefig(output_path, dpi=150)
     plt.close()
     print(f"  {output_path.name}")
@@ -380,7 +385,7 @@ def analyze_log_scale(gray_levels, count, output_dir):
     print(f"\n  Ideal blue noise: +6.0 dB/octave")
 
 
-def analyze_comparison(gray_levels, count, output_dir):
+def analyze_comparison(gray_levels, count, output_dir, suffix=''):
     """Single comparison plot across gray levels."""
     print("Generating comparison plot...")
 
@@ -410,7 +415,8 @@ def analyze_comparison(gray_levels, count, output_dir):
     ax.grid(True, alpha=0.3, which='both')
 
     plt.tight_layout()
-    output_path = output_dir / 'spectrum_1d_comparison.png'
+    filename = f'spectrum_1d_comparison{suffix}.png' if suffix else 'spectrum_1d_comparison.png'
+    output_path = output_dir / filename
     plt.savefig(output_path, dpi=150)
     plt.close()
     print(f"  {output_path.name}")
@@ -711,14 +717,17 @@ def main():
         print(f"\nDone! Results in {output_dir}")
         return
 
+    # Suffix for output filenames to avoid overwrites
+    suffix = '_low_gray' if args.low_gray else ''
+
     # Always run log-scale analysis (it's the most useful)
-    analyze_log_scale(gray_levels, count, output_dir)
+    analyze_log_scale(gray_levels, count, output_dir, suffix)
 
     # Linear analysis for detailed per-gray-level view
     if args.all or not args.log:
         analyze_linear(gray_levels, count, output_dir)
 
-    analyze_comparison(gray_levels, count, output_dir)
+    analyze_comparison(gray_levels, count, output_dir, suffix)
 
     print(f"\nDone! Results in {output_dir}")
 
