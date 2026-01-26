@@ -121,6 +121,12 @@ KERNEL_SETS = {
         [38, 10],       # ratio 3.8:1 = 2×[19,5] (both prime)
     ],
 
+    # User requested: [1]+[3,1] scaled to sum=48
+    '[48]+[36,12] (3:1)': [
+        [48],           # [1] scaled
+        [36, 12],       # [3,1] scaled, ratio 3:1
+    ],
+
     # Original implementation
     '[48]+[28,20]': [
         [48],           # 100% to t+1 (FS-like)

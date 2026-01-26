@@ -31,15 +31,30 @@ def lowbias32(x):
     x ^= x >> 15
     return x
 
-def blue_dither_1d(brightness, count, seed=12345):
+def blue_dither_1d(brightness, count, seed=12345, kernel='38_10'):
     """
     1D blue noise dithering - replicates C implementation.
-    Mixes [48] with [38,10] kernels (ratio ~4:1, optimal for 1D).
+    Mixes [48] with configurable second kernel.
+
+    kernel options:
+        '38_10' - ratio ~4:1 (current best)
+        '36_12' - ratio 3:1 ([3,1] scaled)
+        '28_20' - ratio 7:5 (original JJN-like)
     """
     err0, err1 = 0, 0
     output = np.zeros(count, dtype=np.uint8)
     threshold = 6120   # 127.5 * 48
     white_val = 255 * 48
+
+    # Kernel coefficients
+    if kernel == '38_10':
+        k1_coeff, k2_coeff = 38, 10
+    elif kernel == '36_12':
+        k1_coeff, k2_coeff = 36, 12
+    elif kernel == '28_20':
+        k1_coeff, k2_coeff = 28, 20
+    else:
+        k1_coeff, k2_coeff = 38, 10
 
     for i in range(count):
         pixel = brightness * 48 + err0
@@ -59,9 +74,9 @@ def blue_dither_1d(brightness, count, seed=12345):
             # FS-like: 100% to next
             err0 += quant_err
         else:
-            # Optimal 1D kernel: 38:10 ratio = 2×[19,5] (both prime)
-            err0 += (quant_err * 38) // 48
-            err1 += (quant_err * 10) // 48
+            # Second kernel
+            err0 += (quant_err * k1_coeff) // 48
+            err1 += (quant_err * k2_coeff) // 48
 
     return output
 
@@ -348,11 +363,97 @@ def analyze_comparison(gray_levels, count, output_dir):
     print(f"  {output_path.name}")
 
 
+def analyze_kernel_comparison(gray_levels, count, output_dir):
+    """Compare different 1D kernels across all gray levels."""
+    print("Comparing kernels across all gray levels...")
+
+    kernels = {
+        '[38,10] (3.8:1)': '38_10',
+        '[36,12] (3:1)': '36_12',
+        '[28,20] (1.4:1)': '28_20',
+    }
+    colors = {'38_10': '#2ecc71', '36_12': '#3498db', '28_20': '#e74c3c'}
+
+    # Print table header
+    print(f"\n  {'Kernel':<20}", end="")
+    for g in gray_levels:
+        print(f" G{g:>3}", end="")
+    print("    Avg")
+    print(f"  {'-'*70}")
+
+    results = {}
+    for name, kernel_id in kernels.items():
+        slopes = []
+        for gray in gray_levels:
+            sig = blue_dither_1d(gray, count, kernel=kernel_id)
+            freqs, power = compute_spectrum(sig)
+            slope = measure_slope(freqs, power)
+            slopes.append(slope if slope else 0)
+
+        avg_slope = np.mean(slopes)
+        results[name] = (slopes, avg_slope, kernel_id)
+
+        print(f"  {name:<20}", end="")
+        for s in slopes:
+            print(f" {s:>+4.1f}", end="")
+        print(f"  {avg_slope:>+5.2f}")
+
+    print(f"  {'-'*70}")
+    print(f"  {'Ideal blue noise':<20}", end="")
+    for _ in gray_levels:
+        print(f" {6.0:>+4.1f}", end="")
+    print(f"  {6.0:>+5.2f}")
+
+    # Generate comparison chart
+    n_cols = min(4, len(gray_levels))
+    n_rows = (len(gray_levels) + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    fig.suptitle('1D Kernel Comparison: [38,10] vs [36,12] vs [28,20]', fontsize=14)
+
+    for idx, gray in enumerate(gray_levels):
+        ax = axes[idx // n_cols, idx % n_cols]
+
+        for name, (slopes, avg, kernel_id) in results.items():
+            sig = blue_dither_1d(gray, count, kernel=kernel_id)
+            freqs, power = compute_spectrum(sig)
+            f_smooth, p_smooth = smooth_spectrum_log(freqs, power)
+            ax.semilogx(f_smooth, p_smooth, color=colors[kernel_id], linewidth=2,
+                        label=f'{name}' if idx == 0 else None, alpha=0.8)
+
+        # Ideal reference
+        f_ref = np.logspace(-3, np.log10(0.5), 100)
+        ideal_blue = -20 + 20 * np.log10(f_ref / 0.1)
+        ax.semilogx(f_ref, ideal_blue, 'k--', linewidth=1.5, alpha=0.5,
+                    label='Ideal' if idx == 0 else None)
+
+        ax.set_xlabel('Frequency (log)')
+        ax.set_ylabel('Power (dB)')
+        ax.set_title(f'Gray {gray} ({gray*100/255:.1f}%)')
+        ax.set_xlim(1e-3, 0.5)
+        ax.set_ylim(-55, 5)
+        ax.grid(True, alpha=0.3, which='both')
+
+    # Hide empty subplots
+    for idx in range(len(gray_levels), n_rows * n_cols):
+        axes[idx // n_cols, idx % n_cols].set_visible(False)
+
+    axes[0, 0].legend(loc='lower right', fontsize=8)
+    plt.tight_layout()
+
+    output_path = output_dir / 'spectrum_1d_kernel_full_comparison.png'
+    plt.savefig(output_path, dpi=150)
+    print(f"\n  Saved: {output_path}")
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Analyze 1D temporal dithering spectrum')
     parser.add_argument('--log', action='store_true', help='Use log frequency scale')
     parser.add_argument('--low-gray', action='store_true', help='Focus on low gray levels')
     parser.add_argument('--all', action='store_true', help='Run all analyses (default)')
+    parser.add_argument('--kernel-compare', action='store_true', help='Compare kernels [38,10] vs [36,12] vs [28,20]')
     parser.add_argument('--count', type=int, default=131072, help='Sample count (default: 131072)')
     args = parser.parse_args()
 
@@ -366,6 +467,14 @@ def main():
         gray_levels = [42, 64, 85, 127, 170, 191, 213]
 
     count = args.count
+
+    # Kernel comparison mode
+    if args.kernel_compare:
+        # Use full range of gray levels for kernel comparison
+        all_grays = [1, 2, 5, 10, 18, 20, 42, 43, 54, 64, 85, 91, 127, 128, 170, 191, 212, 213, 254]
+        analyze_kernel_comparison(all_grays, count, output_dir)
+        print(f"\nDone! Results in {output_dir}")
+        return
 
     # Always run log-scale analysis (it's the most useful)
     analyze_log_scale(gray_levels, count, output_dir)
