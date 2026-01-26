@@ -229,6 +229,14 @@ pub enum DitherMode {
     MixedLowbiasOldStandard,
     /// Mixed with original lowbias32 serpentine: Kept for comparison testing.
     MixedLowbiasOldSerpentine,
+    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5)
+    /// Standard left-to-right scanning
+    /// Adds uniform noise to the quantization threshold to break up patterns.
+    /// Reference: Robert Ulichney, "Digital Halftoning", MIT Press, 1987.
+    UlichneyStandard,
+    /// Ulichney: Floyd-Steinberg with random threshold modulation (±0.5)
+    /// Serpentine scanning (alternating direction each row)
+    UlichneySerpentine,
 }
 
 /// Wang hash for deterministic randomization.

@@ -198,7 +198,12 @@ cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o
 
 ### 8. `analyze_1d_dither.py`
 
-Spectral analysis of 1D temporal dithering. Compares our method against ideal blue noise (+6 dB/octave slope) and white noise (flat spectrum).
+Spectral analysis of 1D temporal dithering. Compares our method against:
+- **PWM** - Traditional pulse width modulation (shows harmonic spikes that cause flicker)
+- **White noise** - Random threshold dithering (flat spectrum)
+- **Ideal blue noise** - +6 dB/octave reference slope
+
+All charts use log frequency scale to clearly show blue noise characteristics.
 
 **Outputs** (`tools/test_images/analysis/`):
 - `spectrum_1d_logscale.png` - Log-frequency spectrum across gray levels
@@ -269,7 +274,8 @@ python tools/analyze_dither.py --sanity
 python tools/analyze_dither.py --blue-kernel
 
 # 6. Generate 1D temporal analysis charts
-python tools/analyze_1d_dither.py --all
+python tools/analyze_1d_dither.py --all              # Default gray levels (42-213)
+python tools/analyze_1d_dither.py --low-gray --all   # Low gray levels (1-127)
 python tools/analyze_1d_kernels.py
 ```
 
@@ -334,10 +340,16 @@ Key test cases:
 
 ### 1D Temporal Spectrum Charts
 
-The 1D analysis charts show:
-- **Log-frequency plot**: Power spectrum vs frequency on log scale
-- **Ideal blue noise reference**: +6 dB/octave slope (black dashed line)
-- **Spectral slope**: Measured in dB/octave between 0.01 and 0.1 cycles/sample
+The 1D analysis charts (`spectrum_1d_gray_*.png`) show four panels:
+1. **Our 1D Method** - Blue noise dithering with smoothed spectrum + raw envelope
+2. **PWM** - Traditional PWM showing harmonic spikes (comb pattern)
+3. **White Noise** - Random threshold with flat spectrum
+4. **Comparison** - All methods overlaid
+
+Key features:
+- **Log-frequency scale**: Makes +6 dB/octave slope appear as straight diagonal line
+- **Ideal blue noise reference**: Black dashed line at +6 dB/octave
+- **PWM harmonics**: Vertical spikes at f = 1/256, 3/256, 5/256... (the cause of visible flicker)
 
 **Quality ratings** based on spectral slope:
 - **Excellent**: >5 dB/octave (close to ideal +6)
@@ -345,7 +357,7 @@ The 1D analysis charts show:
 - **OK**: 2-4 dB/octave
 - **Poor**: <2 dB/octave
 
-Blue noise temporal dithering produces less perceptible flicker than white noise (random threshold) because it concentrates energy at high frequencies where the eye is less sensitive.
+Blue noise temporal dithering produces less perceptible flicker than PWM or white noise because it spreads energy across high frequencies where the eye is less sensitive, rather than concentrating it at specific harmonics.
 
 ## Hash Function Notes
 

@@ -715,6 +715,20 @@ pub fn colorspace_aware_dither_gray_with_options(
                 width, height, reach, progress,
             );
         }
+        // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
+        // (threshold modulation is for per-channel quantization)
+        DitherMode::UlichneyStandard => {
+            dither_standard_gray::<FloydSteinberg>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
+        DitherMode::UlichneySerpentine => {
+            dither_serpentine_gray::<FloydSteinberg>(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, progress,
+            );
+        }
     }
 
     out

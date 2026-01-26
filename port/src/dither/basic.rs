@@ -811,6 +811,160 @@ fn zhou_fang_serpentine(
 }
 
 // ============================================================================
+// Ulichney dithering (Floyd-Steinberg with random threshold modulation)
+// ============================================================================
+
+/// Generate a random threshold in [0, 1] for Ulichney dithering.
+/// Uses lowbias32 hash for position-based randomization.
+#[inline]
+fn ulichney_threshold(x: usize, y: usize, seed: u32) -> f32 {
+    let hash = lowbias32((x as u32) ^ ((y as u32) << 16) ^ seed);
+    // Map to [0, 1] range (this gives uniform distribution)
+    (hash as f32) / (u32::MAX as f32)
+}
+
+/// Quantize with threshold modulation for Ulichney dithering.
+/// For 8-bit output, uses floor/ceil of the f32 value directly.
+/// threshold should be in [0, 1] range.
+#[inline]
+fn ulichney_quantize(quant: &QuantParams, value: f32, threshold: f32) -> f32 {
+    // For 8-bit, we need to use the actual f32 floor/ceil
+    if quant.bits == 8 {
+        let floor_val = value.floor();
+        let ceil_val = value.ceil();
+        if floor_val == ceil_val {
+            floor_val.clamp(0.0, 255.0)
+        } else {
+            let frac = value - floor_val;
+            if frac > threshold {
+                ceil_val.clamp(0.0, 255.0)
+            } else {
+                floor_val.clamp(0.0, 255.0)
+            }
+        }
+    } else {
+        // For reduced bit depths, use the LUT-based floor/ceil
+        let floor_val = quant.quantize_floor(value);
+        let ceil_val = quant.quantize_ceil(value);
+        if floor_val == ceil_val {
+            floor_val
+        } else {
+            let frac = (value - floor_val) / (ceil_val - floor_val);
+            if frac > threshold { ceil_val } else { floor_val }
+        }
+    }
+}
+
+/// Ulichney dithering with standard left-to-right scanning.
+/// Uses Floyd-Steinberg kernel with random threshold modulation (±0.5).
+/// The threshold for choosing between floor and ceil is randomized per-pixel.
+fn ulichney_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    // Same reach as Floyd-Steinberg
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let old = buf[y][bx];
+
+            // Compute randomized threshold based on position
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+
+            // Quantize using modulated threshold
+            let new = ulichney_quantize(&quant, old, threshold);
+            buf[y][bx] = new;
+
+            let err = old - new;
+            FloydSteinberg::apply_ltr(&mut buf, bx, y, err, old);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Ulichney dithering with serpentine scanning.
+/// Uses Floyd-Steinberg kernel with random threshold modulation (±0.5).
+fn ulichney_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    let reach = 1usize;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+
+                let new = ulichney_quantize(&quant, old, threshold);
+                buf[y][bx] = new;
+
+                let err = old - new;
+                FloydSteinberg::apply_rtl(&mut buf, bx, y, err, old);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let old = buf[y][bx];
+
+                let img_x = px.saturating_sub(reach);
+                let img_y = y.saturating_sub(reach);
+                let threshold = ulichney_threshold(img_x, img_y, hashed_seed);
+
+                let new = ulichney_quantize(&quant, old, threshold);
+                buf[y][bx] = new;
+
+                let err = old - new;
+                FloydSteinberg::apply_ltr(&mut buf, bx, y, err, old);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -912,6 +1066,8 @@ pub fn dither_with_mode_bits(
         DitherMode::OstromoukhovSerpentine => dither_serpentine::<Ostromoukhov>(img, width, height, quant, progress),
         DitherMode::ZhouFangStandard => zhou_fang_standard(img, width, height, seed, quant, progress),
         DitherMode::ZhouFangSerpentine => zhou_fang_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::UlichneyStandard => ulichney_standard(img, width, height, seed, quant, progress),
+        DitherMode::UlichneySerpentine => ulichney_serpentine(img, width, height, seed, quant, progress),
     }
 }
 
@@ -1350,6 +1506,8 @@ mod tests {
             DitherMode::MixedStandard,
             DitherMode::MixedSerpentine,
             DitherMode::MixedRandom,
+            DitherMode::UlichneyStandard,
+            DitherMode::UlichneySerpentine,
         ];
         let valid_levels = [0u8, 85, 170, 255]; // 2-bit levels
         for mode in modes {
@@ -1359,5 +1517,73 @@ mod tests {
                 assert!(valid_levels.contains(&v), "Mode {:?} produced invalid 2-bit value: {}", mode, v);
             }
         }
+    }
+
+    #[test]
+    fn test_ulichney_standard() {
+        // Test that Ulichney standard mode produces valid output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        assert_eq!(result.len(), 100);
+        // All values should be valid uint8
+        for &v in &result {
+            assert!(v == 127 || v == 128);
+        }
+    }
+
+    #[test]
+    fn test_ulichney_serpentine() {
+        // Test that Ulichney serpentine mode produces valid output
+        let img = vec![127.5; 100]; // 10x10 gray image
+        let result = dither_with_mode(&img, 10, 10, DitherMode::UlichneySerpentine, 42);
+        assert_eq!(result.len(), 100);
+        for &v in &result {
+            assert!(v == 127 || v == 128);
+        }
+    }
+
+    #[test]
+    fn test_ulichney_vs_standard_fs() {
+        // Ulichney should produce different results from standard Floyd-Steinberg
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let fs = dither_with_mode(&img, 10, 10, DitherMode::Standard, 0);
+        let ulichney = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        assert_eq!(fs.len(), 100);
+        assert_eq!(ulichney.len(), 100);
+        // They should produce different results due to threshold modulation
+        assert_ne!(fs, ulichney);
+    }
+
+    #[test]
+    fn test_ulichney_deterministic_with_same_seed() {
+        // Same seed should produce identical results
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result1 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        let result2 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        assert_eq!(result1.len(), 100);
+        assert_eq!(result2.len(), 100);
+        assert_eq!(result1, result2);
+    }
+
+    #[test]
+    fn test_ulichney_different_seeds_produce_different_results() {
+        // Different seeds should produce different results
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let result1 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        let result2 = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 99);
+        assert_eq!(result1.len(), 100);
+        assert_eq!(result2.len(), 100);
+        assert_ne!(result1, result2);
+    }
+
+    #[test]
+    fn test_ulichney_serpentine_vs_standard() {
+        // Ulichney serpentine and standard should produce different results
+        let img: Vec<f32> = (0..100).map(|i| i as f32 * 2.55).collect();
+        let standard = dither_with_mode(&img, 10, 10, DitherMode::UlichneyStandard, 42);
+        let serpentine = dither_with_mode(&img, 10, 10, DitherMode::UlichneySerpentine, 42);
+        assert_eq!(standard.len(), 100);
+        assert_eq!(serpentine.len(), 100);
+        assert_ne!(standard, serpentine);
     }
 }

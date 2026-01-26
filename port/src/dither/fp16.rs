@@ -342,6 +342,13 @@ fn dither_alpha_f16_with_mode(
         DitherMode::ZhouFangSerpentine => {
             dither_alpha_f16::<Ostromoukhov>(alpha, width, height, true)
         }
+        // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
+        DitherMode::UlichneyStandard => {
+            dither_alpha_f16::<FloydSteinberg>(alpha, width, height, false)
+        }
+        DitherMode::UlichneySerpentine => {
+            dither_alpha_f16::<FloydSteinberg>(alpha, width, height, true)
+        }
     }
 }
 
@@ -1188,6 +1195,25 @@ pub fn dither_rgba_f16_with_options(
         }
         DitherMode::ZhouFangSerpentine => {
             dither_serpentine_f16::<Ostromoukhov>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        // Ulichney: fall back to Floyd-Steinberg for colorspace-aware dithering
+        DitherMode::UlichneyStandard => {
+            dither_standard_f16::<FloydSteinberg>(
+                space, working_space, &alpha_dithered,
+                r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, overshoot_penalty, progress,
+            );
+        }
+        DitherMode::UlichneySerpentine => {
+            dither_serpentine_f16::<FloydSteinberg>(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
