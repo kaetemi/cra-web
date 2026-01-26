@@ -106,7 +106,7 @@ def white_noise_dither(brightness, count, seed=42):
 
 
 def sigma_delta_1st(brightness, count):
-    """First-order sigma-delta modulation. Should produce +6 dB/octave (violet)."""
+    """First-order sigma-delta modulation. Should produce +6 dB/octave (blue noise)."""
     vin = (brightness / 255.0) * 2 - 1  # scale to -1..+1 range
     vref = 1.0
     output = np.zeros(count, dtype=np.uint8)
@@ -253,12 +253,12 @@ def analyze_linear(gray_levels, count, output_dir):
                 ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2,
                             label=f'{name} ({duty:.1f}%)')
 
-            # Reference line (+6 dB/octave violet)
+            # Reference line (+6 dB/octave blue noise)
             f_ref = np.logspace(-3, np.log10(0.5), 100)
             anchor_idx = np.argmin(np.abs(f_log - 0.1)) if len(f_log) > 0 else 0
             anchor_db = p_log[anchor_idx] if len(p_log) > anchor_idx else -20
             ideal_6db = anchor_db + 20 * np.log10(f_ref / 0.1)
-            ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Violet (+6dB/oct)')
+            ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Blue (+6dB/oct)')
 
             ax.set_xlabel('Frequency (log scale)')
             ax.set_ylabel('Power (dB)')
@@ -281,7 +281,7 @@ def analyze_linear(gray_levels, count, output_dir):
         # Reference line (only +6dB/oct for comparison panel)
         f_ref = np.logspace(-3, np.log10(0.5), 100)
         ideal_6db = -30 + 20 * np.log10(f_ref / 0.01)
-        ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Violet (+6dB/oct)')
+        ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Blue (+6dB/oct)')
 
         ax.set_xlabel('Frequency (log scale)')
         ax.set_ylabel('Power (dB)')

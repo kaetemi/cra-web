@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
 """
-Compare noise color spectra: audio blue noise vs violet noise vs higher orders.
+Compare noise color spectra for graphics blue noise analysis.
 
-Audio terminology:
+Spectra shown:
 - White:  0 dB/octave (flat)
-- Pink:  -3 dB/octave (1/f)
-- Red:   -6 dB/octave (1/f²)
-- Blue:  +3 dB/octave (f)
-- Violet: +6 dB/octave (f²)
-
-Graphics "blue noise" typically means +6 dB/octave (violet in audio terms).
+- Blue +3 dB/octave (f) - claimed by some sources
+- Blue +6 dB/octave (f²) - standard graphics blue noise
+- +12 dB/octave (f⁴) - second-order noise shaping
 
 Usage:
     python noise_color_comparison.py          # Both charts
@@ -27,16 +24,16 @@ def plot_spectra(ax, f, f_ref, log_scale=True):
     """Plot noise spectra on given axes."""
     spectra = {
         'White (0 dB/oct)': 0 * np.log2(f / f_ref),
-        'Blue - audio (+3 dB/oct)': 3 * np.log2(f / f_ref),
-        'Violet (+6 dB/oct)': 6 * np.log2(f / f_ref),
-        '+12 dB/oct': 12 * np.log2(f / f_ref),
+        'Blue +3 dB/oct (f)': 3 * np.log2(f / f_ref),
+        'Blue +6 dB/oct (f²)': 6 * np.log2(f / f_ref),
+        '+12 dB/oct (f⁴)': 12 * np.log2(f / f_ref),
     }
 
     colors = {
         'White (0 dB/oct)': 'gray',
-        'Blue - audio (+3 dB/oct)': 'blue',
-        'Violet (+6 dB/oct)': 'violet',
-        '+12 dB/oct': 'darkviolet',
+        'Blue +3 dB/oct (f)': 'deepskyblue',
+        'Blue +6 dB/oct (f²)': 'blue',
+        '+12 dB/oct (f⁴)': 'darkblue',
     }
 
     for name, spectrum in spectra.items():
@@ -53,18 +50,18 @@ def plot_spectra(ax, f, f_ref, log_scale=True):
 
     if log_scale:
         ax.set_xlim(1e-3, 0.5)
-        ax.annotate('Graphics "blue noise"\nis actually violet\n(+6 dB/octave)',
+        ax.annotate('Graphics blue noise\ntypically +6 dB/octave',
                     xy=(0.05, 6 * np.log2(0.05 / f_ref)),
                     xytext=(0.008, -5),
                     fontsize=10, ha='center',
-                    arrowprops=dict(arrowstyle='->', color='violet', lw=1.5))
+                    arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
     else:
         ax.set_xlim(0, 0.5)
-        ax.annotate('Graphics "blue noise"\nis actually violet\n(+6 dB/octave)',
+        ax.annotate('Graphics blue noise\ntypically +6 dB/octave',
                     xy=(0.2, 6 * np.log2(0.2 / f_ref)),
                     xytext=(0.08, -25),
                     fontsize=10, ha='center',
-                    arrowprops=dict(arrowstyle='->', color='violet', lw=1.5))
+                    arrowprops=dict(arrowstyle='->', color='blue', lw=1.5))
 
 
 def main():
@@ -85,7 +82,7 @@ def main():
         f = np.logspace(-3, np.log10(0.5), 500)
         fig, ax = plt.subplots(figsize=(10, 6))
         plot_spectra(ax, f, f_ref, log_scale=True)
-        ax.set_title('Noise Color Spectra Comparison (Log Frequency)\n(Audio terminology vs Graphics "blue noise")', fontsize=14)
+        ax.set_title('Noise Color Spectra Comparison (Log Frequency)', fontsize=14)
         plt.tight_layout()
         output_path = output_dir / 'noise_color_comparison.png'
         plt.savefig(output_path, dpi=150)
@@ -96,7 +93,7 @@ def main():
         f = np.linspace(0.001, 0.5, 500)
         fig, ax = plt.subplots(figsize=(10, 6))
         plot_spectra(ax, f, f_ref, log_scale=False)
-        ax.set_title('Noise Color Spectra Comparison (Linear Frequency)\n(Audio terminology vs Graphics "blue noise")', fontsize=14)
+        ax.set_title('Noise Color Spectra Comparison (Linear Frequency)', fontsize=14)
         plt.tight_layout()
         output_path = output_dir / 'noise_color_comparison_linear.png'
         plt.savefig(output_path, dpi=150)
@@ -106,16 +103,14 @@ def main():
     # Print summary table
     print("\nNoise Color Reference:")
     print("=" * 50)
-    print(f"{'Color':<20} {'Slope':<15} {'Power ∝':<10}")
+    print(f"{'Name':<25} {'Slope':<15} {'Power ∝':<10}")
     print("-" * 50)
-    print(f"{'Pink':<20} {'-3 dB/octave':<15} {'1/f':<10}")
-    print(f"{'Red/Brown':<20} {'-6 dB/octave':<15} {'1/f²':<10}")
-    print(f"{'White':<20} {'0 dB/octave':<15} {'constant':<10}")
-    print(f"{'Blue (audio)':<20} {'+3 dB/octave':<15} {'f':<10}")
-    print(f"{'Violet':<20} {'+6 dB/octave':<15} {'f²':<10}")
-    print(f"{'(unnamed)':<20} {'+12 dB/octave':<15} {'f⁴':<10}")
+    print(f"{'White':<25} {'0 dB/octave':<15} {'constant':<10}")
+    print(f"{'Blue +3 dB (some claim)':<25} {'+3 dB/octave':<15} {'f':<10}")
+    print(f"{'Blue +6 dB (graphics)':<25} {'+6 dB/octave':<15} {'f²':<10}")
+    print(f"{'(2nd order shaping)':<25} {'+12 dB/octave':<15} {'f⁴':<10}")
     print("-" * 50)
-    print("\nNote: Graphics 'blue noise' = Violet (+6 dB/octave)")
+    print("\nGraphics blue noise is typically +6 dB/octave (f²)")
 
 
 if __name__ == '__main__':

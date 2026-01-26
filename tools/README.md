@@ -204,12 +204,12 @@ cra -i output.bin --input-metadata '{"format":"L1","width":256,"height":256}' -o
 ### 8. `analyze_1d_dither.py`
 
 Spectral analysis of 1D temporal dithering. Compares our method against:
-- **ΣΔ 1st order** - First-order sigma-delta modulation (+6 dB/octave, violet noise shaping, tonal spikes)
+- **ΣΔ 1st order** - First-order sigma-delta modulation (+6 dB/octave noise shaping, tonal spikes)
 - **ΣΔ 1st + TPDF dither** - First-order sigma-delta with triangular dither (cleaner spectrum)
 - **PWM** - Traditional pulse width modulation (shows harmonic spikes that cause flicker)
 - **White noise** - Random threshold dithering (flat spectrum)
 
-Reference line for +6 dB/octave (violet) shown on all charts.
+Reference line for +6 dB/octave shown on all charts.
 
 All charts use log frequency scale to clearly show noise shaping characteristics.
 
@@ -275,13 +275,13 @@ python tools/experiments/analyze_1d_prime_pairs.py
 
 ### 11. `noise_color_comparison.py`
 
-Generates reference charts comparing noise color spectra using audio terminology:
+Generates reference charts comparing noise color spectra:
 - **White**: 0 dB/octave (flat)
-- **Blue (audio)**: +3 dB/octave
-- **Violet**: +6 dB/octave (what graphics calls "blue noise")
-- **+12 dB/octave**: (unnamed, f⁴)
+- **+3 dB/octave**: (f, claimed by some sources as "blue")
+- **+6 dB/octave**: (f², graphics "blue noise")
+- **+12 dB/octave**: (f⁴, second-order noise shaping)
 
-Note: Graphics "blue noise" (+6 dB/octave) is actually "violet noise" in audio terminology.
+In graphics, "blue noise" refers to noise with steep low-frequency suppression, typically around +6 dB/octave. The +3 dB/octave line is included for reference since some sources claim that value, though it's unclear where this originates.
 
 **Outputs** (`tools/test_images/analysis/`):
 - `noise_color_comparison.png` - Log frequency scale
@@ -406,7 +406,7 @@ The 1D analysis charts (`spectrum_1d_gray_*.png`) show six panels:
 
 Key features:
 - **Log-frequency scale**: Makes dB/octave slopes appear as straight diagonal lines
-- **Reference line**: Dashed line at +6 dB/octave (violet noise)
+- **Reference line**: Dashed line at +6 dB/octave (ideal blue noise)
 - **PWM harmonics**: Vertical spikes at f = 1/256, 3/256, 5/256... (the cause of visible flicker)
 - **Sigma-delta tonal spikes**: Standard ΣΔ shows periodic artifacts; TPDF dither eliminates them
 

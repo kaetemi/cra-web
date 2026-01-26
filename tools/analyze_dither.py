@@ -844,10 +844,10 @@ def analyze_vs_blue_noise(base_dir: Path, output_dir: Path):
         # Ideal curves for reference
         freqs_ideal = np.linspace(0.004, 0.5, 500)
         P_ref = 10 ** (h_bn_db.max() / 10)
-        # Violet (+6 dB/octave, f²) - what graphics calls "blue noise"
-        power_violet_db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
-        # Audio blue (+3 dB/octave, f)
-        power_blue_db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
+        # Blue +6 dB/octave (f²) - standard graphics blue noise
+        power_blue_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+        # Blue +3 dB/octave (f) - claimed by some sources
+        power_blue_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
 
         # Calculate stats
         bn_avg_db = (h_bn_db + d_bn_db + v_bn_db) / 3
@@ -863,8 +863,8 @@ def analyze_vs_blue_noise(base_dir: Path, output_dir: Path):
         axes[0].plot(freqs_bn, h_bn_db, 'r-', label='H', alpha=0.8, linewidth=1)
         axes[0].plot(freqs_bn, d_bn_db, 'g-', label='D', alpha=0.8, linewidth=1)
         axes[0].plot(freqs_bn, v_bn_db, 'b-', label='V', alpha=0.8, linewidth=1)
-        axes[0].plot(freqs_ideal, power_violet_db, 'k--', linewidth=1.5, alpha=0.6, label='Violet f² (+6dB/oct)')
-        axes[0].plot(freqs_ideal, power_blue_db, 'k:', linewidth=1.5, alpha=0.6, label='Blue f (+3dB/oct)')
+        axes[0].plot(freqs_ideal, power_blue_6db, 'k--', linewidth=1.5, alpha=0.6, label='Blue f² (+6dB/oct)')
+        axes[0].plot(freqs_ideal, power_blue_3db, 'k:', linewidth=1.5, alpha=0.6, label='Blue f (+3dB/oct)')
         axes[0].set_xlabel('Spatial Frequency (cycles/pixel)')
         axes[0].set_ylabel('Power (dB)')
         axes[0].set_title(f'Void-and-Cluster Blue Noise\n(thresholded at {gray})', fontsize=12, fontweight='bold')
@@ -877,8 +877,8 @@ def analyze_vs_blue_noise(base_dir: Path, output_dir: Path):
         axes[1].plot(freqs_om, h_om_db, 'r-', label='H', alpha=0.8, linewidth=1)
         axes[1].plot(freqs_om, d_om_db, 'g-', label='D', alpha=0.8, linewidth=1)
         axes[1].plot(freqs_om, v_om_db, 'b-', label='V', alpha=0.8, linewidth=1)
-        axes[1].plot(freqs_ideal, power_violet_db, 'k--', linewidth=1.5, alpha=0.6, label='Violet f² (+6dB/oct)')
-        axes[1].plot(freqs_ideal, power_blue_db, 'k:', linewidth=1.5, alpha=0.6, label='Blue f (+3dB/oct)')
+        axes[1].plot(freqs_ideal, power_blue_6db, 'k--', linewidth=1.5, alpha=0.6, label='Blue f² (+6dB/oct)')
+        axes[1].plot(freqs_ideal, power_blue_3db, 'k:', linewidth=1.5, alpha=0.6, label='Blue f (+3dB/oct)')
         axes[1].set_xlabel('Spatial Frequency (cycles/pixel)')
         axes[1].set_ylabel('Power (dB)')
         axes[1].set_title(f'Our Method (FS/JJN/lowbias32)\ngray_{gray:03d}', fontsize=12, fontweight='bold')
