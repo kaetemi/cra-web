@@ -150,7 +150,9 @@ The 1D mode mixes two kernels for blue noise temporal dithering:
 - K1: `[48]` - 100% error to t+1 (tight response)
 - K2: `[38,10]` - 79% to t+1, 21% to t+2 (spread response) = 2×[19,5]
 
-The `[38,10]` ratio (~4:1) was determined optimal through spectral analysis, achieving +5.52 dB/octave average (ideal is +6.0). Note: 38 = 2×19 and 10 = 2×5, where both 19 and 5 are prime.
+The `[38,10]` ratio (~4:1) achieves +5.62 dB/octave average (ideal is +6.0). Note: 38 = 2×19 and 10 = 2×5, where both 19 and 5 are prime.
+
+**Note:** Exhaustive testing shows `[46,2]` (23:1 ratio) achieves slightly better results (+5.67 avg, +4.84 min) compared to `[38,10]` (+5.62 avg, +4.69 min). See `analyze_1d_dither.py --find-best` for details.
 
 **Usage:**
 ```c
@@ -211,6 +213,8 @@ All charts use log frequency scale to clearly show blue noise characteristics.
 - `spectrum_1d_logscale.png` - Log-frequency spectrum across gray levels
 - `spectrum_1d_gray_*.png` - Detailed per-gray-level analysis
 - `spectrum_1d_comparison.png` - All gray levels overlaid
+- `spectrum_1d_top8_kernels.png` - Top 8 kernels from exhaustive search (default sum=48)
+- `spectrum_1d_top8_kernels_sum*.png` - Top 8 kernels for specific kernel sums
 
 ```bash
 source /root/venv/bin/activate
@@ -218,6 +222,9 @@ python tools/analyze_1d_dither.py              # All analyses
 python tools/analyze_1d_dither.py --log        # Log-scale only
 python tools/analyze_1d_dither.py --low-gray   # Focus on low gray levels (1,2,5,10,20,42,64,85,127)
 python tools/analyze_1d_dither.py --count 262144  # Custom sample count
+python tools/analyze_1d_dither.py --find-best  # Test all kernels, show top 8 (sum=48)
+python tools/analyze_1d_dither.py --find-best --kernel-sum 28 36 48 60  # Test multiple kernel sums
+python tools/analyze_1d_dither.py --kernel-compare  # Compare [38,10] vs [36,12] vs [28,20]
 ```
 
 ### 9. `analyze_1d_kernels.py`
@@ -225,13 +232,24 @@ python tools/analyze_1d_dither.py --count 262144  # Custom sample count
 Compares different 1D kernel configurations for spectral quality.
 
 **Kernels tested:**
-- `[48]+[38,10]` - **Best** (~4:1 ratio), avg +5.52 dB/octave
+- `[48]+[46,2]` - **Best** (23:1 ratio), avg +5.67 dB/octave, min +4.84
+- `[48]+[38,10]` - Runner-up (~4:1 ratio), avg +5.62 dB/octave
 - `[48]+[43,5]` - Prime pair (8.6:1 ratio)
 - `[48]+[41,7]` - Prime pair (5.9:1 ratio)
 - `[48]+[37,11]` - Prime pair (3.4:1 ratio)
 - `[48]+[31,17]` - Prime pair (1.8:1 ratio)
 - `[48]+[28,20]` - Original (1.4:1 ratio)
 - Length-3 variants (generally worse at low gray levels)
+
+**Cross-sum comparison** (best kernel for each sum):
+| Sum | Best Kernel | Ratio | Avg | Min |
+|-----|-------------|-------|-----|-----|
+| 28 | [21,7] | 3.0:1 | +5.51 | +4.36 |
+| 36 | [32,4] | 8.0:1 | +5.58 | +4.54 |
+| **48** | **[46,2]** | **23.0:1** | **+5.67** | **+4.84** |
+| 60 | [54,6] | 9.0:1 | +5.50 | +4.29 |
+
+Sum=48 with kernel [46,2] achieves the highest average and minimum spectral slopes.
 
 **Output:** `spectrum_1d_kernel_comparison.png`
 
@@ -328,6 +346,9 @@ tools/
 │       ├── spectrum_1d_gray_*.png     # 1D temporal: per-gray-level analysis
 │       ├── spectrum_1d_comparison.png # 1D temporal: all gray levels overlaid
 │       ├── spectrum_1d_kernel_comparison.png # 1D kernel comparison
+│       ├── spectrum_1d_kernel_full_comparison.png # 1D kernel full gray range
+│       ├── spectrum_1d_top8_kernels.png # Top 8 kernels (sum=48)
+│       ├── spectrum_1d_top8_kernels_sum*.png # Top 8 kernels for various sums
 │       └── spectrum_1d_prime_pairs.png # 1D prime pair kernel analysis
 ```
 
