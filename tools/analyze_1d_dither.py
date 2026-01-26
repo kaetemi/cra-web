@@ -363,6 +363,163 @@ def analyze_comparison(gray_levels, count, output_dir):
     print(f"  {output_path.name}")
 
 
+def blue_dither_1d_custom(brightness, count, k1, k2, kernel_sum=48, seed=12345):
+    """
+    1D blue noise dithering with custom kernel coefficients.
+    Mixes [kernel_sum] with [k1, k2] where k1 + k2 = kernel_sum.
+    """
+    err0, err1 = 0, 0
+    output = np.zeros(count, dtype=np.uint8)
+    threshold = int(127.5 * kernel_sum)  # 127.5 * kernel_sum
+    white_val = 255 * kernel_sum
+
+    for i in range(count):
+        pixel = brightness * kernel_sum + err0
+
+        if pixel >= threshold:
+            output[i] = 1
+            quant_err = pixel - white_val
+        else:
+            output[i] = 0
+            quant_err = pixel
+
+        h = lowbias32(np.uint32(i) ^ np.uint32(seed))
+        err0 = err1
+        err1 = 0
+
+        if h & 1:
+            # FS-like: 100% to next
+            err0 += quant_err
+        else:
+            # Custom kernel
+            err0 += (quant_err * k1) // kernel_sum
+            err1 += (quant_err * k2) // kernel_sum
+
+    return output
+
+
+def analyze_all_kernels(count, output_dir, kernel_sum=48):
+    """Test all possible [k1, k2] kernels where k1 + k2 = kernel_sum, output top 8."""
+    print(f"Testing all [k1, k2] kernels (k1 + k2 = {kernel_sum})...")
+
+    # Test gray levels - focus on challenging ones
+    gray_levels = [1, 2, 5, 10, 20, 42, 64, 85, 127, 170, 212, 254]
+
+    results = []
+    n_unique = kernel_sum // 2  # Number of unique kernels (k1 > k2)
+
+    # Test all kernels from [kernel_sum-1,1] to [kernel_sum/2+1, kernel_sum/2-1] (k1 > k2 to avoid duplicates)
+    for k1 in range(kernel_sum - 1, kernel_sum // 2, -1):
+        k2 = kernel_sum - k1
+        slopes = []
+
+        for gray in gray_levels:
+            sig = blue_dither_1d_custom(gray, count, k1, k2, kernel_sum)
+            freqs, power = compute_spectrum(sig)
+            slope = measure_slope(freqs, power)
+            slopes.append(slope if slope else 0)
+
+        avg_slope = np.mean(slopes)
+        min_slope = np.min(slopes)
+        results.append({
+            'k1': k1,
+            'k2': k2,
+            'ratio': k1 / k2,
+            'slopes': slopes,
+            'avg': avg_slope,
+            'min': min_slope,
+        })
+
+        # Progress indicator
+        if k1 % 5 == 0:
+            print(f"  Tested [{kernel_sum-1},1] to [{k1},{k2}]...")
+
+    # Sort by average slope (best first)
+    results.sort(key=lambda x: x['avg'], reverse=True)
+
+    # Print full ranking
+    print(f"\n  Full ranking (all {len(results)} unique kernels for sum={kernel_sum}):")
+    print(f"  {'Rank':<5} {'Kernel':<12} {'Ratio':<8} {'Avg':>8} {'Min':>8}")
+    print(f"  {'-'*45}")
+    for i, r in enumerate(results):
+        print(f"  {i+1:<5} [{r['k1']},{r['k2']}]{'':<4} {r['ratio']:>6.2f}:1 {r['avg']:>+7.2f} {r['min']:>+7.2f}")
+
+    # Top 8
+    top8 = results[:8]
+
+    print(f"\n  Top 8 kernels (sum={kernel_sum}):")
+    print(f"  {'Kernel':<12}", end="")
+    for g in gray_levels:
+        print(f" G{g:>3}", end="")
+    print("    Avg    Min")
+    print(f"  {'-'*90}")
+
+    for r in top8:
+        print(f"  [{r['k1']},{r['k2']}]{'':<5}", end="")
+        for s in r['slopes']:
+            print(f" {s:>+4.1f}", end="")
+        print(f"  {r['avg']:>+5.2f}  {r['min']:>+5.2f}")
+
+    print(f"  {'-'*90}")
+    print(f"  {'Ideal':<12}", end="")
+    for _ in gray_levels:
+        print(f" {6.0:>+4.1f}", end="")
+    print(f"  {6.0:>+5.2f}  {6.0:>+5.2f}")
+
+    # Generate comparison chart for top 8
+    n_cols = 4
+    n_rows = (len(gray_levels) + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(16, 4 * n_rows))
+    if n_rows == 1:
+        axes = axes.reshape(1, -1)
+    fig.suptitle(f'Top 8 1D Kernels (sum={kernel_sum}, {len(results)} tested)', fontsize=14)
+
+    colors = plt.cm.tab10(np.linspace(0, 1, 8))
+
+    for idx, gray in enumerate(gray_levels):
+        ax = axes[idx // n_cols, idx % n_cols]
+
+        for kidx, r in enumerate(top8):
+            sig = blue_dither_1d_custom(gray, count, r['k1'], r['k2'], kernel_sum)
+            freqs, power = compute_spectrum(sig)
+            f_smooth, p_smooth = smooth_spectrum_log(freqs, power)
+            label = f"[{r['k1']},{r['k2']}] ({r['ratio']:.1f}:1)" if idx == 0 else None
+            ax.semilogx(f_smooth, p_smooth, color=colors[kidx], linewidth=1.5,
+                        label=label, alpha=0.8)
+
+        # Ideal reference
+        f_ref = np.logspace(-3, np.log10(0.5), 100)
+        ideal_blue = -20 + 20 * np.log10(f_ref / 0.1)
+        ax.semilogx(f_ref, ideal_blue, 'k--', linewidth=1.5, alpha=0.5,
+                    label='Ideal' if idx == 0 else None)
+
+        ax.set_xlabel('Frequency (log)')
+        ax.set_ylabel('Power (dB)')
+        ax.set_title(f'Gray {gray} ({gray*100/255:.1f}%)')
+        ax.set_xlim(1e-3, 0.5)
+        ax.set_ylim(-55, 5)
+        ax.grid(True, alpha=0.3, which='both')
+
+    # Hide empty subplots
+    for idx in range(len(gray_levels), n_rows * n_cols):
+        axes[idx // n_cols, idx % n_cols].set_visible(False)
+
+    axes[0, 0].legend(loc='lower right', fontsize=7)
+    plt.tight_layout()
+
+    output_path = output_dir / f'spectrum_1d_top8_kernels_sum{kernel_sum}.png'
+    plt.savefig(output_path, dpi=150)
+    print(f"\n  Saved: {output_path}")
+    plt.close()
+
+    return results
+
+
+def analyze_all_48_kernels(count, output_dir):
+    """Test all 48 possible [k1, k2] kernels where k1 + k2 = 48, output top 8."""
+    return analyze_all_kernels(count, output_dir, kernel_sum=48)
+
+
 def analyze_kernel_comparison(gray_levels, count, output_dir):
     """Compare different 1D kernels across all gray levels."""
     print("Comparing kernels across all gray levels...")
@@ -454,6 +611,9 @@ def main():
     parser.add_argument('--low-gray', action='store_true', help='Focus on low gray levels')
     parser.add_argument('--all', action='store_true', help='Run all analyses (default)')
     parser.add_argument('--kernel-compare', action='store_true', help='Compare kernels [38,10] vs [36,12] vs [28,20]')
+    parser.add_argument('--find-best', action='store_true', help='Test all 24 kernels [47,1] to [25,23], show top 8')
+    parser.add_argument('--kernel-sum', type=int, nargs='+', default=[48],
+                        help='Kernel sum(s) to test with --find-best (default: 48)')
     parser.add_argument('--count', type=int, default=131072, help='Sample count (default: 131072)')
     args = parser.parse_args()
 
@@ -467,6 +627,28 @@ def main():
         gray_levels = [42, 64, 85, 127, 170, 191, 213]
 
     count = args.count
+
+    # Find best kernel mode
+    if args.find_best:
+        all_results = {}
+        for kernel_sum in args.kernel_sum:
+            print(f"\n{'='*80}")
+            results = analyze_all_kernels(count, output_dir, kernel_sum=kernel_sum)
+            all_results[kernel_sum] = results
+
+        # If multiple sums tested, print cross-sum comparison
+        if len(args.kernel_sum) > 1:
+            print(f"\n{'='*80}")
+            print("CROSS-SUM COMPARISON - Best kernel from each sum:")
+            print(f"{'='*80}")
+            print(f"  {'Sum':<6} {'Best Kernel':<14} {'Ratio':<10} {'Avg':>8} {'Min':>8}")
+            print(f"  {'-'*50}")
+            for kernel_sum in args.kernel_sum:
+                best = all_results[kernel_sum][0]
+                print(f"  {kernel_sum:<6} [{best['k1']},{best['k2']}]{'':<6} {best['ratio']:>6.2f}:1 {best['avg']:>+7.2f} {best['min']:>+7.2f}")
+
+        print(f"\nDone! Results in {output_dir}")
+        return
 
     # Kernel comparison mode
     if args.kernel_compare:
