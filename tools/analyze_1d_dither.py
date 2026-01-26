@@ -130,18 +130,29 @@ def sigma_delta_1st(brightness, count):
     return output
 
 
-def sigma_delta_2nd(brightness, count):
-    """Second-order sigma-delta modulation. Should produce +12 dB/octave."""
-    threshold = brightness / 255.0
+def sigma_delta_1st_dithered(brightness, count, seed=12345):
+    """First-order sigma-delta with TPDF dither. Should reduce tonal artifacts."""
+    vin = (brightness / 255.0) * 2 - 1  # scale to -1..+1 range
+    vref = 1.0
     output = np.zeros(count, dtype=np.uint8)
-    e1 = 0.0
-    e2 = 0.0
+    integrator = 0.0
+    dither_amplitude = 0.5  # ~1 LSB
+    rng = np.random.default_rng(seed)
 
     for i in range(count):
-        value = threshold + 2*e1 - e2
-        output[i] = 1 if value >= 0.5 else 0
-        e2 = e1
-        e1 = value - output[i]
+        # sum input with feedback
+        if i == 0:
+            feedback = 0
+        else:
+            feedback = vref if output[i-1] == 1 else -vref
+
+        integrator = integrator + (vin - feedback)
+
+        # TPDF dither: triangular PDF, zero mean
+        dither = (rng.random() + rng.random() - 1.0) * dither_amplitude
+
+        # compare with dither
+        output[i] = 1 if (integrator + dither) >= 0 else 0
 
     return output
 
@@ -211,8 +222,8 @@ def analyze_linear(gray_levels, count, output_dir):
 
         signals = {
             'Our 1D Method': blue_dither_1d(gray, count),
-            'ΣΔ 1st Order (+6dB/oct)': sigma_delta_1st(gray, count),
-            'ΣΔ 2nd Order (+12dB/oct)': sigma_delta_2nd(gray, count),
+            'ΣΔ 1st Order': sigma_delta_1st(gray, count),
+            'ΣΔ 1st + TPDF Dither': sigma_delta_1st_dithered(gray, count),
             'PWM': pwm_dither(gray, count),
             'White Noise': white_noise_dither(gray, count),
         }
@@ -238,16 +249,12 @@ def analyze_linear(gray_levels, count, output_dir):
                 ax.semilogx(f_log, p_log, color=colors[idx], linewidth=2,
                             label=f'{name} ({duty:.1f}%)')
 
-            # Reference lines
+            # Reference line (+6 dB/octave violet)
             f_ref = np.logspace(-3, np.log10(0.5), 100)
             anchor_idx = np.argmin(np.abs(f_log - 0.1)) if len(f_log) > 0 else 0
             anchor_db = p_log[anchor_idx] if len(p_log) > anchor_idx else -20
             ideal_6db = anchor_db + 20 * np.log10(f_ref / 0.1)
             ax.semilogx(f_ref, ideal_6db, 'k--', alpha=0.5, linewidth=1, label='Violet (+6dB/oct)')
-            # Only show +12dB/oct line on 2nd order sigma-delta panel
-            if '2nd Order' in name:
-                ideal_12db = anchor_db + 40 * np.log10(f_ref / 0.1)
-                ax.semilogx(f_ref, ideal_12db, 'k:', alpha=0.5, linewidth=1, label='+12dB/oct')
 
             ax.set_xlabel('Frequency (log scale)')
             ax.set_ylabel('Power (dB)')
