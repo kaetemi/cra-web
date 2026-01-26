@@ -53,6 +53,12 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
         9 => DitherMode::OstromoukhovSerpentine,
         10 => DitherMode::ZhouFangStandard,
         11 => DitherMode::ZhouFangSerpentine,
+        12 => DitherMode::UlichneyStandard,
+        13 => DitherMode::UlichneySerpentine,
+        14 => DitherMode::UlichneyWeightStandard,
+        15 => DitherMode::UlichneyWeightSerpentine,
+        16 => DitherMode::FsTpdfStandard,
+        17 => DitherMode::FsTpdfSerpentine,
         _ => DitherMode::Standard,
     }
 }
