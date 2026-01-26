@@ -29,13 +29,16 @@ The Rust port in `port/` includes all original Python functionality plus several
 ### F32 Histogram Matching
 Optional sort-based histogram matching using full 32-bit floating-point precision. Eliminates quantization artifacts from the traditional 256-bin histogram approach. Two alignment modes: endpoint-aligned (preserves extremes) and midpoint-aligned (statistically correct).
 
-### Mixed Error Diffusion Dithering
-A novel per-pixel kernel switching technique that randomly selects between Floyd-Steinberg and Jarvis-Judice-Ninke dithering kernels for each pixel using Wang hash. This breaks up the regular patterns that can appear with a single dithering kernel.
+### Error Diffusion Dithering
+Multiple dithering algorithms with standard and serpentine scanning variants:
 
-Available dither modes:
-- **Floyd-Steinberg Standard/Serpentine**: Classic 4-pixel error diffusion
-- **Jarvis-Judice-Ninke Standard/Serpentine**: Larger 12-pixel kernel for smoother gradients
-- **Mixed Standard/Serpentine/Random**: Per-pixel kernel selection with configurable scan direction
+- **Floyd-Steinberg**: Classic 4-pixel error diffusion kernel
+- **Jarvis-Judice-Ninke**: Larger 12-pixel kernel for smoother gradients
+- **Boon (Our Method)**: Novel per-pixel kernel switching between FS and JJN using lowbias32 hash - breaks up regular patterns, produces blue noise characteristics
+- **Ostromoukhov**: Variable-coefficient kernel based on input intensity
+- **Zhou-Fang**: Variable-coefficient kernel with threshold modulation
+- **Ulichney Threshold**: Floyd-Steinberg with ±30% threshold perturbation (1-bit only)
+- **Ulichney Weight**: Floyd-Steinberg with ±50% paired weight perturbation (1-bit only)
 
 ### Colorspace-Aware Dithering
 Joint RGB quantization using perceptual distance metrics to select the best candidate color, with error diffusion in linear RGB space. Unlike per-channel dithering, this processes all channels together to minimize perceived color error:
@@ -173,10 +176,13 @@ Histogram Matching:
       --perceptual                 Use perceptual weighting (cra-rgb)
 
 Dithering:
-      --output-dither <MODE>       Output dithering method [default: mixed-standard]
+      --output-dither <MODE>       Output dithering method [default: boon-serpentine]
                                    [values: fs-standard, fs-serpentine, jjn-standard,
-                                    jjn-serpentine, mixed-standard, mixed-serpentine,
-                                    mixed-random, none]
+                                    jjn-serpentine, boon-standard, boon-serpentine,
+                                    boon-random, ostro-standard, ostro-serpentine,
+                                    zhou-fang-standard, zhou-fang-serpentine,
+                                    ulichney-standard, ulichney-serpentine,
+                                    ulichney-weight-standard, ulichney-weight-serpentine, none]
       --output-alpha-dither <MODE> Alpha channel dithering method [default: same as --output-dither]
       --output-distance-space      Perceptual space for output dithering [default: oklab for RGB, lab-cie94 for grayscale]
                                    [values: oklab, lab-cie76, lab-cie94, lab-ciede2000,
