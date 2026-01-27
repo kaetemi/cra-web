@@ -182,8 +182,8 @@ def generate_patterns(size: int = 128) -> dict:
 
 
 def compute_subband_energy(subband: np.ndarray) -> float:
-    """Compute normalized energy (variance) of a subband."""
-    return np.var(subband)
+    """Compute mean squared value (signal power) of a subband."""
+    return np.mean(subband ** 2)
 
 
 def create_demo_sheet(output_path: Path, size: int = 128):
