@@ -62,6 +62,7 @@ This directly answers: "Does the error look like noise or like structured patter
 | zhou-fang-serpentine | +0.27 | **0.541** | 0.265 | **0.666** |
 | jjn-serpentine | +0.25 | 0.534 | **0.347** | **0.569** |
 | jjn-standard | +0.24 | 0.532 | **0.360** | 0.584 |
+| bluenoise (void-and-cluster) | +0.23 | 0.411 | 0.254 | **0.687** |
 | whitenoise | 0.00 | **0.562** | 0.196 | **0.969** |
 | none (banding) | **-0.42** | 0.501 | **0.578** | 0.382 |
 
@@ -93,6 +94,28 @@ This proves that **blueness and flatness alone are insufficient**. White noise h
 
 The ideal method balances all four. **Boon achieves good blueness (+0.29) with the best flatness** among error diffusion methods.
 
+### Blue Noise Threshold Dithering (Void-and-Cluster)
+
+**Void-and-cluster blue noise** (ordered dithering with a pre-computed blue noise threshold array) provides another important comparison:
+
+- **Blueness = +0.23**: Positive but lower than error diffusion methods
+- **Flatness = 0.411**: Surprisingly low — worse than all error diffusion methods
+- **Structure = 0.254**: Low, similar to whitenoise (no error diffusion)
+- **Isotropy = 0.687**: Good — void-and-cluster is designed to be isotropic
+
+The low flatness reveals a fundamental distinction:
+
+| Approach | What has blue noise properties |
+|----------|-------------------------------|
+| **Error diffusion** | The **error** is actively shaped to be blue noise |
+| **Threshold dithering** | The **halftone** has blue noise structure, but error is not shaped |
+
+Error diffusion methods (FS, JJN, Boon) produce error that looks like noise at each scale. Threshold dithering produces a visually pleasing halftone pattern, but the error (halftone - original) contains image-correlated structure because there's no feedback mechanism to compensate.
+
+Additionally, the 256×256 void-and-cluster texture must be tiled for larger images (512×512 test images require 2×2 tiling), introducing periodic seams that appear as structured error.
+
+This validates that **error diffusion produces fundamentally different results than threshold dithering** — even with a "gold standard" blue noise texture.
+
 ### Key Findings
 
 1. **FS has highest blueness** (+0.32) — its small 4-coefficient kernel concentrates energy at fine scales, giving the steepest low-frequency suppression.
@@ -105,7 +128,9 @@ The ideal method balances all four. **Boon achieves good blueness (+0.29) with t
 
 5. **White noise validates the metric** — blueness=0 by definition, proving the calibration is correct.
 
-6. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
+6. **Blue noise threshold dithering underperforms on flatness** — despite using a "gold standard" void-and-cluster texture, threshold dithering produces structured error (flatness 0.411) because error is not actively shaped. Error diffusion fundamentally outperforms threshold dithering on this metric.
+
+7. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
 
 ### Per-Level Analysis
 
@@ -138,7 +163,9 @@ Each `wavelet_{image}_{method}.png` shows:
 
 - Error subbands should look like **random speckle**, not coherent patches
 - Flatness values should be **close to 1.0** (typically 0.5-0.6 in practice)
-- Isotropy should be **high** (close to 1.0), indicating no directional bias
+- Isotropy should be **high** (close to 1.0), indicating balanced energy across directions
+
+**Note on Isotropy**: Isotropy measures whether error energy is evenly distributed across horizontal (LH), vertical (HL), and diagonal (HH) orientations. It does not directly detect "worms" — worms require BOTH directional bias (low isotropy) AND structured patterns (low flatness in that direction). A method could have low isotropy but high flatness (directionally biased random noise) without exhibiting worms.
 
 ### What Bad Dithering Looks Like
 

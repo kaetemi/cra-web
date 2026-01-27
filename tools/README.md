@@ -337,7 +337,43 @@ python tools/noise_color_comparison.py --log    # Log scale only
 python tools/noise_color_comparison.py --linear # Linear scale only
 ```
 
-### 14. `run_wavelet_tests.sh`
+### 14. `generate_whitenoise_dither.py`
+
+Generates white noise dithered images for comparison/validation.
+
+**Method:** Each pixel is compared against an independent random threshold [0, 255]. No error diffusion.
+
+**Properties:**
+- Perfect spectral flatness (error is literally white noise)
+- Highest isotropy (no directional bias)
+- Terrible visual quality (no local tone preservation)
+- Blueness = 0 by definition (baseline for calibration)
+
+```bash
+source /root/venv/bin/activate
+python tools/generate_whitenoise_dither.py
+python tools/generate_whitenoise_dither.py --ref-dir path/to/images --output-dir path/to/output
+```
+
+### 15. `generate_bluenoise_dither.py`
+
+Generates blue noise (ordered) dithered images using the void-and-cluster threshold array.
+
+**Method:** Each pixel is compared against the corresponding value in the blue noise texture (tiled to cover the image).
+
+**Properties:**
+- Good spectral properties (blue noise characteristics)
+- No error diffusion (purely threshold-based)
+- May show tiling artifacts on large images (texture is 256x256)
+- Useful as "gold standard" blue noise reference
+
+```bash
+source /root/venv/bin/activate
+python tools/generate_bluenoise_dither.py
+python tools/generate_bluenoise_dither.py --blue-noise path/to/texture.png
+```
+
+### 16. `run_wavelet_tests.sh`
 
 Comprehensive test script that generates dithered images from reference photographs and runs wavelet-based quality analysis.
 
@@ -358,7 +394,7 @@ Comprehensive test script that generates dithered images from reference photogra
 ./tools/run_wavelet_tests.sh
 ```
 
-### 15. `analyze_wavelet.py`
+### 17. `analyze_wavelet.py`
 
 Wavelet-based halftone quality analysis using Haar wavelet decomposition.
 
@@ -519,6 +555,8 @@ tools/
 │   │   ├── ulichney-weight-serpentine/
 │   │   ├── fs-tpdf-serpentine/
 │   │   ├── none/
+│   │   ├── whitenoise/              # Python: random threshold (validation baseline)
+│   │   ├── bluenoise/               # Python: void-and-cluster threshold array
 │   │   └── ...
 │   └── analysis/
 │       ├── wavelet_{image}_{method}.png  # Individual visualizations

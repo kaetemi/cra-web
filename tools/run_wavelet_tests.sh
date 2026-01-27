@@ -99,11 +99,28 @@ done
 
 echo ""
 echo "=============================================="
-echo "Running wavelet analysis"
+echo "Generating Python-based dithered images"
 echo "=============================================="
 
 # Activate Python environment
 source /root/venv/bin/activate
+
+# Generate white noise dithered images (random threshold, no error diffusion)
+echo "  Generating whitenoise dithered images..."
+python "${SCRIPT_DIR}/generate_whitenoise_dither.py" \
+    --ref-dir "$REF_DIR" \
+    --output-dir "${DITHERED_DIR}/whitenoise"
+
+# Generate blue noise dithered images (void-and-cluster threshold array)
+echo "  Generating bluenoise dithered images..."
+python "${SCRIPT_DIR}/generate_bluenoise_dither.py" \
+    --ref-dir "$REF_DIR" \
+    --output-dir "${DITHERED_DIR}/bluenoise"
+
+echo ""
+echo "=============================================="
+echo "Running wavelet analysis"
+echo "=============================================="
 
 # Run the wavelet analysis
 python "${SCRIPT_DIR}/analyze_wavelet.py" \
