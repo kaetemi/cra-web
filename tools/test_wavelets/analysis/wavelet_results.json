@@ -2805,6 +2805,261 @@
         "artifact_score_norm": 0.20717715648906318
       }
     },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 17.898352556708957,
+            "energy_half": 3120.9375,
+            "energy_error": 3105.8936956939638,
+            "subband_pixels": 65536,
+            "excess_raw": 3103.039147443291,
+            "missing_raw": 0,
+            "excess_norm": 0.04734861980351701,
+            "missing_norm": 0,
+            "excess_weighted": 0.04734861980351701,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.06969040208119374,
+            "flatness": 0.5626795670810687
+          },
+          "vertical": {
+            "energy_orig": 31.33248173779316,
+            "energy_half": 3142.9375,
+            "energy_error": 3109.690569973087,
+            "subband_pixels": 65536,
+            "excess_raw": 3111.6050182622066,
+            "missing_raw": 0,
+            "excess_norm": 0.04747932461947947,
+            "missing_norm": 0,
+            "excess_weighted": 0.04747932461947947,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.10289607745942028,
+            "flatness": 0.5618162892690166
+          },
+          "diagonal": {
+            "energy_orig": 1.3540618992695115,
+            "energy_half": 3135.1875,
+            "energy_error": 3133.209208958093,
+            "subband_pixels": 65536,
+            "excess_raw": 3133.8334381007303,
+            "missing_raw": 0,
+            "excess_norm": 0.047818503388988194,
+            "missing_norm": 0,
+            "excess_weighted": 0.047818503388988194,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.025572311068375493,
+            "flatness": 0.562045444501698
+          },
+          "isotropy": {
+            "h_ratio": 0.3322240141601267,
+            "v_ratio": 0.3326301493784764,
+            "d_ratio": 0.3351458364613969,
+            "isotropy_score": 0.9912819376420726
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 11.20868608227605,
+            "energy_half": 203.55859375,
+            "energy_error": 193.22873816560937,
+            "subband_pixels": 16384,
+            "excess_raw": 192.34990766772395,
+            "missing_raw": 0,
+            "excess_norm": 0.011740106669172605,
+            "missing_norm": 0,
+            "excess_weighted": 0.02348021333834521,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.22545726014690387,
+            "flatness": 0.565112249727061
+          },
+          "vertical": {
+            "energy_orig": 18.37115051903114,
+            "energy_half": 211.41796875,
+            "energy_error": 193.1979427984429,
+            "subband_pixels": 16384,
+            "excess_raw": 193.04681823096885,
+            "missing_raw": 0,
+            "excess_norm": 0.011782642714292533,
+            "missing_norm": 0,
+            "excess_weighted": 0.023565285428585065,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2935670114515668,
+            "flatness": 0.563956990624012
+          },
+          "diagonal": {
+            "energy_orig": 2.1237814782775857,
+            "energy_half": 197.35546875,
+            "energy_error": 195.14101493415995,
+            "subband_pixels": 16384,
+            "excess_raw": 195.23168727172242,
+            "missing_raw": 0,
+            "excess_norm": 0.011915996537580714,
+            "missing_norm": 0,
+            "excess_weighted": 0.02383199307516143,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.10595064635940231,
+            "flatness": 0.5660031392961302
+          },
+          "isotropy": {
+            "h_ratio": 0.33225493700638575,
+            "v_ratio": 0.33220198467188766,
+            "d_ratio": 0.33554307832172675,
+            "isotropy_score": 0.9900427281452203
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 4.372858395809304,
+            "energy_half": 16.337646484375,
+            "energy_error": 12.050166721483324,
+            "subband_pixels": 4096,
+            "excess_raw": 11.964788088565696,
+            "missing_raw": 0,
+            "excess_norm": 0.0029210908419349843,
+            "missing_norm": 0,
+            "excess_weighted": 0.011684363367739937,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5123035911818854,
+            "flatness": 0.5462831629163304
+          },
+          "vertical": {
+            "energy_orig": 7.70692182694156,
+            "energy_half": 19.176513671875,
+            "energy_error": 11.63937721143911,
+            "subband_pixels": 4096,
+            "excess_raw": 11.46959184493344,
+            "missing_raw": 0,
+            "excess_norm": 0.002800193321516953,
+            "missing_norm": 0,
+            "excess_weighted": 0.011200773286067812,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.6269678925349264,
+            "flatness": 0.5758266645638977
+          },
+          "diagonal": {
+            "energy_orig": 1.2959697141724336,
+            "energy_half": 13.443115234375,
+            "energy_error": 12.044823689356257,
+            "subband_pixels": 4096,
+            "excess_raw": 12.147145520202567,
+            "missing_raw": 0,
+            "excess_norm": 0.002965611699268205,
+            "missing_norm": 0,
+            "excess_weighted": 0.01186244679707282,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.32274708151934367,
+            "flatness": 0.5779358255164531
+          },
+          "isotropy": {
+            "h_ratio": 0.3372150543940398,
+            "v_ratio": 0.32571941203690163,
+            "d_ratio": 0.33706553356905855,
+            "isotropy_score": 0.9659100558906086
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 1.3682404388110943,
+            "energy_half": 1.9839630126953125,
+            "energy_error": 0.7298559675909657,
+            "subband_pixels": 1024,
+            "excess_raw": 0.6157225738842182,
+            "missing_raw": 0,
+            "excess_norm": 0.0006012915760588069,
+            "missing_norm": 0,
+            "excess_weighted": 0.004810332608470455,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7958152307755848,
+            "flatness": 0.5869827721507526
+          },
+          "vertical": {
+            "energy_orig": 2.835098491640835,
+            "energy_half": 3.6065216064453125,
+            "energy_error": 0.7504534409936232,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7714231148044774,
+            "missing_raw": 0,
+            "excess_norm": 0.0007533428855512475,
+            "missing_norm": 0,
+            "excess_weighted": 0.00602674308440998,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.889903598914186,
+            "flatness": 0.5286855995965754
+          },
+          "diagonal": {
+            "energy_orig": 0.5093614563434136,
+            "energy_half": 1.2114410400390625,
+            "energy_error": 0.7105471540111525,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7020795836956489,
+            "missing_raw": 0,
+            "excess_norm": 0.0006856245934527822,
+            "missing_norm": 0,
+            "excess_weighted": 0.005484996747622257,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.6430385057813586,
+            "flatness": 0.5636672531456071
+          },
+          "isotropy": {
+            "h_ratio": 0.3331372669720684,
+            "v_ratio": 0.34253882878780567,
+            "d_ratio": 0.3243239042401258,
+            "isotropy_score": 0.9468237670685692
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3307.969565773465,
+          "vertical": 3316.892851452913,
+          "diagonal": 3341.914350476351
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 9966.77676770273,
+        "total_excess_weighted": {
+          "horizontal": 0.08732352911807262,
+          "vertical": 0.08827212641854232,
+          "diagonal": 0.0889979400088447
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.26459359554545964,
+        "worm_h_score": 0.08732352911807262,
+        "worm_v_score": 0.08827212641854232,
+        "checkerboard_score": 0.0889979400088447,
+        "structure_score": 0.23990646531327028,
+        "per_level_flatness": [
+          0.5621804336172611,
+          0.5650241265490678,
+          0.5666818843322271,
+          0.5597785416309783
+        ],
+        "flatness_avg": 0.5634162465323835,
+        "flatness_weighted": 0.5624789704728087,
+        "isotropy_score": 0.9733392628611576,
+        "artifact_score_norm": 0.26459359554545964
+      }
+    },
     "zhou-fang-serpentine": {
       "levels": 4,
       "subbands": {
@@ -5865,6 +6120,261 @@
         "flatness_weighted": 0.5411376845322468,
         "isotropy_score": 0.5786668589240853,
         "artifact_score_norm": 0.2025110242551036
+      }
+    },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 42.18701268742791,
+            "energy_half": 3047.9375,
+            "energy_error": 3003.2598068050747,
+            "subband_pixels": 65536,
+            "excess_raw": 3005.750487312572,
+            "missing_raw": 0,
+            "excess_norm": 0.04586411266040912,
+            "missing_norm": 0,
+            "excess_weighted": 0.04586411266040912,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.1211214168405517,
+            "flatness": 0.5612221940373386
+          },
+          "vertical": {
+            "energy_orig": 45.87330257593233,
+            "energy_half": 3079.6875,
+            "energy_error": 3036.2559006151478,
+            "subband_pixels": 65536,
+            "excess_raw": 3033.8141974240675,
+            "missing_raw": 0,
+            "excess_norm": 0.04629233089331158,
+            "missing_norm": 0,
+            "excess_weighted": 0.04629233089331158,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.11879877801125373,
+            "flatness": 0.5610333165038818
+          },
+          "diagonal": {
+            "energy_orig": 8.856601307189543,
+            "energy_half": 3002.1875,
+            "energy_error": 2995.0793954248365,
+            "subband_pixels": 65536,
+            "excess_raw": 2993.3308986928105,
+            "missing_raw": 0,
+            "excess_norm": 0.04567460477741715,
+            "missing_norm": 0,
+            "excess_weighted": 0.04567460477741715,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.04895290540559932,
+            "flatness": 0.5610366023146052
+          },
+          "isotropy": {
+            "h_ratio": 0.332417753382144,
+            "v_ratio": 0.3360699473581289,
+            "d_ratio": 0.3315122992597272,
+            "isotropy_score": 0.9864383943454935
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 19.850532367358706,
+            "energy_half": 209.92578125,
+            "energy_error": 191.62585405853517,
+            "subband_pixels": 16384,
+            "excess_raw": 190.0752488826413,
+            "missing_raw": 0,
+            "excess_norm": 0.011601272514809649,
+            "missing_norm": 0,
+            "excess_weighted": 0.023202545029619298,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.29549545801607735,
+            "flatness": 0.5580990922758731
+          },
+          "vertical": {
+            "energy_orig": 18.343717440407534,
+            "energy_half": 209.23828125,
+            "energy_error": 190.95421070021143,
+            "subband_pixels": 16384,
+            "excess_raw": 190.89456380959246,
+            "missing_raw": 0,
+            "excess_norm": 0.01165127952939407,
+            "missing_norm": 0,
+            "excess_weighted": 0.02330255905878814,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.295608180325916,
+            "flatness": 0.5604380384567459
+          },
+          "diagonal": {
+            "energy_orig": 3.8201553489042674,
+            "energy_half": 192.45703125,
+            "energy_error": 189.57010939302194,
+            "subband_pixels": 16384,
+            "excess_raw": 188.63687590109572,
+            "missing_raw": 0,
+            "excess_norm": 0.011513481195135237,
+            "missing_norm": 0,
+            "excess_weighted": 0.023026962390270474,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.1236789833655509,
+            "flatness": 0.568497706173639
+          },
+          "isotropy": {
+            "h_ratio": 0.33492230312195004,
+            "v_ratio": 0.3337484096431628,
+            "d_ratio": 0.33132928723488697,
+            "isotropy_score": 0.9892720913072341
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 7.579727110666571,
+            "energy_half": 19.357666015625,
+            "energy_error": 11.61540515141412,
+            "subband_pixels": 4096,
+            "excess_raw": 11.777938904958429,
+            "missing_raw": 0,
+            "excess_norm": 0.0028754733654683664,
+            "missing_norm": 0,
+            "excess_weighted": 0.011501893461873466,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.6324582180707198,
+            "flatness": 0.5599754706525918
+          },
+          "vertical": {
+            "energy_orig": 7.884240909445887,
+            "energy_half": 19.274658203125,
+            "energy_error": 11.659241866860102,
+            "subband_pixels": 4096,
+            "excess_raw": 11.390417293679114,
+            "missing_raw": 0,
+            "excess_norm": 0.0027808635970896275,
+            "missing_norm": 0,
+            "excess_weighted": 0.01112345438835851,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.6286643206688047,
+            "flatness": 0.5494262339477368
+          },
+          "diagonal": {
+            "energy_orig": 1.8557596462298154,
+            "energy_half": 13.814697265625,
+            "energy_error": 12.004194273987167,
+            "subband_pixels": 4096,
+            "excess_raw": 11.958937619395185,
+            "missing_raw": 0,
+            "excess_norm": 0.0029196625047351525,
+            "missing_norm": 0,
+            "excess_weighted": 0.01167865001894061,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.3620445613696838,
+            "flatness": 0.5505386796113594
+          },
+          "isotropy": {
+            "h_ratio": 0.32924565337019795,
+            "v_ratio": 0.3304882314663101,
+            "d_ratio": 0.34026611516349187,
+            "isotropy_score": 0.9676122267184941
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 3.0370300663732097,
+            "energy_half": 3.8976593017578125,
+            "energy_error": 0.7542523324769169,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8606292353846028,
+            "missing_raw": 0,
+            "excess_norm": 0.0008404582376802762,
+            "missing_norm": 0,
+            "excess_weighted": 0.006723665901442209,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8981786091744091,
+            "flatness": 0.542595437428561
+          },
+          "vertical": {
+            "energy_orig": 2.038163293752703,
+            "energy_half": 2.8543243408203125,
+            "energy_error": 0.7239589169336162,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8161610470676095,
+            "missing_raw": 0,
+            "excess_norm": 0.0007970322725269624,
+            "missing_norm": 0,
+            "excess_weighted": 0.006376258180215699,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8641351152527024,
+            "flatness": 0.5983206154741117
+          },
+          "diagonal": {
+            "energy_orig": 0.6692993858657127,
+            "energy_half": 1.4019317626953125,
+            "energy_error": 0.70976934460116,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7326323768295998,
+            "missing_raw": 0,
+            "excess_norm": 0.0007154613054976561,
+            "missing_norm": 0,
+            "excess_weighted": 0.0057236904439812485,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7027515546292058,
+            "flatness": 0.5866603244171367
+          },
+          "isotropy": {
+            "h_ratio": 0.34472533007890377,
+            "v_ratio": 0.3308799533757415,
+            "d_ratio": 0.32439471654535473,
+            "isotropy_score": 0.941023731766692
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3208.464304335557,
+          "vertical": 3236.9153395744065,
+          "diagonal": 3194.6593445901312
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 9640.038988500095,
+        "total_excess_weighted": {
+          "horizontal": 0.08729221705334411,
+          "vertical": 0.08709460252067394,
+          "diagonal": 0.08610390763060949
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.2604907272046275,
+        "worm_h_score": 0.08729221705334411,
+        "worm_v_score": 0.08709460252067394,
+        "checkerboard_score": 0.08610390763060949,
+        "structure_score": 0.23541037833070827,
+        "per_level_flatness": [
+          0.5610973709519419,
+          0.5623449456354193,
+          0.553313461403896,
+          0.5758587924399364
+        ],
+        "flatness_avg": 0.5631536426077984,
+        "flatness_weighted": 0.5670607631571905,
+        "isotropy_score": 0.9708942122098109,
+        "artifact_score_norm": 0.2604907272046275
       }
     },
     "zhou-fang-serpentine": {
@@ -8929,6 +9439,261 @@
         "artifact_score_norm": 0.23213956042557027
       }
     },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 13.270719915417146,
+            "energy_half": 3554.875,
+            "energy_error": 3540.96042579777,
+            "subband_pixels": 65536,
+            "excess_raw": 3541.604280084583,
+            "missing_raw": 0,
+            "excess_norm": 0.05404059265265782,
+            "missing_norm": 0,
+            "excess_weighted": 0.05404059265265782,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.06258130735911124,
+            "flatness": 0.5585683844106863
+          },
+          "vertical": {
+            "energy_orig": 28.38687524029219,
+            "energy_half": 3549.125,
+            "energy_error": 3523.807953671664,
+            "subband_pixels": 65536,
+            "excess_raw": 3520.7381247597077,
+            "missing_raw": 0,
+            "excess_norm": 0.05372220039001019,
+            "missing_norm": 0,
+            "excess_weighted": 0.05372220039001019,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.08459731161873896,
+            "flatness": 0.5569648486837597
+          },
+          "diagonal": {
+            "energy_orig": 4.042211649365628,
+            "energy_half": 3482.875,
+            "energy_error": 3479.607407727797,
+            "subband_pixels": 65536,
+            "excess_raw": 3478.8327883506345,
+            "missing_raw": 0,
+            "excess_norm": 0.05308277570115104,
+            "missing_norm": 0,
+            "excess_weighted": 0.05308277570115104,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.030803301256135052,
+            "flatness": 0.5602568368901827
+          },
+          "isotropy": {
+            "h_ratio": 0.3358150825862194,
+            "v_ratio": 0.3341883886526693,
+            "d_ratio": 0.32999652876111135,
+            "isotropy_score": 0.9826733398026751
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 5.728250252306804,
+            "energy_half": 227.3984375,
+            "energy_error": 222.2671902032872,
+            "subband_pixels": 16384,
+            "excess_raw": 221.6701872476932,
+            "missing_raw": 0,
+            "excess_norm": 0.013529674514629712,
+            "missing_norm": 0,
+            "excess_weighted": 0.027059349029259425,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.1504440465863913,
+            "flatness": 0.560727064667735
+          },
+          "vertical": {
+            "energy_orig": 13.785394860149944,
+            "energy_half": 231.2890625,
+            "energy_error": 217.77586667387544,
+            "subband_pixels": 16384,
+            "excess_raw": 217.50366763985005,
+            "missing_raw": 0,
+            "excess_norm": 0.013275370339346317,
+            "missing_norm": 0,
+            "excess_weighted": 0.026550740678692633,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.24172584000720174,
+            "flatness": 0.5585267968479264
+          },
+          "diagonal": {
+            "energy_orig": 2.3147931684928875,
+            "energy_half": 224.5078125,
+            "energy_error": 222.69196841359093,
+            "subband_pixels": 16384,
+            "excess_raw": 222.19301933150712,
+            "missing_raw": 0,
+            "excess_norm": 0.013561585652557807,
+            "missing_norm": 0,
+            "excess_weighted": 0.027123171305115615,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.09059729623226988,
+            "flatness": 0.5637134998435558
+          },
+          "isotropy": {
+            "h_ratio": 0.33537866827813223,
+            "v_ratio": 0.32860171616602474,
+            "d_ratio": 0.33601961555584303,
+            "isotropy_score": 0.9779242072593065
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 2.2883067923094482,
+            "energy_half": 16.099609375,
+            "energy_error": 13.974363011672192,
+            "subband_pixels": 4096,
+            "excess_raw": 13.811302582690551,
+            "missing_raw": 0,
+            "excess_norm": 0.0033719000446021854,
+            "missing_norm": 0,
+            "excess_weighted": 0.013487600178408742,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.3635746305944655,
+            "flatness": 0.5786350949691706
+          },
+          "vertical": {
+            "energy_orig": 5.948087585754276,
+            "energy_half": 20.1826171875,
+            "energy_error": 13.725236023254276,
+            "subband_pixels": 4096,
+            "excess_raw": 14.234529601745724,
+            "missing_raw": 0,
+            "excess_norm": 0.003475226953551202,
+            "missing_norm": 0,
+            "excess_weighted": 0.013900907814204808,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5661164368355531,
+            "flatness": 0.5542895995241769
+          },
+          "diagonal": {
+            "energy_orig": 1.0639782588127162,
+            "energy_half": 14.650390625,
+            "energy_error": 13.60021447204801,
+            "subband_pixels": 4096,
+            "excess_raw": 13.586412366187284,
+            "missing_raw": 0,
+            "excess_norm": 0.0033169952065886924,
+            "missing_norm": 0,
+            "excess_weighted": 0.01326798082635477,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.26774152269792817,
+            "flatness": 0.564043575455987
+          },
+          "isotropy": {
+            "h_ratio": 0.3383638284301763,
+            "v_ratio": 0.33233167072138076,
+            "d_ratio": 0.32930450084844287,
+            "isotropy_score": 0.9732260755419284
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 0.7477649941860552,
+            "energy_half": 1.51409912109375,
+            "energy_error": 0.7787757603089107,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7663341269076948,
+            "missing_raw": 0,
+            "excess_norm": 0.0007483731708082957,
+            "missing_norm": 0,
+            "excess_weighted": 0.005986985366466365,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.6969109854986678,
+            "flatness": 0.5673652744064165
+          },
+          "vertical": {
+            "energy_orig": 2.546219778328573,
+            "energy_half": 3.2984619140625,
+            "energy_error": 0.8737931880635602,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7522421357339271,
+            "missing_raw": 0,
+            "excess_norm": 0.0007346114606776631,
+            "missing_norm": 0,
+            "excess_weighted": 0.005876891685421305,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8576307536220256,
+            "flatness": 0.5320762047042847
+          },
+          "diagonal": {
+            "energy_orig": 0.4944319386905728,
+            "energy_half": 1.27032470703125,
+            "energy_error": 0.8208674616302174,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7758927683406772,
+            "missing_raw": 0,
+            "excess_norm": 0.0007577077815826926,
+            "missing_norm": 0,
+            "excess_weighted": 0.006061662252661541,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.5954981038496945,
+            "flatness": 0.5694357143115064
+          },
+          "isotropy": {
+            "h_ratio": 0.3148557841064789,
+            "v_ratio": 0.3532709329133756,
+            "d_ratio": 0.3318732829801455,
+            "isotropy_score": 0.8912586764778739
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3777.8521040418746,
+          "vertical": 3753.228564137037,
+          "diagonal": 3715.3881128166695
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 11246.468780995581,
+        "total_excess_weighted": {
+          "horizontal": 0.10057452722679237,
+          "vertical": 0.10005074056832894,
+          "diagonal": 0.09953559008528297
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.30016085788040425,
+        "worm_h_score": 0.10057452722679237,
+        "worm_v_score": 0.10005074056832894,
+        "checkerboard_score": 0.09953559008528297,
+        "structure_score": 0.1890875063753182,
+        "per_level_flatness": [
+          0.5585966899948763,
+          0.5609891204530725,
+          0.5656560899831115,
+          0.5562923978074026
+        ],
+        "flatness_avg": 0.5603835745596157,
+        "flatness_weighted": 0.5595692315528459,
+        "isotropy_score": 0.9555050119742884,
+        "artifact_score_norm": 0.30016085788040425
+      }
+    },
     "zhou-fang-serpentine": {
       "levels": 4,
       "subbands": {
@@ -11989,6 +12754,261 @@
         "flatness_weighted": 0.547953566952962,
         "isotropy_score": 0.4782672277243558,
         "artifact_score_norm": 0.23615218307366054
+      }
+    },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 40.29503460207613,
+            "energy_half": 3636.125,
+            "energy_error": 3595.875916955017,
+            "subband_pixels": 65536,
+            "excess_raw": 3595.829965397924,
+            "missing_raw": 0,
+            "excess_norm": 0.054868010946623594,
+            "missing_norm": 0,
+            "excess_weighted": 0.054868010946623594,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.10521039805121353,
+            "flatness": 0.5618703227899122
+          },
+          "vertical": {
+            "energy_orig": 50.2705940023068,
+            "energy_half": 3636.375,
+            "energy_error": 3595.134809688581,
+            "subband_pixels": 65536,
+            "excess_raw": 3586.104405997693,
+            "missing_raw": 0,
+            "excess_norm": 0.05471961068722066,
+            "missing_norm": 0,
+            "excess_weighted": 0.05471961068722066,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.1070165489436719,
+            "flatness": 0.5579650854842789
+          },
+          "diagonal": {
+            "energy_orig": 6.342931564782775,
+            "energy_half": 3605.375,
+            "energy_error": 3600.0483237216454,
+            "subband_pixels": 65536,
+            "excess_raw": 3599.0320684352173,
+            "missing_raw": 0,
+            "excess_norm": 0.054916871161426045,
+            "missing_norm": 0,
+            "excess_weighted": 0.054916871161426045,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.03858389187021129,
+            "flatness": 0.5593401231164759
+          },
+          "isotropy": {
+            "h_ratio": 0.3332273412805862,
+            "v_ratio": 0.33315866338132,
+            "d_ratio": 0.3336139953380938,
+            "isotropy_score": 0.9986351533115019
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 14.990353830257591,
+            "energy_half": 239.6015625,
+            "energy_error": 224.2138832420223,
+            "subband_pixels": 16384,
+            "excess_raw": 224.6112086697424,
+            "missing_raw": 0,
+            "excess_norm": 0.013709180216659083,
+            "missing_norm": 0,
+            "excess_weighted": 0.027418360433318165,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2534421768936124,
+            "flatness": 0.5628465778752675
+          },
+          "vertical": {
+            "energy_orig": 16.39203515474817,
+            "energy_half": 240.9453125,
+            "energy_error": 225.6279420174933,
+            "subband_pixels": 16384,
+            "excess_raw": 224.55327734525184,
+            "missing_raw": 0,
+            "excess_norm": 0.013705644369217031,
+            "missing_norm": 0,
+            "excess_weighted": 0.027411288738434063,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2522797702216354,
+            "flatness": 0.5614637777526897
+          },
+          "diagonal": {
+            "energy_orig": 2.4058127883506346,
+            "energy_half": 228.6484375,
+            "energy_error": 226.3756044550173,
+            "subband_pixels": 16384,
+            "excess_raw": 226.24262471164937,
+            "missing_raw": 0,
+            "excess_norm": 0.01380875394968563,
+            "missing_norm": 0,
+            "excess_weighted": 0.02761750789937126,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.09974132696643886,
+            "flatness": 0.5662916387799442
+          },
+          "isotropy": {
+            "h_ratio": 0.3315706951485631,
+            "v_ratio": 0.3336618254763749,
+            "d_ratio": 0.33476747937506196,
+            "isotropy_score": 0.9904507324532641
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 4.920080572976739,
+            "energy_half": 18.7021484375,
+            "energy_error": 13.894040821138503,
+            "subband_pixels": 4096,
+            "excess_raw": 13.78206786452326,
+            "missing_raw": 0,
+            "excess_norm": 0.003364762662237124,
+            "missing_norm": 0,
+            "excess_weighted": 0.013459050648948496,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5070725609527525,
+            "flatness": 0.5429793978942492
+          },
+          "vertical": {
+            "energy_orig": 4.741048454921184,
+            "energy_half": 19.064453125,
+            "energy_error": 14.237281987396674,
+            "subband_pixels": 4096,
+            "excess_raw": 14.323404670078816,
+            "missing_raw": 0,
+            "excess_norm": 0.003496924968280961,
+            "missing_norm": 0,
+            "excess_weighted": 0.013987699873123843,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5032128994469819,
+            "flatness": 0.5516040805141474
+          },
+          "diagonal": {
+            "energy_orig": 0.8960434838763937,
+            "energy_half": 14.513671875,
+            "energy_error": 13.826655846008746,
+            "subband_pixels": 4096,
+            "excess_raw": 13.617628391123606,
+            "missing_raw": 0,
+            "excess_norm": 0.0033246163064266617,
+            "missing_norm": 0,
+            "excess_weighted": 0.013298465225706647,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.21948965357700354,
+            "flatness": 0.5614675244228993
+          },
+          "isotropy": {
+            "h_ratio": 0.33114180584182695,
+            "v_ratio": 0.33932239931331437,
+            "d_ratio": 0.3295357948448587,
+            "isotropy_score": 0.9711583895190509
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 1.5157245490203588,
+            "energy_half": 2.3226318359375,
+            "energy_error": 0.8403642022449298,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8069072869171412,
+            "missing_raw": 0,
+            "excess_norm": 0.0007879953973800207,
+            "missing_norm": 0,
+            "excess_weighted": 0.006303963179040166,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.798914255956555,
+            "flatness": 0.5890488158960567
+          },
+          "vertical": {
+            "energy_orig": 1.5328305374022309,
+            "energy_half": 2.2784423828125,
+            "energy_error": 0.8435381383136895,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7456118454102691,
+            "missing_raw": 0,
+            "excess_norm": 0.000728136567783466,
+            "missing_norm": 0,
+            "excess_weighted": 0.005825092542267728,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7940155243791021,
+            "flatness": 0.5480383534331655
+          },
+          "diagonal": {
+            "energy_orig": 0.2473759486848508,
+            "energy_half": 1.13629150390625,
+            "energy_error": 0.8786938054173875,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8889155552213992,
+            "missing_raw": 0,
+            "excess_norm": 0.0008680815968958977,
+            "missing_norm": 0,
+            "excess_weighted": 0.006944652775167181,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.4762281933270439,
+            "flatness": 0.5670913542339626
+          },
+          "isotropy": {
+            "h_ratio": 0.32793470151921394,
+            "v_ratio": 0.3291732642454335,
+            "d_ratio": 0.3428920342353526,
+            "isotropy_score": 0.9563788854136159
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3835.030149219107,
+          "vertical": 3825.7266998584337,
+          "diagonal": 3839.781237093212
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 11500.538086170753,
+        "total_excess_weighted": {
+          "horizontal": 0.10204938520793042,
+          "vertical": 0.10194369184104629,
+          "diagonal": 0.10277749706167112
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.30677057411064784,
+        "worm_h_score": 0.10204938520793042,
+        "worm_v_score": 0.10194369184104629,
+        "checkerboard_score": 0.10277749706167112,
+        "structure_score": 0.1775276801917648,
+        "per_level_flatness": [
+          0.5597251771302223,
+          0.5635339981359672,
+          0.5520170009437653,
+          0.568059507854395
+        ],
+        "flatness_avg": 0.5608339210160874,
+        "flatness_weighted": 0.5626224826674918,
+        "isotropy_score": 0.9790163465804221,
+        "artifact_score_norm": 0.30677057411064784
       }
     },
     "zhou-fang-serpentine": {
@@ -15053,6 +16073,261 @@
         "artifact_score_norm": 0.24305851024098235
       }
     },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 69.52110918877354,
+            "energy_half": 3755.375,
+            "energy_error": 3684.165717031911,
+            "subband_pixels": 65536,
+            "excess_raw": 3685.8538908112264,
+            "missing_raw": 0,
+            "excess_norm": 0.05624166703508341,
+            "missing_norm": 0,
+            "excess_weighted": 0.05624166703508341,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.1377123535329644,
+            "flatness": 0.5572523687706934
+          },
+          "vertical": {
+            "energy_orig": 45.210082660515184,
+            "energy_half": 3719.125,
+            "energy_error": 3673.278219915417,
+            "subband_pixels": 65536,
+            "excess_raw": 3673.914917339485,
+            "missing_raw": 0,
+            "excess_norm": 0.05605949275725532,
+            "missing_norm": 0,
+            "excess_weighted": 0.05605949275725532,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.1110311017502885,
+            "flatness": 0.5594143817302903
+          },
+          "diagonal": {
+            "energy_orig": 7.995911188004614,
+            "energy_half": 3711.625,
+            "energy_error": 3703.9993425605535,
+            "subband_pixels": 65536,
+            "excess_raw": 3703.629088811995,
+            "missing_raw": 0,
+            "excess_norm": 0.05651289503192131,
+            "missing_norm": 0,
+            "excess_weighted": 0.05651289503192131,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.04533969756938291,
+            "flatness": 0.5599001593122912
+          },
+          "isotropy": {
+            "h_ratio": 0.33306374439012787,
+            "v_ratio": 0.3320794698392053,
+            "d_ratio": 0.3348567857706669,
+            "isotropy_score": 0.9917059589368342
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 23.359302792195308,
+            "energy_half": 253.703125,
+            "energy_error": 231.3840576941561,
+            "subband_pixels": 16384,
+            "excess_raw": 230.3438222078047,
+            "missing_raw": 0,
+            "excess_norm": 0.01405907117967558,
+            "missing_norm": 0,
+            "excess_weighted": 0.02811814235935116,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2966796492177012,
+            "flatness": 0.5608655100938533
+          },
+          "vertical": {
+            "energy_orig": 17.91443831699346,
+            "energy_half": 252.890625,
+            "energy_error": 235.07172998366013,
+            "subband_pixels": 16384,
+            "excess_raw": 234.97618668300655,
+            "missing_raw": 0,
+            "excess_norm": 0.014341808269226474,
+            "missing_norm": 0,
+            "excess_weighted": 0.028683616538452947,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2654456251707734,
+            "flatness": 0.5586511444740007
+          },
+          "diagonal": {
+            "energy_orig": 7.9467864523260285,
+            "energy_half": 233.609375,
+            "energy_error": 225.896786452326,
+            "subband_pixels": 16384,
+            "excess_raw": 225.66258854767398,
+            "missing_raw": 0,
+            "excess_norm": 0.013773351351786742,
+            "missing_norm": 0,
+            "excess_weighted": 0.027546702703573483,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.1817203328591412,
+            "flatness": 0.5655124074878732
+          },
+          "isotropy": {
+            "h_ratio": 0.334199750733739,
+            "v_ratio": 0.3395260431854384,
+            "d_ratio": 0.3262742060808225,
+            "isotropy_score": 0.9609696005046124
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 4.465811571871395,
+            "energy_half": 19.2900390625,
+            "energy_error": 15.09033094993512,
+            "subband_pixels": 4096,
+            "excess_raw": 14.824227490628605,
+            "missing_raw": 0,
+            "excess_norm": 0.0036191961647042492,
+            "missing_norm": 0,
+            "excess_weighted": 0.014476784658816997,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.4668182933741579,
+            "flatness": 0.5761329115213895
+          },
+          "vertical": {
+            "energy_orig": 4.162501066296616,
+            "energy_half": 19.37890625,
+            "energy_error": 15.274037907595636,
+            "subband_pixels": 4096,
+            "excess_raw": 15.216405183703383,
+            "missing_raw": 0,
+            "excess_norm": 0.0037149426718025838,
+            "missing_norm": 0,
+            "excess_weighted": 0.014859770687210335,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.46025184499320476,
+            "flatness": 0.5507003988306491
+          },
+          "diagonal": {
+            "energy_orig": 2.2893520370770855,
+            "energy_half": 16.283203125,
+            "energy_error": 14.311768933523163,
+            "subband_pixels": 4096,
+            "excess_raw": 13.993851087922915,
+            "missing_raw": 0,
+            "excess_norm": 0.0034164675507624303,
+            "missing_norm": 0,
+            "excess_weighted": 0.013665870203049721,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.3489261668575532,
+            "flatness": 0.5539954302184986
+          },
+          "isotropy": {
+            "h_ratio": 0.33777160909725845,
+            "v_ratio": 0.3418835795303271,
+            "d_ratio": 0.32034481137241444,
+            "isotropy_score": 0.9369996997588997
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 0.8133686769361543,
+            "energy_half": 1.660308837890625,
+            "energy_error": 0.938739315914402,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8469401609544707,
+            "missing_raw": 0,
+            "excess_norm": 0.0008270900009321003,
+            "missing_norm": 0,
+            "excess_weighted": 0.006616720007456802,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.660423832183062,
+            "flatness": 0.5639285095608902
+          },
+          "vertical": {
+            "energy_orig": 1.0526775205524919,
+            "energy_half": 1.919097900390625,
+            "energy_error": 0.8322677233328227,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8664203798381331,
+            "missing_raw": 0,
+            "excess_norm": 0.0008461136521856769,
+            "missing_norm": 0,
+            "excess_weighted": 0.006768909217485415,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7526405586803845,
+            "flatness": 0.6021883754976072
+          },
+          "diagonal": {
+            "energy_orig": 0.3550694960697207,
+            "energy_half": 1.356292724609375,
+            "energy_error": 0.9835440719352233,
+            "subband_pixels": 1024,
+            "excess_raw": 1.0012232285396543,
+            "missing_raw": 0,
+            "excess_norm": 0.0009777570591207561,
+            "missing_norm": 0,
+            "excess_weighted": 0.007822056472966049,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.5243961412130681,
+            "flatness": 0.5578135335175907
+          },
+          "isotropy": {
+            "h_ratio": 0.34079575147597413,
+            "v_ratio": 0.30214277743989826,
+            "d_ratio": 0.35706147108412767,
+            "isotropy_score": 0.8461926080193347
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3931.8688806706145,
+          "vertical": 3924.973929586033,
+          "diagonal": 3944.2867516761316
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 11801.12956193278,
+        "total_excess_weighted": {
+          "horizontal": 0.10545331406070838,
+          "vertical": 0.10637178920040402,
+          "diagonal": 0.10554752441151057
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.317372627672623,
+        "worm_h_score": 0.10545331406070838,
+        "worm_v_score": 0.10637178920040402,
+        "checkerboard_score": 0.10554752441151057,
+        "structure_score": 0.18586342281120546,
+        "per_level_flatness": [
+          0.5588556366044249,
+          0.5616763540185757,
+          0.5602762468568457,
+          0.574643472858696
+        ],
+        "flatness_avg": 0.5638629275846356,
+        "flatness_weighted": 0.5680307409959018,
+        "isotropy_score": 0.9323421376586897,
+        "artifact_score_norm": 0.317372627672623
+      }
+    },
     "zhou-fang-serpentine": {
       "levels": 4,
       "subbands": {
@@ -18113,6 +19388,261 @@
         "flatness_weighted": 0.5367674229521864,
         "isotropy_score": 0.4955471581910876,
         "artifact_score_norm": 0.22850126883746202
+      }
+    },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 27.214108996539792,
+            "energy_half": 3512.375,
+            "energy_error": 3489.977344290657,
+            "subband_pixels": 65536,
+            "excess_raw": 3485.16089100346,
+            "missing_raw": 0,
+            "excess_norm": 0.05317933488469635,
+            "missing_norm": 0,
+            "excess_weighted": 0.05317933488469635,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.08023376664946306,
+            "flatness": 0.561279284822015
+          },
+          "vertical": {
+            "energy_orig": 37.70646578239139,
+            "energy_half": 3482.625,
+            "energy_error": 3448.3491128412147,
+            "subband_pixels": 65536,
+            "excess_raw": 3444.918534217609,
+            "missing_raw": 0,
+            "excess_norm": 0.05256528525112318,
+            "missing_norm": 0,
+            "excess_weighted": 0.05256528525112318,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.09931955667416612,
+            "flatness": 0.5641900309569766
+          },
+          "diagonal": {
+            "energy_orig": 7.894001345636292,
+            "energy_half": 3454.125,
+            "energy_error": 3445.369981737793,
+            "subband_pixels": 65536,
+            "excess_raw": 3446.2309986543637,
+            "missing_raw": 0,
+            "excess_norm": 0.05258531186911566,
+            "missing_norm": 0,
+            "excess_weighted": 0.05258531186911566,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.0504128263042065,
+            "flatness": 0.5571088128514614
+          },
+          "isotropy": {
+            "h_ratio": 0.33610163440704016,
+            "v_ratio": 0.33209263513645154,
+            "d_ratio": 0.33180573045650824,
+            "isotropy_score": 0.9872184377856095
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 9.965382845540177,
+            "energy_half": 226.53125,
+            "energy_error": 216.4626561298539,
+            "subband_pixels": 16384,
+            "excess_raw": 216.56586715445982,
+            "missing_raw": 0,
+            "excess_norm": 0.013218131540189198,
+            "missing_norm": 0,
+            "excess_weighted": 0.026436263080378396,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.21082694438179514,
+            "flatness": 0.560768233263732
+          },
+          "vertical": {
+            "energy_orig": 14.180327578335255,
+            "energy_half": 231.3125,
+            "energy_error": 218.70995380382547,
+            "subband_pixels": 16384,
+            "excess_raw": 217.13217242166473,
+            "missing_raw": 0,
+            "excess_norm": 0.013252696070658248,
+            "missing_norm": 0,
+            "excess_weighted": 0.026505392141316496,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.23382152886395474,
+            "flatness": 0.5554349589779586
+          },
+          "diagonal": {
+            "energy_orig": 3.1430347102076124,
+            "energy_half": 221.078125,
+            "energy_error": 218.09692564158016,
+            "subband_pixels": 16384,
+            "excess_raw": 217.93509028979238,
+            "missing_raw": 0,
+            "excess_norm": 0.013301702288195336,
+            "missing_norm": 0,
+            "excess_weighted": 0.026603404576390672,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.11616473620857293,
+            "flatness": 0.5696746687001863
+          },
+          "isotropy": {
+            "h_ratio": 0.33135274850868424,
+            "v_ratio": 0.33479282576866637,
+            "d_ratio": 0.3338544257226494,
+            "isotropy_score": 0.9897247581333801
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 3.8995946908941272,
+            "energy_half": 17.52197265625,
+            "energy_error": 13.353322861850009,
+            "subband_pixels": 4096,
+            "excess_raw": 13.622377965355874,
+            "missing_raw": 0,
+            "excess_norm": 0.0033257758704482113,
+            "missing_norm": 0,
+            "excess_weighted": 0.013303103481792845,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.4880314610435229,
+            "flatness": 0.5971674926000922
+          },
+          "vertical": {
+            "energy_orig": 5.00580456209751,
+            "energy_half": 18.70166015625,
+            "energy_error": 13.53385871344555,
+            "subband_pixels": 4096,
+            "excess_raw": 13.69585559415249,
+            "missing_raw": 0,
+            "excess_norm": 0.0033437147446661354,
+            "missing_norm": 0,
+            "excess_weighted": 0.013374858978664542,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5257362144293779,
+            "flatness": 0.5547737544153578
+          },
+          "diagonal": {
+            "energy_orig": 1.1317603092860917,
+            "energy_half": 14.39990234375,
+            "energy_error": 13.225136917741974,
+            "subband_pixels": 4096,
+            "excess_raw": 13.268142034463908,
+            "missing_raw": 0,
+            "excess_norm": 0.00323929248888279,
+            "missing_norm": 0,
+            "excess_weighted": 0.01295716995553116,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.28567438820117846,
+            "flatness": 0.5526028116125004
+          },
+          "isotropy": {
+            "h_ratio": 0.33289830564562856,
+            "v_ratio": 0.33739906397568814,
+            "d_ratio": 0.32970263037868325,
+            "isotropy_score": 0.9771889302053325
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 1.3258671781605182,
+            "energy_half": 2.200408935546875,
+            "energy_error": 0.8968072631789006,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8745417573863568,
+            "missing_raw": 0,
+            "excess_norm": 0.000854044684947614,
+            "missing_norm": 0,
+            "excess_weighted": 0.006832357479580912,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7697262984316844,
+            "flatness": 0.566245717487832
+          },
+          "vertical": {
+            "energy_orig": 1.7204691219366497,
+            "energy_half": 2.522247314453125,
+            "energy_error": 0.8732693191639784,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8017781925164753,
+            "missing_raw": 0,
+            "excess_norm": 0.0007829865161293704,
+            "missing_norm": 0,
+            "excess_weighted": 0.006263892129034963,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8087445620523802,
+            "flatness": 0.5899753124302334
+          },
+          "diagonal": {
+            "energy_orig": 0.41399201295963395,
+            "energy_half": 1.269561767578125,
+            "energy_error": 0.8453092713082858,
+            "subband_pixels": 1024,
+            "excess_raw": 0.855569754618491,
+            "missing_raw": 0,
+            "excess_norm": 0.0008355173384946202,
+            "missing_norm": 0,
+            "excess_weighted": 0.006684138707956961,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.5781197720764588,
+            "flatness": 0.5361751295534697
+          },
+          "isotropy": {
+            "h_ratio": 0.3428967323987503,
+            "v_ratio": 0.33389693453639574,
+            "d_ratio": 0.32320633306485397,
+            "isotropy_score": 0.9425762992952683
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3716.2236778806623,
+          "vertical": 3676.548340425942,
+          "diagonal": 3678.2898007332383
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 11071.061819039844,
+        "total_excess_weighted": {
+          "horizontal": 0.0997510589264485,
+          "vertical": 0.09870942850013917,
+          "diagonal": 0.09883002510899445
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.29729051253558214,
+        "worm_h_score": 0.0997510589264485,
+        "worm_v_score": 0.09870942850013917,
+        "checkerboard_score": 0.09883002510899445,
+        "structure_score": 0.17268952844987304,
+        "per_level_flatness": [
+          0.560859376210151,
+          0.5619592869806257,
+          0.5681813528759835,
+          0.5641320531571784
+        ],
+        "flatness_avg": 0.5637830173059847,
+        "flatness_weighted": 0.5647039857955176,
+        "isotropy_score": 0.9739926656863728,
+        "artifact_score_norm": 0.29729051253558214
       }
     },
     "zhou-fang-serpentine": {
@@ -21177,6 +22707,261 @@
         "artifact_score_norm": 0.22140106326568498
       }
     },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 73.32866493656286,
+            "energy_half": 3388.875,
+            "energy_error": 3321.3090570934255,
+            "subband_pixels": 65536,
+            "excess_raw": 3315.5463350634373,
+            "missing_raw": 0,
+            "excess_norm": 0.05059122215367794,
+            "missing_norm": 0,
+            "excess_weighted": 0.05059122215367794,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.14131872578249735,
+            "flatness": 0.5607738739062048
+          },
+          "vertical": {
+            "energy_orig": 66.84194059976932,
+            "energy_half": 3365.375,
+            "energy_error": 3304.585077854671,
+            "subband_pixels": 65536,
+            "excess_raw": 3298.5330594002307,
+            "missing_raw": 0,
+            "excess_norm": 0.050331620169070904,
+            "missing_norm": 0,
+            "excess_weighted": 0.050331620169070904,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.13455128657669208,
+            "flatness": 0.5637031617551831
+          },
+          "diagonal": {
+            "energy_orig": 18.870633410226837,
+            "energy_half": 3335.125,
+            "energy_error": 3318.7137706651283,
+            "subband_pixels": 65536,
+            "excess_raw": 3316.2543665897733,
+            "missing_raw": 0,
+            "excess_norm": 0.0506020258573879,
+            "missing_norm": 0,
+            "excess_weighted": 0.0506020258573879,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.07031892350050287,
+            "flatness": 0.561424412275191
+          },
+          "isotropy": {
+            "h_ratio": 0.33398089583991697,
+            "v_ratio": 0.33229918255393465,
+            "d_ratio": 0.3337199216061483,
+            "isotropy_score": 0.9949646422686752
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 24.429327001633986,
+            "energy_half": 229.2265625,
+            "energy_error": 205.1890390114379,
+            "subband_pixels": 16384,
+            "excess_raw": 204.797235498366,
+            "missing_raw": 0,
+            "excess_norm": 0.012499831268210816,
+            "missing_norm": 0,
+            "excess_weighted": 0.02499966253642163,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.323837084598148,
+            "flatness": 0.5595379556006761
+          },
+          "vertical": {
+            "energy_orig": 18.418200511822373,
+            "energy_half": 225.3203125,
+            "energy_error": 207.38195663927337,
+            "subband_pixels": 16384,
+            "excess_raw": 206.90211198817764,
+            "missing_raw": 0,
+            "excess_norm": 0.01262830273365342,
+            "missing_norm": 0,
+            "excess_weighted": 0.02525660546730684,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.2821817837722829,
+            "flatness": 0.5594300675764623
+          },
+          "diagonal": {
+            "energy_orig": 6.058008758650519,
+            "energy_half": 212.0078125,
+            "energy_error": 205.87856635668973,
+            "subband_pixels": 16384,
+            "excess_raw": 205.94980374134948,
+            "missing_raw": 0,
+            "excess_norm": 0.0125701784510101,
+            "missing_norm": 0,
+            "excess_weighted": 0.0251403569020202,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.1700337049873709,
+            "flatness": 0.570448309048052
+          },
+          "isotropy": {
+            "h_ratio": 0.3317797466707275,
+            "v_ratio": 0.33532557766900256,
+            "d_ratio": 0.33289467566026987,
+            "isotropy_score": 0.9894257067327709
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 9.474116111441512,
+            "energy_half": 23.201171875,
+            "energy_error": 13.405919496858179,
+            "subband_pixels": 4096,
+            "excess_raw": 13.727055763558488,
+            "missing_raw": 0,
+            "excess_norm": 0.0033513319735250214,
+            "missing_norm": 0,
+            "excess_weighted": 0.013405327894100086,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.649850075940567,
+            "flatness": 0.557738142141581
+          },
+          "vertical": {
+            "energy_orig": 4.6428530305351305,
+            "energy_half": 18.0498046875,
+            "energy_error": 13.19279750051062,
+            "subband_pixels": 4096,
+            "excess_raw": 13.40695165696487,
+            "missing_raw": 0,
+            "excess_norm": 0.003273181556876189,
+            "missing_norm": 0,
+            "excess_weighted": 0.013092726227504755,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.5188699240192498,
+            "flatness": 0.5616102141258005
+          },
+          "diagonal": {
+            "energy_orig": 1.7833684723123318,
+            "energy_half": 15.1875,
+            "energy_error": 13.182114259689783,
+            "subband_pixels": 4096,
+            "excess_raw": 13.404131527687667,
+            "missing_raw": 0,
+            "excess_norm": 0.003272493048751872,
+            "missing_norm": 0,
+            "excess_weighted": 0.013089972195007488,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.3640011442095608,
+            "flatness": 0.558894733426932
+          },
+          "isotropy": {
+            "h_ratio": 0.33699445369129827,
+            "v_ratio": 0.33163704939347477,
+            "d_ratio": 0.331368496915227,
+            "isotropy_score": 0.9833054914867386
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 2.3083029286268353,
+            "energy_half": 3.079498291015625,
+            "energy_error": 0.830749026206492,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7711953623887897,
+            "missing_raw": 0,
+            "excess_norm": 0.0007531204710828025,
+            "missing_norm": 0,
+            "excess_weighted": 0.00602496376866242,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8546093147595636,
+            "flatness": 0.5640048029215361
+          },
+          "vertical": {
+            "energy_orig": 1.5900885267892004,
+            "energy_half": 2.337005615234375,
+            "energy_error": 0.8344874142738821,
+            "subband_pixels": 1024,
+            "excess_raw": 0.7469170884451746,
+            "missing_raw": 0,
+            "excess_norm": 0.0007294112191847408,
+            "missing_norm": 0,
+            "excess_weighted": 0.005835289753477926,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8021473825961428,
+            "flatness": 0.5807744834371344
+          },
+          "diagonal": {
+            "energy_orig": 0.4283321166194342,
+            "energy_half": 1.262054443359375,
+            "energy_error": 0.8157177056206598,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8337223267399407,
+            "missing_raw": 0,
+            "excess_norm": 0.0008141819597069734,
+            "missing_norm": 0,
+            "excess_weighted": 0.006513455677655787,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.5948182731351273,
+            "flatness": 0.5262396442285874
+          },
+          "isotropy": {
+            "h_ratio": 0.33485061685322287,
+            "v_ratio": 0.33635745166242925,
+            "d_ratio": 0.3287919314843478,
+            "isotropy_score": 0.977507499415609
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3534.8418216877503,
+          "vertical": 3519.5890401338183,
+          "diagonal": 3536.4420241855505
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 10590.87288600712,
+        "total_excess_weighted": {
+          "horizontal": 0.09502117635286207,
+          "vertical": 0.09451624161736041,
+          "diagonal": 0.09534581063207137
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.28488322860229387,
+        "worm_h_score": 0.09502117635286207,
+        "worm_v_score": 0.09451624161736041,
+        "checkerboard_score": 0.09534581063207137,
+        "structure_score": 0.20834867265529314,
+        "per_level_flatness": [
+          0.5619671493121929,
+          0.5631387774083968,
+          0.5594143632314378,
+          0.5570063101957526
+        ],
+        "flatness_avg": 0.560381650036945,
+        "flatness_weighted": 0.5587968425747173,
+        "isotropy_score": 0.9862791450730104,
+        "artifact_score_norm": 0.28488322860229387
+      }
+    },
     "zhou-fang-serpentine": {
       "levels": 4,
       "subbands": {
@@ -24237,6 +26022,261 @@
         "flatness_weighted": 0.5488636663238593,
         "isotropy_score": 0.48614046718724796,
         "artifact_score_norm": 0.23902749666751508
+      }
+    },
+    "whitenoise": {
+      "levels": 4,
+      "subbands": {
+        "level_0": {
+          "horizontal": {
+            "energy_orig": 31.332346212995002,
+            "energy_half": 3694.375,
+            "energy_error": 3657.4465618992695,
+            "subband_pixels": 65536,
+            "excess_raw": 3663.042653787005,
+            "missing_raw": 0,
+            "excess_norm": 0.055893595181076124,
+            "missing_norm": 0,
+            "excess_weighted": 0.055893595181076124,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.10031695278825463,
+            "flatness": 0.5648676265797665
+          },
+          "vertical": {
+            "energy_orig": 48.470327758554404,
+            "energy_half": 3663.875,
+            "energy_error": 3618.078661091887,
+            "subband_pixels": 65536,
+            "excess_raw": 3615.4046722414455,
+            "missing_raw": 0,
+            "excess_norm": 0.055166697269309166,
+            "missing_norm": 0,
+            "excess_weighted": 0.055166697269309166,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.11184584430519909,
+            "flatness": 0.5661164856331322
+          },
+          "diagonal": {
+            "energy_orig": 10.973257400999616,
+            "energy_half": 3632.125,
+            "energy_error": 3618.963943675509,
+            "subband_pixels": 65536,
+            "excess_raw": 3621.1517425990005,
+            "missing_raw": 0,
+            "excess_norm": 0.055254390603622444,
+            "missing_norm": 0,
+            "excess_weighted": 0.055254390603622444,
+            "missing_weighted": 0,
+            "perceptual_weight": 1,
+            "correlation": 0.06044449892727054,
+            "flatness": 0.5619751408641955
+          },
+          "isotropy": {
+            "h_ratio": 0.33571528742162404,
+            "v_ratio": 0.3321017264546873,
+            "d_ratio": 0.33218298612368863,
+            "isotropy_score": 0.9892362334921063
+          }
+        },
+        "level_1": {
+          "horizontal": {
+            "energy_orig": 7.823832360149942,
+            "energy_half": 234.6796875,
+            "energy_error": 226.82257623269896,
+            "subband_pixels": 16384,
+            "excess_raw": 226.85585513985006,
+            "missing_raw": 0,
+            "excess_norm": 0.013846182564688114,
+            "missing_norm": 0,
+            "excess_weighted": 0.02769236512937623,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.18297623162158652,
+            "flatness": 0.5586497328896621
+          },
+          "vertical": {
+            "energy_orig": 12.727926458573624,
+            "energy_half": 237.9296875,
+            "energy_error": 224.62532229190694,
+            "subband_pixels": 16384,
+            "excess_raw": 225.20176104142638,
+            "missing_raw": 0,
+            "excess_norm": 0.013745224672938622,
+            "missing_norm": 0,
+            "excess_weighted": 0.027490449345877244,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.23652620301227678,
+            "flatness": 0.5616160763750215
+          },
+          "diagonal": {
+            "energy_orig": 2.819273296328335,
+            "energy_half": 230.8515625,
+            "energy_error": 228.1262279531911,
+            "subband_pixels": 16384,
+            "excess_raw": 228.03228920367167,
+            "missing_raw": 0,
+            "excess_norm": 0.013917986401591288,
+            "missing_norm": 0,
+            "excess_weighted": 0.027835972803182576,
+            "missing_weighted": 0,
+            "perceptual_weight": 2,
+            "correlation": 0.10866904269125523,
+            "flatness": 0.5610808649664226
+          },
+          "isotropy": {
+            "h_ratio": 0.33377164814721605,
+            "v_ratio": 0.33053836739802056,
+            "d_ratio": 0.3356899844547634,
+            "isotropy_score": 0.9846536468309882
+          }
+        },
+        "level_2": {
+          "horizontal": {
+            "energy_orig": 3.0972540872200596,
+            "energy_half": 16.984375,
+            "energy_error": 13.985280665038687,
+            "subband_pixels": 4096,
+            "excess_raw": 13.88712091277994,
+            "missing_raw": 0,
+            "excess_norm": 0.003390410379096665,
+            "missing_norm": 0,
+            "excess_weighted": 0.01356164151638666,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.4202682504049928,
+            "flatness": 0.5730708205092477
+          },
+          "vertical": {
+            "energy_orig": 4.0226618030024515,
+            "energy_half": 18.408203125,
+            "energy_error": 14.304537951899508,
+            "subband_pixels": 4096,
+            "excess_raw": 14.385541321997549,
+            "missing_raw": 0,
+            "excess_norm": 0.0035120950493158077,
+            "missing_norm": 0,
+            "excess_weighted": 0.014048380197263231,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.4721737479996893,
+            "flatness": 0.5397741490982304
+          },
+          "diagonal": {
+            "energy_orig": 0.8722253572844578,
+            "energy_half": 14.9228515625,
+            "energy_error": 14.026910942456027,
+            "subband_pixels": 4096,
+            "excess_raw": 14.050626205215542,
+            "missing_raw": 0,
+            "excess_norm": 0.0034303286633827006,
+            "missing_norm": 0,
+            "excess_weighted": 0.013721314653530802,
+            "missing_weighted": 0,
+            "perceptual_weight": 4,
+            "correlation": 0.2450489073384644,
+            "flatness": 0.5481798410736768
+          },
+          "isotropy": {
+            "h_ratio": 0.33049058399963205,
+            "v_ratio": 0.33803505376808907,
+            "d_ratio": 0.331474362232279,
+            "isotropy_score": 0.9776813981734778
+          }
+        },
+        "level_3": {
+          "horizontal": {
+            "energy_orig": 1.0503024103090608,
+            "energy_half": 1.955718994140625,
+            "energy_error": 0.8291954958635951,
+            "subband_pixels": 1024,
+            "excess_raw": 0.9054165838315642,
+            "missing_raw": 0,
+            "excess_norm": 0.0008841958826480119,
+            "missing_norm": 0,
+            "excess_weighted": 0.007073567061184095,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.7594222097685981,
+            "flatness": 0.5520365079600231
+          },
+          "vertical": {
+            "energy_orig": 1.5501718086849863,
+            "energy_half": 2.433319091796875,
+            "energy_error": 0.8511469350636623,
+            "subband_pixels": 1024,
+            "excess_raw": 0.8831472831118887,
+            "missing_raw": 0,
+            "excess_norm": 0.0008624485186639538,
+            "missing_norm": 0,
+            "excess_weighted": 0.006899588149311631,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.8063990389265403,
+            "flatness": 0.5566154593863938
+          },
+          "diagonal": {
+            "energy_orig": 0.378211572537831,
+            "energy_half": 1.259796142578125,
+            "energy_error": 0.8476396611560908,
+            "subband_pixels": 1024,
+            "excess_raw": 0.881584570040294,
+            "missing_raw": 0,
+            "excess_norm": 0.0008609224316799746,
+            "missing_norm": 0,
+            "excess_weighted": 0.006887379453439797,
+            "missing_weighted": 0,
+            "perceptual_weight": 8,
+            "correlation": 0.5725083677505145,
+            "flatness": 0.5940904446085403
+          },
+          "isotropy": {
+            "h_ratio": 0.32800687095858444,
+            "v_ratio": 0.3366902549385622,
+            "d_ratio": 0.33530287410285337,
+            "isotropy_score": 0.974209577341161
+          }
+        }
+      },
+      "summary": {
+        "total_excess": {
+          "horizontal": 3904.6910464234666,
+          "vertical": 3855.8751218879815,
+          "diagonal": 3864.1162425779276
+        },
+        "total_missing": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score": 11624.682410889376,
+        "total_excess_weighted": {
+          "horizontal": 0.1042211688880231,
+          "vertical": 0.10360511496176128,
+          "diagonal": 0.10369905751377562
+        },
+        "total_missing_weighted": {
+          "horizontal": 0,
+          "vertical": 0,
+          "diagonal": 0
+        },
+        "artifact_score_weighted": 0.31152534136356,
+        "worm_h_score": 0.1042211688880231,
+        "worm_v_score": 0.10360511496176128,
+        "checkerboard_score": 0.10369905751377562,
+        "structure_score": 0.15709272399679203,
+        "per_level_flatness": [
+          0.5643197510256981,
+          0.5604488914103687,
+          0.5536749368937183,
+          0.5675808039849857
+        ],
+        "flatness_avg": 0.5615060958286927,
+        "flatness_weighted": 0.562704247553413,
+        "isotropy_score": 0.981427705835019,
+        "artifact_score_norm": 0.31152534136356
       }
     },
     "zhou-fang-serpentine": {

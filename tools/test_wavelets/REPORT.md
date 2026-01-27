@@ -51,24 +51,41 @@ This directly answers: "Does the error look like noise or like structured patter
 
 | Method | Flatness (avg) | Structure | Isotropy |
 |--------|---------------|-----------|----------|
+| whitenoise | **0.562** | 0.196 | **0.969** |
 | boon-serpentine | **0.542** | 0.315 | **0.570** |
-| boon-standard | **0.541** | 0.326 | 0.567 |
+| boon-standard | **0.541** | **0.326** | **0.567** |
 | zhou-fang-serpentine | **0.541** | 0.264 | **0.667** |
-| fs-tpdf-serpentine | 0.535 | 0.290 | 0.551 |
-| jjn-serpentine | 0.534 | **0.347** | 0.570 |
+| fs-tpdf-serpentine | **0.535** | 0.290 | 0.551 |
+| jjn-serpentine | 0.534 | **0.347** | **0.570** |
 | jjn-standard | 0.533 | **0.360** | **0.597** |
 | ulichney-serpentine | 0.531 | 0.301 | 0.539 |
 | ulichney-weight-serpentine | 0.529 | 0.315 | 0.508 |
 | fs-serpentine | 0.524 | 0.316 | 0.485 |
-| fs-standard | 0.520 | 0.326 | 0.480 |
+| fs-standard | 0.520 | **0.326** | 0.480 |
 | ostro-serpentine | 0.511 | 0.303 | 0.409 |
 | none (banding) | 0.501 | **0.578** | 0.382 |
 
+### The White Noise Paradox
+
+**White noise dithering** (random threshold, no error diffusion) serves as a critical validation:
+
+- **Highest flatness (0.562)**: Error is literally white noise — perfectly flat spectrum
+- **Highest isotropy (0.969)**: White noise is perfectly isotropic
+- **Lowest structure (0.196)**: No error diffusion = terrible tone preservation
+
+This proves that **flatness alone is insufficient**. White noise wins on flatness but looks terrible because it doesn't preserve local tone. Good dithering requires:
+
+1. **High flatness** — error should be noise-like (avoid structured patterns)
+2. **High structure** — error diffusion must preserve local average intensity
+3. **High isotropy** — no directional bias
+
+The ideal method balances all three. Among error diffusion methods, **Boon achieves the best flatness** while maintaining reasonable structure preservation.
+
 ### Key Findings
 
-1. **Boon (our method) achieves highest flatness** (0.542), indicating the most noise-like error distribution. This validates the kernel-mixing approach.
+1. **White noise validates the metric** — it has best flatness but worst structure, proving we need both metrics.
 
-2. **Zhou-Fang has highest isotropy** (0.667), meaning the most balanced directional distribution. However, its structure preservation is lowest.
+2. **Boon (our method) achieves highest flatness among error diffusion methods** (0.542), indicating the most noise-like error distribution while still preserving tone.
 
 3. **"none" (banding) has lowest flatness** (0.501) as expected — banding creates highly structured error patterns.
 
