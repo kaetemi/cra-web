@@ -337,6 +337,81 @@ python tools/noise_color_comparison.py --log    # Log scale only
 python tools/noise_color_comparison.py --linear # Linear scale only
 ```
 
+### 14. `run_wavelet_tests.sh`
+
+Comprehensive test script that generates dithered images from reference photographs and runs wavelet-based quality analysis.
+
+**Reference images** (`tools/test_wavelets/reference_images/`):
+- Classic test images: cameraman, lena, mandril, pirate, etc.
+
+**Dithering methods tested:**
+- `fs-standard`, `fs-serpentine` - Floyd-Steinberg
+- `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
+- `boon-standard`, `boon-serpentine` - Boon (our method)
+- `ostro-serpentine` - Ostromoukhov
+- `zhou-fang-serpentine` - Zhou-Fang
+- `ulichney-serpentine`, `ulichney-weight-serpentine` - Ulichney perturbation variants
+- `fs-tpdf-serpentine` - FS with TPDF threshold dither
+- `none` - No dithering (banding baseline)
+
+```bash
+./tools/run_wavelet_tests.sh
+```
+
+### 15. `analyze_wavelet.py`
+
+Wavelet-based halftone quality analysis using Haar wavelet decomposition.
+
+**Method:**
+Compares dithered 1-bit images against their grayscale originals by decomposing both into wavelet subbands (LH=horizontal, HL=vertical, HH=diagonal) at multiple scales (2px, 4px, 8px, 16px).
+
+**Metrics computed:**
+- **Excess energy**: Energy in halftone subband exceeding original = artifacts
+- **Missing energy**: Energy in original exceeding halftone = blur/loss
+- **Correlation**: Structure preservation between original and halftone subbands
+- **Isotropy ratios**: H/V/D energy distribution (ideal = 0.333 each)
+- **Isotropy score**: min/max ratio across orientations (1.0 = perfect)
+
+**Summary scores:**
+- `artifact_score` - Total excess energy across all subbands
+- `fine_artifact_score` - Excess at levels 0-1 only (most visible artifacts)
+- `worm_h_score` - Horizontal worm artifacts (LH excess)
+- `worm_v_score` - Vertical worm artifacts (HL excess)
+- `checkerboard_score` - Checkerboard artifacts (HH excess)
+- `structure_score` - Energy-weighted correlation
+- `isotropy_score` - Geometric mean of per-level isotropy
+
+**Outputs** (`tools/test_wavelets/analysis/`):
+- `wavelet_{image}_{method}.png` - Individual analysis visualization
+- `wavelet_comparison_{image}.png` - Per-image method comparison
+- `wavelet_summary.png` - Aggregated comparison across all images
+- `wavelet_summary.csv` - Raw metrics data
+- `wavelet_results.json` - Full results for further analysis
+
+```bash
+source /root/venv/bin/activate
+
+# Compare all methods on all reference images
+python tools/analyze_wavelet.py --compare
+
+# Single image pair analysis
+python tools/analyze_wavelet.py -o original.png --halftone dithered.png
+
+# Custom directories
+python tools/analyze_wavelet.py --compare \
+    --ref-dir tools/test_wavelets/reference_images \
+    --dithered-dir tools/test_wavelets/dithered \
+    --output-dir tools/test_wavelets/analysis
+```
+
+**Interpreting results:**
+- Lower artifact scores = fewer visible patterns
+- Higher isotropy = more uniform directional distribution (less worm-like)
+- Higher structure score = better edge/detail preservation
+- JJN typically has lowest artifacts (larger kernel = smoother diffusion)
+- Zhou-Fang typically has best isotropy (threshold modulation breaks patterns)
+- Boon (our method) balances both metrics well
+
 ## Full Regeneration Sequence
 
 ```bash
@@ -351,10 +426,10 @@ python tools/generate_test_images.py
 # 3. Generate RNG noise images
 python tools/generate_rng_noise.py
 
-# 4. Run dither tests
+# 4. Run dither tests (flat grays, gradients)
 ./tools/run_dither_tests.sh
 
-# 5. Generate 2D analysis charts
+# 5. Generate 2D spectral analysis charts
 python tools/analyze_dither.py --serpentine
 python tools/analyze_dither.py --hash
 python tools/analyze_dither.py --rng
@@ -370,13 +445,16 @@ python tools/analyze_1d_kernels.py
 python tools/principal_frequency_comparison.py       # f_c vs gray level
 python tools/spectrum_shape_comparison.py            # Bandpass vs power law
 python tools/noise_color_comparison.py               # Noise color spectra
+
+# 8. Run wavelet-based quality analysis (real images)
+./tools/run_wavelet_tests.sh                         # Generates dithered + analysis
 ```
 
 ## Output Structure
 
 ```
 tools/
-├── test_images/
+├── test_images/                 # Flat gray and gradient tests (spectral analysis)
 │   ├── blue_noise_256.png       # Reference blue noise (not processed)
 │   ├── sources/                 # Source test images (processed by run_dither_tests.sh)
 │   │   ├── gray_*.png           # Pathological gray levels
@@ -429,6 +507,26 @@ tools/
 │       ├── spectrum_shape_comparison.png # Blue noise vs power law spectra
 │       ├── noise_color_comparison.png # Noise color spectra (log scale)
 │       └── noise_color_comparison_linear.png # Noise color spectra (linear scale)
+│
+├── test_wavelets/               # Real image tests (wavelet analysis)
+│   ├── reference_images/        # Source photographs (cameraman, lena, etc.)
+│   ├── dithered/                # Dithered versions by method
+│   │   ├── fs-serpentine/
+│   │   ├── jjn-serpentine/
+│   │   ├── boon-serpentine/
+│   │   ├── ostro-serpentine/
+│   │   ├── zhou-fang-serpentine/
+│   │   ├── ulichney-serpentine/
+│   │   ├── ulichney-weight-serpentine/
+│   │   ├── fs-tpdf-serpentine/
+│   │   ├── none/
+│   │   └── ...
+│   └── analysis/
+│       ├── wavelet_{image}_{method}.png  # Individual visualizations
+│       ├── wavelet_comparison_{image}.png # Per-image method comparison
+│       ├── wavelet_summary.png            # Aggregated comparison chart
+│       ├── wavelet_summary.csv            # Raw metrics data
+│       └── wavelet_results.json           # Full results JSON
 ```
 
 ## Interpreting Analysis Charts
