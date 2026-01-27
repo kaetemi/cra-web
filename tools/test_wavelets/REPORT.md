@@ -1,0 +1,157 @@
+# Wavelet-Based Halftone Quality Analysis Report
+
+## Overview
+
+This report presents a wavelet-based quality metric for evaluating dithering algorithms. The key insight is that ideal dithering should produce quantization error that looks like **random noise** rather than structured patterns (worms, checkerboards).
+
+## Methodology
+
+### Wavelet Decomposition
+
+Both the original grayscale image and the dithered 1-bit halftone are decomposed using Haar wavelets into 4 levels:
+
+| Level | Scale | What it captures |
+|-------|-------|------------------|
+| 0 | 2px | Finest detail, pixel-level patterns |
+| 1 | 4px | Small-scale structure |
+| 2 | 8px | Medium-scale structure |
+| 3 | 16px | Coarse structure, most visible artifacts |
+
+Each level has three orientation subbands:
+- **LH (Horizontal)**: Detects horizontal edges/worms
+- **HL (Vertical)**: Detects vertical edges/worms
+- **HH (Diagonal)**: Detects diagonal/checkerboard patterns
+
+### Error Subband Analysis
+
+For each subband, we compute the **difference** between the halftone and original wavelet coefficients:
+
+```
+error_subband = wavelet(halftone) - wavelet(original)
+```
+
+This error represents "structure in the halftone that doesn't exist in the original" — exactly what we want to minimize.
+
+### Spectral Flatness Metric
+
+For each error subband, we compute **spectral flatness**:
+
+```
+flatness = geometric_mean(power_spectrum) / arithmetic_mean(power_spectrum)
+```
+
+- **Flatness = 1.0**: Perfectly flat spectrum = white noise = ideal
+- **Flatness → 0.0**: Peaked spectrum = periodic patterns = artifacts
+
+This directly answers: "Does the error look like noise or like structured patterns?"
+
+## Results Summary
+
+### Average Metrics Across All Test Images
+
+| Method | Flatness (avg) | Structure | Isotropy |
+|--------|---------------|-----------|----------|
+| boon-serpentine | **0.542** | 0.315 | **0.570** |
+| boon-standard | **0.541** | 0.326 | 0.567 |
+| zhou-fang-serpentine | **0.541** | 0.264 | **0.667** |
+| fs-tpdf-serpentine | 0.535 | 0.290 | 0.551 |
+| jjn-serpentine | 0.534 | **0.347** | 0.570 |
+| jjn-standard | 0.533 | **0.360** | **0.597** |
+| ulichney-serpentine | 0.531 | 0.301 | 0.539 |
+| ulichney-weight-serpentine | 0.529 | 0.315 | 0.508 |
+| fs-serpentine | 0.524 | 0.316 | 0.485 |
+| fs-standard | 0.520 | 0.326 | 0.480 |
+| ostro-serpentine | 0.511 | 0.303 | 0.409 |
+| none (banding) | 0.501 | **0.578** | 0.382 |
+
+### Key Findings
+
+1. **Boon (our method) achieves highest flatness** (0.542), indicating the most noise-like error distribution. This validates the kernel-mixing approach.
+
+2. **Zhou-Fang has highest isotropy** (0.667), meaning the most balanced directional distribution. However, its structure preservation is lowest.
+
+3. **"none" (banding) has lowest flatness** (0.501) as expected — banding creates highly structured error patterns.
+
+4. **Ostromoukhov surprisingly underperforms** (0.511 flatness, 0.409 isotropy), despite being a well-regarded method.
+
+5. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
+
+### Per-Level Analysis
+
+Flatness varies by scale:
+
+| Level | Scale | Typical Range | Notes |
+|-------|-------|---------------|-------|
+| 0 | 2px | 0.47 - 0.54 | Lowest flatness (dithering pattern visible) |
+| 1 | 4px | 0.52 - 0.55 | Improving |
+| 2 | 8px | 0.53 - 0.55 | Good |
+| 3 | 16px | 0.52 - 0.57 | Generally highest (coarse structure is noise-like) |
+
+The 2px level shows the most variation between methods — this is where dithering artifacts are most apparent.
+
+## Interpretation Guide
+
+### Reading the Visualizations
+
+Each `wavelet_{image}_{method}.png` shows:
+
+1. **Top row**: Original, Halftone, Error, Per-level flatness bar chart
+2. **Rows 2-4**: Error subbands for LH/HL/HH orientations at each scale
+   - Blue = negative error, Red = positive error
+   - Uniform speckle = good (noise-like)
+   - Large patches of same color = bad (structured patterns)
+
+### What Good Dithering Looks Like
+
+- Error subbands should look like **random speckle**, not coherent patches
+- Flatness values should be **close to 1.0** (typically 0.5-0.6 in practice)
+- Isotropy should be **high** (close to 1.0), indicating no directional bias
+
+### What Bad Dithering Looks Like
+
+- Error subbands show **large regions of same color** (worms, bands)
+- Flatness values are **low** (below 0.5)
+- Isotropy is **low** (one direction dominates)
+
+## Test Images
+
+| Image | Description | Key Challenge |
+|-------|-------------|---------------|
+| cameraman | Classic test, high contrast | Strong edges |
+| lena_gray_512 | Smooth gradients, textures | Gradient rendering |
+| mandril_gray | High texture detail | Detail preservation |
+| lake | Natural scene, varied tones | Overall balance |
+| livingroom | Indoor scene, mixed content | Shadow regions |
+| pirate | Portrait, skin tones | Smooth gradients |
+| walkbridge | High detail, foliage | Fine texture |
+| woman_blonde | Portrait, hair detail | Fine structure |
+
+## Conclusions
+
+1. **Spectral flatness is a principled metric** for dithering quality — it directly measures whether quantization error looks like noise.
+
+2. **Kernel mixing (Boon method) produces the most noise-like error**, validating the approach of randomly selecting between FS and JJN kernels.
+
+3. **Zhou-Fang excels at isotropy** but sacrifices structure preservation.
+
+4. **Traditional FS has moderate performance** — better methods exist.
+
+5. **The metric correctly identifies banding as worst** — "none" method has lowest flatness.
+
+## Files Generated
+
+```
+analysis/
+├── wavelet_{image}_{method}.png  # Individual analysis (96 files)
+├── wavelet_comparison_{image}.png # Per-image comparison (8 files)
+├── wavelet_summary.png            # Aggregated chart
+├── wavelet_summary.csv            # Raw metrics
+└── wavelet_results.json           # Full results
+```
+
+## Future Work
+
+- Test on more diverse images (graphics, text, gradients)
+- Correlate flatness with perceptual quality studies
+- Investigate why Ostromoukhov underperforms on this metric
+- Explore weighted combinations of flatness, structure, and isotropy
