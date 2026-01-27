@@ -366,20 +366,18 @@ Wavelet-based halftone quality analysis using Haar wavelet decomposition.
 Compares dithered 1-bit images against their grayscale originals by decomposing both into wavelet subbands (LH=horizontal, HL=vertical, HH=diagonal) at multiple scales (2px, 4px, 8px, 16px).
 
 **Metrics computed:**
-- **Excess energy**: Energy in halftone subband exceeding original = artifacts
-- **Missing energy**: Energy in original exceeding halftone = blur/loss
+- **Spectral flatness**: Measures whether the error subband looks like noise (flat spectrum) or has structure (peaked spectrum). Computed as geometric_mean(power) / arithmetic_mean(power).
+  - Flatness = 1.0 → flat spectrum = white noise = ideal dithering
+  - Flatness → 0.0 → peaked spectrum = periodic patterns = worms/checkerboards
 - **Correlation**: Structure preservation between original and halftone subbands
 - **Isotropy ratios**: H/V/D energy distribution (ideal = 0.333 each)
 - **Isotropy score**: min/max ratio across orientations (1.0 = perfect)
 
 **Summary scores:**
-- `artifact_score` - Total excess energy across all subbands
-- `fine_artifact_score` - Excess at levels 0-1 only (most visible artifacts)
-- `worm_h_score` - Horizontal worm artifacts (LH excess)
-- `worm_v_score` - Vertical worm artifacts (HL excess)
-- `checkerboard_score` - Checkerboard artifacts (HH excess)
-- `structure_score` - Energy-weighted correlation
-- `isotropy_score` - Geometric mean of per-level isotropy
+- `flatness_avg` - **Key metric**: Average spectral flatness across all levels (higher = more noise-like = better)
+- `flatness_weighted` - Weighted flatness giving more weight to coarser scales
+- `structure_score` - Energy-weighted correlation (higher = better edge/detail preservation)
+- `isotropy_score` - Geometric mean of per-level isotropy (higher = more uniform, less directional bias)
 
 **Outputs** (`tools/test_wavelets/analysis/`):
 - `wavelet_{image}_{method}.png` - Individual analysis visualization
@@ -405,12 +403,13 @@ python tools/analyze_wavelet.py --compare \
 ```
 
 **Interpreting results:**
-- Lower artifact scores = fewer visible patterns
+- **Higher flatness = better** (error looks more like noise, less like structured patterns)
 - Higher isotropy = more uniform directional distribution (less worm-like)
 - Higher structure score = better edge/detail preservation
-- JJN typically has lowest artifacts (larger kernel = smoother diffusion)
+- Ideal dithering produces error that looks like random noise in every wavelet subband
+- Boon and Zhou-Fang typically have highest flatness (most noise-like error)
+- "none" (banding) has lowest flatness (most structured error)
 - Zhou-Fang typically has best isotropy (threshold modulation breaks patterns)
-- Boon (our method) balances both metrics well
 
 ## Full Regeneration Sequence
 
