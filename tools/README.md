@@ -374,8 +374,8 @@ Compares dithered 1-bit images against their grayscale originals by decomposing 
 - **Isotropy score**: min/max ratio across orientations (1.0 = perfect)
 
 **Summary scores:**
-- `flatness_avg` - **Key metric**: Average spectral flatness across all levels (higher = more noise-like = better)
-- `flatness_weighted` - Weighted flatness giving more weight to coarser scales
+- `blueness` - Rate of energy decay across scales, normalized to white noise (0=white, +=blue, -=red)
+- `flatness_avg` - Average spectral flatness across all levels (higher = more noise-like = better)
 - `structure_score` - Energy-weighted correlation (higher = better edge/detail preservation)
 - `isotropy_score` - Geometric mean of per-level isotropy (higher = more uniform, less directional bias)
 
@@ -403,13 +403,13 @@ python tools/analyze_wavelet.py --compare \
 ```
 
 **Interpreting results:**
-- **Higher flatness = better** (error looks more like noise, less like structured patterns)
+- **Positive blueness = blue noise** (low-frequency suppression); FS has highest (+0.32), JJN lower (+0.24)
+- **Blueness = 0 = white noise** (baseline); **Negative = red/pink** (banding is -0.42)
+- **Higher flatness = better** (error looks more like noise at each scale)
 - Higher isotropy = more uniform directional distribution (less worm-like)
 - Higher structure score = better edge/detail preservation
-- Ideal dithering produces error that looks like random noise in every wavelet subband
-- Boon and Zhou-Fang typically have highest flatness (most noise-like error)
-- "none" (banding) has lowest flatness (most structured error)
-- Zhou-Fang typically has best isotropy (threshold modulation breaks patterns)
+- Boon balances blueness (+0.29) with highest flatness (0.54) among error diffusion methods
+- Zhou-Fang has best isotropy (0.67) due to threshold modulation
 
 ## Full Regeneration Sequence
 

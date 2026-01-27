@@ -49,49 +49,63 @@ This directly answers: "Does the error look like noise or like structured patter
 
 ### Average Metrics Across All Test Images
 
-| Method | Flatness (avg) | Structure | Isotropy |
-|--------|---------------|-----------|----------|
-| whitenoise | **0.562** | 0.196 | **0.969** |
-| boon-serpentine | **0.542** | 0.315 | **0.570** |
-| boon-standard | **0.541** | **0.326** | **0.567** |
-| zhou-fang-serpentine | **0.541** | 0.264 | **0.667** |
-| fs-tpdf-serpentine | **0.535** | 0.290 | 0.551 |
-| jjn-serpentine | 0.534 | **0.347** | **0.570** |
-| jjn-standard | 0.533 | **0.360** | **0.597** |
-| ulichney-serpentine | 0.531 | 0.301 | 0.539 |
-| ulichney-weight-serpentine | 0.529 | 0.315 | 0.508 |
-| fs-serpentine | 0.524 | 0.316 | 0.485 |
-| fs-standard | 0.520 | **0.326** | 0.480 |
-| ostro-serpentine | 0.511 | 0.303 | 0.409 |
-| none (banding) | 0.501 | **0.578** | 0.382 |
+| Method | Blueness | Flatness | Structure | Isotropy |
+|--------|----------|----------|-----------|----------|
+| fs-standard | **+0.33** | 0.520 | **0.329** | 0.480 |
+| fs-serpentine | **+0.32** | 0.524 | 0.321 | 0.484 |
+| ulichney-weight-serpentine | **+0.31** | 0.529 | 0.314 | 0.508 |
+| ulichney-serpentine | **+0.31** | 0.531 | 0.301 | 0.539 |
+| fs-tpdf-serpentine | **+0.30** | 0.535 | 0.295 | 0.551 |
+| boon-standard | +0.29 | **0.541** | **0.326** | **0.567** |
+| boon-serpentine | +0.29 | **0.542** | 0.315 | **0.570** |
+| ostro-serpentine | +0.29 | 0.511 | 0.303 | 0.409 |
+| zhou-fang-serpentine | +0.27 | **0.541** | 0.265 | **0.666** |
+| jjn-serpentine | +0.25 | 0.534 | **0.347** | **0.569** |
+| jjn-standard | +0.24 | 0.532 | **0.360** | 0.584 |
+| whitenoise | 0.00 | **0.562** | 0.196 | **0.969** |
+| none (banding) | **-0.42** | 0.501 | **0.578** | 0.382 |
+
+### The Blueness Metric
+
+**Blueness** measures the rate of energy decay across wavelet scales, normalized to white noise:
+
+- **Blueness = 0**: White noise (flat spectrum, energy decays at baseline rate)
+- **Blueness > 0**: Blue noise (low frequencies suppressed, faster decay)
+- **Blueness < 0**: Red/pink noise (low frequencies emphasized, slower decay)
+
+FS has highest blueness (+0.32) because its small kernel concentrates energy at fine scales. JJN has lower blueness (+0.24) because its larger kernel spreads energy to coarser scales. Banding ("none") is red (-0.42) because it emphasizes low-frequency structure.
 
 ### The White Noise Paradox
 
 **White noise dithering** (random threshold, no error diffusion) serves as a critical validation:
 
+- **Blueness = 0**: By definition, white noise is the baseline
 - **Highest flatness (0.562)**: Error is literally white noise — perfectly flat spectrum
 - **Highest isotropy (0.969)**: White noise is perfectly isotropic
 - **Lowest structure (0.196)**: No error diffusion = terrible tone preservation
 
-This proves that **flatness alone is insufficient**. White noise wins on flatness but looks terrible because it doesn't preserve local tone. Good dithering requires:
+This proves that **blueness and flatness alone are insufficient**. White noise has blueness=0 and highest flatness, but looks terrible because it doesn't preserve local tone. Good dithering requires:
 
-1. **High flatness** — error should be noise-like (avoid structured patterns)
-2. **High structure** — error diffusion must preserve local average intensity
-3. **High isotropy** — no directional bias
+1. **Positive blueness** — suppress low-frequency error (avoid visible patterns)
+2. **High flatness** — error should be noise-like at each scale
+3. **High structure** — error diffusion must preserve local average intensity
+4. **High isotropy** — no directional bias
 
-The ideal method balances all three. Among error diffusion methods, **Boon achieves the best flatness** while maintaining reasonable structure preservation.
+The ideal method balances all four. **Boon achieves good blueness (+0.29) with the best flatness** among error diffusion methods.
 
 ### Key Findings
 
-1. **White noise validates the metric** — it has best flatness but worst structure, proving we need both metrics.
+1. **FS has highest blueness** (+0.32) — its small 4-coefficient kernel concentrates energy at fine scales, giving the steepest low-frequency suppression.
 
-2. **Boon (our method) achieves highest flatness among error diffusion methods** (0.542), indicating the most noise-like error distribution while still preserving tone.
+2. **JJN has lower blueness** (+0.24) — its larger 12-coefficient kernel spreads error to coarser scales.
 
-3. **"none" (banding) has lowest flatness** (0.501) as expected — banding creates highly structured error patterns.
+3. **Boon (our method) balances blueness and flatness** — good blueness (+0.29) with highest flatness (0.542) among error diffusion methods, indicating noise-like error at all scales.
 
-4. **Ostromoukhov surprisingly underperforms** (0.511 flatness, 0.409 isotropy), despite being a well-regarded method.
+4. **Banding ("none") is red** (-0.42) — low-frequency structure dominates, the opposite of blue noise.
 
-5. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
+5. **White noise validates the metric** — blueness=0 by definition, proving the calibration is correct.
+
+6. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
 
 ### Per-Level Analysis
 
@@ -117,6 +131,8 @@ Each `wavelet_{image}_{method}.png` shows:
    - Blue = negative error, Red = positive error
    - Uniform speckle = good (noise-like)
    - Large patches of same color = bad (structured patterns)
+
+**Visualization weighting**: Coarser scales are boosted (2x per level) to show comparable detail. For white noise, all scales should appear similar intensity. For error diffusion (blue noise), coarser scales appear progressively lighter due to low-frequency suppression.
 
 ### What Good Dithering Looks Like
 

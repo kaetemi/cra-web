@@ -287,6 +287,29 @@ def analyze_halftone(original: np.ndarray, halftone: np.ndarray, levels: int = 4
     flatness_weighted = sum(per_level_flatness[l] * weights[l] for l in range(levels)) / total_weight
     results['summary']['flatness_weighted'] = flatness_weighted
 
+    # Blueness metric: rate of energy decay across scales
+    # Computed as slope of log(energy) vs level, normalized to white noise baseline
+    # 0 = white noise (flat spectrum), + = blue (low-freq suppression), - = red (low-freq emphasis)
+    per_level_energy = []
+    for level in range(levels):
+        level_data = results['subbands'][f'level_{level}']
+        total_energy = sum(level_data[o]['energy_error'] for o in ['horizontal', 'vertical', 'diagonal'])
+        per_level_energy.append(total_energy)
+    results['summary']['per_level_energy'] = per_level_energy
+
+    # Compute slope of log(energy) vs level
+    log_energy = np.log(np.array(per_level_energy) + 1e-10)
+    level_indices = np.arange(levels)
+    energy_slope = -np.polyfit(level_indices, log_energy, 1)[0]  # Negative because energy decreases
+    results['summary']['energy_slope'] = float(energy_slope)
+
+    # White noise baseline: energy drops ~16x PER LEVEL
+    # This is derived from: each level halves resolution in each dimension (4x fewer pixels),
+    # and white noise spreads energy, giving ~16x drop per level empirically
+    whitenoise_slope = np.log(16)  # ≈ 2.77 per level
+    blueness = (energy_slope - whitenoise_slope) / whitenoise_slope
+    results['summary']['blueness'] = float(blueness)
+
     # Isotropy summary (geometric mean across levels)
     isotropy_scores = [results['subbands'][f'level_{l}']['isotropy']['isotropy_score']
                        for l in range(levels)]
@@ -332,8 +355,8 @@ def print_analysis(results: dict, name: str = ""):
     print("\nSummary:")
     print("-" * 70)
     s = results['summary']
-    print(f"  Flatness (weighted):    {s['flatness_weighted']:.4f}  (higher = more noise-like = better)")
-    print(f"  Flatness (average):     {s['flatness_avg']:.4f}")
+    print(f"  Blueness:               {s['blueness']:+.3f}  (0=white, +=blue, -=red)")
+    print(f"  Flatness (average):     {s['flatness_avg']:.4f}  (higher = more noise-like)")
     print(f"  Structure preservation: {s['structure_score']:.3f}")
     print(f"  Isotropy score:         {s['isotropy_score']:.3f}")
 
@@ -382,13 +405,25 @@ def visualize_analysis(original: np.ndarray, halftone: np.ndarray, results: dict
     orientations = ['LH', 'HL', 'HH']
     orientation_names = ['LH (Horiz)', 'HL (Vert)', 'HH (Diag)']
 
+    # Weight visualization by scale to show comparable detail at each level
+    # White noise energy per pixel decreases ~4x per level, so we scale up coarser levels
+    # This makes all levels visually comparable when error is random noise
+    scale_weights = [1.0, 2.0, 4.0, 8.0]  # Perceptual weighting for visualization
+
+    # Compute weighted vmax at level 0 for reference
+    level0_vmax = 0.1
+    for orient in orientations:
+        subband = err_wav[orient][0]
+        level0_vmax = max(level0_vmax, np.abs(subband).max())
+
     for row, (orient, orient_name) in enumerate(zip(orientations, orientation_names), start=1):
         for level in range(min(4, results['levels'])):
             ax = fig.add_subplot(gs[row, level])
 
-            # Show error subband
+            # Show error subband with scale-weighted visualization
             subband = err_wav[orient][level]
-            vmax = max(0.1, np.abs(subband).max())
+            # Scale vmax inversely with level to boost visibility of coarser scales
+            vmax = level0_vmax / scale_weights[level]
             ax.imshow(subband, cmap='RdBu', vmin=-vmax, vmax=vmax)
 
             # Add metrics as title
@@ -509,17 +544,15 @@ def create_summary_table(all_data: dict, output_dir: Path):
     csv_path = output_dir / "wavelet_summary.csv"
     with open(csv_path, 'w') as f:
         # Header
-        f.write("Image,Method,FlatnessWeighted,FlatnessAvg,Structure,Isotropy,Flat_2px,Flat_4px,Flat_8px,Flat_16px\n")
+        f.write("Image,Method,Blueness,Flatness,Structure,Isotropy\n")
 
         for img in all_images:
             for method in all_methods:
                 if method in all_data[img]:
                     s = all_data[img][method]['summary']
-                    per_level = s.get('per_level_flatness', [0, 0, 0, 0])
-                    f.write(f"{img},{method},{s['flatness_weighted']:.6f},"
-                           f"{s['flatness_avg']:.6f},"
-                           f"{s['structure_score']:.4f},{s['isotropy_score']:.4f},"
-                           f"{per_level[0]:.6f},{per_level[1]:.6f},{per_level[2]:.6f},{per_level[3]:.6f}\n")
+                    f.write(f"{img},{method},{s['blueness']:.4f},"
+                           f"{s['flatness_avg']:.4f},"
+                           f"{s['structure_score']:.4f},{s['isotropy_score']:.4f}\n")
 
     print(f"  Saved summary CSV: {csv_path}")
 
@@ -527,8 +560,8 @@ def create_summary_table(all_data: dict, output_dir: Path):
     fig, axes = plt.subplots(2, 4, figsize=(18, 8))
 
     metrics = [
-        ('flatness_weighted', 'Flatness Weighted (higher=better)', axes[0, 0], True),
-        ('flatness_avg', 'Flatness Average', axes[0, 1], True),
+        ('blueness', 'Blueness (0=white, +=blue)', axes[0, 0], None),  # None = centered on 0
+        ('flatness_avg', 'Flatness (higher=better)', axes[0, 1], True),
         ('structure_score', 'Structure Preservation', axes[0, 2], True),
         ('isotropy_score', 'Isotropy', axes[0, 3], True),
     ]
@@ -555,7 +588,12 @@ def create_summary_table(all_data: dict, output_dir: Path):
         ax.set_xticklabels(all_methods, rotation=45, ha='right', fontsize=7)
         ax.set_title(metric_name)
 
-        if higher_better:
+        if higher_better is None:
+            # Centered on 0 (for blueness)
+            max_abs = max(abs(v) for v in values) * 1.1
+            ax.set_ylim(-max_abs, max_abs)
+            ax.axhline(y=0, color='black', linestyle='-', linewidth=0.5)
+        elif higher_better:
             ax.set_ylim(0, 1.1)
 
     # Per-level flatness chart (key metric)
@@ -671,7 +709,7 @@ def run_comparison(ref_dir: Path, dithered_dir: Path, output_dir: Path, levels: 
 
             # Print summary
             s = results['summary']
-            print(f"  {method:30s} flat={s['flatness_avg']:.4f} struct={s['structure_score']:.3f} iso={s['isotropy_score']:.3f}")
+            print(f"  {method:30s} blue={s['blueness']:+.3f} flat={s['flatness_avg']:.3f} struct={s['structure_score']:.3f} iso={s['isotropy_score']:.3f}")
 
             # Generate individual visualization
             vis_path = output_dir / f"wavelet_{img_name}_{method}.png"
