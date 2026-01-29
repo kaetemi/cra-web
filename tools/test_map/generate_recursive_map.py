@@ -20,8 +20,22 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+try:
+    from numba import njit
+except ImportError:
+    def njit(*args, **kwargs):
+        """No-op decorator when numba is not installed."""
+        if len(args) == 1 and callable(args[0]):
+            return args[0]
+        def wrapper(func):
+            return func
+        return wrapper
 
-def lowbias32(x: np.uint32) -> np.uint32:
+TPDF_AMPLITUDE = 64.0 / 255.0
+
+
+@njit(cache=True)
+def lowbias32(x):
     """Lowbias32 hash - improved version with bias 0.107."""
     x = np.uint32(x)
     x ^= x >> np.uint32(16)
@@ -32,7 +46,8 @@ def lowbias32(x: np.uint32) -> np.uint32:
     return x
 
 
-def triple32(x: np.uint32) -> np.uint32:
+@njit(cache=True)
+def triple32(x):
     """Triple32 hash function."""
     x = np.uint32(x)
     x ^= x >> np.uint32(17)
@@ -52,6 +67,7 @@ def triple32(x: np.uint32) -> np.uint32:
 REACH_1ST = 2   # JJN kernel radius
 
 
+@njit(cache=True)
 def apply_fs_ltr(buf, bx, y, err):
     buf[y, bx + 1] += err * (7.0 / 16.0)
     buf[y + 1, bx - 1] += err * (3.0 / 16.0)
@@ -59,6 +75,7 @@ def apply_fs_ltr(buf, bx, y, err):
     buf[y + 1, bx + 1] += err * (1.0 / 16.0)
 
 
+@njit(cache=True)
 def apply_fs_rtl(buf, bx, y, err):
     buf[y, bx - 1] += err * (7.0 / 16.0)
     buf[y + 1, bx + 1] += err * (3.0 / 16.0)
@@ -66,6 +83,7 @@ def apply_fs_rtl(buf, bx, y, err):
     buf[y + 1, bx - 1] += err * (1.0 / 16.0)
 
 
+@njit(cache=True)
 def apply_jjn_ltr(buf, bx, y, err):
     buf[y, bx + 1] += err * (7.0 / 48.0)
     buf[y, bx + 2] += err * (5.0 / 48.0)
@@ -81,6 +99,7 @@ def apply_jjn_ltr(buf, bx, y, err):
     buf[y + 2, bx + 2] += err * (1.0 / 48.0)
 
 
+@njit(cache=True)
 def apply_jjn_rtl(buf, bx, y, err):
     buf[y, bx - 1] += err * (7.0 / 48.0)
     buf[y, bx - 2] += err * (5.0 / 48.0)
@@ -96,6 +115,7 @@ def apply_jjn_rtl(buf, bx, y, err):
     buf[y + 2, bx - 2] += err * (1.0 / 48.0)
 
 
+@njit(cache=True)
 def apply_error_1st(buf, bx, y, err, use_jjn, is_rtl):
     if use_jjn:
         if is_rtl:
@@ -149,6 +169,7 @@ REACH_2ND = 4   # JJN² kernel radius (dx ±4, dy 0..4)
 SEED_2ND = 16   # Seed area width (4x reach for warm-up with negative weights)
 
 
+@njit(cache=True)
 def apply_fs2_ltr(buf, bx, y, err):
     """FS second-order kernel (2H_fs - H_fs²), LTR. Reach: dx -2..+2, dy 0..2."""
     buf[y, bx + 1] += err * (224.0 / 256.0)
@@ -164,6 +185,7 @@ def apply_fs2_ltr(buf, bx, y, err):
     buf[y + 2, bx + 2] += err * (-1.0 / 256.0)
 
 
+@njit(cache=True)
 def apply_jjn2_ltr(buf, bx, y, err):
     """JJN second-order kernel (2H_jjn - H_jjn²), LTR. Reach: dx -4..+4, dy 0..4."""
     # Row 0
@@ -211,6 +233,7 @@ def apply_jjn2_ltr(buf, bx, y, err):
     buf[y + 4, bx + 4] += err * (-1.0 / 2304.0)
 
 
+@njit(cache=True)
 def apply_error_2nd(buf, bx, y, err, use_jjn):
     """Apply second-order (2H - H²) kernel (precomputed, assumes uniform kernel). LTR only."""
     if use_jjn:
@@ -257,7 +280,8 @@ def create_seeded_buffer_2nd(input_image):
     return buf
 
 
-def quantize(value: float, bits: int) -> float:
+@njit(cache=True)
+def quantize(value, bits):
     """
     Quantize a value to N-bit levels.
 
@@ -298,7 +322,8 @@ def inverse_transform_image(img, swap_xy, mirror_x, mirror_y):
     return np.ascontiguousarray(result)
 
 
-def tpdf_threshold(x, y, hashed_seed, amplitude=64.0/255.0):
+@njit(cache=True)
+def tpdf_threshold(x, y, hashed_seed, amplitude):
     """TPDF-perturbed threshold using two hashes for triangular distribution.
 
     Matches the Rust implementation: two independent hashes summed for
@@ -583,19 +608,51 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
     print(f"Saved: {out_path}")
 
 
-def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
-    """First-order mixed FS/JJN with serpentine scanning."""
-    height, width = input_image.shape
-    r = REACH_1ST
-    s = r  # seed = reach for first-order
-    buf = create_seeded_buffer_1st(input_image)
-    hashed_seed = triple32(np.uint32(seed))
-    use_tpdf = tpdf and bits == 1
-    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
-    fifo = deque()
+@njit(cache=True)
+def _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error):
+    """JIT inner loop for first-order dither (delay=0 only)."""
+    bx_start = r
+    process_height = r + height
+    process_width = r + width + r
 
-    total_left = r * 2
-    total_top = r
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+
+        if is_rtl:
+            px_range = range(process_width - 1, -1, -1)
+        else:
+            px_range = range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+            old_val = buf[y, bx]
+
+            img_x = px - r
+            img_y = y - r
+            in_image = (0 <= img_x < width) and (0 <= img_y < height)
+
+            if return_error and in_image:
+                error_map[img_y, img_x] = old_val
+
+            if use_tpdf and in_image:
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed, TPDF_AMPLITUDE)
+                new_val = 1.0 if old_val > thresh else 0.0
+            else:
+                new_val = quantize(old_val, bits)
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            apply_error_1st(buf, bx, y, err, use_jjn, is_rtl)
+
+
+def _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error, delay):
+    """Python fallback loop for first-order dither with FIFO delay support."""
+    fifo = deque()
     bx_start = r
     process_height = r + height
     process_width = r + width + r
@@ -616,7 +673,7 @@ def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
                 error_map[img_y, img_x] = old_val
 
             if use_tpdf and in_image:
-                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed, TPDF_AMPLITUDE)
                 new_val = 1.0 if old_val > thresh else 0.0
             else:
                 new_val = quantize(old_val, bits)
@@ -638,25 +695,33 @@ def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
         dbx, dy, derr, d_jjn, d_rtl = fifo.popleft()
         apply_error_1st(buf, dbx, dy, derr, d_jjn, d_rtl)
 
+
+def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
+    """First-order mixed FS/JJN with serpentine scanning."""
+    height, width = input_image.shape
+    r = REACH_1ST
+    buf = create_seeded_buffer_1st(input_image)
+    hashed_seed = triple32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64)
+
+    total_left = r * 2
+    total_top = r
+
+    if delay == 0:
+        _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error)
+    else:
+        _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error, delay)
+
     output = buf[total_top:total_top + height, total_left:total_left + width].copy()
     if return_error:
         return output, error_map
     return output
 
 
-def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
-    """2H-H² kernel with mixed FS²/JJN², always LTR."""
-    height, width = input_image.shape
-    r = REACH_2ND
-    s = SEED_2ND
-    buf = create_seeded_buffer_2nd(input_image)
-    hashed_seed = triple32(np.uint32(seed))
-    use_tpdf = tpdf and bits == 1
-    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
-    fifo = deque()
-
-    total_left = r + s
-    total_top = s
+@njit(cache=True)
+def _dither_2hh2_jit_loop(buf, error_map, height, width, r, s, hashed_seed, bits, use_tpdf, return_error):
+    """JIT inner loop for 2H-H² dither (delay=0 only, LTR only)."""
     bx_start = r
     process_height = s + height
     process_width = s + width + s
@@ -674,7 +739,42 @@ def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
                 error_map[img_y, img_x] = old_val
 
             if use_tpdf and in_image:
-                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed, TPDF_AMPLITUDE)
+                new_val = 1.0 if old_val > thresh else 0.0
+            else:
+                new_val = quantize(old_val, bits)
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            apply_error_2nd(buf, bx, y, err, use_jjn)
+
+
+def _dither_2hh2_python_loop(buf, error_map, height, width, r, s, hashed_seed, bits, use_tpdf, return_error, delay):
+    """Python fallback loop for 2H-H² dither with FIFO delay support."""
+    fifo = deque()
+    bx_start = r
+    process_height = s + height
+    process_width = s + width + s
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+            old_val = buf[y, bx]
+
+            img_x = px - s
+            img_y = y - s
+            in_image = (0 <= img_x < width) and (0 <= img_y < height)
+
+            if return_error and in_image:
+                error_map[img_y, img_x] = old_val
+
+            if use_tpdf and in_image:
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed, TPDF_AMPLITUDE)
                 new_val = 1.0 if old_val > thresh else 0.0
             else:
                 new_val = quantize(old_val, bits)
@@ -696,34 +796,45 @@ def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
         dbx, dy, derr, d_jjn = fifo.popleft()
         apply_error_2nd(buf, dbx, dy, derr, d_jjn)
 
+
+def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
+    """2H-H² kernel with mixed FS²/JJN², always LTR."""
+    height, width = input_image.shape
+    r = REACH_2ND
+    s = SEED_2ND
+    buf = create_seeded_buffer_2nd(input_image)
+    hashed_seed = triple32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64)
+
+    total_left = r + s
+    total_top = s
+
+    if delay == 0:
+        _dither_2hh2_jit_loop(buf, error_map, height, width, r, s, hashed_seed, bits, use_tpdf, return_error)
+    else:
+        _dither_2hh2_python_loop(buf, error_map, height, width, r, s, hashed_seed, bits, use_tpdf, return_error, delay)
+
     output = buf[total_top:total_top + height, total_left:total_left + width].copy()
     if return_error:
         return output, error_map
     return output
 
 
-def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
-    """Dual-integrator: two coupled error buffers with first-order kernels, serpentine."""
-    height, width = input_image.shape
-    r = REACH_1ST
-    s = r
-
-    buf1 = create_seeded_buffer_1st(input_image)
-    buf2 = np.zeros_like(buf1)
-
-    hashed_seed = triple32(np.uint32(seed))
-    use_tpdf = tpdf and bits == 1
-    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
-
-    total_left = r * 2
-    total_top = r
+@njit(cache=True)
+def _dither_dual_integrator_jit_loop(buf1, buf2, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error):
+    """JIT inner loop for dual-integrator dither."""
     bx_start = r
     process_height = r + height
     process_width = r + width + r
 
     for y in range(process_height):
         is_rtl = y % 2 == 1
-        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        if is_rtl:
+            px_range = range(process_width - 1, -1, -1)
+        else:
+            px_range = range(process_width)
 
         for px in px_range:
             bx = bx_start + px
@@ -739,10 +850,13 @@ def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
                 error_map[img_y, img_x] = int2_val
 
             if use_tpdf and in_image:
-                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed, TPDF_AMPLITUDE)
                 new_val = 1.0 if int2_val > thresh else 0.0
             else:
-                new_val = 1.0 if int2_val > 0.5 else 0.0 if bits == 1 else quantize(int2_val, bits)
+                if bits == 1:
+                    new_val = 1.0 if int2_val > 0.5 else 0.0
+                else:
+                    new_val = quantize(int2_val, bits)
             buf1[y, bx] = new_val
 
             err1 = int1_val - new_val
@@ -756,6 +870,24 @@ def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
 
             apply_error_1st(buf1, bx, y, err1, use_jjn_1, is_rtl)
             apply_error_1st(buf2, bx, y, err2, use_jjn_2, is_rtl)
+
+
+def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
+    """Dual-integrator: two coupled error buffers with first-order kernels, serpentine."""
+    height, width = input_image.shape
+    r = REACH_1ST
+
+    buf1 = create_seeded_buffer_1st(input_image)
+    buf2 = np.zeros_like(buf1)
+
+    hashed_seed = triple32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64)
+
+    total_left = r * 2
+    total_top = r
+
+    _dither_dual_integrator_jit_loop(buf1, buf2, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error)
 
     output = buf1[total_top:total_top + height, total_left:total_left + width].copy()
     if return_error:

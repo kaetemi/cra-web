@@ -11,8 +11,11 @@ Tools for generating test images and analyzing dithering algorithm quality.
 
 ```bash
 source /root/venv/bin/activate
-pip install numpy pillow matplotlib
+pip install numpy pillow matplotlib numba
 ```
+
+Note: `numba` is optional but recommended for `generate_recursive_map.py` (large speedup
+for `--recursive-test`). The scripts work without it.
 
 ## Scripts
 
