@@ -165,28 +165,63 @@ def apply_error(buf, bx, y, err, use_jjn, is_rtl):
 # Reverse kernel lookup (for second-order prediction, padded buffer coords)
 # ============================================================================
 
-def predicted_incoming_fs(err_history, bx, y, is_rtl):
-    """Estimate error diffused into (bx, y) using FS reverse kernel.
+# Weight tables: offset (dx, dy) from source to target → weight
+# LTR convention; for RTL, negate dx before lookup
+_FS_W = {
+    (1, 0): 7.0/16.0,
+    (-1, 1): 3.0/16.0, (0, 1): 5.0/16.0, (1, 1): 1.0/16.0,
+}
+_JJN_W = {
+    (1, 0): 7.0/48.0, (2, 0): 5.0/48.0,
+    (-2, 1): 3.0/48.0, (-1, 1): 5.0/48.0, (0, 1): 7.0/48.0, (1, 1): 5.0/48.0, (2, 1): 3.0/48.0,
+    (-2, 2): 1.0/48.0, (-1, 2): 3.0/48.0, (0, 2): 5.0/48.0, (1, 2): 3.0/48.0, (2, 2): 1.0/48.0,
+}
 
-    Works on padded buffer coordinates. Only needs y > 0 check since
-    at y=0 (first seeding row) there's no row above.
+
+def _src_weight(use_jjn, src_is_rtl, dx, dy):
+    """Weight that a source pixel assigns to a target at offset (dx, dy)."""
+    if src_is_rtl:
+        dx = -dx
+    return (_JJN_W if use_jjn else _FS_W).get((dx, dy), 0.0)
+
+
+def predicted_incoming_matched(err_history, kernel_history, bx, y, is_rtl):
+    """Estimate error diffused into (bx, y) using each source's actual kernel.
+
+    For each already-processed neighbor that could have diffused error here,
+    looks up what kernel that neighbor used and applies the corresponding weight.
     """
     pred = 0.0
 
+    # Same row: already-processed pixels
     if is_rtl:
-        # Previous pixel is to the right (already processed on RTL row)
-        pred += (7.0 / 16.0) * err_history[y, bx + 1]
-        if y > 0:
-            pred += (3.0 / 16.0) * err_history[y - 1, bx + 1]
-            pred += (5.0 / 16.0) * err_history[y - 1, bx]
-            pred += (1.0 / 16.0) * err_history[y - 1, bx - 1]
+        same_row = [(bx + 1, y), (bx + 2, y)]
     else:
-        # Previous pixel is to the left (already processed on LTR row)
-        pred += (7.0 / 16.0) * err_history[y, bx - 1]
-        if y > 0:
-            pred += (3.0 / 16.0) * err_history[y - 1, bx - 1]
-            pred += (5.0 / 16.0) * err_history[y - 1, bx]
-            pred += (1.0 / 16.0) * err_history[y - 1, bx + 1]
+        same_row = [(bx - 1, y), (bx - 2, y)]
+
+    for (sx, sy) in same_row:
+        dx = bx - sx
+        w = _src_weight(kernel_history[sy, sx], is_rtl, dx, 0)
+        if w > 0.0:
+            pred += w * err_history[sy, sx]
+
+    # Row y-1 (opposite scan direction due to serpentine)
+    if y > 0:
+        prev_rtl = not is_rtl
+        for sx in range(bx - 2, bx + 3):
+            dx = bx - sx
+            w = _src_weight(kernel_history[y - 1, sx], prev_rtl, dx, 1)
+            if w > 0.0:
+                pred += w * err_history[y - 1, sx]
+
+    # Row y-2 (same scan direction, only JJN reaches 2 rows)
+    if y > 1:
+        prev2_rtl = is_rtl
+        for sx in range(bx - 2, bx + 3):
+            dx = bx - sx
+            w = _src_weight(kernel_history[y - 2, sx], prev2_rtl, dx, 2)
+            if w > 0.0:
+                pred += w * err_history[y - 2, sx]
 
     return pred
 
@@ -227,17 +262,18 @@ def dither_first_order(input_image, seed=0):
 
 
 def dither_second_order(input_image, seed=0):
-    """Second-order mixed FS/JJN error diffusion with edge seeding (+12 dB/oct target).
+    """Second-order mixed FS/JJN error diffusion with matched reverse prediction.
 
-    Diffuses shaped error: d = 2*err - C*err (reverse FS kernel on raw errors).
+    Diffuses shaped error: d = 2*err - C*err, where the reverse prediction C
+    uses each source pixel's actual kernel choice (FS or JJN).
     NTF = (1 - C(z))^2 for +12 dB/octave noise shaping.
     """
     height, width = input_image.shape
     buf = create_seeded_buffer(input_image)
 
-    # err_history in padded buffer dimensions
     buf_h, buf_w = buf.shape
     err_history = np.zeros((buf_h, buf_w), dtype=np.float64)
+    kernel_history = np.zeros((buf_h, buf_w), dtype=np.bool_)
 
     hashed_seed = lowbias32(np.uint32(seed))
 
@@ -256,11 +292,11 @@ def dither_second_order(input_image, seed=0):
             buf[y, bx] = new_val
             err = old_val - new_val
 
-            # Second-order: shaped_err = 2*err - predicted_incoming
-            predicted = predicted_incoming_fs(err_history, bx, y, is_rtl)
+            # Second-order: predict using each source's actual kernel
+            predicted = predicted_incoming_matched(err_history, kernel_history, bx, y, is_rtl)
             shaped_err = 2.0 * err - predicted
 
-            # Store raw error for future reverse lookups
+            # Store raw error and kernel choice for future reverse lookups
             err_history[y, bx] = err
 
             # Map to image coordinates for hash (saturating_sub)
@@ -268,6 +304,8 @@ def dither_second_order(input_image, seed=0):
             img_y = max(y - REACH, 0)
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
+
+            kernel_history[y, bx] = use_jjn
             apply_error(buf, bx, y, shaped_err, use_jjn, is_rtl)
 
     return extract_result(buf, width, height)
@@ -284,7 +322,6 @@ def dither_dual_integrator(input_image, seed=0):
         err2 = int2 - output → diffuse to buf2
 
     NTF = (1 - C(z))² for +12 dB/octave noise shaping.
-    Analogous to 1D sigma_delta_2nd with two series integrators.
     """
     height, width = input_image.shape
 
@@ -323,15 +360,16 @@ def dither_dual_integrator(input_image, seed=0):
             # Second integrator error
             err2 = int2_val - new_val
 
-            # Kernel selection
+            # Kernel selection — different bits for each integrator
             img_x = max(px - REACH, 0)
             img_y = max(y - REACH, 0)
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
-            use_jjn = (coord_hash & 1) == 1
+            use_jjn_1 = (coord_hash & 1) == 1
+            use_jjn_2 = (coord_hash & 2) == 2
 
             # Diffuse errors to respective buffers
-            apply_error(buf1, bx, y, err1, use_jjn, is_rtl)
-            apply_error(buf2, bx, y, err2, use_jjn, is_rtl)
+            apply_error(buf1, bx, y, err1, use_jjn_1, is_rtl)
+            apply_error(buf2, bx, y, err2, use_jjn_2, is_rtl)
 
     return extract_result(buf1, width, height)
 
@@ -410,7 +448,7 @@ def analyze_gray(gray_val, output_dir, size=256, seed=0):
 
     methods = [
         ('1st order (mixed FS/JJN)', dither_first_order),
-        ('2nd order (mixed FS/JJN)', dither_second_order),
+        ('2nd order (matched)', dither_second_order),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -484,7 +522,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
 
     methods = [
         ('1st order', dither_first_order),
-        ('2nd order', dither_second_order),
+        ('2nd order (matched)', dither_second_order),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -524,7 +562,7 @@ def process_image(image_path, output_dir, seed=0):
     stem = Path(image_path).stem
 
     # Standard methods
-    for label, fn in [('1st_order', dither_first_order), ('2nd_order', dither_second_order), ('dual_int', dither_dual_integrator)]:
+    for label, fn in [('1st_order', dither_first_order), ('2nd_order_matched', dither_second_order), ('dual_int', dither_dual_integrator)]:
         result = fn(input_image, seed=seed)
         out_img = (result * 255).astype(np.uint8)
         path = output_dir / f"{stem}_{label}.png"
