@@ -830,15 +830,6 @@
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
                     <option value="4" selected>* Our method (FS/JJN/lowbias32, Standard)</option>
                     <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
-                    <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
-                    <option value="8">Ostromoukhov (Standard)</option>
-                    <option value="9">Ostromoukhov (Serpentine)</option>
-                    <option value="10">⚠ Zhou-Fang (Standard)</option>
-                    <option value="11">Zhou-Fang (Serpentine)</option>
-                    <option value="12">⚠ Ulichney Threshold ±30% (Standard)</option>
-                    <option value="13">Ulichney Threshold ±30% (Serpentine)</option>
-                    <option value="14">⚠ Ulichney Weight ±50% (Standard)</option>
-                    <option value="15">Ulichney Weight ±50% (Serpentine)</option>
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
                     <option value="18">Our method (2nd Order Kernel)</option>
@@ -857,15 +848,6 @@
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
                     <option value="4">* Our method (FS/JJN/lowbias32, Standard)</option>
                     <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
-                    <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
-                    <option value="8">Ostromoukhov (Standard)</option>
-                    <option value="9">Ostromoukhov (Serpentine)</option>
-                    <option value="10">⚠ Zhou-Fang (Standard)</option>
-                    <option value="11">Zhou-Fang (Serpentine)</option>
-                    <option value="12">⚠ Ulichney Threshold ±30% (Standard)</option>
-                    <option value="13">Ulichney Threshold ±30% (Serpentine)</option>
-                    <option value="14">⚠ Ulichney Weight ±50% (Standard)</option>
-                    <option value="15">Ulichney Weight ±50% (Serpentine)</option>
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
                     <option value="18">Our method (2nd Order Kernel)</option>
@@ -2082,34 +2064,12 @@
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const outputMode = document.getElementById('output-mode').value;
 
-            // Modes 12-17 are 1-bit only (Ulichney threshold, Ulichney weight, FS-TPDF)
-            const is1BitOnlyMode = mode >= 12 && mode <= 17;
-            // Modes 10-11 are Zhou-Fang (falls back to Ostromoukhov in colorspace-aware)
-            const isZhouFang = mode === 10 || mode === 11;
-
-            // Check if output is 1-bit
-            let is1BitOutput = false;
-            if (outputMode === 'grayscale') {
-                const bitsGray = parseInt(document.getElementById('bits-gray').value);
-                is1BitOutput = bitsGray === 1;
-            } else if (outputMode === 'rgb') {
-                const bitsR = parseInt(document.getElementById('bits-r').value);
-                const bitsG = parseInt(document.getElementById('bits-g').value);
-                const bitsB = parseInt(document.getElementById('bits-b').value);
-                is1BitOutput = bitsR === 1 && bitsG === 1 && bitsB === 1;
-            }
             // Paletted modes are always colorspace-aware
             const isPaletted = outputMode.startsWith('palette-');
 
             const warningEl = document.getElementById('dither-mode-warning');
 
-            if (is1BitOnlyMode && (isPerceptual || !is1BitOutput || isPaletted)) {
-                warningEl.textContent = '\u26A0 This mode is designed for 1-bit output without colorspace-aware dithering. With current settings, it will fall back to standard Floyd-Steinberg.';
-                warningEl.classList.remove('hidden');
-            } else if (isZhouFang && (isPerceptual || isPaletted)) {
-                warningEl.textContent = '\u26A0 Zhou-Fang threshold modulation is not available in colorspace-aware mode. It will fall back to Ostromoukhov.';
-                warningEl.classList.remove('hidden');
-            } else if (mode === 18 && (isPerceptual || isPaletted)) {
+            if (mode === 18 && (isPerceptual || isPaletted)) {
                 warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
                 warningEl.classList.remove('hidden');
             } else {
@@ -2121,10 +2081,6 @@
         document.getElementById('dither-mode').addEventListener('change', updateDitherModeWarning);
         document.getElementById('perceptual-toggle').addEventListener('change', updateDitherModeWarning);
         document.getElementById('output-mode').addEventListener('change', updateDitherModeWarning);
-        document.getElementById('bits-gray').addEventListener('change', updateDitherModeWarning);
-        document.getElementById('bits-r').addEventListener('change', updateDitherModeWarning);
-        document.getElementById('bits-g').addEventListener('change', updateDitherModeWarning);
-        document.getElementById('bits-b').addEventListener('change', updateDitherModeWarning);
 
         // Drag and drop support
         const uploadBox = document.getElementById('input-upload');

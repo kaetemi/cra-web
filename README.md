@@ -190,11 +190,7 @@ Dithering:
       --output-dither <MODE>       Output dithering method [default: boon-standard]
                                    [values: fs-standard, fs-serpentine, jjn-standard,
                                     jjn-serpentine, boon-standard, boon-serpentine,
-                                    boon-random, ostro-standard, ostro-serpentine,
-                                    zhou-fang-standard, zhou-fang-serpentine,
-                                    ulichney-standard, ulichney-serpentine,
-                                    ulichney-weight-standard, ulichney-weight-serpentine,
-                                    fs-tpdf-standard, fs-tpdf-serpentine, none]
+                                    fs-tpdf-standard, fs-tpdf-serpentine, boon-h2, none]
       --output-alpha-dither <MODE> Alpha channel dithering method [default: same as --output-dither]
       --output-distance-space      Perceptual space for output dithering
                                    [default: oklab-lr for RGB, lab-cie94 for grayscale]

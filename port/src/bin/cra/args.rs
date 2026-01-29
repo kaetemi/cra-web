@@ -50,27 +50,31 @@ pub enum DitherMethod {
     #[value(name = "boon-serpentine", alias = "mixed-serpentine")]
     BoonSerpentine,
     /// Boon (Our method): randomly selects kernel AND scan direction per-row
-    #[value(name = "boon-random", alias = "mixed-random")]
+    #[value(name = "boon-random", alias = "mixed-random", hide = true)]
     BoonRandom,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, standard scanning
+    #[value(hide = true)]
     OstroStandard,
     /// Ostromoukhov: variable-coefficient kernel based on input intensity, serpentine scanning
+    #[value(hide = true)]
     OstroSerpentine,
     /// Zhou-Fang: variable-coefficient kernel with threshold modulation, standard scanning
+    #[value(hide = true)]
     ZhouFangStandard,
     /// Zhou-Fang: variable-coefficient kernel with threshold modulation, serpentine scanning
+    #[value(hide = true)]
     ZhouFangSerpentine,
     /// Ulichney threshold perturbation: FS with ±30% threshold noise, standard scanning (1-bit only)
-    #[value(name = "ulichney-standard")]
+    #[value(name = "ulichney-standard", hide = true)]
     UlichneyStandard,
     /// Ulichney threshold perturbation: FS with ±30% threshold noise, serpentine scanning (1-bit only)
-    #[value(name = "ulichney-serpentine")]
+    #[value(name = "ulichney-serpentine", hide = true)]
     UlichneySerpentine,
     /// Ulichney weight perturbation: FS with ±50% paired weight noise, standard scanning (1-bit only)
-    #[value(name = "ulichney-weight-standard")]
+    #[value(name = "ulichney-weight-standard", hide = true)]
     UlichneyWeightStandard,
     /// Ulichney weight perturbation: FS with ±50% paired weight noise, serpentine scanning (1-bit only)
-    #[value(name = "ulichney-weight-serpentine")]
+    #[value(name = "ulichney-weight-serpentine", hide = true)]
     UlichneyWeightSerpentine,
     /// Floyd-Steinberg with TPDF threshold dither, standard scanning (1-bit only)
     #[value(name = "fs-tpdf-standard")]
