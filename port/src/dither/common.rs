@@ -294,6 +294,21 @@ pub fn lowbias32(mut x: u32) -> u32 {
     x
 }
 
+/// Triple32 hash - used for 2nd-order kernel (H2) dithering.
+/// Better avalanche properties than lowbias32 (7 shifts + 3 multiplies vs 5+2).
+/// Reference: https://github.com/skeeto/hash-prospector
+#[inline]
+pub fn triple32(mut x: u32) -> u32 {
+    x ^= x >> 17;
+    x = x.wrapping_mul(0xed5ad4bb);
+    x ^= x >> 11;
+    x = x.wrapping_mul(0xac4c1b51);
+    x ^= x >> 15;
+    x = x.wrapping_mul(0x31848bab);
+    x ^= x >> 14;
+    x
+}
+
 /// Original lowbias32 hash (bias 0.174) - kept for comparison testing.
 /// Reference: https://nullprogram.com/blog/2018/07/31/
 #[inline]

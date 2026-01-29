@@ -12,7 +12,7 @@ pub use super::common::DitherMode;
 
 // Import shared utilities from common
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, lowbias32, lowbias32_old, wang_hash, FloydSteinberg,
+    apply_single_channel_kernel, bit_replicate, lowbias32, lowbias32_old, triple32, wang_hash, FloydSteinberg,
     JarvisJudiceNinke, NoneKernel, Ostromoukhov, SingleChannelKernel,
 };
 
@@ -1379,7 +1379,7 @@ fn mixed_h2_dither_standard(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = lowbias32(seed);
+    let hashed_seed = triple32(seed);
     let reach = H2_REACH;
     let seed_size = H2_SEED;
     let mut buf = create_seeded_buffer_h2(img, width, height);
@@ -1397,7 +1397,7 @@ fn mixed_h2_dither_standard(
             // Use image coordinates for hash (adjusted for seeding offset)
             let img_x = px.wrapping_sub(seed_size) as u16;
             let img_y = y.wrapping_sub(seed_size) as u16;
-            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 == 1;
             apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
@@ -1422,7 +1422,7 @@ fn mixed_h2_dither_serpentine(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = lowbias32(seed);
+    let hashed_seed = triple32(seed);
     let reach = H2_REACH;
     let seed_size = H2_SEED;
     let mut buf = create_seeded_buffer_h2(img, width, height);
@@ -1440,7 +1440,7 @@ fn mixed_h2_dither_serpentine(
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.wrapping_sub(seed_size) as u16;
                 let img_y = y.wrapping_sub(seed_size) as u16;
-                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
@@ -1451,7 +1451,7 @@ fn mixed_h2_dither_serpentine(
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.wrapping_sub(seed_size) as u16;
                 let img_y = y.wrapping_sub(seed_size) as u16;
-                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, false);
             }

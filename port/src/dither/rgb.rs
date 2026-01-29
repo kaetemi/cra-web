@@ -19,7 +19,7 @@ use crate::color_distance::perceptual_distance_sq;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, lowbias32, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
+    linear_rgb_to_perceptual_clamped, triple32, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
 };
 use super::kernels::{apply_h2_kernel_rgb, H2_REACH, H2_SEED};
 
@@ -690,7 +690,7 @@ fn dither_mixed_h2_standard_rgb(
             // Per-channel kernel selection using hash bits
             let img_x = px.wrapping_sub(seed);
             let img_y = y.wrapping_sub(seed);
-            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
         }
         if let Some(ref mut cb) = progress {
@@ -753,7 +753,7 @@ fn dither_mixed_h2_serpentine_rgb(
 
                 let img_x = px.wrapping_sub(seed);
                 let img_y = y.wrapping_sub(seed);
-                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
             }
         } else {
@@ -781,7 +781,7 @@ fn dither_mixed_h2_serpentine_rgb(
 
                 let img_x = px.wrapping_sub(seed);
                 let img_y = y.wrapping_sub(seed);
-                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
             }
         }
@@ -964,7 +964,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
         let mut g_out = vec![0u8; pixels];
         let mut b_out = vec![0u8; pixels];
 
-        let hashed_seed = lowbias32(seed);
+        let hashed_seed = triple32(seed);
 
         if mode == DitherMode::MixedH2Serpentine {
             dither_mixed_h2_serpentine_rgb(
