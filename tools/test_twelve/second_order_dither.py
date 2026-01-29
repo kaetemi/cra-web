@@ -349,6 +349,138 @@ def apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl):
 
 
 # ============================================================================
+# 3H-3H²+H³ kernels (single-buffer approach)
+# NTF = 1 - (3H-3H²+H³) = (1-H)³ → +18 dB/oct target
+# Even wider reach and more negative weights than 2nd order.
+# ============================================================================
+
+def apply_fs3_ltr(buf, bx, y, err):
+    """FS third-order kernel (3H - 3H² + H³), LTR. Reach: dx -3..+3, dy 0..3."""
+    # Row 0
+    buf[y, bx + 1] += err * (5376.0 / 4096.0)
+    buf[y, bx + 2] += err * (-2352.0 / 4096.0)
+    buf[y, bx + 3] += err * (343.0 / 4096.0)
+    # Row 1
+    buf[y + 1, bx - 1] += err * (2304.0 / 4096.0)
+    buf[y + 1, bx] += err * (1824.0 / 4096.0)
+    buf[y + 1, bx + 1] += err * (-2151.0 / 4096.0)
+    buf[y + 1, bx + 2] += err * (63.0 / 4096.0)
+    buf[y + 1, bx + 3] += err * (147.0 / 4096.0)
+    # Row 2
+    buf[y + 2, bx - 2] += err * (-432.0 / 4096.0)
+    buf[y + 2, bx - 1] += err * (-1251.0 / 4096.0)
+    buf[y + 2, bx] += err * (-858.0 / 4096.0)
+    buf[y + 2, bx + 1] += err * (171.0 / 4096.0)
+    buf[y + 2, bx + 2] += err * (162.0 / 4096.0)
+    buf[y + 2, bx + 3] += err * (21.0 / 4096.0)
+    # Row 3
+    buf[y + 3, bx - 3] += err * (27.0 / 4096.0)
+    buf[y + 3, bx - 2] += err * (135.0 / 4096.0)
+    buf[y + 3, bx - 1] += err * (252.0 / 4096.0)
+    buf[y + 3, bx] += err * (215.0 / 4096.0)
+    buf[y + 3, bx + 1] += err * (84.0 / 4096.0)
+    buf[y + 3, bx + 2] += err * (15.0 / 4096.0)
+    buf[y + 3, bx + 3] += err * (1.0 / 4096.0)
+
+
+def apply_jjn3_ltr(buf, bx, y, err):
+    """JJN third-order kernel (3H - 3H² + H³), LTR. Reach: dx -6..+6, dy 0..6."""
+    # Row 0 (dy=0)
+    buf[y, bx + 1] += err * (48384.0 / 110592.0)
+    buf[y, bx + 2] += err * (27504.0 / 110592.0)
+    buf[y, bx + 3] += err * (-9737.0 / 110592.0)
+    buf[y, bx + 4] += err * (-2865.0 / 110592.0)
+    buf[y, bx + 5] += err * (525.0 / 110592.0)
+    buf[y, bx + 6] += err * (125.0 / 110592.0)
+    # Row 1 (dy=1)
+    buf[y + 1, bx - 2] += err * (20736.0 / 110592.0)
+    buf[y + 1, bx - 1] += err * (28512.0 / 110592.0)
+    buf[y + 1, bx] += err * (34425.0 / 110592.0)
+    buf[y + 1, bx + 1] += err * (14613.0 / 110592.0)
+    buf[y + 1, bx + 2] += err * (2880.0 / 110592.0)
+    buf[y + 1, bx + 3] += err * (-10668.0 / 110592.0)
+    buf[y + 1, bx + 4] += err * (-2304.0 / 110592.0)
+    buf[y + 1, bx + 5] += err * (1005.0 / 110592.0)
+    buf[y + 1, bx + 6] += err * (225.0 / 110592.0)
+    # Row 2 (dy=2)
+    buf[y + 2, bx - 4] += err * (-1296.0 / 110592.0)
+    buf[y + 2, bx - 3] += err * (-4131.0 / 110592.0)
+    buf[y + 2, bx - 2] += err * (-1971.0 / 110592.0)
+    buf[y + 2, bx - 1] += err * (6177.0 / 110592.0)
+    buf[y + 2, bx] += err * (13476.0 / 110592.0)
+    buf[y + 2, bx + 1] += err * (-3456.0 / 110592.0)
+    buf[y + 2, bx + 2] += err * (-10689.0 / 110592.0)
+    buf[y + 2, bx + 3] += err * (-6033.0 / 110592.0)
+    buf[y + 2, bx + 4] += err * (51.0 / 110592.0)
+    buf[y + 2, bx + 5] += err * (1074.0 / 110592.0)
+    buf[y + 2, bx + 6] += err * (210.0 / 110592.0)
+    # Row 3 (dy=3)
+    buf[y + 3, bx - 6] += err * (27.0 / 110592.0)
+    buf[y + 3, bx - 5] += err * (135.0 / 110592.0)
+    buf[y + 3, bx - 4] += err * (-450.0 / 110592.0)
+    buf[y + 3, bx - 3] += err * (-3016.0 / 110592.0)
+    buf[y + 3, bx - 2] += err * (-8481.0 / 110592.0)
+    buf[y + 3, bx - 1] += err * (-13296.0 / 110592.0)
+    buf[y + 3, bx] += err * (-14597.0 / 110592.0)
+    buf[y + 3, bx + 1] += err * (-10488.0 / 110592.0)
+    buf[y + 3, bx + 2] += err * (-4509.0 / 110592.0)
+    buf[y + 3, bx + 3] += err * (212.0 / 110592.0)
+    buf[y + 3, bx + 4] += err * (1248.0 / 110592.0)
+    buf[y + 3, bx + 5] += err * (681.0 / 110592.0)
+    buf[y + 3, bx + 6] += err * (117.0 / 110592.0)
+    # Row 4 (dy=4)
+    buf[y + 4, bx - 6] += err * (27.0 / 110592.0)
+    buf[y + 4, bx - 5] += err * (171.0 / 110592.0)
+    buf[y + 4, bx - 4] += err * (462.0 / 110592.0)
+    buf[y + 4, bx - 3] += err * (591.0 / 110592.0)
+    buf[y + 4, bx - 2] += err * (-42.0 / 110592.0)
+    buf[y + 4, bx - 1] += err * (-1149.0 / 110592.0)
+    buf[y + 4, bx] += err * (-1482.0 / 110592.0)
+    buf[y + 4, bx + 1] += err * (-153.0 / 110592.0)
+    buf[y + 4, bx + 2] += err * (1248.0 / 110592.0)
+    buf[y + 4, bx + 3] += err * (1509.0 / 110592.0)
+    buf[y + 4, bx + 4] += err * (873.0 / 110592.0)
+    buf[y + 4, bx + 5] += err * (282.0 / 110592.0)
+    buf[y + 4, bx + 6] += err * (42.0 / 110592.0)
+    # Row 5 (dy=5)
+    buf[y + 5, bx - 6] += err * (9.0 / 110592.0)
+    buf[y + 5, bx - 5] += err * (69.0 / 110592.0)
+    buf[y + 5, bx - 4] += err * (282.0 / 110592.0)
+    buf[y + 5, bx - 3] += err * (750.0 / 110592.0)
+    buf[y + 5, bx - 2] += err * (1443.0 / 110592.0)
+    buf[y + 5, bx - 1] += err * (2094.0 / 110592.0)
+    buf[y + 5, bx] += err * (2367.0 / 110592.0)
+    buf[y + 5, bx + 1] += err * (2094.0 / 110592.0)
+    buf[y + 5, bx + 2] += err * (1443.0 / 110592.0)
+    buf[y + 5, bx + 3] += err * (750.0 / 110592.0)
+    buf[y + 5, bx + 4] += err * (282.0 / 110592.0)
+    buf[y + 5, bx + 5] += err * (69.0 / 110592.0)
+    buf[y + 5, bx + 6] += err * (9.0 / 110592.0)
+    # Row 6 (dy=6)
+    buf[y + 6, bx - 6] += err * (1.0 / 110592.0)
+    buf[y + 6, bx - 5] += err * (9.0 / 110592.0)
+    buf[y + 6, bx - 4] += err * (42.0 / 110592.0)
+    buf[y + 6, bx - 3] += err * (126.0 / 110592.0)
+    buf[y + 6, bx - 2] += err * (267.0 / 110592.0)
+    buf[y + 6, bx - 1] += err * (414.0 / 110592.0)
+    buf[y + 6, bx] += err * (479.0 / 110592.0)
+    buf[y + 6, bx + 1] += err * (414.0 / 110592.0)
+    buf[y + 6, bx + 2] += err * (267.0 / 110592.0)
+    buf[y + 6, bx + 3] += err * (126.0 / 110592.0)
+    buf[y + 6, bx + 4] += err * (42.0 / 110592.0)
+    buf[y + 6, bx + 5] += err * (9.0 / 110592.0)
+    buf[y + 6, bx + 6] += err * (1.0 / 110592.0)
+
+
+def apply_error_3rd(buf, bx, y, err, use_jjn):
+    """Apply third-order (3H - 3H² + H³) kernel (LTR only)."""
+    if use_jjn:
+        apply_jjn3_ltr(buf, bx, y, err)
+    else:
+        apply_fs3_ltr(buf, bx, y, err)
+
+
+# ============================================================================
 # Dithering functions
 # ============================================================================
 
@@ -450,6 +582,9 @@ def dither_dual_integrator(input_image, seed=0):
 REACH_2ND = 4  # JJN² kernel radius (dx ±4, dy 0..4)
 SEED_2ND = 16  # Seed area width (4x reach for warm-up with negative weights)
 
+REACH_3RD = 6  # JJN³ kernel radius (dx ±6, dy 0..6)
+SEED_3RD = 24  # Seed area width (4x reach)
+
 
 def create_seeded_buffer_r4(input_image):
     """Create padded buffer for second-order kernels.
@@ -523,6 +658,65 @@ def dither_kernel_2nd(input_image, seed=0):
 
     total_left = r + s
     total_top = s
+    return buf[total_top:total_top + height, total_left:total_left + width].copy()
+
+
+def dither_kernel_3rd(input_image, seed=0):
+    """Error diffusion with precomputed 3H-3H²+H³ kernels.
+
+    Uses K = 3H - 3H² + H³ with uniform kernel assumption.
+    FS³ has 20 weights (reach 3), JJN³ has 78 weights (reach 6).
+    Always LTR (no serpentine).
+    """
+    height, width = input_image.shape
+    r = REACH_3RD
+    s = SEED_3RD
+
+    total_left = r + s
+    total_right = s + r
+    total_top = s
+    total_bottom = r
+
+    buf_width = total_left + width + total_right
+    buf_height = total_top + height + total_bottom
+    buf = np.zeros((buf_height, buf_width), dtype=np.float64)
+
+    buf[total_top:total_top + height, total_left:total_left + width] = input_image
+
+    seed_left_start = r
+    seed_right_start = total_left + width
+
+    for sx in range(s):
+        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+    for sx in range(s):
+        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+    for sy in range(s):
+        for sx in range(s):
+            buf[sy, seed_left_start + sx] = input_image[0, 0]
+        buf[sy, total_left:total_left + width] = input_image[0, :]
+        for sx in range(s):
+            buf[sy, seed_right_start + sx] = input_image[0, -1]
+
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    bx_start = r
+    process_height = s + height
+    process_width = s + width + s
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+            old_val = buf[y, bx]
+            new_val = 1.0 if old_val > 0.5 else 0.0
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            img_x = (px - s) & 0xFFFF
+            img_y = (y - s) & 0xFFFF
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+            apply_error_3rd(buf, bx, y, err, use_jjn)
+
     return buf[total_top:total_top + height, total_left:total_left + width].copy()
 
 
@@ -601,6 +795,7 @@ def analyze_gray(gray_val, output_dir, size=256, seed=0):
     methods = [
         ('1st order (mixed FS/JJN)', dither_first_order),
         ('2H-H² kernel', dither_kernel_2nd),
+        ('3H-3H²+H³ kernel', dither_kernel_3rd),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -675,6 +870,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
     methods = [
         ('1st order', dither_first_order),
         ('2H-H² kernel', dither_kernel_2nd),
+        ('3H-3H²+H³ kernel', dither_kernel_3rd),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -701,7 +897,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
     for label, fn in methods:
         result = fn(gradient, seed=seed)
         img = (result * 255).astype(np.uint8)
-        safe_label = label.replace(' ', '_')
+        safe_label = label.replace(' ', '_').replace('²', '2').replace('³', '3').replace('⁴', '4')
         path = output_dir / f"gradient_{safe_label}.png"
         Image.fromarray(img, mode='L').save(path)
         print(f"Saved: {path}")
@@ -714,7 +910,7 @@ def process_image(image_path, output_dir, seed=0):
     stem = Path(image_path).stem
 
     # Standard methods
-    for label, fn in [('1st_order', dither_first_order), ('2H_H2_kernel', dither_kernel_2nd), ('dual_int', dither_dual_integrator)]:
+    for label, fn in [('1st_order', dither_first_order), ('2H_H2_kernel', dither_kernel_2nd), ('3H_3H2_H3_kernel', dither_kernel_3rd), ('dual_int', dither_dual_integrator)]:
         result = fn(input_image, seed=seed)
         out_img = (result * 255).astype(np.uint8)
         path = output_dir / f"{stem}_{label}.png"
