@@ -34,11 +34,8 @@ Multiple dithering algorithms with standard and serpentine scanning variants:
 
 - **Floyd-Steinberg**: Classic 4-pixel error diffusion kernel
 - **Jarvis-Judice-Ninke**: Larger 12-pixel kernel for smoother gradients
-- **Boon (Our Method)**: Novel per-pixel kernel switching between FS and JJN using lowbias32 hash - breaks up regular patterns, produces blue noise characteristics
-- **Ostromoukhov**: Variable-coefficient kernel based on input intensity
-- **Zhou-Fang**: Variable-coefficient kernel with threshold modulation
-- **Ulichney Threshold**: Floyd-Steinberg with ±30% threshold perturbation (1-bit only)
-- **Ulichney Weight**: Floyd-Steinberg with ±50% paired weight perturbation (1-bit only)
+- **Our Method**: Novel per-pixel kernel switching between FS and JJN using lowbias32 hash — breaks up regular patterns, produces blue noise characteristics
+- **Our Method (2nd Order Kernels)**: Precomputed second-order convolution kernels (FS² and JJN²) with wider reach and negative weights for steeper noise shaping (~8.2 dB/oct vs ~6.8 dB/oct)
 - **Floyd-Steinberg TPDF**: Floyd-Steinberg with triangular PDF threshold dither (1-bit only)
 
 ### Colorspace-Aware Dithering
@@ -293,7 +290,7 @@ cra-web/
 ├── port/                # Main Rust port of CRA algorithms
 │   ├── src/
 │   │   ├── lib.rs       # WASM exports
-│   │   ├── bin/cra.rs   # CLI tool
+│   │   ├── bin/cra/     # CLI tool (main.rs, args.rs)
 │   │   ├── basic_*.rs   # Basic histogram matching
 │   │   ├── cra_*.rs     # CRA implementations
 │   │   ├── tiled_*.rs   # Tiled processing
@@ -303,7 +300,10 @@ cra-web/
 │   └── Cargo.toml
 ├── scripts/             # Original Python scripts (submodule)
 ├── tools/               # Testing and analysis tools (see tools/README.md)
-├── index.html           # Web demo
+├── index.html           # Color correction web demo
+├── dither.html          # Dithering web demo
+├── resize.html          # Resize web demo
+├── app.js               # Color correction demo logic
 ├── build.sh             # Web build script
 ├── build-cli.sh         # CLI build script
 └── dist/                # Build output
