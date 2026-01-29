@@ -341,45 +341,70 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
     print(f"  Slope range: [{slopes.min():.2f}, {slopes.max():.2f}] dB/oct")
     print(f"  Mean slope: {slopes.mean():.2f} dB/oct")
 
-    # Analysis of the ranked output image itself (as grayscale)
+    # Analysis of the ranked output vs blue_noise_256 reference
     rank_img = rank.astype(np.float64)
-    freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(rank_img)
-    h_db = 10 * np.log10(h_pow + 1e-10)
-    d_db = 10 * np.log10(d_pow + 1e-10)
-    v_db = 10 * np.log10(v_pow + 1e-10)
+    ref_path = Path(__file__).parent.parent / "test_images" / "blue_noise_256.png"
+    ref_img = np.array(Image.open(ref_path).convert('L')).astype(np.float64) if ref_path.exists() else None
 
-    freqs_ideal = np.linspace(0.004, 0.5, 500)
-    P_ref = 10 ** (h_db.max() / 10)
-    power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
-    power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
-    power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
+    panels = [('Recursive (ours)', rank_img)]
+    if ref_img is not None:
+        panels.append(('Void-and-Cluster', ref_img))
+    n_cols = len(panels)
 
-    spectrum_2d = compute_power_spectrum(rank_img)
+    fig, axes = plt.subplots(3, n_cols, figsize=(7 * n_cols, 14))
+    if n_cols == 1:
+        axes = axes.reshape(3, 1)
 
-    fig, axes = plt.subplots(3, 1, figsize=(8, 14))
-    axes[0].imshow(rank_img, cmap='gray', vmin=0, vmax=255)
-    axes[0].set_title('Ranked Output (8-bit dither array)', fontsize=12)
-    axes[0].axis('off')
+    # Compute all spectra first for shared y-axis
+    all_radial = {}
+    for label, img in panels:
+        freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(img)
+        h_db = 10 * np.log10(h_pow + 1e-10)
+        d_db = 10 * np.log10(d_pow + 1e-10)
+        v_db = 10 * np.log10(v_pow + 1e-10)
+        all_radial[label] = (freqs, h_db, d_db, v_db)
 
-    axes[1].imshow(spectrum_2d, cmap='gray')
-    axes[1].set_title('2D Power Spectrum', fontsize=12)
-    axes[1].axis('off')
+    all_db = np.concatenate([np.concatenate([h, d, v]) for _, (_, h, d, v) in all_radial.items()])
+    y_min = all_db.min() - 5
+    y_max = all_db.max() + 5
 
-    axes[2].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
-    axes[2].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
-    axes[2].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
-    axes[2].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
-    axes[2].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
-    axes[2].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
-    axes[2].set_xlim(0, 0.5)
-    axes[2].set_xlabel('Spatial Frequency (cycles/pixel)')
-    axes[2].set_ylabel('Power (dB)')
-    axes[2].set_title('Radial Power Spectrum', fontsize=12)
-    axes[2].grid(True, alpha=0.3)
-    axes[2].legend(loc='lower right', fontsize=8)
+    for col, (label, img) in enumerate(panels):
+        axes[0, col].imshow(img, cmap='gray', vmin=0, vmax=255)
+        axes[0, col].set_title(label, fontsize=12, fontweight='bold')
+        axes[0, col].axis('off')
 
-    fig.suptitle('Recursive Dither Array — Raw Ranked Output', fontsize=14, fontweight='bold')
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+        spectrum_2d = compute_power_spectrum(img)
+        axes[1, col].imshow(spectrum_2d, cmap='gray')
+        axes[1, col].axis('off')
+
+        freqs, h_db, d_db, v_db = all_radial[label]
+
+        freqs_ideal = np.linspace(0.004, 0.5, 500)
+        P_ref = 10 ** (h_db.max() / 10)
+        power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
+        power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+        power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
+
+        axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
+        axes[2, col].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
+        axes[2, col].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
+        axes[2, col].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
+        axes[2, col].set_xlim(0, 0.5)
+        axes[2, col].set_ylim(y_min, y_max)
+        axes[2, col].set_xlabel('Spatial Frequency (cycles/pixel)')
+        axes[2, col].grid(True, alpha=0.3)
+        axes[2, col].legend(loc='lower right', fontsize=8)
+        if col == 0:
+            axes[2, col].set_ylabel('Power (dB)')
+
+    fig.text(0.02, 0.83, 'Array', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.02, 0.5, 'Spectrum', va='center', rotation='vertical', fontsize=12)
+    fig.text(0.02, 0.17, 'Radial', va='center', rotation='vertical', fontsize=12)
+
+    fig.suptitle('Dither Array Comparison — Raw Ranked Output', fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0.03, 0, 1, 0.96])
     out_path = output_dir / "analysis_ranked.png"
     plt.savefig(out_path, dpi=150, bbox_inches='tight')
     plt.close()
