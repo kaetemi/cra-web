@@ -297,16 +297,16 @@ def main():
         error_norm = (error_map - emin) / (emax - emin) if emax > emin else error_map
         save_step(error_norm, "step1_error")
 
-        # Step 2a: Scale 1-bit to 0-2/3, generate 1-bit
-        print("\nStep 2a: Scale to 0 - 2/3, 1-bit dither")
-        scaled_lo = result_1bit * (2.0 / 3.0)
+        # Step 2a: Scale 1-bit to 0-0.5, generate 1-bit (target: 25% white)
+        print("\nStep 2a: Scale to 0 - 0.5, 1-bit dither")
+        scaled_lo = result_1bit * 0.5
         save_step(scaled_lo, "step2a_input")
         result_2a = dither(scaled_lo, bits=1, seed=get_seed())
         save_step(result_2a, "step2a_1bit")
 
-        # Step 2b: Scale 1-bit to 1/3-1, generate 1-bit
-        print("\nStep 2b: Scale to 1/3 - 1, 1-bit dither")
-        scaled_hi = result_1bit * (2.0 / 3.0) + (1.0 / 3.0)
+        # Step 2b: Scale 1-bit to 0.5-1, generate 1-bit (target: 75% white)
+        print("\nStep 2b: Scale to 0.5 - 1, 1-bit dither")
+        scaled_hi = result_1bit * 0.5 + 0.5
         save_step(scaled_hi, "step2b_input")
         result_2b = dither(scaled_hi, bits=1, seed=get_seed())
         save_step(result_2b, "step2b_1bit")
