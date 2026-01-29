@@ -800,7 +800,6 @@
                 <select id="perceptual-space">
                     <option value="1">OKLab</option>
                     <option value="8" selected>* OKLab Lr (better for dark colors)</option>
-                    <option value="9">OKLab Heavy Chroma (×4, for limited palettes)</option>
                     <option value="3">CIELAB (CIEDE2000)</option>
                     <option value="2">* CIELAB (CIE94)</option>
                     <option value="0">CIELAB (CIE76)</option>
@@ -830,9 +829,9 @@
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
                     <option value="4" selected>* Our method (FS/JJN/lowbias32, Standard)</option>
                     <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
-                    <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
-                    <option value="17">FS-TPDF Threshold (Serpentine)</option>
-                    <option value="18">Our method (2nd Order Kernel)</option>
+                    <option value="16">⚠ Floyd-Steinberg TPDF Threshold (Standard)</option>
+                    <option value="17">Floyd-Steinberg TPDF Threshold (Serpentine)</option>
+                    <option value="18">Our method (2nd Order Kernels)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="dither-mode-warning hidden" id="dither-mode-warning"></p>
@@ -848,9 +847,9 @@
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
                     <option value="4">* Our method (FS/JJN/lowbias32, Standard)</option>
                     <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
-                    <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
-                    <option value="17">FS-TPDF Threshold (Serpentine)</option>
-                    <option value="18">Our method (2nd Order Kernel)</option>
+                    <option value="16">⚠ Floyd-Steinberg TPDF Threshold (Standard)</option>
+                    <option value="17">Floyd-Steinberg TPDF Threshold (Serpentine)</option>
+                    <option value="18">Our method (2nd Order Kernels)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="alpha-dither-hint">Separate dither mode for alpha channel. Only applies when output has alpha (ARGB, LA).</p>

@@ -39,7 +39,7 @@ Multiple dithering algorithms with standard and serpentine scanning variants:
 - **Zhou-Fang**: Variable-coefficient kernel with threshold modulation
 - **Ulichney Threshold**: Floyd-Steinberg with ±30% threshold perturbation (1-bit only)
 - **Ulichney Weight**: Floyd-Steinberg with ±50% paired weight perturbation (1-bit only)
-- **FS-TPDF**: Floyd-Steinberg with triangular PDF threshold dither (1-bit only)
+- **Floyd-Steinberg TPDF**: Floyd-Steinberg with triangular PDF threshold dither (1-bit only)
 
 ### Colorspace-Aware Dithering
 Joint RGB quantization using perceptual distance metrics to select the best candidate color, with error diffusion in linear RGB space. Unlike per-channel dithering, this processes all channels together to minimize perceived color error:
