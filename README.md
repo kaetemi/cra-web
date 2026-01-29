@@ -194,7 +194,8 @@ Dithering:
                                     zhou-fang-standard, zhou-fang-serpentine,
                                     ulichney-standard, ulichney-serpentine,
                                     ulichney-weight-standard, ulichney-weight-serpentine,
-                                    fs-tpdf-standard, fs-tpdf-serpentine, none]
+                                    fs-tpdf-standard, fs-tpdf-serpentine,
+                                    boon-adaptive, none]
       --output-alpha-dither <MODE> Alpha channel dithering method [default: same as --output-dither]
       --output-distance-space      Perceptual space for output dithering
                                    [default: oklab-lr for RGB, lab-cie94 for grayscale]

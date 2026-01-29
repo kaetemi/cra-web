@@ -674,7 +674,7 @@ fn mixed_dither_random(
 // ============================================================================
 
 use super::kernels::{apply_zhou_fang_ltr, apply_zhou_fang_rtl, zhou_fang_threshold};
-use super::kernels::{apply_h2_single_channel_kernel, H2_REACH, H2_SEED};
+use super::kernels::{apply_h2_single_channel_kernel, apply_adaptive_single_channel_kernel, H2_REACH, H2_SEED};
 
 /// Zhou-Fang dithering with standard left-to-right scanning.
 /// Uses threshold modulation to break up "worm" patterns in mid-tones.
@@ -1467,6 +1467,88 @@ fn mixed_h2_dither_serpentine(
 }
 
 // ============================================================================
+// Adaptive (gradient-blended 1st+2nd order) dithering
+// ============================================================================
+
+/// Pre-compute alpha map from single-channel image gradients.
+///
+/// Alpha = (1 - |gx|) * (1 - |gy|) where gx/gy are horizontal/vertical gradients
+/// normalized to [0, 1]. At image edges, gradient is 0 so alpha = 1 (full 2nd-order).
+fn compute_alpha_map_gray(img: &[f32], width: usize, height: usize) -> Vec<f32> {
+    let mut alpha_map = vec![1.0f32; width * height];
+    for y in 0..height {
+        for x in 0..width {
+            let cur = img[y * width + x] / 255.0;
+            let gx = if x + 1 < width {
+                (img[y * width + x + 1] / 255.0 - cur).abs()
+            } else {
+                0.0
+            };
+            let gy = if y + 1 < height {
+                (img[(y + 1) * width + x] / 255.0 - cur).abs()
+            } else {
+                0.0
+            };
+            alpha_map[y * width + x] = (1.0 - gx) * (1.0 - gy);
+        }
+    }
+    alpha_map
+}
+
+/// Mixed adaptive dithering: gradient-adaptive blend of 1st and 2nd order kernels.
+/// Always LTR. Uses H2-sized seeded buffer.
+fn mixed_adaptive_dither(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = triple32(seed);
+    let reach = H2_REACH;
+    let seed_size = H2_SEED;
+    let mut buf = create_seeded_buffer_h2(img, width, height);
+
+    // Pre-compute alpha map from input image gradients
+    let alpha_map = compute_alpha_map_gray(img, width, height);
+
+    let bx_start = reach;
+    let process_width = seed_size + width + seed_size;
+    let process_height = seed_size + height;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let err = process_pixel(&mut buf, bx, y, &quant);
+
+            let img_x = px.wrapping_sub(seed_size) as u16;
+            let img_y = y.wrapping_sub(seed_size) as u16;
+            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+
+            // Look up alpha: use 1.0 for seed pixels
+            let ix = px.wrapping_sub(seed_size);
+            let iy = y.wrapping_sub(seed_size);
+            let alpha = if ix < width && iy < height {
+                alpha_map[iy * width + ix]
+            } else {
+                1.0
+            };
+
+            apply_adaptive_single_channel_kernel(&mut buf, bx, y, err, alpha, use_jjn);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= seed_size {
+                cb((y - seed_size + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded_h2(&buf, width, height)
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -1576,6 +1658,7 @@ pub fn dither_with_mode_bits(
         DitherMode::FsTpdfSerpentine => fs_tpdf_serpentine(img, width, height, seed, quant, progress),
         DitherMode::MixedH2Standard => mixed_h2_dither_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedH2Serpentine => mixed_h2_dither_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::MixedAdaptive => mixed_adaptive_dither(img, width, height, seed, quant, progress),
     }
 }
 

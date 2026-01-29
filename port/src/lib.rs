@@ -61,6 +61,7 @@ fn dither_mode_from_u8(mode: u8) -> DitherMode {
         17 => DitherMode::FsTpdfSerpentine,
         18 => DitherMode::MixedH2Standard,
         19 => DitherMode::MixedH2Serpentine,
+        20 => DitherMode::MixedAdaptive,
         _ => DitherMode::Standard,
     }
 }

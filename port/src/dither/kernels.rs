@@ -1530,3 +1530,98 @@ pub fn apply_h2_kernel_rgba(
     apply_h2_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
     apply_h2_single_channel_kernel(err_a, bx, y, err_a_val, use_jjn_a, is_rtl);
 }
+
+// ============================================================================
+// Adaptive (gradient-blended 1st+2nd order) kernel implementations
+// ============================================================================
+
+/// Apply adaptive single-channel kernel: blend of 1st-order and 2nd-order.
+///
+/// Splits error between 1st-order (FS/JJN) and 2nd-order (FS²/JJN²) kernels
+/// based on alpha (from gradient map). Both write to the same buffer.
+/// Always LTR (is_rtl=false).
+///
+/// - alpha >= 1.0: pure 2nd-order
+/// - alpha <= 0.0: pure 1st-order
+/// - otherwise: (1-alpha)*err to H1, alpha*err to H2
+#[inline]
+pub fn apply_adaptive_single_channel_kernel(
+    buf: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err: f32,
+    alpha: f32,
+    use_jjn: bool,
+) {
+    if alpha >= 1.0 {
+        // Pure 2nd order (common case in smooth areas)
+        apply_h2_single_channel_kernel(buf, bx, y, err, use_jjn, false);
+    } else if alpha <= 0.0 {
+        // Pure 1st order
+        apply_single_channel_kernel(buf, bx, y, err, use_jjn, false);
+    } else {
+        // Split error between kernels
+        let err_1st = err * (1.0 - alpha);
+        let err_2nd = err * alpha;
+        apply_single_channel_kernel(buf, bx, y, err_1st, use_jjn, false);
+        apply_h2_single_channel_kernel(buf, bx, y, err_2nd, use_jjn, false);
+    }
+}
+
+/// Apply adaptive kernel to RGB channels (3 separate buffers).
+///
+/// Each channel independently selects between FS and JJN based on hash bits,
+/// then splits error between 1st-order and 2nd-order kernels based on alpha.
+/// Bit assignment: R=bit0, G=bit1, B=bit2.
+#[inline]
+pub fn apply_adaptive_kernel_rgb(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    alpha: f32,
+    pixel_hash: u32,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+
+    apply_adaptive_single_channel_kernel(err_r, bx, y, err_r_val, alpha, use_jjn_r);
+    apply_adaptive_single_channel_kernel(err_g, bx, y, err_g_val, alpha, use_jjn_g);
+    apply_adaptive_single_channel_kernel(err_b, bx, y, err_b_val, alpha, use_jjn_b);
+}
+
+/// Apply adaptive kernel to RGBA channels (4 separate buffers).
+///
+/// Each channel independently selects between FS and JJN based on hash bits,
+/// then splits error between 1st-order and 2nd-order kernels based on alpha.
+/// Bit assignment: R=bit0, G=bit1, B=bit2, A=bit3.
+#[inline]
+pub fn apply_adaptive_kernel_rgba(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    alpha: f32,
+    pixel_hash: u32,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+    let use_jjn_a = pixel_hash & 8 != 0;
+
+    apply_adaptive_single_channel_kernel(err_r, bx, y, err_r_val, alpha, use_jjn_r);
+    apply_adaptive_single_channel_kernel(err_g, bx, y, err_g_val, alpha, use_jjn_g);
+    apply_adaptive_single_channel_kernel(err_b, bx, y, err_b_val, alpha, use_jjn_b);
+    apply_adaptive_single_channel_kernel(err_a, bx, y, err_a_val, alpha, use_jjn_a);
+}

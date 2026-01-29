@@ -325,7 +325,7 @@ fn dither_alpha_f16_with_mode(
         DitherMode::JarvisSerpentine => {
             dither_alpha_f16::<JarvisJudiceNinke>(alpha, width, height, true)
         }
-        DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine => {
+        DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine | DitherMode::MixedAdaptive => {
             // For mixed modes, use JJN padding but random kernel selection
             dither_alpha_f16_mixed(alpha, width, height, mode, seed)
         }
@@ -1145,7 +1145,7 @@ pub fn dither_rgba_f16_with_options(
                 width, height, reach, overshoot_penalty, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard | DitherMode::MixedAdaptive => {
             dither_mixed_standard_f16(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,
