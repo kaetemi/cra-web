@@ -257,7 +257,12 @@ def main():
 
     elif args.recursive_test:
         size = args.size
-        seed = args.seed
+        next_seed = [args.seed]
+
+        def get_seed():
+            s = next_seed[0]
+            next_seed[0] += 1
+            return s
 
         def save_step(img, name):
             path = output_dir / f"{name}.png"
@@ -268,26 +273,27 @@ def main():
             for level, count in zip(unique, counts):
                 print(f"  {level:.4f}: {count:6d} ({count/total*100:.1f}%)")
 
-        # Step 1: 1-bit dither of uniform 0.5 gray
-        print("Step 1: 1-bit dither of 0.5 gray")
-        input_1bit = np.full((size, size), 0.5, dtype=np.float64)
-        result_1bit = dither(input_1bit, bits=1, seed=seed)
-        save_step(result_1bit, "step1_1bit")
+        gray = np.full((size, size), 0.5, dtype=np.float64)
 
-        # Step 2: Scale 1-bit result to 1/6 - 5/6
-        print("\nStep 2: Scale to 1/6 - 5/6")
-        scaled = result_1bit * (4.0 / 6.0) + (1.0 / 6.0)
-        save_step(scaled, "step2_scaled")
+        # Step 1a: 1-bit dither of 0.5 gray (seed 0)
+        print("Step 1a: 1-bit dither of 0.5 gray (seed 0)")
+        a = dither(gray, bits=1, seed=get_seed())
+        save_step(a, "step1a_1bit")
 
-        # Step 3: 2-bit dither of scaled input (no delay)
-        print("\nStep 3: 2-bit dither, delay=0")
-        result_2bit = dither(scaled, bits=2, seed=seed)
-        save_step(result_2bit, "step3_2bit_delay0")
+        # Step 1b: 1-bit dither of 0.5 gray (seed 1)
+        print("\nStep 1b: 1-bit dither of 0.5 gray (seed 1)")
+        b = dither(gray, bits=1, seed=get_seed())
+        save_step(b, "step1b_1bit")
 
-        # Step 4: 2-bit dither of scaled input (delay=1)
-        print("\nStep 4: 2-bit dither, delay=1")
-        result_2bit_d1 = dither(scaled, bits=2, seed=seed, delay=1)
-        save_step(result_2bit_d1, "step4_2bit_delay1")
+        # Step 2: Average
+        print("\nStep 2: Average of 1a and 1b")
+        avg = (a + b) / 2.0
+        save_step(avg, "step2_average")
+
+        # Step 3: 2-bit dither of the average (seed 2)
+        print("\nStep 3: 2-bit dither of average")
+        result_2bit = dither(avg, bits=2, seed=get_seed())
+        save_step(result_2bit, "step3_2bit")
 
     elif args.gray is not None:
         # Dither uniform gray
