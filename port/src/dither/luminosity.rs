@@ -37,9 +37,10 @@ use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_single_channel_kernel, gray_overshoot_penalty, perceptual_lightness_distance_sq,
-    wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
+    triple32, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, SingleChannelKernel,
 };
+use super::kernels::{apply_h2_single_channel_kernel, H2_REACH, H2_SEED};
 #[cfg(test)]
 use super::common::{lightness_distance_ciede2000_sq, lightness_distance_sq};
 
@@ -518,6 +519,132 @@ fn dither_mixed_random_gray(
 }
 
 // ============================================================================
+// Mixed H2 (second-order kernel) grayscale dithering
+// ============================================================================
+
+/// Mixed H2 kernel dithering for colorspace-aware grayscale, LTR only.
+#[inline]
+fn dither_mixed_h2_standard_gray(
+    ctx: &GrayDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let seed = H2_SEED;
+    let reach = H2_REACH;
+
+    let bx_start = reach;
+    let process_width = seed + width + seed;
+    let process_height = seed + height;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+
+            let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
+            let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
+
+            let in_real_y = y >= seed;
+            let in_real_x = px >= seed && px < seed + width;
+            if in_real_y && in_real_x {
+                let img_x = px - seed;
+                let img_y = y - seed;
+                let idx = img_y * width + img_x;
+                out[idx] = best_gray;
+            }
+
+            let img_x = px.wrapping_sub(seed);
+            let img_y = y.wrapping_sub(seed);
+            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 != 0;
+            apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
+        }
+        if y >= seed {
+            if let Some(ref mut cb) = progress {
+                cb((y - seed + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+/// Mixed H2 kernel dithering for colorspace-aware grayscale, serpentine scanning.
+#[inline]
+fn dither_mixed_h2_serpentine_gray(
+    ctx: &GrayDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let seed = H2_SEED;
+    let reach = H2_REACH;
+
+    let bx_start = reach;
+    let process_width = seed + width + seed;
+    let process_height = seed + height;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
+
+                let in_real_y = y >= seed;
+                let in_real_x = px >= seed && px < seed + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - seed;
+                    let img_y = y - seed;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
+
+                let img_x = px.wrapping_sub(seed);
+                let img_y = y.wrapping_sub(seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
+            }
+        } else {
+            for px in 0..process_width {
+                let bx = bx_start + px;
+
+                let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
+                let (best_gray, err_val) = process_pixel_with_gray(ctx, gray_value, err_buf, bx, y);
+
+                let in_real_y = y >= seed;
+                let in_real_x = px >= seed && px < seed + width;
+                if in_real_y && in_real_x {
+                    let img_x = px - seed;
+                    let img_y = y - seed;
+                    let idx = img_y * width + img_x;
+                    out[idx] = best_gray;
+                }
+
+                let img_x = px.wrapping_sub(seed);
+                let img_y = y.wrapping_sub(seed);
+                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 != 0;
+                apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
+            }
+        }
+        if y >= seed {
+            if let Some(ref mut cb) = progress {
+                cb((y - seed + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -628,6 +755,33 @@ pub fn colorspace_aware_dither_gray_with_options(
 
     let pixels = width * height;
 
+    // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
+    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+        let h2_reach = H2_REACH;
+        let h2_seed = H2_SEED;
+        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
+        let buf_height = h2_seed + height + h2_reach;
+
+        let mut err_buf: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+        let mut out = vec![0u8; pixels];
+
+        let hashed_seed = triple32(seed);
+
+        if mode == DitherMode::MixedH2Serpentine {
+            dither_mixed_h2_serpentine_gray(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, hashed_seed, progress,
+            );
+        } else {
+            dither_mixed_h2_standard_gray(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, hashed_seed, progress,
+            );
+        }
+
+        return out;
+    }
+
     // Use JJN reach for all modes (largest kernel)
     let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
 
@@ -671,13 +825,13 @@ pub fn colorspace_aware_dither_gray_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Serpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_gray(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,
@@ -741,6 +895,9 @@ pub fn colorspace_aware_dither_gray_with_options(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, progress,
             );
+        }
+        DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine => {
+            unreachable!("H2 modes handled in early return above");
         }
     }
 

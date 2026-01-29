@@ -384,6 +384,7 @@ Comprehensive test script that generates dithered images from reference photogra
 - `fs-standard`, `fs-serpentine` - Floyd-Steinberg
 - `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
 - `boon-standard`, `boon-serpentine` - Boon (our method)
+- `boon-h2` - Boon 2nd-order kernel (precomputed FS² and JJN², standard scanning)
 - `ostro-serpentine` - Ostromoukhov
 - `zhou-fang-serpentine` - Zhou-Fang
 - `ulichney-serpentine`, `ulichney-weight-serpentine` - Ulichney perturbation variants
@@ -445,6 +446,7 @@ python tools/analyze_wavelet.py --compare \
 - Higher isotropy = more uniform directional distribution (less worm-like)
 - Higher structure score = better edge/detail preservation
 - Boon balances blueness (+0.29) with highest flatness (0.54) among error diffusion methods
+- Boon-H2 (2nd-order, standard scanning) has highest blueness (+0.32) tied with FS, good flatness (0.54)
 - Zhou-Fang has best isotropy (0.67) due to threshold modulation
 
 ### 18. `test_map/generate_recursive_map.py`
@@ -684,6 +686,7 @@ tools/
 │   │   ├── fs-serpentine/
 │   │   ├── jjn-serpentine/
 │   │   ├── boon-serpentine/
+│   │   ├── boon-h2/
 │   │   ├── ostro-serpentine/
 │   │   ├── zhou-fang-serpentine/
 │   │   ├── ulichney-serpentine/

@@ -48,6 +48,7 @@ METHODS_STANDARD=(
     "fs-standard"
     "jjn-standard"
     "boon-standard"
+    "boon-h2"
 )
 
 echo "=============================================="

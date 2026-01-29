@@ -52,6 +52,7 @@ This directly answers: "Does the error look like noise or like structured patter
 | Method | Blueness | Flatness | Structure | Isotropy |
 |--------|----------|----------|-----------|----------|
 | fs-standard | **+0.33** | 0.520 | **0.329** | 0.480 |
+| boon-h2 | **+0.32** | 0.536 | 0.278 | 0.542 |
 | fs-serpentine | **+0.32** | 0.524 | 0.321 | 0.484 |
 | ulichney-weight-serpentine | **+0.31** | 0.529 | 0.314 | 0.508 |
 | ulichney-serpentine | **+0.31** | 0.531 | 0.301 | 0.539 |
@@ -202,7 +203,7 @@ Each `wavelet_{image}_{method}.png` shows:
 
 ```
 analysis/
-├── wavelet_{image}_{method}.png  # Individual analysis (96 files)
+├── wavelet_{image}_{method}.png  # Individual analysis (120 files)
 ├── wavelet_comparison_{image}.png # Per-image comparison (8 files)
 ├── wavelet_summary.png            # Aggregated chart
 ├── wavelet_summary.csv            # Raw metrics
