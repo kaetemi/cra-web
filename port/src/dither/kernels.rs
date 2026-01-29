@@ -1286,3 +1286,247 @@ pub fn apply_zhou_fang_rgba_rtl(
     apply_zhou_fang_rtl(err_b, bx, y, err_b_val, level_b);
     apply_zhou_fang_rtl(err_a, bx, y, err_a_val, level_a);
 }
+
+// ============================================================================
+// Second-order (H²) kernel implementations: FS² and JJN²
+// ============================================================================
+
+/// Maximum reach for H2 kernels (JJN² spans ±4 columns, 5 rows down).
+pub const H2_REACH: usize = 4;
+
+/// Seeding size for H2 buffers. Larger than standard to accommodate negative
+/// weights that can propagate error backwards into the seeding region.
+pub const H2_SEED: usize = 16;
+
+/// Apply FS² (second-order Floyd-Steinberg) kernel, LTR only.
+///
+/// Kernel = 2·H_fs - H_fs², denominator 256, reach 2.
+/// 11 taps across 3 rows. Contains negative weights.
+///
+/// ```text
+///               *  224  -49
+///          96  118  -38  -14
+///     -9  -30  -31  -10   -1
+/// ```
+#[inline]
+pub fn apply_fs2_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    // Row 0 (dy=0)
+    buf[y][bx + 1] += err * (224.0 / 256.0);
+    buf[y][bx + 2] += err * (-49.0 / 256.0);
+    // Row 1 (dy=1)
+    buf[y + 1][bx - 1] += err * (96.0 / 256.0);
+    buf[y + 1][bx] += err * (118.0 / 256.0);
+    buf[y + 1][bx + 1] += err * (-38.0 / 256.0);
+    buf[y + 1][bx + 2] += err * (-14.0 / 256.0);
+    // Row 2 (dy=2)
+    buf[y + 2][bx - 2] += err * (-9.0 / 256.0);
+    buf[y + 2][bx - 1] += err * (-30.0 / 256.0);
+    buf[y + 2][bx] += err * (-31.0 / 256.0);
+    buf[y + 2][bx + 1] += err * (-10.0 / 256.0);
+    buf[y + 2][bx + 2] += err * (-1.0 / 256.0);
+}
+
+/// Apply JJN² (second-order Jarvis-Judice-Ninke) kernel, LTR only.
+///
+/// Kernel = 2·H_jjn - H_jjn², denominator 2304, reach 4.
+/// 38 taps across 5 rows. Contains negative weights.
+/// Rows 3-4 are entirely negative (correction from -H² term).
+#[inline]
+pub fn apply_jjn2_ltr(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    // Row 0 (dy=0): 4 taps
+    buf[y][bx + 1] += err * (672.0 / 2304.0);
+    buf[y][bx + 2] += err * (431.0 / 2304.0);
+    buf[y][bx + 3] += err * (-70.0 / 2304.0);
+    buf[y][bx + 4] += err * (-25.0 / 2304.0);
+    // Row 1 (dy=1): 7 taps
+    buf[y + 1][bx - 2] += err * (288.0 / 2304.0);
+    buf[y + 1][bx - 1] += err * (438.0 / 2304.0);
+    buf[y + 1][bx] += err * (572.0 / 2304.0);
+    buf[y + 1][bx + 1] += err * (332.0 / 2304.0);
+    buf[y + 1][bx + 2] += err * (148.0 / 2304.0);
+    buf[y + 1][bx + 3] += err * (-92.0 / 2304.0);
+    buf[y + 1][bx + 4] += err * (-30.0 / 2304.0);
+    // Row 2 (dy=2): 9 taps
+    buf[y + 2][bx - 4] += err * (-9.0 / 2304.0);
+    buf[y + 2][bx - 3] += err * (-30.0 / 2304.0);
+    buf[y + 2][bx - 2] += err * (29.0 / 2304.0);
+    buf[y + 2][bx - 1] += err * (174.0 / 2304.0);
+    buf[y + 2][bx] += err * (311.0 / 2304.0);
+    buf[y + 2][bx + 1] += err * (88.0 / 2304.0);
+    buf[y + 2][bx + 2] += err * (-63.0 / 2304.0);
+    buf[y + 2][bx + 3] += err * (-74.0 / 2304.0);
+    buf[y + 2][bx + 4] += err * (-19.0 / 2304.0);
+    // Row 3 (dy=3): 9 taps (symmetric, all negative)
+    buf[y + 3][bx - 4] += err * (-6.0 / 2304.0);
+    buf[y + 3][bx - 3] += err * (-28.0 / 2304.0);
+    buf[y + 3][bx - 2] += err * (-74.0 / 2304.0);
+    buf[y + 3][bx - 1] += err * (-120.0 / 2304.0);
+    buf[y + 3][bx] += err * (-142.0 / 2304.0);
+    buf[y + 3][bx + 1] += err * (-120.0 / 2304.0);
+    buf[y + 3][bx + 2] += err * (-74.0 / 2304.0);
+    buf[y + 3][bx + 3] += err * (-28.0 / 2304.0);
+    buf[y + 3][bx + 4] += err * (-6.0 / 2304.0);
+    // Row 4 (dy=4): 9 taps (symmetric, all negative)
+    buf[y + 4][bx - 4] += err * (-1.0 / 2304.0);
+    buf[y + 4][bx - 3] += err * (-6.0 / 2304.0);
+    buf[y + 4][bx - 2] += err * (-19.0 / 2304.0);
+    buf[y + 4][bx - 1] += err * (-36.0 / 2304.0);
+    buf[y + 4][bx] += err * (-45.0 / 2304.0);
+    buf[y + 4][bx + 1] += err * (-36.0 / 2304.0);
+    buf[y + 4][bx + 2] += err * (-19.0 / 2304.0);
+    buf[y + 4][bx + 3] += err * (-6.0 / 2304.0);
+    buf[y + 4][bx + 4] += err * (-1.0 / 2304.0);
+}
+
+/// Apply FS² (second-order Floyd-Steinberg) kernel, RTL (mirrored).
+///
+/// Mirror of `apply_fs2_ltr`: all horizontal offsets negated.
+/// 11 taps across 3 rows. Contains negative weights.
+///
+/// ```text
+///     -49  224   *
+///     -14  -38  118   96
+///      -1  -10  -31  -30   -9
+/// ```
+#[inline]
+pub fn apply_fs2_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    // Row 0 (dy=0)
+    buf[y][bx - 1] += err * (224.0 / 256.0);
+    buf[y][bx - 2] += err * (-49.0 / 256.0);
+    // Row 1 (dy=1)
+    buf[y + 1][bx + 1] += err * (96.0 / 256.0);
+    buf[y + 1][bx] += err * (118.0 / 256.0);
+    buf[y + 1][bx - 1] += err * (-38.0 / 256.0);
+    buf[y + 1][bx - 2] += err * (-14.0 / 256.0);
+    // Row 2 (dy=2)
+    buf[y + 2][bx + 2] += err * (-9.0 / 256.0);
+    buf[y + 2][bx + 1] += err * (-30.0 / 256.0);
+    buf[y + 2][bx] += err * (-31.0 / 256.0);
+    buf[y + 2][bx - 1] += err * (-10.0 / 256.0);
+    buf[y + 2][bx - 2] += err * (-1.0 / 256.0);
+}
+
+/// Apply JJN² (second-order Jarvis-Judice-Ninke) kernel, RTL (mirrored).
+///
+/// Mirror of `apply_jjn2_ltr`: all horizontal offsets negated.
+/// 38 taps across 5 rows. Contains negative weights.
+#[inline]
+pub fn apply_jjn2_rtl(buf: &mut [Vec<f32>], bx: usize, y: usize, err: f32) {
+    // Row 0 (dy=0): 4 taps
+    buf[y][bx - 1] += err * (672.0 / 2304.0);
+    buf[y][bx - 2] += err * (431.0 / 2304.0);
+    buf[y][bx - 3] += err * (-70.0 / 2304.0);
+    buf[y][bx - 4] += err * (-25.0 / 2304.0);
+    // Row 1 (dy=1): 7 taps
+    buf[y + 1][bx + 2] += err * (288.0 / 2304.0);
+    buf[y + 1][bx + 1] += err * (438.0 / 2304.0);
+    buf[y + 1][bx] += err * (572.0 / 2304.0);
+    buf[y + 1][bx - 1] += err * (332.0 / 2304.0);
+    buf[y + 1][bx - 2] += err * (148.0 / 2304.0);
+    buf[y + 1][bx - 3] += err * (-92.0 / 2304.0);
+    buf[y + 1][bx - 4] += err * (-30.0 / 2304.0);
+    // Row 2 (dy=2): 9 taps
+    buf[y + 2][bx + 4] += err * (-9.0 / 2304.0);
+    buf[y + 2][bx + 3] += err * (-30.0 / 2304.0);
+    buf[y + 2][bx + 2] += err * (29.0 / 2304.0);
+    buf[y + 2][bx + 1] += err * (174.0 / 2304.0);
+    buf[y + 2][bx] += err * (311.0 / 2304.0);
+    buf[y + 2][bx - 1] += err * (88.0 / 2304.0);
+    buf[y + 2][bx - 2] += err * (-63.0 / 2304.0);
+    buf[y + 2][bx - 3] += err * (-74.0 / 2304.0);
+    buf[y + 2][bx - 4] += err * (-19.0 / 2304.0);
+    // Row 3 (dy=3): 9 taps (symmetric, all negative — same as LTR)
+    buf[y + 3][bx - 4] += err * (-6.0 / 2304.0);
+    buf[y + 3][bx - 3] += err * (-28.0 / 2304.0);
+    buf[y + 3][bx - 2] += err * (-74.0 / 2304.0);
+    buf[y + 3][bx - 1] += err * (-120.0 / 2304.0);
+    buf[y + 3][bx] += err * (-142.0 / 2304.0);
+    buf[y + 3][bx + 1] += err * (-120.0 / 2304.0);
+    buf[y + 3][bx + 2] += err * (-74.0 / 2304.0);
+    buf[y + 3][bx + 3] += err * (-28.0 / 2304.0);
+    buf[y + 3][bx + 4] += err * (-6.0 / 2304.0);
+    // Row 4 (dy=4): 9 taps (symmetric, all negative — same as LTR)
+    buf[y + 4][bx - 4] += err * (-1.0 / 2304.0);
+    buf[y + 4][bx - 3] += err * (-6.0 / 2304.0);
+    buf[y + 4][bx - 2] += err * (-19.0 / 2304.0);
+    buf[y + 4][bx - 1] += err * (-36.0 / 2304.0);
+    buf[y + 4][bx] += err * (-45.0 / 2304.0);
+    buf[y + 4][bx + 1] += err * (-36.0 / 2304.0);
+    buf[y + 4][bx + 2] += err * (-19.0 / 2304.0);
+    buf[y + 4][bx + 3] += err * (-6.0 / 2304.0);
+    buf[y + 4][bx + 4] += err * (-1.0 / 2304.0);
+}
+
+/// Apply H2 kernel to a single channel.
+/// Dispatches to FS² or JJN² based on the `use_jjn` flag,
+/// and to LTR or RTL based on `is_rtl`.
+#[inline]
+pub fn apply_h2_single_channel_kernel(
+    buf: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err: f32,
+    use_jjn: bool,
+    is_rtl: bool,
+) {
+    match (use_jjn, is_rtl) {
+        (true, false) => apply_jjn2_ltr(buf, bx, y, err),
+        (true, true) => apply_jjn2_rtl(buf, bx, y, err),
+        (false, false) => apply_fs2_ltr(buf, bx, y, err),
+        (false, true) => apply_fs2_rtl(buf, bx, y, err),
+    }
+}
+
+/// Apply H2 kernel to RGB channels.
+/// Each channel independently selects between FS² and JJN²
+/// based on bits from the pixel_hash. Bit assignment: R=bit0, G=bit1, B=bit2.
+#[inline]
+pub fn apply_h2_kernel_rgb(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    pixel_hash: u32,
+    is_rtl: bool,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+
+    apply_h2_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
+    apply_h2_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
+    apply_h2_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
+}
+
+/// Apply H2 kernel to RGBA channels.
+/// Each channel independently selects between FS² and JJN²
+/// based on bits from the pixel_hash. Bit assignment: R=bit0, G=bit1, B=bit2, A=bit3.
+#[inline]
+pub fn apply_h2_kernel_rgba(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    pixel_hash: u32,
+    is_rtl: bool,
+) {
+    let use_jjn_r = pixel_hash & 1 != 0;
+    let use_jjn_g = pixel_hash & 2 != 0;
+    let use_jjn_b = pixel_hash & 4 != 0;
+    let use_jjn_a = pixel_hash & 8 != 0;
+
+    apply_h2_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
+    apply_h2_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
+    apply_h2_single_channel_kernel(err_b, bx, y, err_b_val, use_jjn_b, is_rtl);
+    apply_h2_single_channel_kernel(err_a, bx, y, err_a_val, use_jjn_a, is_rtl);
+}

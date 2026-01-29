@@ -19,8 +19,9 @@ use crate::color_distance::perceptual_distance_sq;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
-    linear_rgb_to_perceptual_clamped, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
+    linear_rgb_to_perceptual_clamped, lowbias32, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
 };
+use super::kernels::{apply_h2_kernel_rgb, H2_REACH, H2_SEED};
 
 // Re-export common types for backwards compatibility
 #[allow(unused_imports)]
@@ -607,6 +608,192 @@ fn dither_mixed_random_rgb(
 }
 
 // ============================================================================
+// Mixed H2 (second-order kernel) RGB dithering
+// ============================================================================
+
+/// Get RGB values for H2 processing coordinate, handling seeding area mapping.
+/// H2 uses SEED=16 instead of REACH for seeding width.
+#[inline]
+fn get_seeding_rgb_h2(
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    width: usize,
+    px: usize,  // processing x (0..seed + real_width + seed)
+    py: usize,  // processing y (0..seed + real_height)
+    seed: usize,
+) -> (f32, f32, f32) {
+    let img_y = if py < seed { 0 } else { py - seed };
+    let img_x = if px < seed {
+        0
+    } else if px >= seed + width {
+        width - 1
+    } else {
+        px - seed
+    };
+    let idx = img_y * width + img_x;
+    (r_channel[idx], g_channel[idx], b_channel[idx])
+}
+
+/// Mixed H2 kernel dithering for colorspace-aware RGB, LTR only.
+/// Uses FS² and JJN² kernels with per-channel hash-based selection.
+/// Requires wider buffer (REACH=4, SEED=16) due to negative weights and larger footprint.
+#[inline]
+fn dither_mixed_h2_standard_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let seed = H2_SEED;
+    let reach = H2_REACH;
+
+    // bx_start = overshoot (reach) — skip it, start at seeding
+    let bx_start = reach;
+    let process_width = seed + width + seed;
+    let process_height = seed + height;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+
+            // Get RGB values (handles seeding coordinate mapping)
+            let (r_val, g_val, b_val) = get_seeding_rgb_h2(
+                r_channel, g_channel, b_channel, width, px, y, seed
+            );
+
+            let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
+
+            // Only write output for real image pixels (not seeding)
+            let in_real_y = y >= seed;
+            let in_real_x = px >= seed && px < seed + width;
+            if in_real_y && in_real_x {
+                let real_y = y - seed;
+                let real_x = px - seed;
+                let idx = real_y * width + real_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+            }
+
+            // Per-channel kernel selection using hash bits
+            let img_x = px.wrapping_sub(seed);
+            let img_y = y.wrapping_sub(seed);
+            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= seed {
+                cb((y - seed + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+/// Mixed H2 dithering with serpentine scanning for RGB.
+/// Uses precomputed second-order kernels (FS² and JJN²) selected per-pixel via hash.
+/// Alternates scan direction per row (even=LTR, odd=RTL).
+fn dither_mixed_h2_serpentine_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let seed = H2_SEED;
+    let reach = H2_REACH;
+
+    let bx_start = reach;
+    let process_width = seed + width + seed;
+    let process_height = seed + height;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+
+                let (r_val, g_val, b_val) = get_seeding_rgb_h2(
+                    r_channel, g_channel, b_channel, width, px, y, seed
+                );
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
+
+                let in_real_y = y >= seed;
+                let in_real_x = px >= seed && px < seed + width;
+                if in_real_y && in_real_x {
+                    let real_y = y - seed;
+                    let real_x = px - seed;
+                    let idx = real_y * width + real_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
+
+                let img_x = px.wrapping_sub(seed);
+                let img_y = y.wrapping_sub(seed);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+
+                let (r_val, g_val, b_val) = get_seeding_rgb_h2(
+                    r_channel, g_channel, b_channel, width, px, y, seed
+                );
+
+                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                    process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
+
+                let in_real_y = y >= seed;
+                let in_real_x = px >= seed && px < seed + width;
+                if in_real_y && in_real_x {
+                    let real_y = y - seed;
+                    let real_x = px - seed;
+                    let idx = real_y * width + real_x;
+                    r_out[idx] = best_r;
+                    g_out[idx] = best_g;
+                    b_out[idx] = best_b;
+                }
+
+                let img_x = px.wrapping_sub(seed);
+                let img_y = y.wrapping_sub(seed);
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= seed {
+                cb((y - seed + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+// ============================================================================
 // Main dithering implementation
 // ============================================================================
 
@@ -762,6 +949,42 @@ pub fn colorspace_aware_dither_rgb_with_options(
 
     let pixels = width * height;
 
+    // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
+    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+        let h2_reach = H2_REACH;
+        let h2_seed = H2_SEED;
+        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach; // 4+16+W+16+4 = W+40
+        let buf_height = h2_seed + height + h2_reach;                     // 16+H+4 = H+20
+
+        let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+        let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+        let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
+
+        let mut r_out = vec![0u8; pixels];
+        let mut g_out = vec![0u8; pixels];
+        let mut b_out = vec![0u8; pixels];
+
+        let hashed_seed = lowbias32(seed);
+
+        if mode == DitherMode::MixedH2Serpentine {
+            dither_mixed_h2_serpentine_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, hashed_seed, progress,
+            );
+        } else {
+            dither_mixed_h2_standard_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, hashed_seed, progress,
+            );
+        }
+
+        return (r_out, g_out, b_out);
+    }
+
     // Use JJN reach (larger) for all modes to accommodate both kernels
     // Buffer layout: [overshoot][seeding][real][seeding][overshoot]
     let reach = <JarvisJudiceNinke as RgbKernel>::REACH;
@@ -823,7 +1046,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard => {
             dither_mixed_standard_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
@@ -831,7 +1054,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Serpentine => {
             dither_mixed_serpentine_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,

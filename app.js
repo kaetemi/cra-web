@@ -166,7 +166,9 @@ function generateCliCommand() {
         3: 'jjn-serpentine',
         4: 'mixed-standard',
         5: 'mixed-serpentine',
-        6: 'mixed-random'
+        6: 'mixed-random',
+        18: 'boon-h2',
+        19: 'boon-h2-serpentine'
     };
 
     // Map histogram mode values to CLI histogram mode names
@@ -495,7 +497,9 @@ const OUTPUT_DITHER_DESCRIPTIONS = {
     '8': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Standard scanning. Used for final output quantization.',
     '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for final output quantization.',
     '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for final output quantization.',
-    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for final output quantization.'
+    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for final output quantization.',
+    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for final output quantization.',
+    '19': 'Our method (2nd Order Kernel, Serpentine): Uses precomputed second-order FS² and JJN² kernels with serpentine scanning. Alternates scan direction each row. Used for final output quantization.'
 };
 
 // Histogram dithering method descriptions
@@ -510,7 +514,9 @@ const HISTOGRAM_DITHER_DESCRIPTIONS = {
     '8': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Standard scanning. Used for histogram processing.',
     '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for histogram processing.',
     '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for histogram processing.',
-    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for histogram processing.'
+    '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for histogram processing.',
+    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for histogram processing.',
+    '19': 'Our method (2nd Order Kernel, Serpentine): Uses precomputed second-order FS² and JJN² kernels with serpentine scanning. Alternates scan direction each row. Used for histogram processing.'
 };
 
 // Update output dither method description

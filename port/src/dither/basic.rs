@@ -674,6 +674,7 @@ fn mixed_dither_random(
 // ============================================================================
 
 use super::kernels::{apply_zhou_fang_ltr, apply_zhou_fang_rtl, zhou_fang_threshold};
+use super::kernels::{apply_h2_single_channel_kernel, H2_REACH, H2_SEED};
 
 /// Zhou-Fang dithering with standard left-to-right scanning.
 /// Uses threshold modulation to break up "worm" patterns in mid-tones.
@@ -1268,6 +1269,204 @@ fn fs_tpdf_serpentine(
 }
 
 // ============================================================================
+// Mixed H2 dithering (second-order precomputed kernels)
+// ============================================================================
+
+/// Create a padded buffer with edge seeding for H2 kernels.
+///
+/// H2 kernels have REACH=4 and need SEED=16 padding for stable edge behavior.
+/// Buffer layout:
+/// ```text
+/// Cols: [overshoot=4][seed=16][image W][seed=16][overshoot=4]  → W+40
+/// Rows: [seed=16][image H][overshoot=4]                       → H+20
+/// ```
+#[inline]
+fn create_seeded_buffer_h2(
+    img: &[f32],
+    width: usize,
+    height: usize,
+) -> Vec<Vec<f32>> {
+    let reach = H2_REACH;
+    let seed = H2_SEED;
+
+    let total_left = reach + seed;  // overshoot + seeding = 4 + 16 = 20
+    let total_right = seed + reach; // seeding + overshoot = 16 + 4 = 20
+    let total_top = seed;           // seeding only = 16
+    let total_bottom = reach;       // overshoot only = 4
+
+    let buf_width = total_left + width + total_right;
+    let buf_height = total_top + height + total_bottom;
+    let mut buf = vec![vec![0.0f32; buf_width]; buf_height];
+
+    // Copy real image data
+    for y in 0..height {
+        for x in 0..width {
+            buf[y + total_top][x + total_left] = img[y * width + x];
+        }
+    }
+
+    // Fill seeding areas with duplicated edge pixels
+    let seed_left_start = reach; // after left overshoot
+    let seed_right_start = total_left + width; // after real image
+
+    // Fill left seeding columns (duplicate first column of real image)
+    for y in 0..height {
+        let first_col_val = img[y * width];
+        for sx in 0..seed {
+            buf[y + total_top][seed_left_start + sx] = first_col_val;
+        }
+    }
+
+    // Fill right seeding columns (duplicate last column of real image)
+    for y in 0..height {
+        let last_col_val = img[y * width + (width - 1)];
+        for sx in 0..seed {
+            buf[y + total_top][seed_right_start + sx] = last_col_val;
+        }
+    }
+
+    // Fill top seeding rows (duplicate first row, including seeding columns)
+    if seed > 0 {
+        let first_row_left_seed = img[0];
+        let first_row_right_seed = img[width - 1];
+
+        for sy in 0..seed {
+            // Left seeding area of top seeding row
+            for sx in 0..seed {
+                buf[sy][seed_left_start + sx] = first_row_left_seed;
+            }
+            // Real image area of top seeding row (copy first row)
+            for x in 0..width {
+                buf[sy][x + total_left] = img[x];
+            }
+            // Right seeding area of top seeding row
+            for sx in 0..seed {
+                buf[sy][seed_right_start + sx] = first_row_right_seed;
+            }
+        }
+    }
+
+    buf
+}
+
+/// Extract real pixels from H2 seeded buffer, clamp, and convert to u8.
+#[inline]
+fn extract_result_seeded_h2(
+    buf: &[Vec<f32>],
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    let total_left = H2_REACH + H2_SEED; // 20
+    let total_top = H2_SEED;             // 16
+
+    let mut result = Vec::with_capacity(width * height);
+    for y in 0..height {
+        for x in 0..width {
+            result.push(buf[y + total_top][x + total_left].clamp(0.0, 255.0).round() as u8);
+        }
+    }
+    result
+}
+
+/// Mixed H2 dithering with standard left-to-right scanning.
+/// Uses precomputed second-order kernels (FS² and JJN²) selected per-pixel via hash.
+/// Always LTR — no serpentine variant due to kernel asymmetry.
+fn mixed_h2_dither_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    let reach = H2_REACH;
+    let seed_size = H2_SEED;
+    let mut buf = create_seeded_buffer_h2(img, width, height);
+
+    // Processing area includes seeding + real image
+    // bx_start = overshoot (skip it, start at seeding)
+    let bx_start = reach; // = 4
+    let process_width = seed_size + width + seed_size; // 16 + W + 16
+    let process_height = seed_size + height;            // 16 + H
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let err = process_pixel(&mut buf, bx, y, &quant);
+            // Use image coordinates for hash (adjusted for seeding offset)
+            let img_x = px.wrapping_sub(seed_size) as u16;
+            let img_y = y.wrapping_sub(seed_size) as u16;
+            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 == 1;
+            apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= seed_size {
+                cb((y - seed_size + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded_h2(&buf, width, height)
+}
+
+/// Mixed H2 dithering with serpentine scanning.
+/// Uses precomputed second-order kernels (FS² and JJN²) selected per-pixel via hash.
+/// Alternates scan direction per row (even=LTR, odd=RTL).
+fn mixed_h2_dither_serpentine(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    let reach = H2_REACH;
+    let seed_size = H2_SEED;
+    let mut buf = create_seeded_buffer_h2(img, width, height);
+
+    // Processing area includes seeding + real image
+    let bx_start = reach; // = 4
+    let process_width = seed_size + width + seed_size;
+    let process_height = seed_size + height;
+
+    for y in 0..process_height {
+        if y % 2 == 1 {
+            // Right-to-left on odd rows
+            for px in (0..process_width).rev() {
+                let bx = bx_start + px;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let img_x = px.wrapping_sub(seed_size) as u16;
+                let img_y = y.wrapping_sub(seed_size) as u16;
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, true);
+            }
+        } else {
+            // Left-to-right on even rows
+            for px in 0..process_width {
+                let bx = bx_start + px;
+                let err = process_pixel(&mut buf, bx, y, &quant);
+                let img_x = px.wrapping_sub(seed_size) as u16;
+                let img_y = y.wrapping_sub(seed_size) as u16;
+                let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+                let use_jjn = pixel_hash & 1 == 1;
+                apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, false);
+            }
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= seed_size {
+                cb((y - seed_size + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded_h2(&buf, width, height)
+}
+
+// ============================================================================
 // Public API
 // ============================================================================
 
@@ -1375,6 +1574,8 @@ pub fn dither_with_mode_bits(
         DitherMode::UlichneyWeightSerpentine => ulichney_weight_serpentine(img, width, height, seed, quant, progress),
         DitherMode::FsTpdfStandard => fs_tpdf_standard(img, width, height, seed, quant, progress),
         DitherMode::FsTpdfSerpentine => fs_tpdf_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::MixedH2Standard => mixed_h2_dither_standard(img, width, height, seed, quant, progress),
+        DitherMode::MixedH2Serpentine => mixed_h2_dither_serpentine(img, width, height, seed, quant, progress),
     }
 }
 

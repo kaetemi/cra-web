@@ -841,6 +841,8 @@
                     <option value="15">Ulichney Weight ±50% (Serpentine)</option>
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
+                    <option value="18">Our method (2nd Order Kernel)</option>
+                    <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="dither-mode-warning hidden" id="dither-mode-warning">⚠ This mode is designed for 1-bit output without colorspace-aware dithering. With current settings, it will fall back to standard Floyd-Steinberg.</p>
@@ -867,6 +869,8 @@
                     <option value="15">Ulichney Weight ±50% (Serpentine)</option>
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
+                    <option value="18">Our method (2nd Order Kernel)</option>
+                    <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="alpha-dither-hint">Separate dither mode for alpha channel. Only applies when output has alpha (ARGB, LA).</p>
@@ -1619,7 +1623,9 @@
                 14: 'ulichney-weight-standard',
                 15: 'ulichney-weight-serpentine',
                 16: 'fs-tpdf-standard',
-                17: 'fs-tpdf-serpentine'
+                17: 'fs-tpdf-serpentine',
+                18: 'boon-h2-standard',
+                19: 'boon-h2-serpentine'
             };
 
             // Map perceptual space values to CLI names
@@ -1722,7 +1728,7 @@
             }
 
             // Add seed for mixed modes (only if not default 12345)
-            if (mode >= 4 && mode <= 6 && seed !== 12345) {
+            if (((mode >= 4 && mode <= 6) || mode === 18 || mode === 19) && seed !== 12345) {
                 cmd += ` --seed ${seed}`;
             }
 
@@ -2069,7 +2075,7 @@
         // Now works for both basic and color-space aware modes
         function updateSeedVisibility() {
             const mode = parseInt(document.getElementById('dither-mode').value);
-            const isMixedMode = mode >= 4 && mode <= 6;
+            const isMixedMode = (mode >= 4 && mode <= 6) || mode === 18 || mode === 19;
             document.getElementById('seed-options').classList.toggle('visible', isMixedMode);
         }
 
