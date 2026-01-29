@@ -219,6 +219,8 @@ def main():
                         help="FIFO delay in pixels before error diffusion (default: 0)")
     parser.add_argument("--gradient", nargs="+", type=int,
                         help="Generate gradient at specified bit depths")
+    parser.add_argument("--recursive-test", action="store_true",
+                        help="Run recursive generation experiment")
     parser.add_argument("--output", "-o", type=str,
                         help="Output path")
 
@@ -252,6 +254,40 @@ def main():
             unique = np.unique(dithered)
             print(f"Unique levels: {len(unique)} (expected {2**bits})")
             print(f"Levels: {unique}")
+
+    elif args.recursive_test:
+        size = args.size
+        seed = args.seed
+
+        def save_step(img, name):
+            path = output_dir / f"{name}.png"
+            Image.fromarray((img * 255).astype(np.uint8), mode='L').save(path)
+            print(f"Saved: {path}")
+            unique, counts = np.unique(img, return_counts=True)
+            total = img.size
+            for level, count in zip(unique, counts):
+                print(f"  {level:.4f}: {count:6d} ({count/total*100:.1f}%)")
+
+        # Step 1: 1-bit dither of uniform 0.5 gray
+        print("Step 1: 1-bit dither of 0.5 gray")
+        input_1bit = np.full((size, size), 0.5, dtype=np.float64)
+        result_1bit = dither(input_1bit, bits=1, seed=seed)
+        save_step(result_1bit, "step1_1bit")
+
+        # Step 2: Scale 1-bit result to 1/6 - 5/6
+        print("\nStep 2: Scale to 1/6 - 5/6")
+        scaled = result_1bit * (4.0 / 6.0) + (1.0 / 6.0)
+        save_step(scaled, "step2_scaled")
+
+        # Step 3: 2-bit dither of scaled input (no delay)
+        print("\nStep 3: 2-bit dither, delay=0")
+        result_2bit = dither(scaled, bits=2, seed=seed)
+        save_step(result_2bit, "step3_2bit_delay0")
+
+        # Step 4: 2-bit dither of scaled input (delay=1)
+        print("\nStep 4: 2-bit dither, delay=1")
+        result_2bit_d1 = dither(scaled, bits=2, seed=seed, delay=1)
+        save_step(result_2bit_d1, "step4_2bit_delay1")
 
     elif args.gray is not None:
         # Dither uniform gray
