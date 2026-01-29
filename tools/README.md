@@ -385,6 +385,7 @@ Comprehensive test script that generates dithered images from reference photogra
 - `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
 - `boon-standard`, `boon-serpentine` - Boon (our method)
 - `boon-h2` - Boon 2nd-order kernel (precomputed FS² and JJN², standard scanning)
+- `adaptive-blend` - Gradient-adaptive 1st/2nd order blend (Python: smooth→2nd, edges→1st)
 - `ostro-serpentine` - Ostromoukhov
 - `zhou-fang-serpentine` - Zhou-Fang
 - `ulichney-serpentine`, `ulichney-weight-serpentine` - Ulichney perturbation variants
@@ -687,6 +688,7 @@ tools/
 │   │   ├── jjn-serpentine/
 │   │   ├── boon-serpentine/
 │   │   ├── boon-h2/
+│   │   ├── adaptive-blend/          # Python: gradient-adaptive 1st/2nd order
 │   │   ├── ostro-serpentine/
 │   │   ├── zhou-fang-serpentine/
 │   │   ├── ulichney-serpentine/

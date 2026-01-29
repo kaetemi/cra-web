@@ -118,6 +118,12 @@ python "${SCRIPT_DIR}/generate_bluenoise_dither.py" \
     --ref-dir "$REF_DIR" \
     --output-dir "${DITHERED_DIR}/bluenoise"
 
+# Generate adaptive 1st/2nd order blend dithered images
+echo "  Generating adaptive-blend dithered images..."
+python "${SCRIPT_DIR}/generate_adaptive_blend_dither.py" \
+    --ref-dir "$REF_DIR" \
+    --output-dir "${DITHERED_DIR}/adaptive-blend"
+
 echo ""
 echo "=============================================="
 echo "Running wavelet analysis"

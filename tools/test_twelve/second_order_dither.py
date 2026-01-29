@@ -676,6 +676,90 @@ def dither_kernel_2nd(input_image, seed=0):
     return buf[total_top:total_top + height, total_left:total_left + width].copy()
 
 
+def dither_adaptive_blend(input_image, seed=0):
+    """Gradient-adaptive blend of 1st and 2nd order kernels.
+
+    Blends between 1st-order (FS/JJN) and 2nd-order (2H-H²) kernels based on
+    local image gradient. Sharp edges use 1st order (more stable), smooth areas
+    use 2nd order (steeper noise shaping).
+
+    Alpha is computed from the original input image (0.0-1.0 range):
+        gx = abs(input[y, x+1] - input[y, x])
+        gy = abs(input[y+1, x] - input[y, x])
+        alpha = (1.0 - gx) * (1.0 - gy)
+    alpha=1 → smooth → 2nd order, alpha=0 → edge → 1st order.
+
+    Error is split: alpha*err to 2nd-order kernel, (1-alpha)*err to 1st-order.
+    Always LTR (2nd-order component is unstable with serpentine).
+    Uses triple32 hash for kernel selection.
+    """
+    height, width = input_image.shape
+    r = REACH_2ND
+    s = SEED_2ND
+
+    # Precompute alpha map from original input gradients
+    alpha_map = np.ones((height, width), dtype=np.float64)
+    for y in range(height):
+        for x in range(width):
+            gx = abs(input_image[y, min(x + 1, width - 1)] - input_image[y, x])
+            gy = abs(input_image[min(y + 1, height - 1), x] - input_image[y, x])
+            alpha_map[y, x] = (1.0 - gx) * (1.0 - gy)
+
+    buf = create_seeded_buffer_r4(input_image)
+    hashed_seed = triple32(np.uint32(seed))
+
+    bx_start = r  # skip left overshoot
+    process_height = s + height
+    process_width = s + width + s
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+            old_val = buf[y, bx]
+            new_val = 1.0 if old_val > 0.5 else 0.0
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            img_x = px - s
+            img_y = y - s
+
+            # Look up alpha: use 1.0 for seed pixels (uniform = smooth)
+            if 0 <= img_x < width and 0 <= img_y < height:
+                alpha = alpha_map[img_y, img_x]
+            else:
+                alpha = 1.0
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            # Split error between kernels
+            if alpha < 1.0:
+                err_1st = err * (1.0 - alpha)
+                err_2nd = err * alpha
+                # 1st-order kernel (LTR only, fits within reach=4 buffer)
+                if use_jjn:
+                    apply_jjn_ltr(buf, bx, y, err_1st)
+                else:
+                    apply_fs_ltr(buf, bx, y, err_1st)
+                # 2nd-order kernel
+                if use_jjn:
+                    apply_jjn2_ltr(buf, bx, y, err_2nd)
+                else:
+                    apply_fs2_ltr(buf, bx, y, err_2nd)
+            else:
+                # Pure 2nd order (common case in smooth areas)
+                if use_jjn:
+                    apply_jjn2_ltr(buf, bx, y, err)
+                else:
+                    apply_fs2_ltr(buf, bx, y, err)
+
+    total_left = r + s
+    total_top = s
+    return buf[total_top:total_top + height, total_left:total_left + width].copy()
+
+
 def dither_kernel_3rd(input_image, seed=0):
     """Error diffusion with precomputed 3H-3H²+H³ kernels.
 
@@ -869,6 +953,7 @@ def analyze_gray(gray_val, output_dir, size=256, seed=0):
     methods = [
         ('1st order (mixed FS/JJN)', dither_first_order),
         ('2H-H² kernel', dither_kernel_2nd),
+        ('adaptive 1st+2nd', dither_adaptive_blend),
         ('3H-3H²+H³ kernel', dither_kernel_3rd),
         ('dual integrator', dither_dual_integrator),
     ]
@@ -944,6 +1029,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
     methods = [
         ('1st order', dither_first_order),
         ('2H-H² kernel', dither_kernel_2nd),
+        ('adaptive 1st+2nd', dither_adaptive_blend),
         ('3H-3H²+H³ kernel', dither_kernel_3rd),
         ('dual integrator', dither_dual_integrator),
     ]
@@ -984,7 +1070,7 @@ def process_image(image_path, output_dir, seed=0):
     stem = Path(image_path).stem
 
     # Standard methods
-    for label, fn in [('1st_order', dither_first_order), ('2H_H2_kernel', dither_kernel_2nd), ('3H_3H2_H3_kernel', dither_kernel_3rd), ('dual_int', dither_dual_integrator)]:
+    for label, fn in [('1st_order', dither_first_order), ('2H_H2_kernel', dither_kernel_2nd), ('adaptive_blend', dither_adaptive_blend), ('3H_3H2_H3_kernel', dither_kernel_3rd), ('dual_int', dither_dual_integrator)]:
         result = fn(input_image, seed=seed)
         out_img = (result * 255).astype(np.uint8)
         path = output_dir / f"{stem}_{label}.png"
