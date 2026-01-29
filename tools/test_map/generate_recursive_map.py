@@ -286,76 +286,37 @@ def main():
 
         gray = np.full((size, size), 0.5, dtype=np.float64)
 
-        # Step 1a: 1-bit dither of 0.5 gray
-        print("Step 1a: 1-bit dither of 0.5 gray")
-        a = dither(gray, bits=1, seed=get_seed())
-        save_step(a, "step1a_1bit")
+        # Step 1: 1-bit dither of 0.5 gray with error capture
+        print("Step 1: 1-bit dither of 0.5 gray")
+        result_1bit, error_map = dither(gray, bits=1, seed=get_seed(), return_error=True)
+        save_step(result_1bit, "step1_1bit")
 
-        # Step 1b: 1-bit dither of 0.5 gray (different seed)
-        print("\nStep 1b: 1-bit dither of 0.5 gray")
-        b = dither(gray, bits=1, seed=get_seed())
-        save_step(b, "step1b_1bit")
+        # Error map stats
+        emin, emax = error_map.min(), error_map.max()
+        print(f"Error range: [{emin:.4f}, {emax:.4f}]")
+        error_norm = (error_map - emin) / (emax - emin) if emax > emin else error_map
+        save_step(error_norm, "step1_error")
 
-        result_1bit = a
+        # Step 2a: Scale 1-bit to 0-2/3, generate 1-bit
+        print("\nStep 2a: Scale to 0 - 2/3, 1-bit dither")
+        scaled_lo = result_1bit * (2.0 / 3.0)
+        save_step(scaled_lo, "step2a_input")
+        result_2a = dither(scaled_lo, bits=1, seed=get_seed())
+        save_step(result_2a, "step2a_1bit")
 
-        # Step 2: Boolean combinations
-        a_bool = a > 0.5
-        b_bool = b > 0.5
-
-        print("\nStep 2: XOR")
-        xor = (a_bool ^ b_bool).astype(np.float64)
-        save_step(xor, "step2_xor")
-
-        print("\nStep 2: !XOR (XNOR)")
-        xnor = (~(a_bool ^ b_bool)).astype(np.float64)
-        save_step(xnor, "step2_xnor")
-
-        print("\nStep 2: AND")
-        and_result = (a_bool & b_bool).astype(np.float64)
-        save_step(and_result, "step2_and")
-
-        # Step 3: Second XOR from two more independent 1-bit dithers
-        print("\nStep 3a: 1-bit dither of 0.5 gray")
-        c = dither(gray, bits=1, seed=get_seed())
-        save_step(c, "step3a_1bit")
-
-        print("\nStep 3b: 1-bit dither of 0.5 gray")
-        d = dither(gray, bits=1, seed=get_seed())
-        save_step(d, "step3b_1bit")
-
-        print("\nStep 3: XOR of c,d")
-        xor2 = ((c > 0.5) ^ (d > 0.5)).astype(np.float64)
-        save_step(xor2, "step3_xor2")
-
-        # Step 4: Scale both XORs to 1/6-5/6, 2-bit dither
-        print("\nStep 4a: XOR1 scaled to 1/6-5/6, 2-bit dither")
-        xor1_scaled = xor * (4.0 / 6.0) + (1.0 / 6.0)
-        result_4a = dither(xor1_scaled, bits=2, seed=get_seed())
-        save_step(result_4a, "step4a_2bit")
-
-        print("\nStep 4b: XOR2 scaled to 1/6-5/6, 2-bit dither")
-        xor2_scaled = xor2 * (4.0 / 6.0) + (1.0 / 6.0)
-        result_4b = dither(xor2_scaled, bits=2, seed=get_seed())
-        save_step(result_4b, "step4b_2bit")
-
-        # Step 5: Combine the two XORs
-        xor1_bool = xor > 0.5
-        xor2_bool = xor2 > 0.5
-
-        print("\nStep 5: AND of two XORs")
-        xor_and = (xor1_bool & xor2_bool).astype(np.float64)
-        save_step(xor_and, "step5_xor_and")
-
-        print("\nStep 5: XOR of two XORs")
-        xor_xor = (xor1_bool ^ xor2_bool).astype(np.float64)
-        save_step(xor_xor, "step5_xor_xor")
+        # Step 2b: Scale 1-bit to 1/3-1, generate 1-bit
+        print("\nStep 2b: Scale to 1/3 - 1, 1-bit dither")
+        scaled_hi = result_1bit * (2.0 / 3.0) + (1.0 / 3.0)
+        save_step(scaled_hi, "step2b_input")
+        result_2b = dither(scaled_hi, bits=1, seed=get_seed())
+        save_step(result_2b, "step2b_1bit")
 
     elif args.gray is not None:
         # Dither uniform gray
         print(f"Dithering {args.gray:.3f} gray at {args.bits}-bit...")
 
         input_img = np.full((args.size, args.size), args.gray, dtype=np.float64)
-        dithered = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay)
+        dithered, error_map = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay, return_error=True)
 
         out_path = args.output or str(output_dir / f"gray_{args.gray:.2f}_{args.bits}bit.png")
         img = (dithered * 255).astype(np.uint8)
@@ -368,6 +329,15 @@ def main():
         print(f"\nLevel distribution:")
         for level, count in zip(unique, counts):
             print(f"  {level:.4f}: {count:6d} ({count/total*100:.2f}%)")
+
+        # Error (target) output
+        emin, emax = error_map.min(), error_map.max()
+        print(f"\nTarget range: [{emin:.4f}, {emax:.4f}]")
+        error_norm = (error_map - emin) / (emax - emin) if emax > emin else error_map
+        err_path = output_dir / f"gray_{args.gray:.2f}_{args.bits}bit_error.png"
+        Image.fromarray((error_norm * 255).astype(np.uint8), mode='L').save(err_path)
+        print(f"Saved: {err_path}")
+        np.save(output_dir / f"gray_{args.gray:.2f}_{args.bits}bit_error.npy", error_map)
 
     else:
         parser.print_help()
