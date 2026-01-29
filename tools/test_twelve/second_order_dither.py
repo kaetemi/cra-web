@@ -9,6 +9,11 @@ which should achieve +12 dB/octave.
 Uses mixed FS/JJN kernel switching for forward diffusion (our method),
 with a fixed FS reverse kernel for the second-order prediction.
 
+Implements edge seeding matching the Rust dither/basic.rs create_seeded_buffer:
+- reach=2 (JJN radius) padding with duplicated edge pixels
+- Processing includes seeding rows/columns to pre-warm error diffusion
+- No bounds checking in kernels (padding handles edges)
+
 Usage:
     python second_order_dither.py                    # Gray levels + gradient
     python second_order_dither.py --gray 0.5         # Single gray level
@@ -25,6 +30,9 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 
+REACH = 2  # JJN kernel radius
+
+
 def lowbias32(x: np.uint32) -> np.uint32:
     """Lowbias32 hash - improved version with bias 0.107."""
     x = np.uint32(x)
@@ -37,144 +45,148 @@ def lowbias32(x: np.uint32) -> np.uint32:
 
 
 # ============================================================================
-# Error diffusion kernels
+# Seeded buffer (matches Rust create_seeded_buffer)
 # ============================================================================
 
-def apply_fs_ltr(buf, x, y, err):
-    h, w = buf.shape
-    if x + 1 < w:
-        buf[y, x + 1] += err * (7.0 / 16.0)
-    if y + 1 < h:
-        if x > 0:
-            buf[y + 1, x - 1] += err * (3.0 / 16.0)
-        buf[y + 1, x] += err * (5.0 / 16.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (1.0 / 16.0)
+def create_seeded_buffer(input_image):
+    """Create padded buffer with edge seeding, matching Rust create_seeded_buffer.
+
+    Buffer layout (reach=2):
+        cols: [0..2) overshoot | [2..4) left seed | [4..4+W) image | [4+W..6+W) right seed | [6+W..8+W) overshoot
+        rows: [0..2) top seed | [2..2+H) image | [2+H..4+H) bottom overshoot
+    """
+    height, width = input_image.shape
+    total_left = REACH * 2
+    total_right = REACH * 2
+    total_top = REACH
+    total_bottom = REACH
+
+    buf_width = total_left + width + total_right
+    buf_height = total_top + height + total_bottom
+    buf = np.zeros((buf_height, buf_width), dtype=np.float64)
+
+    # Copy real image data
+    buf[total_top:total_top + height, total_left:total_left + width] = input_image
+
+    seed_left_start = REACH  # columns [reach..reach*2]
+    seed_right_start = total_left + width  # columns [total_left+width..]
+
+    # Left seeding columns: duplicate first column of real image
+    for sx in range(REACH):
+        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+
+    # Right seeding columns: duplicate last column of real image
+    for sx in range(REACH):
+        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+
+    # Top seeding rows: duplicate first row (including seeding columns)
+    for sy in range(REACH):
+        # Left seeding area
+        for sx in range(REACH):
+            buf[sy, seed_left_start + sx] = input_image[0, 0]
+        # Real image area (first row)
+        buf[sy, total_left:total_left + width] = input_image[0, :]
+        # Right seeding area
+        for sx in range(REACH):
+            buf[sy, seed_right_start + sx] = input_image[0, -1]
+
+    return buf
 
 
-def apply_fs_rtl(buf, x, y, err):
-    h, w = buf.shape
-    if x > 0:
-        buf[y, x - 1] += err * (7.0 / 16.0)
-    if y + 1 < h:
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (3.0 / 16.0)
-        buf[y + 1, x] += err * (5.0 / 16.0)
-        if x > 0:
-            buf[y + 1, x - 1] += err * (1.0 / 16.0)
+def extract_result(buf, width, height):
+    """Extract real pixels from seeded buffer."""
+    total_left = REACH * 2
+    total_top = REACH
+    return buf[total_top:total_top + height, total_left:total_left + width].copy()
 
 
-def apply_jjn_ltr(buf, x, y, err):
-    h, w = buf.shape
-    if x + 1 < w:
-        buf[y, x + 1] += err * (7.0 / 48.0)
-    if x + 2 < w:
-        buf[y, x + 2] += err * (5.0 / 48.0)
-    if y + 1 < h:
-        if x >= 2:
-            buf[y + 1, x - 2] += err * (3.0 / 48.0)
-        if x >= 1:
-            buf[y + 1, x - 1] += err * (5.0 / 48.0)
-        buf[y + 1, x] += err * (7.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (5.0 / 48.0)
-        if x + 2 < w:
-            buf[y + 1, x + 2] += err * (3.0 / 48.0)
-    if y + 2 < h:
-        if x >= 2:
-            buf[y + 2, x - 2] += err * (1.0 / 48.0)
-        if x >= 1:
-            buf[y + 2, x - 1] += err * (3.0 / 48.0)
-        buf[y + 2, x] += err * (5.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 2, x + 1] += err * (3.0 / 48.0)
-        if x + 2 < w:
-            buf[y + 2, x + 2] += err * (1.0 / 48.0)
+# ============================================================================
+# Error diffusion kernels (no bounds checking - padded buffer handles edges)
+# ============================================================================
+
+def apply_fs_ltr(buf, bx, y, err):
+    buf[y, bx + 1] += err * (7.0 / 16.0)
+    buf[y + 1, bx - 1] += err * (3.0 / 16.0)
+    buf[y + 1, bx] += err * (5.0 / 16.0)
+    buf[y + 1, bx + 1] += err * (1.0 / 16.0)
 
 
-def apply_jjn_rtl(buf, x, y, err):
-    h, w = buf.shape
-    if x >= 1:
-        buf[y, x - 1] += err * (7.0 / 48.0)
-    if x >= 2:
-        buf[y, x - 2] += err * (5.0 / 48.0)
-    if y + 1 < h:
-        if x + 2 < w:
-            buf[y + 1, x + 2] += err * (3.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (5.0 / 48.0)
-        buf[y + 1, x] += err * (7.0 / 48.0)
-        if x >= 1:
-            buf[y + 1, x - 1] += err * (5.0 / 48.0)
-        if x >= 2:
-            buf[y + 1, x - 2] += err * (3.0 / 48.0)
-    if y + 2 < h:
-        if x + 2 < w:
-            buf[y + 2, x + 2] += err * (1.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 2, x + 1] += err * (3.0 / 48.0)
-        buf[y + 2, x] += err * (5.0 / 48.0)
-        if x >= 1:
-            buf[y + 2, x - 1] += err * (3.0 / 48.0)
-        if x >= 2:
-            buf[y + 2, x - 2] += err * (1.0 / 48.0)
+def apply_fs_rtl(buf, bx, y, err):
+    buf[y, bx - 1] += err * (7.0 / 16.0)
+    buf[y + 1, bx + 1] += err * (3.0 / 16.0)
+    buf[y + 1, bx] += err * (5.0 / 16.0)
+    buf[y + 1, bx - 1] += err * (1.0 / 16.0)
 
 
-def apply_error(buf, x, y, err, use_jjn, is_rtl):
+def apply_jjn_ltr(buf, bx, y, err):
+    buf[y, bx + 1] += err * (7.0 / 48.0)
+    buf[y, bx + 2] += err * (5.0 / 48.0)
+    buf[y + 1, bx - 2] += err * (3.0 / 48.0)
+    buf[y + 1, bx - 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx] += err * (7.0 / 48.0)
+    buf[y + 1, bx + 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx + 2] += err * (3.0 / 48.0)
+    buf[y + 2, bx - 2] += err * (1.0 / 48.0)
+    buf[y + 2, bx - 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx] += err * (5.0 / 48.0)
+    buf[y + 2, bx + 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx + 2] += err * (1.0 / 48.0)
+
+
+def apply_jjn_rtl(buf, bx, y, err):
+    buf[y, bx - 1] += err * (7.0 / 48.0)
+    buf[y, bx - 2] += err * (5.0 / 48.0)
+    buf[y + 1, bx + 2] += err * (3.0 / 48.0)
+    buf[y + 1, bx + 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx] += err * (7.0 / 48.0)
+    buf[y + 1, bx - 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx - 2] += err * (3.0 / 48.0)
+    buf[y + 2, bx + 2] += err * (1.0 / 48.0)
+    buf[y + 2, bx + 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx] += err * (5.0 / 48.0)
+    buf[y + 2, bx - 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx - 2] += err * (1.0 / 48.0)
+
+
+def apply_error(buf, bx, y, err, use_jjn, is_rtl):
     if use_jjn:
         if is_rtl:
-            apply_jjn_rtl(buf, x, y, err)
+            apply_jjn_rtl(buf, bx, y, err)
         else:
-            apply_jjn_ltr(buf, x, y, err)
+            apply_jjn_ltr(buf, bx, y, err)
     else:
         if is_rtl:
-            apply_fs_rtl(buf, x, y, err)
+            apply_fs_rtl(buf, bx, y, err)
         else:
-            apply_fs_ltr(buf, x, y, err)
+            apply_fs_ltr(buf, bx, y, err)
 
 
 # ============================================================================
-# Reverse kernel lookup (what previous errors contributed to current pixel)
+# Reverse kernel lookup (for second-order prediction, padded buffer coords)
 # ============================================================================
 
-def predicted_incoming_fs(err_history, x, y, is_rtl):
-    """Estimate error that was diffused into (x,y) using FS reverse kernel.
+def predicted_incoming_fs(err_history, bx, y, is_rtl):
+    """Estimate error diffused into (bx, y) using FS reverse kernel.
 
-    For LTR row (even y), previous row was RTL:
-        7/16 from (x-1, y)   - same row, left
-        3/16 from (x-1, y-1) - upper-left (from RTL row's forward-below)
-        5/16 from (x, y-1)   - above
-        1/16 from (x+1, y-1) - upper-right (from RTL row's back-below)
-
-    For RTL row (odd y), previous row was LTR:
-        7/16 from (x+1, y)   - same row, right
-        3/16 from (x+1, y-1) - upper-right (from LTR row's back-below)
-        5/16 from (x, y-1)   - above
-        1/16 from (x-1, y-1) - upper-left (from LTR row's forward-below)
+    Works on padded buffer coordinates. Only needs y > 0 check since
+    at y=0 (first seeding row) there's no row above.
     """
-    h, w = err_history.shape
     pred = 0.0
 
     if is_rtl:
-        # Previous pixel is to the right
-        if x + 1 < w:
-            pred += (7.0 / 16.0) * err_history[y, x + 1]
+        # Previous pixel is to the right (already processed on RTL row)
+        pred += (7.0 / 16.0) * err_history[y, bx + 1]
         if y > 0:
-            if x + 1 < w:
-                pred += (3.0 / 16.0) * err_history[y - 1, x + 1]
-            pred += (5.0 / 16.0) * err_history[y - 1, x]
-            if x > 0:
-                pred += (1.0 / 16.0) * err_history[y - 1, x - 1]
+            pred += (3.0 / 16.0) * err_history[y - 1, bx + 1]
+            pred += (5.0 / 16.0) * err_history[y - 1, bx]
+            pred += (1.0 / 16.0) * err_history[y - 1, bx - 1]
     else:
-        # Previous pixel is to the left
-        if x > 0:
-            pred += (7.0 / 16.0) * err_history[y, x - 1]
+        # Previous pixel is to the left (already processed on LTR row)
+        pred += (7.0 / 16.0) * err_history[y, bx - 1]
         if y > 0:
-            if x > 0:
-                pred += (3.0 / 16.0) * err_history[y - 1, x - 1]
-            pred += (5.0 / 16.0) * err_history[y - 1, x]
-            if x + 1 < w:
-                pred += (1.0 / 16.0) * err_history[y - 1, x + 1]
+            pred += (3.0 / 16.0) * err_history[y - 1, bx - 1]
+            pred += (5.0 / 16.0) * err_history[y - 1, bx]
+            pred += (1.0 / 16.0) * err_history[y - 1, bx + 1]
 
     return pred
 
@@ -184,64 +196,81 @@ def predicted_incoming_fs(err_history, x, y, is_rtl):
 # ============================================================================
 
 def dither_first_order(input_image, seed=0):
-    """Standard mixed FS/JJN error diffusion (first-order, +6 dB/oct)."""
+    """Standard mixed FS/JJN error diffusion with edge seeding (first-order, +6 dB/oct)."""
     height, width = input_image.shape
-    buf = input_image.copy().astype(np.float64)
-    output = np.zeros((height, width), dtype=np.float64)
+    buf = create_seeded_buffer(input_image)
     hashed_seed = lowbias32(np.uint32(seed))
 
-    for y in range(height):
-        is_rtl = y % 2 == 1
-        x_range = range(width - 1, -1, -1) if is_rtl else range(width)
+    bx_start = REACH  # skip left overshoot
+    process_height = REACH + height  # seeding rows + real rows
+    process_width = REACH + width + REACH  # left seed + real + right seed
 
-        for x in x_range:
-            old_val = buf[y, x]
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+            old_val = buf[y, bx]
             new_val = 1.0 if old_val > 0.5 else 0.0
-            output[y, x] = new_val
+            buf[y, bx] = new_val
             err = old_val - new_val
 
-            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            # Map buffer px to image coordinates for hash (saturating_sub)
+            img_x = max(px - REACH, 0)
+            img_y = max(y - REACH, 0)
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
-            apply_error(buf, x, y, err, use_jjn, is_rtl)
+            apply_error(buf, bx, y, err, use_jjn, is_rtl)
 
-    return output
+    return extract_result(buf, width, height)
 
 
 def dither_second_order(input_image, seed=0):
-    """Second-order mixed FS/JJN error diffusion (+12 dB/oct target).
+    """Second-order mixed FS/JJN error diffusion with edge seeding (+12 dB/oct target).
 
     Diffuses shaped error: d = 2*err - C*err (reverse FS kernel on raw errors).
     NTF = (1 - C(z))^2 for +12 dB/octave noise shaping.
     """
     height, width = input_image.shape
-    buf = input_image.copy().astype(np.float64)
-    output = np.zeros((height, width), dtype=np.float64)
-    err_history = np.zeros((height, width), dtype=np.float64)
+    buf = create_seeded_buffer(input_image)
+
+    # err_history in padded buffer dimensions
+    buf_h, buf_w = buf.shape
+    err_history = np.zeros((buf_h, buf_w), dtype=np.float64)
+
     hashed_seed = lowbias32(np.uint32(seed))
 
-    for y in range(height):
-        is_rtl = y % 2 == 1
-        x_range = range(width - 1, -1, -1) if is_rtl else range(width)
+    bx_start = REACH
+    process_height = REACH + height
+    process_width = REACH + width + REACH
 
-        for x in x_range:
-            old_val = buf[y, x]
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+            old_val = buf[y, bx]
             new_val = 1.0 if old_val > 0.5 else 0.0
-            output[y, x] = new_val
+            buf[y, bx] = new_val
             err = old_val - new_val
 
             # Second-order: shaped_err = 2*err - predicted_incoming
-            predicted = predicted_incoming_fs(err_history, x, y, is_rtl)
+            predicted = predicted_incoming_fs(err_history, bx, y, is_rtl)
             shaped_err = 2.0 * err - predicted
 
             # Store raw error for future reverse lookups
-            err_history[y, x] = err
+            err_history[y, bx] = err
 
-            # Diffuse shaped error using mixed FS/JJN
-            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+            # Map to image coordinates for hash (saturating_sub)
+            img_x = max(px - REACH, 0)
+            img_y = max(y - REACH, 0)
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
-            apply_error(buf, x, y, shaped_err, use_jjn, is_rtl)
+            apply_error(buf, bx, y, shaped_err, use_jjn, is_rtl)
 
-    return output
+    return extract_result(buf, width, height)
 
 
 # ============================================================================
