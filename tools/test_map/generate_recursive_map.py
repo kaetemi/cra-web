@@ -157,7 +157,21 @@ def inverse_transform_image(img, swap_xy, mirror_x, mirror_y):
     return np.ascontiguousarray(result)
 
 
-def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False):
+def tpdf_threshold(x, y, hashed_seed, amplitude=64.0/255.0):
+    """TPDF-perturbed threshold using two hashes for triangular distribution.
+
+    Matches the Rust implementation: two independent hashes summed for
+    triangular PDF in [-1, 1], scaled by amplitude around 0.5.
+    """
+    hash1 = lowbias32(np.uint32(np.uint32(x) * np.uint32(2)) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+    hash2 = lowbias32(np.uint32(np.uint32(x) * np.uint32(2) + np.uint32(1)) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
+    r1 = float(hash1) / float(0xFFFFFFFF)
+    r2 = float(hash2) / float(0xFFFFFFFF)
+    tpdf = r1 + r2 - 1.0
+    return 0.5 + tpdf * amplitude
+
+
+def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False):
     """Dither with random spatial transform derived from seed."""
     swap_xy = bool(seed & 1)
     mirror_x = bool(seed & 2)
@@ -166,13 +180,13 @@ def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False)
     transformed = transform_image(input_image, swap_xy, mirror_x, mirror_y)
 
     if return_error:
-        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True)
+        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf)
         return (
             inverse_transform_image(result, swap_xy, mirror_x, mirror_y),
             inverse_transform_image(error_map, swap_xy, mirror_x, mirror_y),
         )
     else:
-        result = dither(transformed, bits=bits, seed=seed, delay=delay)
+        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf)
         return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
 
 
@@ -447,7 +461,8 @@ def dither(
     bits: int = 1,
     seed: int = 0,
     delay: int = 0,
-    return_error: bool = False
+    return_error: bool = False,
+    tpdf: bool = False
 ):
     """
     Apply mixed FS/JJN error diffusion dithering.
@@ -459,6 +474,7 @@ def dither(
         delay: FIFO delay in pixels before error is diffused (0 = immediate)
         return_error: If True, also return the per-pixel error buffer value
                       (buf[y,x] at time of quantization), centered around 0.5
+        tpdf: If True, add TPDF threshold perturbation (1-bit only)
 
     Returns:
         Dithered image, or (dithered, error_map) if return_error=True
@@ -469,6 +485,7 @@ def dither(
     error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
     hashed_seed = lowbias32(np.uint32(seed))
     fifo = deque()
+    use_tpdf = tpdf and bits == 1
 
     for y in range(height):
         if y % 2 == 0:
@@ -482,7 +499,12 @@ def dither(
             old_val = buf[y, x]
             if return_error:
                 error_map[y, x] = old_val
-            new_val = quantize(old_val, bits)
+
+            if use_tpdf:
+                thresh = tpdf_threshold(x, y, hashed_seed)
+                new_val = 1.0 if old_val > thresh else 0.0
+            else:
+                new_val = quantize(old_val, bits)
             output[y, x] = new_val
             err = old_val - new_val
 
@@ -528,6 +550,8 @@ def main():
                         help="Generate gradient at specified bit depths")
     parser.add_argument("--recursive-test", action="store_true",
                         help="Run recursive generation experiment")
+    parser.add_argument("--tpdf", action="store_true",
+                        help="Add TPDF threshold perturbation on top of mixed FS/JJN")
     parser.add_argument("--output", "-o", type=str,
                         help="Output path")
 
@@ -543,7 +567,7 @@ def main():
             gradient = generate_gradient(args.size, args.size)
 
             # Dither it
-            dithered = dither(gradient, bits=bits, seed=args.seed, delay=args.delay)
+            dithered = dither(gradient, bits=bits, seed=args.seed, delay=args.delay, tpdf=args.tpdf)
 
             # Save as PNG (scale to 0-255)
             delay_suffix = f"_delay{args.delay}" if args.delay > 0 else ""
@@ -586,9 +610,13 @@ def main():
             Image.fromarray(np.clip(scaled, 0, 255).astype(np.uint8), mode='L').save(path)
             print(f"  Saved: {path} ({n_levels} levels)")
 
+        use_tpdf = args.tpdf
+        if use_tpdf:
+            print("TPDF threshold perturbation enabled")
+
         # Level 0: initial 1-bit split
         print("Level 0: 1-bit dither of 0.5 gray")
-        result0 = dither_transformed(gray, bits=1, seed=get_seed())
+        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf)
         rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
         img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
@@ -624,7 +652,7 @@ def main():
                 input_hi = clean.copy()
                 input_hi[~parent_mask] = 0.0
                 input_hi = input_hi * 0.5
-                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed())
+                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf)
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
@@ -635,7 +663,7 @@ def main():
                 input_lo = clean.copy()
                 input_lo[~parent_mask] = 1.0
                 input_lo = input_lo * 0.5 + 0.5
-                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed())
+                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf)
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
                 total_passes += 1
@@ -665,7 +693,7 @@ def main():
         print(f"Dithering {args.gray:.3f} gray at {args.bits}-bit...")
 
         input_img = np.full((args.size, args.size), args.gray, dtype=np.float64)
-        dithered, error_map = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay, return_error=True)
+        dithered, error_map = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay, return_error=True, tpdf=args.tpdf)
 
         out_path = args.output or str(output_dir / f"gray_{args.gray:.2f}_{args.bits}bit.png")
         img = (dithered * 255).astype(np.uint8)
