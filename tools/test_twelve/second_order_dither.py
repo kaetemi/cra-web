@@ -643,7 +643,8 @@ def dither_kernel_2nd(input_image, seed=0):
     Uses K = 2H - H² with uniform kernel assumption (H² = H_self⊗H_self).
     The uniform assumption over-corrects vs the true mixed-kernel H², but
     this gives the best measured slope. Single feedback loop around one
-    quantizer (Kite et al.). Always LTR (no serpentine).
+    quantizer (Kite et al.). Always LTR — serpentine is unstable at 2nd order
+    (collapses on some images, e.g. woman_blonde in wavelet tests).
     Uses triple32 hash for kernel selection.
     """
     height, width = input_image.shape
@@ -680,7 +681,7 @@ def dither_kernel_3rd(input_image, seed=0):
 
     Uses K = 3H - 3H² + H³ with uniform kernel assumption.
     FS³ has 20 weights (reach 3), JJN³ has 78 weights (reach 6).
-    Always LTR (no serpentine).
+    Always LTR — serpentine is unstable at higher orders.
     """
     height, width = input_image.shape
     r = REACH_3RD
@@ -739,7 +740,7 @@ def dither_dual_int_2nd(input_image, seed=0):
 
     First integrator uses 2nd-order (2H-H²) error diffusion kernels.
     Second integrator uses 1st-order kernels for accumulated correction.
-    Always LTR (no serpentine, matching 2H-H² behavior).
+    Always LTR — serpentine is unstable at 2nd order (see 2H-H² note).
     """
     height, width = input_image.shape
     r = REACH_2ND

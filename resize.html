@@ -488,11 +488,11 @@
                 </select>
             </div>
 
-            <!-- Dither options hidden - using good defaults (Our method FS/JJN/lowbias32 Serpentine + OKLab Lr color-aware) -->
+            <!-- Dither options hidden - using good defaults (Our method FS/JJN/lowbias32 Standard + OKLab Lr color-aware) -->
             <div class="option-row" style="display: none;">
                 <label>Dither Mode:</label>
                 <select id="dither-mode">
-                    <option value="5" selected>Our method (FS/JJN/lowbias32, Serpentine)</option>
+                    <option value="4" selected>Our method (FS/JJN/lowbias32, Standard)</option>
                 </select>
             </div>
             <input type="hidden" id="perceptual-toggle" value="1">
@@ -851,8 +851,8 @@
                 cmd += ` --scale-method ${interpolationMap[interpolation]}`;
             }
 
-            // Add dither mode (only if not default mixed-serpentine)
-            if (ditherMode !== 5) {
+            // Add dither mode (only if not default mixed-standard)
+            if (ditherMode !== 4) {
                 cmd += ` --output-dither ${modeMap[ditherMode]}`;
             }
 

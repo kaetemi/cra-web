@@ -828,12 +828,12 @@
                     <option value="1">Floyd-Steinberg (Serpentine)</option>
                     <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                    <option value="4">Our method (FS/JJN/lowbias32, Standard)</option>
-                    <option value="5" selected>* Our method (FS/JJN/lowbias32, Serpentine)</option>
+                    <option value="4" selected>* Our method (FS/JJN/lowbias32, Standard)</option>
+                    <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
                     <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
                     <option value="8">Ostromoukhov (Standard)</option>
                     <option value="9">Ostromoukhov (Serpentine)</option>
-                    <option value="10">Zhou-Fang (Standard)</option>
+                    <option value="10">⚠ Zhou-Fang (Standard)</option>
                     <option value="11">Zhou-Fang (Serpentine)</option>
                     <option value="12">⚠ Ulichney Threshold ±30% (Standard)</option>
                     <option value="13">Ulichney Threshold ±30% (Serpentine)</option>
@@ -845,7 +845,7 @@
                     <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
-                <p class="dither-mode-warning hidden" id="dither-mode-warning">⚠ This mode is designed for 1-bit output without colorspace-aware dithering. With current settings, it will fall back to standard Floyd-Steinberg.</p>
+                <p class="dither-mode-warning hidden" id="dither-mode-warning"></p>
             </div>
 
             <div class="option-row hidden" id="alpha-dither-mode-row">
@@ -856,12 +856,12 @@
                     <option value="1">Floyd-Steinberg (Serpentine)</option>
                     <option value="2">* Jarvis-Judice-Ninke (Standard)</option>
                     <option value="3">Jarvis-Judice-Ninke (Serpentine)</option>
-                    <option value="4">Our method (FS/JJN/lowbias32, Standard)</option>
-                    <option value="5">* Our method (FS/JJN/lowbias32, Serpentine)</option>
+                    <option value="4">* Our method (FS/JJN/lowbias32, Standard)</option>
+                    <option value="5">Our method (FS/JJN/lowbias32, Serpentine)</option>
                     <option value="6">Our method (FS/JJN/lowbias32, Random Direction)</option>
                     <option value="8">Ostromoukhov (Standard)</option>
                     <option value="9">Ostromoukhov (Serpentine)</option>
-                    <option value="10">Zhou-Fang (Standard)</option>
+                    <option value="10">⚠ Zhou-Fang (Standard)</option>
                     <option value="11">Zhou-Fang (Serpentine)</option>
                     <option value="12">⚠ Ulichney Threshold ±30% (Standard)</option>
                     <option value="13">Ulichney Threshold ±30% (Serpentine)</option>
@@ -1691,8 +1691,8 @@
                 }
             }
 
-            // Add dither mode (only if not default mixed-serpentine)
-            if (mode !== 5) {
+            // Add dither mode (only if not default mixed-standard)
+            if (mode !== 4) {
                 cmd += ` --output-dither ${modeMap[mode]}`;
             }
 
@@ -2079,7 +2079,7 @@
             document.getElementById('seed-options').classList.toggle('visible', isMixedMode);
         }
 
-        // Show warning for 1-bit-only modes when colorspace-aware is on or bit depth > 1
+        // Show warning for modes that fall back under certain settings
         function updateDitherModeWarning() {
             const mode = parseInt(document.getElementById('dither-mode').value);
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
@@ -2087,6 +2087,8 @@
 
             // Modes 12-17 are 1-bit only (Ulichney threshold, Ulichney weight, FS-TPDF)
             const is1BitOnlyMode = mode >= 12 && mode <= 17;
+            // Modes 10-11 are Zhou-Fang (falls back to Ostromoukhov in colorspace-aware)
+            const isZhouFang = mode === 10 || mode === 11;
 
             // Check if output is 1-bit
             let is1BitOutput = false;
@@ -2102,13 +2104,17 @@
             // Paletted modes are always colorspace-aware
             const isPaletted = outputMode.startsWith('palette-');
 
-            // Show warning if using 1-bit-only mode but either:
-            // - colorspace-aware is on (will fall back to FS)
-            // - bit depth is not 1-bit (will fall back to FS)
-            // - paletted mode (always colorspace-aware)
-            const showWarning = is1BitOnlyMode && (isPerceptual || !is1BitOutput || isPaletted);
+            const warningEl = document.getElementById('dither-mode-warning');
 
-            document.getElementById('dither-mode-warning').classList.toggle('hidden', !showWarning);
+            if (is1BitOnlyMode && (isPerceptual || !is1BitOutput || isPaletted)) {
+                warningEl.textContent = '\u26A0 This mode is designed for 1-bit output without colorspace-aware dithering. With current settings, it will fall back to standard Floyd-Steinberg.';
+                warningEl.classList.remove('hidden');
+            } else if (isZhouFang && (isPerceptual || isPaletted)) {
+                warningEl.textContent = '\u26A0 Zhou-Fang threshold modulation is not available in colorspace-aware mode. It will fall back to Ostromoukhov.';
+                warningEl.classList.remove('hidden');
+            } else {
+                warningEl.classList.add('hidden');
+            }
         }
 
         document.getElementById('dither-mode').addEventListener('change', updateSeedVisibility);

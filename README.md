@@ -187,7 +187,7 @@ Histogram Matching:
       --perceptual                 Use perceptual weighting (cra-rgb)
 
 Dithering:
-      --output-dither <MODE>       Output dithering method [default: boon-serpentine]
+      --output-dither <MODE>       Output dithering method [default: boon-standard]
                                    [values: fs-standard, fs-serpentine, jjn-standard,
                                     jjn-serpentine, boon-standard, boon-serpentine,
                                     boon-random, ostro-standard, ostro-serpentine,
@@ -202,7 +202,7 @@ Dithering:
                                     linear-rgb, y-cb-cr, srgb, y-cb-cr-bt601]
       --no-colorspace-aware-output Disable colorspace-aware dithering (use per-channel)
       --no-overshoot-penalty       Disable overshoot penalty for colorspace-aware dithering
-      --histogram-dither <MODE>    Dithering for histogram quantization [default: boon-serpentine]
+      --histogram-dither <MODE>    Dithering for histogram quantization [default: boon-standard]
       --histogram-distance-space   Perceptual space for histogram dithering [default: oklab-lr]
       --no-colorspace-aware-histogram  Disable colorspace-aware histogram dithering
 
@@ -217,7 +217,7 @@ Safetensors Output:
       --safetensors-transfer <T>   Transfer function [default: srgb]
                                    [values: auto, linear, srgb]
       --safetensors-no-alpha       Strip alpha channel from output
-      --safetensors-dither <MODE>  Dithering for FP16/BF16 quantization [default: boon-serpentine]
+      --safetensors-dither <MODE>  Dithering for FP16/BF16 quantization [default: boon-standard]
       --safetensors-distance-space Perceptual space for safetensors dithering [default: oklab-lr]
 
 Resize:
