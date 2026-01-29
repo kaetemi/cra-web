@@ -228,62 +228,79 @@ def compute_segmented_radial_power(img):
 
 
 def analyze_ranked_output(rank, output_dir, gray_levels=None):
-    """Analyze the ranked output at multiple gray levels.
+    """Analyze the ranked output at multiple gray levels, compared to void-and-cluster.
     Generates charts with: halftone, 2D spectrum, radial power + reference lines."""
     if gray_levels is None:
         gray_levels = [32, 64, 85, 127, 170, 191, 224]
 
+    # Load void-and-cluster reference
+    ref_path = Path(__file__).parent.parent / "test_images" / "blue_noise_256.png"
+    ref_raw = np.array(Image.open(ref_path).convert('L')) if ref_path.exists() else None
+
     for gray in gray_levels:
-        # Threshold the rank array at this gray level
-        threshold = gray  # rank 0..255, threshold 0..255
-        halftone = (rank < threshold).astype(np.float64) * 255.0
-        density = halftone.mean() / 255.0
+        # Threshold both arrays
+        halftone_ours = (rank < gray).astype(np.float64) * 255.0
+        density = halftone_ours.mean() / 255.0
 
-        # Compute spectra
-        freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(halftone)
-        h_db = 10 * np.log10(h_pow + 1e-10)
-        d_db = 10 * np.log10(d_pow + 1e-10)
-        v_db = 10 * np.log10(v_pow + 1e-10)
+        panels = [('Recursive (ours)', halftone_ours)]
+        if ref_raw is not None:
+            halftone_ref = (ref_raw < gray).astype(np.float64) * 255.0
+            panels.append(('Void-and-Cluster', halftone_ref))
+        n_cols = len(panels)
 
-        # Reference lines
-        freqs_ideal = np.linspace(0.004, 0.5, 500)
-        P_ref = 10 ** (h_db.max() / 10)
-        power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
-        power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
-        power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
+        # Compute all radial spectra for shared y-axis
+        all_radial = {}
+        for label, ht in panels:
+            freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(ht)
+            h_db = 10 * np.log10(h_pow + 1e-10)
+            d_db = 10 * np.log10(d_pow + 1e-10)
+            v_db = 10 * np.log10(v_pow + 1e-10)
+            all_radial[label] = (freqs, h_db, d_db, v_db)
 
-        # 2D spectrum
-        spectrum_2d = compute_power_spectrum(halftone)
+        all_db = np.concatenate([np.concatenate([h, d, v]) for _, (_, h, d, v) in all_radial.items()])
+        y_min = all_db.min() - 5
+        y_max = all_db.max() + 5
 
-        # Plot: 3 rows (halftone, spectrum, radial), 1 column
-        fig, axes = plt.subplots(3, 1, figsize=(8, 14))
+        fig, axes = plt.subplots(3, n_cols, figsize=(7 * n_cols, 14))
+        if n_cols == 1:
+            axes = axes.reshape(3, 1)
 
-        # Row 1: Halftone
-        axes[0].imshow(halftone, cmap='gray', vmin=0, vmax=255)
-        axes[0].set_title(f'Threshold at {gray} ({density*100:.1f}% white)', fontsize=12)
-        axes[0].axis('off')
+        for col, (label, ht) in enumerate(panels):
+            axes[0, col].imshow(ht, cmap='gray', vmin=0, vmax=255)
+            axes[0, col].set_title(f'{label}\n{density*100:.1f}% white', fontsize=11, fontweight='bold')
+            axes[0, col].axis('off')
 
-        # Row 2: 2D FFT spectrum
-        axes[1].imshow(spectrum_2d, cmap='gray')
-        axes[1].set_title('2D Power Spectrum', fontsize=12)
-        axes[1].axis('off')
+            spectrum_2d = compute_power_spectrum(ht)
+            axes[1, col].imshow(spectrum_2d, cmap='gray')
+            axes[1, col].axis('off')
 
-        # Row 3: Radial power + reference lines
-        axes[2].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
-        axes[2].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
-        axes[2].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
-        axes[2].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
-        axes[2].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
-        axes[2].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
-        axes[2].set_xlim(0, 0.5)
-        axes[2].set_xlabel('Spatial Frequency (cycles/pixel)')
-        axes[2].set_ylabel('Power (dB)')
-        axes[2].set_title('Radial Power Spectrum', fontsize=12)
-        axes[2].grid(True, alpha=0.3)
-        axes[2].legend(loc='lower right', fontsize=8)
+            freqs, h_db, d_db, v_db = all_radial[label]
+            freqs_ideal = np.linspace(0.004, 0.5, 500)
+            P_ref = 10 ** (h_db.max() / 10)
+            power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
+            power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+            power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
 
-        fig.suptitle(f'Recursive Dither Array — gray {gray}/255', fontsize=14, fontweight='bold')
-        plt.tight_layout(rect=[0, 0, 1, 0.96])
+            axes[2, col].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+            axes[2, col].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+            axes[2, col].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
+            axes[2, col].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
+            axes[2, col].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
+            axes[2, col].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
+            axes[2, col].set_xlim(0, 0.5)
+            axes[2, col].set_ylim(y_min, y_max)
+            axes[2, col].set_xlabel('Spatial Frequency (cycles/pixel)')
+            axes[2, col].grid(True, alpha=0.3)
+            axes[2, col].legend(loc='lower right', fontsize=8)
+            if col == 0:
+                axes[2, col].set_ylabel('Power (dB)')
+
+        fig.text(0.02, 0.83, 'Halftone', va='center', rotation='vertical', fontsize=12)
+        fig.text(0.02, 0.5, 'Spectrum', va='center', rotation='vertical', fontsize=12)
+        fig.text(0.02, 0.17, 'Radial', va='center', rotation='vertical', fontsize=12)
+
+        fig.suptitle(f'Dither Array Comparison — gray {gray}/255', fontsize=14, fontweight='bold')
+        plt.tight_layout(rect=[0.03, 0, 1, 0.96])
         out_path = output_dir / f"analysis_gray_{gray:03d}.png"
         plt.savefig(out_path, dpi=150, bbox_inches='tight')
         plt.close()
