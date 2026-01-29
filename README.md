@@ -36,7 +36,7 @@ Multiple dithering algorithms with standard and serpentine scanning variants:
 - **Jarvis-Judice-Ninke**: Larger 12-pixel kernel for smoother gradients
 - **Our Method**: Novel per-pixel kernel switching between FS and JJN using lowbias32 hash — breaks up regular patterns, produces blue noise characteristics
 - **Our Method (2nd Order Kernels)**: Precomputed second-order convolution kernels (FS² and JJN²) with wider reach and negative weights for steeper noise shaping (~8.2 dB/oct vs ~6.8 dB/oct)
-- **Floyd-Steinberg TPDF**: Floyd-Steinberg with triangular PDF threshold dither (1-bit only)
+- **Floyd-Steinberg TPDF**: Floyd-Steinberg with triangular PDF threshold dither — perturbs quantization boundary at any bit depth
 
 ### Colorspace-Aware Dithering
 Joint RGB quantization using perceptual distance metrics to select the best candidate color, with error diffusion in linear RGB space. Unlike per-channel dithering, this processes all channels together to minimize perceived color error:

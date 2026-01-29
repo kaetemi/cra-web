@@ -76,10 +76,10 @@ pub enum DitherMethod {
     /// Ulichney weight perturbation: FS with ±50% paired weight noise, serpentine scanning (1-bit only)
     #[value(name = "ulichney-weight-serpentine", hide = true)]
     UlichneyWeightSerpentine,
-    /// Floyd-Steinberg with TPDF threshold dither, standard scanning (1-bit only)
+    /// Floyd-Steinberg with TPDF threshold dither, standard scanning
     #[value(name = "fs-tpdf-standard")]
     FsTpdfStandard,
-    /// Floyd-Steinberg with TPDF threshold dither, serpentine scanning (1-bit only)
+    /// Floyd-Steinberg with TPDF threshold dither, serpentine scanning
     #[value(name = "fs-tpdf-serpentine")]
     FsTpdfSerpentine,
     /// Boon 2nd-order kernel: precomputed FS² and JJN² kernels, standard scanning

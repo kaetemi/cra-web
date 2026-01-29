@@ -1134,23 +1134,39 @@ fn ulichney_weight_serpentine(
 // Floyd-Steinberg with TPDF (Triangular PDF) threshold dither
 // ============================================================================
 
-/// Generate TPDF-perturbed threshold using two hashes summed for triangular distribution.
-/// Returns threshold centered at 127.5 with triangular distribution.
+/// Generate TPDF (Triangular PDF) noise value in [-1, 1] for a given pixel.
+/// Uses two independent hashes summed for triangular distribution.
 #[inline]
-fn fs_tpdf_threshold(x: usize, y: usize, seed: u32, amplitude: f32) -> f32 {
-    // Use two independent hashes for TPDF
+fn fs_tpdf_noise(x: usize, y: usize, seed: u32) -> f32 {
     let hash1 = lowbias32((x as u32).wrapping_mul(2) ^ ((y as u32) << 16) ^ seed);
     let hash2 = lowbias32((x as u32).wrapping_mul(2).wrapping_add(1) ^ ((y as u32) << 16) ^ seed);
-    // Map each to [0, 1] range
     let r1 = (hash1 as f32) / (u32::MAX as f32);
     let r2 = (hash2 as f32) / (u32::MAX as f32);
     // TPDF: sum of two uniform randoms minus 1 gives triangular [-1, 1]
-    let tpdf = r1 + r2 - 1.0;
-    127.5 + tpdf * amplitude
+    r1 + r2 - 1.0
+}
+
+/// Quantize a pixel with TPDF-perturbed rounding boundary.
+/// The TPDF noise shifts the decision point between floor and ceil levels.
+/// For 1-bit: equivalent to perturbing the threshold at 127.5.
+/// For N-bit: perturbs the midpoint between adjacent quantization levels.
+#[inline]
+fn quantize_tpdf(value: f32, quant: &QuantParams, tpdf: f32) -> f32 {
+    let floor = quant.quantize_floor(value);
+    let ceil = quant.quantize_ceil(value);
+    if floor == ceil {
+        return floor;
+    }
+    // Midpoint between the two levels
+    let mid = (floor + ceil) * 0.5;
+    // Perturb by half the level gap scaled by TPDF noise
+    let half_gap = (ceil - floor) * 0.5;
+    let threshold = mid + tpdf * half_gap;
+    if value > threshold { ceil } else { floor }
 }
 
 /// Floyd-Steinberg with TPDF threshold dithering - standard scanning.
-/// Designed for 1-bit output. For higher bit depths, falls back to standard FS.
+/// Works at any bit depth by perturbing the quantization boundary with TPDF noise.
 fn fs_tpdf_standard(
     img: &[f32],
     width: usize,
@@ -1159,15 +1175,9 @@ fn fs_tpdf_standard(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    // Only apply TPDF for 1-bit output
-    if quant.bits != 1 {
-        return dither_standard::<FloydSteinberg>(img, width, height, quant, progress);
-    }
-
     let hashed_seed = lowbias32(seed);
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
-    let amplitude = 64.0; // ~0.5 LSB in terms of decision threshold
 
     for y in reach..(height + reach) {
         for px in reach..(width + reach) {
@@ -1176,8 +1186,8 @@ fn fs_tpdf_standard(
             let img_y = y.wrapping_sub(reach) as u16;
 
             let old = buf[y][bx];
-            let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
-            let new = if old > threshold { 255.0 } else { 0.0 };
+            let tpdf = fs_tpdf_noise(img_x as usize, img_y as usize, hashed_seed);
+            let new = quantize_tpdf(old, &quant, tpdf);
             buf[y][bx] = new;
 
             let err = old - new;
@@ -1199,6 +1209,7 @@ fn fs_tpdf_standard(
 }
 
 /// Floyd-Steinberg with TPDF threshold dithering - serpentine scanning.
+/// Works at any bit depth by perturbing the quantization boundary with TPDF noise.
 fn fs_tpdf_serpentine(
     img: &[f32],
     width: usize,
@@ -1207,15 +1218,9 @@ fn fs_tpdf_serpentine(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    // Only apply TPDF for 1-bit output
-    if quant.bits != 1 {
-        return dither_serpentine::<FloydSteinberg>(img, width, height, quant, progress);
-    }
-
     let hashed_seed = lowbias32(seed);
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
-    let amplitude = 64.0; // ~0.5 LSB in terms of decision threshold
 
     for y in reach..(height + reach) {
         let left_to_right = (y - reach) % 2 == 0;
@@ -1227,8 +1232,8 @@ fn fs_tpdf_serpentine(
                 let img_y = y.wrapping_sub(reach) as u16;
 
                 let old = buf[y][bx];
-                let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
-                let new = if old > threshold { 255.0 } else { 0.0 };
+                let tpdf = fs_tpdf_noise(img_x as usize, img_y as usize, hashed_seed);
+                let new = quantize_tpdf(old, &quant, tpdf);
                 buf[y][bx] = new;
 
                 let err = old - new;
@@ -1245,8 +1250,8 @@ fn fs_tpdf_serpentine(
                 let img_y = y.wrapping_sub(reach) as u16;
 
                 let old = buf[y][bx];
-                let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
-                let new = if old > threshold { 255.0 } else { 0.0 };
+                let tpdf = fs_tpdf_noise(img_x as usize, img_y as usize, hashed_seed);
+                let new = quantize_tpdf(old, &quant, tpdf);
                 buf[y][bx] = new;
 
                 let err = old - new;
