@@ -447,6 +447,104 @@ python tools/analyze_wavelet.py --compare \
 - Boon balances blueness (+0.29) with highest flatness (0.54) among error diffusion methods
 - Zhou-Fang has best isotropy (0.67) due to threshold modulation
 
+### 18. `test_map/generate_recursive_map.py`
+
+Floating-point mixed FS/JJN error diffusion with recursive bit decomposition for generating multi-bit ranked dither arrays.
+
+**Features:**
+- Generates gradient dithering at multiple bit depths (1-8 bits)
+- Recursive ranked output: builds 8-bit threshold maps by decomposing each bit level
+- Spectral analysis comparing recursive dither arrays against void-and-cluster blue noise
+- Spatial transform support (XY swap, mirror X/Y) for randomized dithering
+- Delay parameter for FIFO-based error diffusion timing experiments
+
+**Outputs** (`tools/test_map/`):
+- `gradient_*bit.png/.npy` - Gradient dithering at various bit depths
+- `gradient_*_delay*.png/.npy` - Delayed error diffusion experiments
+- `ranked_output.png/.npy` - Final 8-bit ranked threshold map
+- `ranked_level*.png` - Intermediate ranked maps (levels 0-7)
+- `analysis_gray_*.png` - Spectral analysis per gray level vs void-and-cluster
+- `analysis_histogram.png` - Rank value distribution check
+- `analysis_slopes.png` - Spectral slope across all thresholds
+- `analysis_ranked.png` - Ranked array vs void-and-cluster comparison
+
+```bash
+source /root/venv/bin/activate
+python tools/test_map/generate_recursive_map.py --gradient 1 2 4 8   # Gradients at bit depths 1-8
+python tools/test_map/generate_recursive_map.py --bits 4 --gray 0.5  # 50% gray at 4-bit
+python tools/test_map/generate_recursive_map.py --recursive-test     # Full ranked output + analysis
+```
+
+### 19. `dither_map_experiment.py`
+
+Tools for building and analyzing threshold maps from error diffusion patterns.
+
+**Features:**
+- Clean implementation of "Our Method" (FS/JJN with lowbias32) for generating patterns
+- Generate 8-bit threshold maps from 8 independent 50% patterns
+- Spectral analysis comparing threshold maps against blue noise and error diffusion
+- Density accuracy testing
+
+```bash
+source /root/venv/bin/activate
+python tools/dither_map_experiment.py --gray 127.5                    # Single dither pattern
+python tools/dither_map_experiment.py --generate-map -o threshold.png # 8-bit threshold map
+python tools/dither_map_experiment.py --analyze-map threshold.png     # Spectral analysis
+python tools/dither_map_experiment.py --test-map threshold.png        # Density accuracy test
+```
+
+### 20. `compare_kernels.py`
+
+Compares two 1D dithering kernels across the full gray range for spectral quality.
+
+```bash
+source /root/venv/bin/activate
+python tools/compare_kernels.py                        # Compare [38,10] vs [46,2]
+python tools/compare_kernels.py --k1 38 10 --k2 46 2  # Custom kernels
+```
+
+### 21. `wavelet_pattern_demo.py`
+
+Visual demonstration of how Haar wavelets encode different patterns (horizontal/vertical/diagonal lines, checkerboard, noise). Shows why wavelet analysis is effective for detecting dithering artifacts like directional "worms".
+
+```bash
+source /root/venv/bin/activate
+python tools/wavelet_pattern_demo.py
+```
+
+### 22. `tent_kernel.py` (and variants)
+
+Tent-space kernel derivation tools for computing effective direct kernels for arbitrary downsampling ratios. The key insight is composing box-to-tent expansion, kernel resampling, and tent-to-box contraction.
+
+**Variants:**
+- `tent_kernel.py` - 1D tent-space kernel derivation
+- `tent_kernel_2d.py` - 2D tent-space kernel derivation
+- `tent_kernel_bruteforce.py` - 1D brute-force kernel exploration
+- `tent_kernel_2d_bruteforce.py` - 2D brute-force kernel exploration
+- `tent_kernel_bruteforce_lanczos.py` - Brute-force Lanczos kernel optimization
+- `tent_kernel_lanczos_constraint.py` - Constrained Lanczos kernel derivation
+
+```bash
+source /root/venv/bin/activate
+python tools/tent_kernel.py --ratio 2 --kernel box --width 2      # 2x downsample
+python tools/tent_kernel.py --ratio 3 --kernel lanczos2 --width 4 # 3x with Lanczos-2
+```
+
+### 23. Color Science Tools
+
+Tools for deriving and validating color science constants.
+
+- `derive_d65.py` - Derives D65 chromaticity coordinates (0.31272, 0.32903) from CIE source SPD data. Proves chromaticity is derived from spectral power distribution, not defined independently.
+- `derive_d65_1nm.py` - 1nm-resolution version of D65 derivation
+- `d65_constants.py` - Pre-computed D65 constants for fast lookup
+- `derive_k_from_matrix.py` - Derives correlated color temperature from an RGB-to-XYZ matrix white point. Shows how the sRGB matrix implicitly defines a D65 white point.
+
+```bash
+source /root/venv/bin/activate
+python tools/derive_d65.py
+python tools/derive_k_from_matrix.py
+```
+
 ## Full Regeneration Sequence
 
 ```bash
@@ -483,6 +581,9 @@ python tools/noise_color_comparison.py               # Noise color spectra
 
 # 8. Run wavelet-based quality analysis (real images)
 ./tools/run_wavelet_tests.sh                         # Generates dithered + analysis
+
+# 9. Generate recursive dither map + analysis
+python tools/test_map/generate_recursive_map.py --recursive-test
 ```
 
 ## Output Structure
@@ -542,6 +643,16 @@ tools/
 │       ├── spectrum_shape_comparison.png # Blue noise vs power law spectra
 │       ├── noise_color_comparison.png # Noise color spectra (log scale)
 │       └── noise_color_comparison_linear.png # Noise color spectra (linear scale)
+│
+├── test_map/                    # Recursive dither map experiments
+│   ├── generate_recursive_map.py    # Generator script
+│   ├── gradient_*bit.png/.npy       # Gradient dithering outputs
+│   ├── ranked_output.png/.npy       # Final 8-bit ranked threshold map
+│   ├── ranked_level*.png            # Intermediate ranked maps
+│   ├── analysis_gray_*.png          # Per-gray spectral analysis vs blue noise
+│   ├── analysis_histogram.png       # Rank value distribution
+│   ├── analysis_slopes.png          # Spectral slopes across thresholds
+│   └── analysis_ranked.png          # Ranked array vs void-and-cluster
 │
 ├── test_wavelets/               # Real image tests (wavelet analysis)
 │   ├── reference_images/        # Source photographs (cameraman, lena, etc.)

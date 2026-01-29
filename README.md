@@ -39,18 +39,27 @@ Multiple dithering algorithms with standard and serpentine scanning variants:
 - **Zhou-Fang**: Variable-coefficient kernel with threshold modulation
 - **Ulichney Threshold**: Floyd-Steinberg with ±30% threshold perturbation (1-bit only)
 - **Ulichney Weight**: Floyd-Steinberg with ±50% paired weight perturbation (1-bit only)
+- **FS-TPDF**: Floyd-Steinberg with triangular PDF threshold dither (1-bit only)
 
 ### Colorspace-Aware Dithering
 Joint RGB quantization using perceptual distance metrics to select the best candidate color, with error diffusion in linear RGB space. Unlike per-channel dithering, this processes all channels together to minimize perceived color error:
-- **Distance metric**: OKLab (default), CIELAB (CIE76/CIE94/CIEDE2000), Linear RGB, Y'CbCr, or sRGB
+- **Distance metric**: OKLab Lr (default), OKLab, CIELAB (CIE76/CIE94/CIEDE2000), Linear RGB, Y'CbCr (BT.709/BT.601), or sRGB
 - **Error accumulation**: Linear RGB (physically correct blending)
+- **Overshoot penalty**: Penalizes quantization choices whose error would push neighboring pixels outside [0,1] RGB (reduces color fringing)
 - **Candidate search**: Evaluates nearby quantization levels jointly to find perceptually closest match
 
 ### Configurable Bit Depth
 Support for 1-8 bit output with proper bit replication (e.g., 3-bit value ABC becomes ABCABCAB in 8-bit output).
 
+### Palette Dithering
+Dither to arbitrary palettes loaded from PNG files:
+- **Hull tracing**: Projects colors onto the palette's convex hull for better color relationships
+- **Hull error decay**: Configurable error decay when palette colors are sparse near the gamut boundary
+- Supports paletted PNG output and GIF output
+
 ### Output Formats
 - **PNG**: Standard lossless image output (grayscale, RGB, or RGBA); palettized for ≤8bpp formats
+- **GIF**: Paletted output with 1-bit transparency support
 - **RGB**: RGB332, RGB565, RGB8, etc. (4-24 bits per pixel)
 - **ARGB**: ARGB1555, ARGB4, ARGB8, etc. (with alpha channel)
 - **Grayscale**: L1, L2, L4, L8 (1-8 bits per pixel)
@@ -145,12 +154,14 @@ Input/Output:
   -r, --ref <PATH>                 Reference image path (for histogram matching)
       --ref-profile <MODE>         Reference color profile [default: auto]
   -o, --output <PATH>              Output PNG image path
+      --output-gif <PATH>          Output GIF image path (paletted formats only, 1-bit transparency)
       --no-palettized-output       Disable palettized PNG for ≤8bpp formats
       --output-raw <PATH>          Output raw binary file
       --output-raw-r <PATH>        Output red channel only (raw binary)
       --output-raw-g <PATH>        Output green channel only (raw binary)
       --output-raw-b <PATH>        Output blue channel only (raw binary)
       --output-raw-a <PATH>        Output alpha channel only (requires ARGB format)
+      --output-raw-palette <PATH>  Output raw palette file (ARGB8888 binary, up to 256 colors)
       --output-meta <PATH>         Output metadata JSON file
       --output-safetensors <PATH>  Output safetensors file (.safetensors)
 
@@ -182,23 +193,32 @@ Dithering:
                                     boon-random, ostro-standard, ostro-serpentine,
                                     zhou-fang-standard, zhou-fang-serpentine,
                                     ulichney-standard, ulichney-serpentine,
-                                    ulichney-weight-standard, ulichney-weight-serpentine, none]
+                                    ulichney-weight-standard, ulichney-weight-serpentine,
+                                    fs-tpdf-standard, fs-tpdf-serpentine, none]
       --output-alpha-dither <MODE> Alpha channel dithering method [default: same as --output-dither]
-      --output-distance-space      Perceptual space for output dithering [default: oklab for RGB, lab-cie94 for grayscale]
-                                   [values: oklab, lab-cie76, lab-cie94, lab-ciede2000,
-                                    linear-rgb, y-cb-cr, srgb]
+      --output-distance-space      Perceptual space for output dithering
+                                   [default: oklab-lr for RGB, lab-cie94 for grayscale]
+                                   [values: oklab, oklab-lr, lab-cie76, lab-cie94, lab-ciede2000,
+                                    linear-rgb, y-cb-cr, srgb, y-cb-cr-bt601]
       --no-colorspace-aware-output Disable colorspace-aware dithering (use per-channel)
-      --histogram-dither <MODE>    Dithering for histogram quantization [default: mixed-standard]
-      --histogram-distance-space   Perceptual space for histogram dithering [default: oklab]
+      --no-overshoot-penalty       Disable overshoot penalty for colorspace-aware dithering
+      --histogram-dither <MODE>    Dithering for histogram quantization [default: boon-serpentine]
+      --histogram-distance-space   Perceptual space for histogram dithering [default: oklab-lr]
       --no-colorspace-aware-histogram  Disable colorspace-aware histogram dithering
+
+Palette Dithering:
+      --input-palette <PNG_FILE>   Use palette from a PNG file (extracts PLTE or unique colors)
+      --no-hull-tracing            Disable hull tracing for palette dithering
+      --hull-error-decay <FACTOR>  Error decay when palette color is farther than hull boundary
+                                   [default: 1.0, typical: 0.5-0.9]
 
 Safetensors Output:
       --safetensors-format <FMT>   Data format [default: fp32] [values: fp32, fp16, bf16]
       --safetensors-transfer <T>   Transfer function [default: srgb]
                                    [values: auto, linear, srgb]
       --safetensors-no-alpha       Strip alpha channel from output
-      --safetensors-dither <MODE>  Dithering for FP16/BF16 quantization [default: mixed-standard]
-      --safetensors-distance-space Perceptual space for safetensors dithering [default: oklab]
+      --safetensors-dither <MODE>  Dithering for FP16/BF16 quantization [default: boon-serpentine]
+      --safetensors-distance-space Perceptual space for safetensors dithering [default: oklab-lr]
 
 Resize:
       --width <W>                  Resize to width (preserves aspect ratio)
@@ -208,6 +228,7 @@ Resize:
                                    EWA (2D): ewa-lanczos2, ewa-lanczos3, ewa-lanczos3-sharp,
                                              ewa-lanczos4-sharpest, ewa-sinc-lanczos2,
                                              ewa-sinc-lanczos3, ewa-mitchell, ewa-catmull-rom
+                                   Iterative: bilinear-iterative, hybrid-lanczos3
                                    Research: sinc, jinc, lanczos3-scatter, sinc-scatter,
                                              stochastic-jinc, stochastic-jinc-scatter,
                                              stochastic-jinc-scatter-normalized
@@ -260,6 +281,12 @@ General:
 
 # ARGB output with alpha channel for sprites/UI
 ./dist/bin/cra -i sprite.png -o output.png -f ARGB8888
+
+# Dither to a custom palette from a PNG file
+./dist/bin/cra -i input.png -o output.png --input-palette palette.png
+
+# GIF output with palette dithering
+./dist/bin/cra -i input.png --output-gif output.gif --input-palette palette.png
 ```
 
 ## Project Structure
@@ -274,11 +301,12 @@ cra-web/
 │   │   ├── basic_*.rs   # Basic histogram matching
 │   │   ├── cra_*.rs     # CRA implementations
 │   │   ├── tiled_*.rs   # Tiled processing
-│   │   ├── dither.rs    # Error diffusion dithering
+│   │   ├── dither/      # Error diffusion dithering
 │   │   ├── histogram.rs # Histogram matching algorithms
 │   │   └── color.rs     # Color space conversions
 │   └── Cargo.toml
 ├── scripts/             # Original Python scripts (submodule)
+├── tools/               # Testing and analysis tools (see tools/README.md)
 ├── index.html           # Web demo
 ├── build.sh             # Web build script
 ├── build-cli.sh         # CLI build script
