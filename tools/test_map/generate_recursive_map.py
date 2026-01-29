@@ -266,50 +266,70 @@ def main():
     elif args.recursive_test:
         size = args.size
         next_seed = [args.seed]
+        N = 8  # bits for final output
 
         def get_seed():
             s = next_seed[0]
             next_seed[0] += 1
             return s
 
-        def save_step(img, name):
-            path = output_dir / f"{name}.png"
-            Image.fromarray((img * 255).astype(np.uint8), mode='L').save(path)
-            print(f"Saved: {path}")
-            unique, counts = np.unique(img, return_counts=True)
-            total = img.size
-            if len(unique) <= 16:
-                for level, count in zip(unique, counts):
-                    print(f"  {level:.4f}: {count:6d} ({count/total*100:.1f}%)")
-            else:
-                print(f"  {len(unique)} unique values, range [{unique[0]:.4f}, {unique[-1]:.4f}]")
-
         gray = np.full((size, size), 0.5, dtype=np.float64)
+        rank = np.zeros((size, size), dtype=np.int32)
 
-        # Step 1: 1-bit dither of 0.5 gray with error capture
-        print("Step 1: 1-bit dither of 0.5 gray")
-        result_1bit, error_map = dither(gray, bits=1, seed=get_seed(), return_error=True)
-        save_step(result_1bit, "step1_1bit")
+        # Level 0: initial 1-bit split
+        print("Level 0: 1-bit dither of 0.5 gray")
+        result0 = dither(gray, bits=1, seed=get_seed())
+        rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
-        # Error map stats
-        emin, emax = error_map.min(), error_map.max()
-        print(f"Error range: [{emin:.4f}, {emax:.4f}]")
-        error_norm = (error_map - emin) / (emax - emin) if emax > emin else error_map
-        save_step(error_norm, "step1_error")
+        img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
+        img0.save(output_dir / "step1_1bit.png")
+        w = (result0 > 0.5).sum()
+        print(f"  white: {w} ({w/result0.size*100:.1f}%)")
 
-        # Step 2a: Scale 1-bit to 0-0.5, generate 1-bit (target: 25% white)
-        print("\nStep 2a: Scale to 0 - 0.5, 1-bit dither")
-        scaled_lo = result_1bit * 0.5
-        save_step(scaled_lo, "step2a_input")
-        result_2a = dither(scaled_lo, bits=1, seed=get_seed())
-        save_step(result_2a, "step2a_1bit")
+        # Tree: list of (result_image, mask)
+        nodes = [(result0, np.ones((size, size), dtype=bool))]
+        total_passes = 1
 
-        # Step 2b: Scale 1-bit to 0.5-1, generate 1-bit (target: 75% white)
-        print("\nStep 2b: Scale to 0.5 - 1, 1-bit dither")
-        scaled_hi = result_1bit * 0.5 + 0.5
-        save_step(scaled_hi, "step2b_input")
-        result_2b = dither(scaled_hi, bits=1, seed=get_seed())
-        save_step(result_2b, "step2b_1bit")
+        for level in range(1, N):
+            bit_pos = N - 1 - level
+            num_nodes = len(nodes)
+            print(f"\nLevel {level}: {num_nodes} nodes, determining bit {bit_pos}...")
+            new_nodes = []
+
+            for i, (parent_result, parent_mask) in enumerate(nodes):
+                went_high = parent_mask & (parent_result > 0.5)
+                went_low = parent_mask & (~(parent_result > 0.5))
+
+                # Split "high" group: scale to [0, 0.5]
+                # Parent 1→0.5 (split), Parent 0→0 (boundary)
+                input_hi = parent_result * 0.5
+                result_hi = dither(input_hi, bits=1, seed=get_seed())
+                rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
+                new_nodes.append((result_hi, went_high))
+                total_passes += 1
+
+                # Split "low" group: scale to [0.5, 1]
+                # Parent 0→0.5 (split), Parent 1→1 (boundary)
+                input_lo = parent_result * 0.5 + 0.5
+                result_lo = dither(input_lo, bits=1, seed=get_seed())
+                rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
+                new_nodes.append((result_lo, went_low))
+                total_passes += 1
+
+            nodes = new_nodes
+
+        print(f"\nTotal dither passes: {total_passes}")
+
+        # Output final ranked image
+        unique_ranks = np.unique(rank)
+        print(f"Unique rank values: {len(unique_ranks)} (expected {2**N})")
+        print(f"Rank range: [{rank.min()}, {rank.max()}]")
+
+        # Save as 8-bit grayscale
+        out_path = output_dir / "ranked_output.png"
+        Image.fromarray(rank.astype(np.uint8), mode='L').save(out_path)
+        print(f"Saved: {out_path}")
+        np.save(output_dir / "ranked_output.npy", rank)
 
     elif args.gray is not None:
         # Dither uniform gray
