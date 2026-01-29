@@ -554,7 +554,7 @@ Experiments with higher-order error diffusion noise shaping for 2D halftoning.
 - **2H-H² kernel** - Precomputed kernel aiming for (1-H)² NTF, ~8.2 dB/oct
 - **Dual integrator** - Two coupled error buffers, ~7.1 dB/oct
 
-**Key finding (Kite et al.):** Single-feedback-loop architectures are fundamentally limited to first-order NTF = (1-H), regardless of kernel modifications. The 2H-H² kernel achieves improved first-order shaping but not true second-order (+12 dB/oct). True higher-order requires MASH or multi-feedback topologies, but MASH requires multi-bit DAC output which is incompatible with binary halftoning.
+**Kite et al. insight:** In a single feedback loop, NTF behaves as (1-H) regardless of quantizer gain K. One loop = one order of noise shaping.
 
 **Outputs** (`tools/test_twelve/`):
 - `order_comparison_gray_*.png` - Spectral analysis at various gray levels

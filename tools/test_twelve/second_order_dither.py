@@ -7,14 +7,10 @@ Compares three approaches to noise shaping:
 2. 2H-H² kernel: precomputed kernel aiming for NTF = (1-H)², ~8.2 dB/oct
 3. Dual integrator: two coupled error buffers aiming for NTF = (1-C)², ~7.1 dB/oct
 
-Theoretical limitation (Kite et al.): In a single feedback loop, the NTF is
-always (1-H) regardless of kernel modifications. The quantizer gain K varies
-with the kernel (K≈2 for FS, K≈4.5 for JJN) but the loop always produces
-NTF = (1-K·H_loop). One feedback loop = one order of noise shaping. The 2H-H²
-and dual integrator approaches achieve improved first-order shaping but cannot
-reach true second-order (+12 dB/oct) within a single-loop architecture. True
-higher-order requires multi-stage (MASH) or multi-feedback topologies, but
-MASH requires multi-bit DAC output which is incompatible with binary halftoning.
+Kite et al. insight: In a single feedback loop, the quantizer gain K varies
+with the kernel (K≈2 for FS, K≈4.5 for JJN), and NTF = (1-H)/(1+(K-1)H)
+which behaves as (1-H) regardless of K. One feedback loop = one order of
+noise shaping.
 
 Uses mixed FS/JJN kernel switching with hash-based selection.
 The kernel switching is equivalent to threshold dithering but with less white noise
@@ -54,14 +50,11 @@ Approaches tried that gave worse results:
   Helped 2H-H² slightly (8.22→8.33 at 50%) but hurt first-order (6.78→6.32)
   and dual integrator (7.08→6.52). White noise hash better for limit cycle
   breaking in first-order methods.
-- MASH 1-1 digital cancellation (Y = Y₁ + (1-H)·Y₂):
-  Stage 1 dithers input, stage 2 dithers raw quantization error, combine with
-  (1-H) cancellation filter. Theoretically gives (1-H)²·E₂ noise. But the
-  combined signal is continuous-valued (only ~1% near binary), and
-  re-thresholding to binary destroys the spectral cancellation. Spatial-domain
-  (1-H) filter: 1.26 dB/oct, re-dithering: 4.06 dB/oct, 1D (1-z⁻¹)
-  differentiator: 4.08 dB/oct. Fundamental barrier: 1D MASH uses multi-bit
-  DAC, but 2D halftoning requires binary pixels.
+- MASH 1-1 digital cancellation with re-binarization (Y = threshold(Y₁ + (1-H)·Y₂)):
+  Spatial-domain (1-H) filter: 1.26 dB/oct, re-dithering: 4.06 dB/oct, 1D
+  (1-z⁻¹) differentiator: 4.08 dB/oct. The combined signal is continuous and
+  re-thresholding introduces unshaped noise. Needs a different recombination
+  strategy that preserves binary output.
 
 Usage:
     python second_order_dither.py                    # Gray levels + gradient
@@ -213,8 +206,7 @@ def apply_error(buf, bx, y, err, use_jjn, is_rtl):
 
 # ============================================================================
 # 2H-H² kernels (single-buffer approach)
-# Designed for NTF = 1 - (2H - H²) = (1-H)², but in practice the single
-# feedback loop limits this to improved first-order shaping (~8.2 dB/oct).
+# NTF = 1 - (2H - H²) = (1-H)² → +12 dB/oct target
 # These have negative weights and wider reach than the originals.
 # ============================================================================
 
@@ -401,9 +393,8 @@ def dither_dual_integrator(input_image, seed=0):
         err1 = int1 - output → diffuse to buf1
         err2 = int2 - output → diffuse to buf2
 
-    Despite the dual-integrator structure, this is still a single feedback loop
-    around one quantizer, so NTF remains first-order (Kite et al.). The second
-    buffer provides additional error correction but not a true second-order NTF.
+    Single feedback loop around one quantizer (Kite et al.: NTF behaves as
+    (1-H) for single-loop architectures regardless of K).
     """
     height, width = input_image.shape
 
@@ -496,12 +487,8 @@ def dither_kernel_2nd(input_image, seed=0):
 
     Uses K = 2H - H² with uniform kernel assumption (H² = H_self⊗H_self).
     The uniform assumption over-corrects vs the true mixed-kernel H², but
-    this gives the best measured slope.
-
-    Despite the (1-H)² kernel design, this is still a single feedback loop
-    around one quantizer, so NTF is fundamentally first-order (Kite et al.).
-    The 2H-H² kernel achieves improved first-order shaping, not true
-    second-order. Always LTR (no serpentine).
+    this gives the best measured slope. Single feedback loop around one
+    quantizer (Kite et al.). Always LTR (no serpentine).
     """
     height, width = input_image.shape
     r = REACH_2ND
