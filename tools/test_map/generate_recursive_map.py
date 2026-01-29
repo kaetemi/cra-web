@@ -13,6 +13,7 @@ Usage:
 import numpy as np
 from PIL import Image
 from pathlib import Path
+from collections import deque
 import argparse
 
 
@@ -128,10 +129,25 @@ def quantize(value: float, bits: int) -> float:
     return level / max_level if max_level > 0 else 0.0
 
 
+def apply_error(buf, x, y, err, use_jjn, is_rtl):
+    """Apply the appropriate error diffusion kernel."""
+    if use_jjn:
+        if is_rtl:
+            apply_jjn_rtl(buf, x, y, err)
+        else:
+            apply_jjn_ltr(buf, x, y, err)
+    else:
+        if is_rtl:
+            apply_fs_rtl(buf, x, y, err)
+        else:
+            apply_fs_ltr(buf, x, y, err)
+
+
 def dither(
     input_image: np.ndarray,
     bits: int = 1,
-    seed: int = 0
+    seed: int = 0,
+    delay: int = 0
 ) -> np.ndarray:
     """
     Apply mixed FS/JJN error diffusion dithering.
@@ -140,6 +156,7 @@ def dither(
         input_image: Input image with values in [0.0, 1.0]
         bits: Output bit depth (1 = binary, 2 = 4 levels, etc.)
         seed: Random seed for kernel selection
+        delay: FIFO delay in pixels before error is diffused (0 = immediate)
 
     Returns:
         Dithered image with values in [0.0, 1.0], quantized to 2^bits levels
@@ -148,6 +165,7 @@ def dither(
     buf = input_image.copy().astype(np.float64)
     output = np.zeros((height, width), dtype=np.float64)
     hashed_seed = lowbias32(np.uint32(seed))
+    fifo = deque()
 
     for y in range(height):
         if y % 2 == 0:
@@ -166,16 +184,16 @@ def dither(
             coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
 
-            if use_jjn:
-                if is_rtl:
-                    apply_jjn_rtl(buf, x, y, err)
-                else:
-                    apply_jjn_ltr(buf, x, y, err)
-            else:
-                if is_rtl:
-                    apply_fs_rtl(buf, x, y, err)
-                else:
-                    apply_fs_ltr(buf, x, y, err)
+            fifo.append((x, y, err, use_jjn, is_rtl))
+
+            if len(fifo) > delay:
+                dx, dy, derr, d_jjn, d_rtl = fifo.popleft()
+                apply_error(buf, dx, dy, derr, d_jjn, d_rtl)
+
+    # Flush remaining
+    while fifo:
+        dx, dy, derr, d_jjn, d_rtl = fifo.popleft()
+        apply_error(buf, dx, dy, derr, d_jjn, d_rtl)
 
     return output
 
@@ -197,6 +215,8 @@ def main():
                         help="Random seed (default: 0)")
     parser.add_argument("--gray", type=float,
                         help="Dither uniform gray level (0.0-1.0)")
+    parser.add_argument("--delay", type=int, default=0,
+                        help="FIFO delay in pixels before error diffusion (default: 0)")
     parser.add_argument("--gradient", nargs="+", type=int,
                         help="Generate gradient at specified bit depths")
     parser.add_argument("--output", "-o", type=str,
@@ -214,16 +234,17 @@ def main():
             gradient = generate_gradient(args.size, args.size)
 
             # Dither it
-            dithered = dither(gradient, bits=bits, seed=args.seed)
+            dithered = dither(gradient, bits=bits, seed=args.seed, delay=args.delay)
 
             # Save as PNG (scale to 0-255)
-            out_path = output_dir / f"gradient_{bits}bit.png"
+            delay_suffix = f"_delay{args.delay}" if args.delay > 0 else ""
+            out_path = output_dir / f"gradient_{bits}bit{delay_suffix}.png"
             img = (dithered * 255).astype(np.uint8)
             Image.fromarray(img, mode='L').save(out_path)
             print(f"Saved: {out_path}")
 
             # Save raw float data
-            npy_path = output_dir / f"gradient_{bits}bit.npy"
+            npy_path = output_dir / f"gradient_{bits}bit{delay_suffix}.npy"
             np.save(npy_path, dithered)
             print(f"Saved: {npy_path}")
 
@@ -237,7 +258,7 @@ def main():
         print(f"Dithering {args.gray:.3f} gray at {args.bits}-bit...")
 
         input_img = np.full((args.size, args.size), args.gray, dtype=np.float64)
-        dithered = dither(input_img, bits=args.bits, seed=args.seed)
+        dithered = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay)
 
         out_path = args.output or str(output_dir / f"gray_{args.gray:.2f}_{args.bits}bit.png")
         img = (dithered * 255).astype(np.uint8)
