@@ -2,22 +2,19 @@
 """
 Second-order error diffusion experiment.
 
-Standard error diffusion (first-order) gives +6 dB/octave noise shaping.
-Second-order feeds back a shaped error: d = 2*err - C*err, giving NTF = (1-C)²
-which should achieve +12 dB/octave.
+Compares three approaches to noise shaping:
+1. First-order: standard FS/JJN error diffusion → NTF = (1-H), +6 dB/oct
+2. 2H-H² kernel: precomputed second-order kernel → NTF = (1-H)², +12 dB/oct target
+3. Dual integrator: two coupled error buffers → NTF = (1-C)², +12 dB/oct target
 
-Uses mixed FS/JJN kernel switching for forward diffusion (our method),
-with a fixed FS reverse kernel for the second-order prediction.
-
-Implements edge seeding matching the Rust dither/basic.rs create_seeded_buffer:
-- reach=2 (JJN radius) padding with duplicated edge pixels
-- Processing includes seeding rows/columns to pre-warm error diffusion
-- No bounds checking in kernels (padding handles edges)
+Uses mixed FS/JJN kernel switching with hash-based selection.
+Implements edge seeding matching the Rust dither/basic.rs create_seeded_buffer.
 
 Usage:
     python second_order_dither.py                    # Gray levels + gradient
     python second_order_dither.py --gray 0.5         # Single gray level
     python second_order_dither.py --gradient-only     # Gradient only
+    python second_order_dither.py --image FILE        # Process an image
 """
 
 import numpy as np
@@ -306,71 +303,6 @@ def apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl):
 
 
 # ============================================================================
-# Reverse kernel lookup (for second-order prediction, padded buffer coords)
-# ============================================================================
-
-# Weight tables: offset (dx, dy) from source to target → weight
-# LTR convention; for RTL, negate dx before lookup
-_FS_W = {
-    (1, 0): 7.0/16.0,
-    (-1, 1): 3.0/16.0, (0, 1): 5.0/16.0, (1, 1): 1.0/16.0,
-}
-_JJN_W = {
-    (1, 0): 7.0/48.0, (2, 0): 5.0/48.0,
-    (-2, 1): 3.0/48.0, (-1, 1): 5.0/48.0, (0, 1): 7.0/48.0, (1, 1): 5.0/48.0, (2, 1): 3.0/48.0,
-    (-2, 2): 1.0/48.0, (-1, 2): 3.0/48.0, (0, 2): 5.0/48.0, (1, 2): 3.0/48.0, (2, 2): 1.0/48.0,
-}
-
-
-def _src_weight(use_jjn, src_is_rtl, dx, dy):
-    """Weight that a source pixel assigns to a target at offset (dx, dy)."""
-    if src_is_rtl:
-        dx = -dx
-    return (_JJN_W if use_jjn else _FS_W).get((dx, dy), 0.0)
-
-
-def predicted_incoming_matched(err_history, kernel_history, bx, y, is_rtl):
-    """Estimate error diffused into (bx, y) using each source's actual kernel.
-
-    For each already-processed neighbor that could have diffused error here,
-    looks up what kernel that neighbor used and applies the corresponding weight.
-    """
-    pred = 0.0
-
-    # Same row: already-processed pixels
-    if is_rtl:
-        same_row = [(bx + 1, y), (bx + 2, y)]
-    else:
-        same_row = [(bx - 1, y), (bx - 2, y)]
-
-    for (sx, sy) in same_row:
-        dx = bx - sx
-        w = _src_weight(kernel_history[sy, sx], is_rtl, dx, 0)
-        if w > 0.0:
-            pred += w * err_history[sy, sx]
-
-    # Row y-1 (opposite scan direction due to serpentine)
-    if y > 0:
-        prev_rtl = not is_rtl
-        for sx in range(bx - 2, bx + 3):
-            dx = bx - sx
-            w = _src_weight(kernel_history[y - 1, sx], prev_rtl, dx, 1)
-            if w > 0.0:
-                pred += w * err_history[y - 1, sx]
-
-    # Row y-2 (same scan direction, only JJN reaches 2 rows)
-    if y > 1:
-        prev2_rtl = is_rtl
-        for sx in range(bx - 2, bx + 3):
-            dx = bx - sx
-            w = _src_weight(kernel_history[y - 2, sx], prev2_rtl, dx, 2)
-            if w > 0.0:
-                pred += w * err_history[y - 2, sx]
-
-    return pred
-
-
-# ============================================================================
 # Dithering functions
 # ============================================================================
 
@@ -401,56 +333,6 @@ def dither_first_order(input_image, seed=0):
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
             apply_error(buf, bx, y, err, use_jjn, is_rtl)
-
-    return extract_result(buf, width, height)
-
-
-def dither_second_order(input_image, seed=0):
-    """Second-order mixed FS/JJN error diffusion with matched reverse prediction.
-
-    Diffuses shaped error: d = 2*err - C*err, where the reverse prediction C
-    uses each source pixel's actual kernel choice (FS or JJN).
-    NTF = (1 - C(z))^2 for +12 dB/octave noise shaping.
-    """
-    height, width = input_image.shape
-    buf = create_seeded_buffer(input_image)
-
-    buf_h, buf_w = buf.shape
-    err_history = np.zeros((buf_h, buf_w), dtype=np.float64)
-    kernel_history = np.zeros((buf_h, buf_w), dtype=np.bool_)
-
-    hashed_seed = lowbias32(np.uint32(seed))
-
-    bx_start = REACH
-    process_height = REACH + height
-    process_width = REACH + width + REACH
-
-    for y in range(process_height):
-        is_rtl = y % 2 == 1
-        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
-
-        for px in px_range:
-            bx = bx_start + px
-            old_val = buf[y, bx]
-            new_val = 1.0 if old_val > 0.5 else 0.0
-            buf[y, bx] = new_val
-            err = old_val - new_val
-
-            # Second-order: predict using each source's actual kernel
-            predicted = predicted_incoming_matched(err_history, kernel_history, bx, y, is_rtl)
-            shaped_err = 2.0 * err - predicted
-
-            # Store raw error and kernel choice for future reverse lookups
-            err_history[y, bx] = err
-
-            # Map to image coordinates for hash (saturating_sub)
-            img_x = max(px - REACH, 0)
-            img_y = max(y - REACH, 0)
-            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
-            use_jjn = (coord_hash & 1) == 1
-
-            kernel_history[y, bx] = use_jjn
-            apply_error(buf, bx, y, shaped_err, use_jjn, is_rtl)
 
     return extract_result(buf, width, height)
 
