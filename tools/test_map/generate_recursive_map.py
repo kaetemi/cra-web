@@ -32,88 +32,216 @@ def lowbias32(x: np.uint32) -> np.uint32:
     return x
 
 
-def apply_fs_ltr(buf: np.ndarray, x: int, y: int, err: float):
-    """Floyd-Steinberg kernel, left-to-right."""
-    h, w = buf.shape
-    if x + 1 < w:
-        buf[y, x + 1] += err * (7.0 / 16.0)
-    if y + 1 < h:
-        if x > 0:
-            buf[y + 1, x - 1] += err * (3.0 / 16.0)
-        buf[y + 1, x] += err * (5.0 / 16.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (1.0 / 16.0)
+# ============================================================================
+# First-order kernels (padded buffer, no bounds checking)
+# ============================================================================
+
+REACH_1ST = 2   # JJN kernel radius
 
 
-def apply_fs_rtl(buf: np.ndarray, x: int, y: int, err: float):
-    """Floyd-Steinberg kernel, right-to-left."""
-    h, w = buf.shape
-    if x > 0:
-        buf[y, x - 1] += err * (7.0 / 16.0)
-    if y + 1 < h:
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (3.0 / 16.0)
-        buf[y + 1, x] += err * (5.0 / 16.0)
-        if x > 0:
-            buf[y + 1, x - 1] += err * (1.0 / 16.0)
+def apply_fs_ltr(buf, bx, y, err):
+    buf[y, bx + 1] += err * (7.0 / 16.0)
+    buf[y + 1, bx - 1] += err * (3.0 / 16.0)
+    buf[y + 1, bx] += err * (5.0 / 16.0)
+    buf[y + 1, bx + 1] += err * (1.0 / 16.0)
 
 
-def apply_jjn_ltr(buf: np.ndarray, x: int, y: int, err: float):
-    """Jarvis-Judice-Ninke kernel, left-to-right."""
-    h, w = buf.shape
-    if x + 1 < w:
-        buf[y, x + 1] += err * (7.0 / 48.0)
-    if x + 2 < w:
-        buf[y, x + 2] += err * (5.0 / 48.0)
-    if y + 1 < h:
-        if x >= 2:
-            buf[y + 1, x - 2] += err * (3.0 / 48.0)
-        if x >= 1:
-            buf[y + 1, x - 1] += err * (5.0 / 48.0)
-        buf[y + 1, x] += err * (7.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (5.0 / 48.0)
-        if x + 2 < w:
-            buf[y + 1, x + 2] += err * (3.0 / 48.0)
-    if y + 2 < h:
-        if x >= 2:
-            buf[y + 2, x - 2] += err * (1.0 / 48.0)
-        if x >= 1:
-            buf[y + 2, x - 1] += err * (3.0 / 48.0)
-        buf[y + 2, x] += err * (5.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 2, x + 1] += err * (3.0 / 48.0)
-        if x + 2 < w:
-            buf[y + 2, x + 2] += err * (1.0 / 48.0)
+def apply_fs_rtl(buf, bx, y, err):
+    buf[y, bx - 1] += err * (7.0 / 16.0)
+    buf[y + 1, bx + 1] += err * (3.0 / 16.0)
+    buf[y + 1, bx] += err * (5.0 / 16.0)
+    buf[y + 1, bx - 1] += err * (1.0 / 16.0)
 
 
-def apply_jjn_rtl(buf: np.ndarray, x: int, y: int, err: float):
-    """Jarvis-Judice-Ninke kernel, right-to-left."""
-    h, w = buf.shape
-    if x >= 1:
-        buf[y, x - 1] += err * (7.0 / 48.0)
-    if x >= 2:
-        buf[y, x - 2] += err * (5.0 / 48.0)
-    if y + 1 < h:
-        if x + 2 < w:
-            buf[y + 1, x + 2] += err * (3.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 1, x + 1] += err * (5.0 / 48.0)
-        buf[y + 1, x] += err * (7.0 / 48.0)
-        if x >= 1:
-            buf[y + 1, x - 1] += err * (5.0 / 48.0)
-        if x >= 2:
-            buf[y + 1, x - 2] += err * (3.0 / 48.0)
-    if y + 2 < h:
-        if x + 2 < w:
-            buf[y + 2, x + 2] += err * (1.0 / 48.0)
-        if x + 1 < w:
-            buf[y + 2, x + 1] += err * (3.0 / 48.0)
-        buf[y + 2, x] += err * (5.0 / 48.0)
-        if x >= 1:
-            buf[y + 2, x - 1] += err * (3.0 / 48.0)
-        if x >= 2:
-            buf[y + 2, x - 2] += err * (1.0 / 48.0)
+def apply_jjn_ltr(buf, bx, y, err):
+    buf[y, bx + 1] += err * (7.0 / 48.0)
+    buf[y, bx + 2] += err * (5.0 / 48.0)
+    buf[y + 1, bx - 2] += err * (3.0 / 48.0)
+    buf[y + 1, bx - 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx] += err * (7.0 / 48.0)
+    buf[y + 1, bx + 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx + 2] += err * (3.0 / 48.0)
+    buf[y + 2, bx - 2] += err * (1.0 / 48.0)
+    buf[y + 2, bx - 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx] += err * (5.0 / 48.0)
+    buf[y + 2, bx + 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx + 2] += err * (1.0 / 48.0)
+
+
+def apply_jjn_rtl(buf, bx, y, err):
+    buf[y, bx - 1] += err * (7.0 / 48.0)
+    buf[y, bx - 2] += err * (5.0 / 48.0)
+    buf[y + 1, bx + 2] += err * (3.0 / 48.0)
+    buf[y + 1, bx + 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx] += err * (7.0 / 48.0)
+    buf[y + 1, bx - 1] += err * (5.0 / 48.0)
+    buf[y + 1, bx - 2] += err * (3.0 / 48.0)
+    buf[y + 2, bx + 2] += err * (1.0 / 48.0)
+    buf[y + 2, bx + 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx] += err * (5.0 / 48.0)
+    buf[y + 2, bx - 1] += err * (3.0 / 48.0)
+    buf[y + 2, bx - 2] += err * (1.0 / 48.0)
+
+
+def apply_error_1st(buf, bx, y, err, use_jjn, is_rtl):
+    if use_jjn:
+        if is_rtl:
+            apply_jjn_rtl(buf, bx, y, err)
+        else:
+            apply_jjn_ltr(buf, bx, y, err)
+    else:
+        if is_rtl:
+            apply_fs_rtl(buf, bx, y, err)
+        else:
+            apply_fs_ltr(buf, bx, y, err)
+
+
+def create_seeded_buffer_1st(input_image):
+    """Create padded buffer for first-order kernels (reach=2, seed=2)."""
+    height, width = input_image.shape
+    r = REACH_1ST
+    total_left = r * 2
+    total_right = r * 2
+    total_top = r
+    total_bottom = r
+
+    buf_width = total_left + width + total_right
+    buf_height = total_top + height + total_bottom
+    buf = np.zeros((buf_height, buf_width), dtype=np.float64)
+
+    buf[total_top:total_top + height, total_left:total_left + width] = input_image
+
+    seed_left_start = r
+    seed_right_start = total_left + width
+
+    for sx in range(r):
+        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+    for sx in range(r):
+        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+    for sy in range(r):
+        for sx in range(r):
+            buf[sy, seed_left_start + sx] = input_image[0, 0]
+        buf[sy, total_left:total_left + width] = input_image[0, :]
+        for sx in range(r):
+            buf[sy, seed_right_start + sx] = input_image[0, -1]
+
+    return buf
+
+
+# ============================================================================
+# Second-order 2H-H² kernels
+# ============================================================================
+
+REACH_2ND = 4   # JJN² kernel radius (dx ±4, dy 0..4)
+SEED_2ND = 16   # Seed area width (4x reach for warm-up with negative weights)
+
+
+def apply_fs2_ltr(buf, bx, y, err):
+    """FS second-order kernel (2H_fs - H_fs²), LTR. Reach: dx -2..+2, dy 0..2."""
+    buf[y, bx + 1] += err * (224.0 / 256.0)
+    buf[y, bx + 2] += err * (-49.0 / 256.0)
+    buf[y + 1, bx - 1] += err * (96.0 / 256.0)
+    buf[y + 1, bx] += err * (118.0 / 256.0)
+    buf[y + 1, bx + 1] += err * (-38.0 / 256.0)
+    buf[y + 1, bx + 2] += err * (-14.0 / 256.0)
+    buf[y + 2, bx - 2] += err * (-9.0 / 256.0)
+    buf[y + 2, bx - 1] += err * (-30.0 / 256.0)
+    buf[y + 2, bx] += err * (-31.0 / 256.0)
+    buf[y + 2, bx + 1] += err * (-10.0 / 256.0)
+    buf[y + 2, bx + 2] += err * (-1.0 / 256.0)
+
+
+def apply_jjn2_ltr(buf, bx, y, err):
+    """JJN second-order kernel (2H_jjn - H_jjn²), LTR. Reach: dx -4..+4, dy 0..4."""
+    # Row 0
+    buf[y, bx + 1] += err * (672.0 / 2304.0)
+    buf[y, bx + 2] += err * (431.0 / 2304.0)
+    buf[y, bx + 3] += err * (-70.0 / 2304.0)
+    buf[y, bx + 4] += err * (-25.0 / 2304.0)
+    # Row 1
+    buf[y + 1, bx - 2] += err * (288.0 / 2304.0)
+    buf[y + 1, bx - 1] += err * (438.0 / 2304.0)
+    buf[y + 1, bx] += err * (572.0 / 2304.0)
+    buf[y + 1, bx + 1] += err * (332.0 / 2304.0)
+    buf[y + 1, bx + 2] += err * (148.0 / 2304.0)
+    buf[y + 1, bx + 3] += err * (-92.0 / 2304.0)
+    buf[y + 1, bx + 4] += err * (-30.0 / 2304.0)
+    # Row 2
+    buf[y + 2, bx - 4] += err * (-9.0 / 2304.0)
+    buf[y + 2, bx - 3] += err * (-30.0 / 2304.0)
+    buf[y + 2, bx - 2] += err * (29.0 / 2304.0)
+    buf[y + 2, bx - 1] += err * (174.0 / 2304.0)
+    buf[y + 2, bx] += err * (311.0 / 2304.0)
+    buf[y + 2, bx + 1] += err * (88.0 / 2304.0)
+    buf[y + 2, bx + 2] += err * (-63.0 / 2304.0)
+    buf[y + 2, bx + 3] += err * (-74.0 / 2304.0)
+    buf[y + 2, bx + 4] += err * (-19.0 / 2304.0)
+    # Row 3
+    buf[y + 3, bx - 4] += err * (-6.0 / 2304.0)
+    buf[y + 3, bx - 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx - 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx - 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx] += err * (-142.0 / 2304.0)
+    buf[y + 3, bx + 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx + 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx + 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx + 4] += err * (-6.0 / 2304.0)
+    # Row 4
+    buf[y + 4, bx - 4] += err * (-1.0 / 2304.0)
+    buf[y + 4, bx - 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx - 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx - 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx] += err * (-45.0 / 2304.0)
+    buf[y + 4, bx + 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx + 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx + 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx + 4] += err * (-1.0 / 2304.0)
+
+
+def apply_error_2nd(buf, bx, y, err, use_jjn):
+    """Apply second-order (2H - H²) kernel (precomputed, assumes uniform kernel). LTR only."""
+    if use_jjn:
+        apply_jjn2_ltr(buf, bx, y, err)
+    else:
+        apply_fs2_ltr(buf, bx, y, err)
+
+
+def create_seeded_buffer_2nd(input_image):
+    """Create padded buffer for second-order kernels.
+
+    Buffer layout (reach=4, seed=16):
+        cols: [0..4) overshoot | [4..20) seed | [20..20+W) image | [20+W..36+W) seed | [36+W..40+W) overshoot
+        rows: [0..16) seed | [16..16+H) image | [16+H..20+H) overshoot
+    """
+    height, width = input_image.shape
+    r = REACH_2ND
+    s = SEED_2ND
+    total_left = r + s
+    total_right = s + r
+    total_top = s
+    total_bottom = r
+
+    buf_width = total_left + width + total_right
+    buf_height = total_top + height + total_bottom
+    buf = np.zeros((buf_height, buf_width), dtype=np.float64)
+
+    buf[total_top:total_top + height, total_left:total_left + width] = input_image
+
+    seed_left_start = r
+    seed_right_start = total_left + width
+
+    for sx in range(s):
+        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+    for sx in range(s):
+        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+    for sy in range(s):
+        for sx in range(s):
+            buf[sy, seed_left_start + sx] = input_image[0, 0]
+        buf[sy, total_left:total_left + width] = input_image[0, :]
+        for sx in range(s):
+            buf[sy, seed_right_start + sx] = input_image[0, -1]
+
+    return buf
 
 
 def quantize(value: float, bits: int) -> float:
@@ -171,7 +299,7 @@ def tpdf_threshold(x, y, hashed_seed, amplitude=64.0/255.0):
     return 0.5 + tpdf * amplitude
 
 
-def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False):
+def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False, method='1st'):
     """Dither with random spatial transform derived from seed."""
     swap_xy = bool(seed & 1)
     mirror_x = bool(seed & 2)
@@ -180,13 +308,13 @@ def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False,
     transformed = transform_image(input_image, swap_xy, mirror_x, mirror_y)
 
     if return_error:
-        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf)
+        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf, method=method)
         return (
             inverse_transform_image(result, swap_xy, mirror_x, mirror_y),
             inverse_transform_image(error_map, swap_xy, mirror_x, mirror_y),
         )
     else:
-        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf)
+        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf, method=method)
         return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
 
 
@@ -442,18 +570,184 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
     print(f"Saved: {out_path}")
 
 
-def apply_error(buf, x, y, err, use_jjn, is_rtl):
-    """Apply the appropriate error diffusion kernel."""
-    if use_jjn:
-        if is_rtl:
-            apply_jjn_rtl(buf, x, y, err)
-        else:
-            apply_jjn_ltr(buf, x, y, err)
-    else:
-        if is_rtl:
-            apply_fs_rtl(buf, x, y, err)
-        else:
-            apply_fs_ltr(buf, x, y, err)
+def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
+    """First-order mixed FS/JJN with serpentine scanning."""
+    height, width = input_image.shape
+    r = REACH_1ST
+    s = r  # seed = reach for first-order
+    buf = create_seeded_buffer_1st(input_image)
+    hashed_seed = lowbias32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
+    fifo = deque()
+
+    total_left = r * 2
+    total_top = r
+    bx_start = r
+    process_height = r + height
+    process_width = r + width + r
+
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+            old_val = buf[y, bx]
+
+            img_x = px - r
+            img_y = y - r
+            in_image = (0 <= img_x < width) and (0 <= img_y < height)
+
+            if return_error and in_image:
+                error_map[img_y, img_x] = old_val
+
+            if use_tpdf and in_image:
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                new_val = 1.0 if old_val > thresh else 0.0
+            else:
+                new_val = quantize(old_val, bits)
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            fifo.append((bx, y, err, use_jjn, is_rtl))
+
+            if len(fifo) > delay:
+                dbx, dy, derr, d_jjn, d_rtl = fifo.popleft()
+                apply_error_1st(buf, dbx, dy, derr, d_jjn, d_rtl)
+
+    while fifo:
+        dbx, dy, derr, d_jjn, d_rtl = fifo.popleft()
+        apply_error_1st(buf, dbx, dy, derr, d_jjn, d_rtl)
+
+    output = buf[total_top:total_top + height, total_left:total_left + width].copy()
+    if return_error:
+        return output, error_map
+    return output
+
+
+def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
+    """2H-H² kernel with mixed FS²/JJN², always LTR."""
+    height, width = input_image.shape
+    r = REACH_2ND
+    s = SEED_2ND
+    buf = create_seeded_buffer_2nd(input_image)
+    hashed_seed = lowbias32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
+    fifo = deque()
+
+    total_left = r + s
+    total_top = s
+    bx_start = r
+    process_height = s + height
+    process_width = s + width + s
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+            old_val = buf[y, bx]
+
+            img_x = px - s
+            img_y = y - s
+            in_image = (0 <= img_x < width) and (0 <= img_y < height)
+
+            if return_error and in_image:
+                error_map[img_y, img_x] = old_val
+
+            if use_tpdf and in_image:
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                new_val = 1.0 if old_val > thresh else 0.0
+            else:
+                new_val = quantize(old_val, bits)
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            fifo.append((bx, y, err, use_jjn))
+
+            if len(fifo) > delay:
+                dbx, dy, derr, d_jjn = fifo.popleft()
+                apply_error_2nd(buf, dbx, dy, derr, d_jjn)
+
+    while fifo:
+        dbx, dy, derr, d_jjn = fifo.popleft()
+        apply_error_2nd(buf, dbx, dy, derr, d_jjn)
+
+    output = buf[total_top:total_top + height, total_left:total_left + width].copy()
+    if return_error:
+        return output, error_map
+    return output
+
+
+def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
+    """Dual-integrator: two coupled error buffers with first-order kernels, serpentine."""
+    height, width = input_image.shape
+    r = REACH_1ST
+    s = r
+
+    buf1 = create_seeded_buffer_1st(input_image)
+    buf2 = np.zeros_like(buf1)
+
+    hashed_seed = lowbias32(np.uint32(seed))
+    use_tpdf = tpdf and bits == 1
+    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
+
+    total_left = r * 2
+    total_top = r
+    bx_start = r
+    process_height = r + height
+    process_width = r + width + r
+
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+
+            int1_val = buf1[y, bx]
+            int2_val = int1_val + buf2[y, bx]
+
+            img_x = px - r
+            img_y = y - r
+            in_image = (0 <= img_x < width) and (0 <= img_y < height)
+
+            if return_error and in_image:
+                error_map[img_y, img_x] = int2_val
+
+            if use_tpdf and in_image:
+                thresh = tpdf_threshold(img_x, img_y, hashed_seed)
+                new_val = 1.0 if int2_val > thresh else 0.0
+            else:
+                new_val = 1.0 if int2_val > 0.5 else 0.0 if bits == 1 else quantize(int2_val, bits)
+            buf1[y, bx] = new_val
+
+            err1 = int1_val - new_val
+            err2 = int2_val - new_val
+
+            coord_x = img_x & 0xFFFF
+            coord_y = img_y & 0xFFFF
+            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn_1 = (coord_hash & 1) == 1
+            use_jjn_2 = (coord_hash & 2) == 2
+
+            apply_error_1st(buf1, bx, y, err1, use_jjn_1, is_rtl)
+            apply_error_1st(buf2, bx, y, err2, use_jjn_2, is_rtl)
+
+    output = buf1[total_top:total_top + height, total_left:total_left + width].copy()
+    if return_error:
+        return output, error_map
+    return output
 
 
 def dither(
@@ -462,10 +756,11 @@ def dither(
     seed: int = 0,
     delay: int = 0,
     return_error: bool = False,
-    tpdf: bool = False
+    tpdf: bool = False,
+    method: str = '1st'
 ):
     """
-    Apply mixed FS/JJN error diffusion dithering.
+    Apply error diffusion dithering.
 
     Args:
         input_image: Input image with values in [0.0, 1.0]
@@ -473,58 +768,18 @@ def dither(
         seed: Random seed for kernel selection
         delay: FIFO delay in pixels before error is diffused (0 = immediate)
         return_error: If True, also return the per-pixel error buffer value
-                      (buf[y,x] at time of quantization), centered around 0.5
         tpdf: If True, add TPDF threshold perturbation (1-bit only)
+        method: '1st' (first-order FS/JJN), '2hh2' (2H-H² kernels), 'dual' (dual integrator)
 
     Returns:
         Dithered image, or (dithered, error_map) if return_error=True
     """
-    height, width = input_image.shape
-    buf = input_image.copy().astype(np.float64)
-    output = np.zeros((height, width), dtype=np.float64)
-    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
-    hashed_seed = lowbias32(np.uint32(seed))
-    fifo = deque()
-    use_tpdf = tpdf and bits == 1
-
-    for y in range(height):
-        if y % 2 == 0:
-            x_range = range(width)
-            is_rtl = False
-        else:
-            x_range = range(width - 1, -1, -1)
-            is_rtl = True
-
-        for x in x_range:
-            old_val = buf[y, x]
-            if return_error:
-                error_map[y, x] = old_val
-
-            if use_tpdf:
-                thresh = tpdf_threshold(x, y, hashed_seed)
-                new_val = 1.0 if old_val > thresh else 0.0
-            else:
-                new_val = quantize(old_val, bits)
-            output[y, x] = new_val
-            err = old_val - new_val
-
-            coord_hash = lowbias32(np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ hashed_seed)
-            use_jjn = (coord_hash & 1) == 1
-
-            fifo.append((x, y, err, use_jjn, is_rtl))
-
-            if len(fifo) > delay:
-                dx, dy, derr, d_jjn, d_rtl = fifo.popleft()
-                apply_error(buf, dx, dy, derr, d_jjn, d_rtl)
-
-    # Flush remaining
-    while fifo:
-        dx, dy, derr, d_jjn, d_rtl = fifo.popleft()
-        apply_error(buf, dx, dy, derr, d_jjn, d_rtl)
-
-    if return_error:
-        return output, error_map
-    return output
+    if method == '2hh2':
+        return _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf)
+    elif method == 'dual':
+        return _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf)
+    else:
+        return _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf)
 
 
 def generate_gradient(width: int, height: int) -> np.ndarray:
@@ -552,6 +807,9 @@ def main():
                         help="Run recursive generation experiment")
     parser.add_argument("--tpdf", action="store_true",
                         help="Add TPDF threshold perturbation on top of mixed FS/JJN")
+    parser.add_argument("--method", type=str, default="1st",
+                        choices=["1st", "2hh2", "dual"],
+                        help="Dither method: 1st (first-order), 2hh2 (2H-H²), dual (dual integrator)")
     parser.add_argument("--output", "-o", type=str,
                         help="Output path")
 
@@ -567,7 +825,7 @@ def main():
             gradient = generate_gradient(args.size, args.size)
 
             # Dither it
-            dithered = dither(gradient, bits=bits, seed=args.seed, delay=args.delay, tpdf=args.tpdf)
+            dithered = dither(gradient, bits=bits, seed=args.seed, delay=args.delay, tpdf=args.tpdf, method=args.method)
 
             # Save as PNG (scale to 0-255)
             delay_suffix = f"_delay{args.delay}" if args.delay > 0 else ""
@@ -616,7 +874,9 @@ def main():
 
         # Level 0: initial 1-bit split
         print("Level 0: 1-bit dither of 0.5 gray")
-        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf)
+        method = args.method
+        print(f"Method: {method}")
+        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
         rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
         img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
@@ -652,7 +912,7 @@ def main():
                 input_hi = clean.copy()
                 input_hi[~parent_mask] = 0.0
                 input_hi = input_hi * 0.5
-                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf)
+                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
@@ -663,7 +923,7 @@ def main():
                 input_lo = clean.copy()
                 input_lo[~parent_mask] = 1.0
                 input_lo = input_lo * 0.5 + 0.5
-                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf)
+                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
                 total_passes += 1
@@ -693,7 +953,7 @@ def main():
         print(f"Dithering {args.gray:.3f} gray at {args.bits}-bit...")
 
         input_img = np.full((args.size, args.size), args.gray, dtype=np.float64)
-        dithered, error_map = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay, return_error=True, tpdf=args.tpdf)
+        dithered, error_map = dither(input_img, bits=args.bits, seed=args.seed, delay=args.delay, return_error=True, tpdf=args.tpdf, method=args.method)
 
         out_path = args.output or str(output_dir / f"gray_{args.gray:.2f}_{args.bits}bit.png")
         img = (dithered * 255).astype(np.uint8)
