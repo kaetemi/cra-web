@@ -87,6 +87,19 @@ def lowbias32(x: np.uint32) -> np.uint32:
     return x
 
 
+def triple32(x: np.uint32) -> np.uint32:
+    """Triple32 hash function."""
+    x = np.uint32(x)
+    x ^= x >> np.uint32(17)
+    x = np.uint32(np.uint64(x) * np.uint64(0xed5ad4bb) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(11)
+    x = np.uint32(np.uint64(x) * np.uint64(0xac4c1b51) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(15)
+    x = np.uint32(np.uint64(x) * np.uint64(0x31848bab) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(14)
+    return x
+
+
 # ============================================================================
 # Seeded buffer (matches Rust create_seeded_buffer)
 # ============================================================================
@@ -631,12 +644,13 @@ def dither_kernel_2nd(input_image, seed=0):
     The uniform assumption over-corrects vs the true mixed-kernel H², but
     this gives the best measured slope. Single feedback loop around one
     quantizer (Kite et al.). Always LTR (no serpentine).
+    Uses triple32 hash for kernel selection.
     """
     height, width = input_image.shape
     r = REACH_2ND
     s = SEED_2ND
     buf = create_seeded_buffer_r4(input_image)
-    hashed_seed = lowbias32(np.uint32(seed))
+    hashed_seed = triple32(np.uint32(seed))
 
     bx_start = r  # skip left overshoot
     process_height = s + height
@@ -652,7 +666,7 @@ def dither_kernel_2nd(input_image, seed=0):
 
             img_x = (px - s) & 0xFFFF
             img_y = (y - s) & 0xFFFF
-            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            coord_hash = triple32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
             apply_error_2nd(buf, bx, y, err, use_jjn, False)
 
