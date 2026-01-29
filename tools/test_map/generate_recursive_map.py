@@ -286,42 +286,69 @@ def main():
 
         gray = np.full((size, size), 0.5, dtype=np.float64)
 
-        # Step 1: 1-bit dither of 0.5 gray, capturing error
-        print("Step 1: 1-bit dither of 0.5 gray (with error capture)")
-        result_1bit, error_map = dither(gray, bits=1, seed=get_seed(), return_error=True)
-        save_step(result_1bit, "step1_1bit")
+        # Step 1a: 1-bit dither of 0.5 gray
+        print("Step 1a: 1-bit dither of 0.5 gray")
+        a = dither(gray, bits=1, seed=get_seed())
+        save_step(a, "step1a_1bit")
 
-        # Error map from step 1
-        emin, emax = error_map.min(), error_map.max()
-        print(f"Error map range: [{emin:.4f}, {emax:.4f}]")
-        error_normalized = (error_map - emin) / (emax - emin) if emax > emin else error_map
-        save_step(error_normalized, "step1_error")
-        np.save(output_dir / "step1_error.npy", error_map)
+        # Step 1b: 1-bit dither of 0.5 gray (different seed)
+        print("\nStep 1b: 1-bit dither of 0.5 gray")
+        b = dither(gray, bits=1, seed=get_seed())
+        save_step(b, "step1b_1bit")
 
-        # Find top 25% and bottom 25% of error values
-        p25 = np.percentile(error_map, 25)
-        p75 = np.percentile(error_map, 75)
-        mask_extreme = (error_map <= p25) | (error_map >= p75)
-        mask_middle = ~mask_extreme
-        print(f"\nPercentiles: p25={p25:.4f}, p75={p75:.4f}")
-        print(f"Extreme pixels (top+bottom 25%): {mask_extreme.sum()} ({mask_extreme.mean()*100:.1f}%)")
-        print(f"Middle pixels: {mask_middle.sum()} ({mask_middle.mean()*100:.1f}%)")
+        result_1bit = a
 
-        # Step 2: Set extreme pixels to gray, keep middle as 0/1, 2-bit dither
-        print("\nStep 2: 1-bit with extreme error pixels → gray, 2-bit dither")
-        input_2 = result_1bit.copy()
-        input_2[mask_extreme] = 0.5
-        save_step(input_2, "step2_input")
-        result_2 = dither(input_2, bits=2, seed=get_seed())
-        save_step(result_2, "step2_2bit")
+        # Step 2: Boolean combinations
+        a_bool = a > 0.5
+        b_bool = b > 0.5
 
-        # Step 3: Set middle pixels to gray, keep extreme as 0/1, 2-bit dither
-        print("\nStep 3: 1-bit with middle error pixels → gray, 2-bit dither")
-        input_3 = result_1bit.copy()
-        input_3[mask_middle] = 0.5
-        save_step(input_3, "step3_input")
-        result_3 = dither(input_3, bits=2, seed=get_seed())
-        save_step(result_3, "step3_2bit")
+        print("\nStep 2: XOR")
+        xor = (a_bool ^ b_bool).astype(np.float64)
+        save_step(xor, "step2_xor")
+
+        print("\nStep 2: !XOR (XNOR)")
+        xnor = (~(a_bool ^ b_bool)).astype(np.float64)
+        save_step(xnor, "step2_xnor")
+
+        print("\nStep 2: AND")
+        and_result = (a_bool & b_bool).astype(np.float64)
+        save_step(and_result, "step2_and")
+
+        # Step 3: Second XOR from two more independent 1-bit dithers
+        print("\nStep 3a: 1-bit dither of 0.5 gray")
+        c = dither(gray, bits=1, seed=get_seed())
+        save_step(c, "step3a_1bit")
+
+        print("\nStep 3b: 1-bit dither of 0.5 gray")
+        d = dither(gray, bits=1, seed=get_seed())
+        save_step(d, "step3b_1bit")
+
+        print("\nStep 3: XOR of c,d")
+        xor2 = ((c > 0.5) ^ (d > 0.5)).astype(np.float64)
+        save_step(xor2, "step3_xor2")
+
+        # Step 4: Scale both XORs to 1/6-5/6, 2-bit dither
+        print("\nStep 4a: XOR1 scaled to 1/6-5/6, 2-bit dither")
+        xor1_scaled = xor * (4.0 / 6.0) + (1.0 / 6.0)
+        result_4a = dither(xor1_scaled, bits=2, seed=get_seed())
+        save_step(result_4a, "step4a_2bit")
+
+        print("\nStep 4b: XOR2 scaled to 1/6-5/6, 2-bit dither")
+        xor2_scaled = xor2 * (4.0 / 6.0) + (1.0 / 6.0)
+        result_4b = dither(xor2_scaled, bits=2, seed=get_seed())
+        save_step(result_4b, "step4b_2bit")
+
+        # Step 5: Combine the two XORs
+        xor1_bool = xor > 0.5
+        xor2_bool = xor2 > 0.5
+
+        print("\nStep 5: AND of two XORs")
+        xor_and = (xor1_bool & xor2_bool).astype(np.float64)
+        save_step(xor_and, "step5_xor_and")
+
+        print("\nStep 5: XOR of two XORs")
+        xor_xor = (xor1_bool ^ xor2_bool).astype(np.float64)
+        save_step(xor_xor, "step5_xor_xor")
 
     elif args.gray is not None:
         # Dither uniform gray
