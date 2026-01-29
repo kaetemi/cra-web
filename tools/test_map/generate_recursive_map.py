@@ -301,6 +301,46 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
     plt.close()
     print(f"Saved: {hist_path}")
 
+    # Spectral slope at every threshold
+    print("Computing spectral slopes across all thresholds...")
+    thresholds = np.arange(1, 256)
+    slopes = []
+    for t in thresholds:
+        halftone = (rank < t).astype(np.float64) * 255.0
+        freqs_t, h_t, d_t, v_t = compute_segmented_radial_power(halftone)
+        avg_pow = (h_t + d_t + v_t) / 3.0
+        avg_db = 10 * np.log10(avg_pow + 1e-10)
+        # Fit slope in log-log space (log2(freq) vs dB)
+        # dB/octave = slope of dB vs log2(freq)
+        valid = freqs_t > 0.02  # skip very low freqs
+        if valid.sum() > 10:
+            log2_f = np.log2(freqs_t[valid])
+            db_vals = avg_db[valid]
+            coeffs = np.polyfit(log2_f, db_vals, 1)
+            slopes.append(coeffs[0])  # dB per octave
+        else:
+            slopes.append(0)
+    slopes = np.array(slopes)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(thresholds, slopes, 'b-', linewidth=1)
+    ax.axhline(y=6, color='k', linestyle='--', alpha=0.5, label='+6 dB/oct (ideal)')
+    ax.axhline(y=3, color='k', linestyle=':', alpha=0.5, label='+3 dB/oct')
+    ax.axhline(y=0, color='gray', linestyle='-', alpha=0.3)
+    ax.set_xlabel('Threshold (rank value)')
+    ax.set_ylabel('Spectral Slope (dB/octave)')
+    ax.set_title('Spectral Slope vs Threshold')
+    ax.set_xlim(1, 255)
+    ax.grid(True, alpha=0.3)
+    ax.legend(loc='lower right', fontsize=8)
+    plt.tight_layout()
+    slope_path = output_dir / "analysis_slopes.png"
+    plt.savefig(slope_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {slope_path}")
+    print(f"  Slope range: [{slopes.min():.2f}, {slopes.max():.2f}] dB/oct")
+    print(f"  Mean slope: {slopes.mean():.2f} dB/oct")
+
     # Analysis of the ranked output image itself (as grayscale)
     rank_img = rank.astype(np.float64)
     freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(rank_img)
