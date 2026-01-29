@@ -545,6 +545,30 @@ python tools/derive_d65.py
 python tools/derive_k_from_matrix.py
 ```
 
+### 24. `test_twelve/second_order_dither.py`
+
+Experiments with higher-order error diffusion noise shaping for 2D halftoning.
+
+**Methods compared:**
+- **1st order (mixed FS/JJN)** - Standard error diffusion, ~6.8 dB/oct
+- **2H-H² kernel** - Precomputed kernel aiming for (1-H)² NTF, ~8.2 dB/oct
+- **Dual integrator** - Two coupled error buffers, ~7.1 dB/oct
+
+**Key finding (Kite et al.):** Single-feedback-loop architectures are fundamentally limited to first-order NTF = (1-H), regardless of kernel modifications. The 2H-H² kernel achieves improved first-order shaping but not true second-order (+12 dB/oct). True higher-order requires MASH or multi-feedback topologies, but MASH requires multi-bit DAC output which is incompatible with binary halftoning.
+
+**Outputs** (`tools/test_twelve/`):
+- `order_comparison_gray_*.png` - Spectral analysis at various gray levels
+- `order_comparison_gradient.png` - Gradient comparison
+- `david_*.png` - Real image dithering comparison
+
+```bash
+source /root/venv/bin/activate
+python tools/test_twelve/second_order_dither.py                    # All gray levels + gradient
+python tools/test_twelve/second_order_dither.py --gray 0.5         # Single gray level
+python tools/test_twelve/second_order_dither.py --gradient-only    # Gradient only
+python tools/test_twelve/second_order_dither.py --image FILE       # Process an image
+```
+
 ## Full Regeneration Sequence
 
 ```bash
