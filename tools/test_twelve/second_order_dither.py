@@ -289,7 +289,7 @@ def apply_jjn2_rtl(buf, bx, y, err):
 
 
 def apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl):
-    """Apply second-order (2H - H²) kernel."""
+    """Apply second-order (2H - H²) kernel (precomputed, assumes uniform kernel)."""
     if use_jjn:
         if is_rtl:
             apply_jjn2_rtl(buf, bx, y, err)
@@ -300,6 +300,266 @@ def apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl):
             apply_fs2_rtl(buf, bx, y, err)
         else:
             apply_fs2_ltr(buf, bx, y, err)
+
+
+# ============================================================================
+# Cross-kernel second-order: K_fj = 2H_fs - FS⊗JJN, K_jf = 2H_jjn - JJN⊗FS
+# These pair with K_ff (apply_fs2_ltr) and K_jj (apply_jjn2_ltr) above.
+# ============================================================================
+
+def apply_fs_jjn_ltr(buf, bx, y, err):
+    """K_fj = 2H_fs - FS⊗JJN, LTR. This pixel FS, correction assumes JJN neighbors."""
+    # Row 0
+    buf[y, bx + 1] += err * 0.875
+    buf[y, bx + 2] += err * (-0.0638020833)
+    buf[y, bx + 3] += err * (-0.0455729167)
+    # Row 1
+    buf[y + 1, bx - 1] += err * 0.34765625
+    buf[y + 1, bx] += err * 0.5520833333
+    buf[y + 1, bx + 1] += err * (-0.00390625)
+    buf[y + 1, bx + 2] += err * (-0.0872395833)
+    buf[y + 1, bx + 3] += err * (-0.0338541667)
+    # Row 2
+    buf[y + 2, bx - 3] += err * (-0.01171875)
+    buf[y + 2, bx - 2] += err * (-0.0390625)
+    buf[y + 2, bx - 1] += err * (-0.0729166667)
+    buf[y + 2, bx] += err * (-0.0989583333)
+    buf[y + 2, bx + 1] += err * (-0.0989583333)
+    buf[y + 2, bx + 2] += err * (-0.0533854167)
+    buf[y + 2, bx + 3] += err * (-0.0130208333)
+    # Row 3
+    buf[y + 3, bx - 3] += err * (-0.00390625)
+    buf[y + 3, bx - 2] += err * (-0.0182291667)
+    buf[y + 3, bx - 1] += err * (-0.0403645833)
+    buf[y + 3, bx] += err * (-0.0481770833)
+    buf[y + 3, bx + 1] += err * (-0.0299479167)
+    buf[y + 3, bx + 2] += err * (-0.0104166667)
+    buf[y + 3, bx + 3] += err * (-0.0013020833)
+
+
+def apply_jjn_fs_ltr(buf, bx, y, err):
+    """K_jf = 2H_jjn - JJN⊗FS, LTR. This pixel JJN, correction assumes FS neighbors."""
+    # Row 0
+    buf[y, bx + 1] += err * 0.2916666667
+    buf[y, bx + 2] += err * 0.14453125
+    buf[y, bx + 3] += err * (-0.0455729167)
+    # Row 1
+    buf[y + 1, bx - 2] += err * 0.125
+    buf[y + 1, bx - 1] += err * 0.1809895833
+    buf[y + 1, bx] += err * 0.21875
+    buf[y + 1, bx + 1] += err * 0.0794270833
+    buf[y + 1, bx + 2] += err * 0.0377604167
+    buf[y + 1, bx + 3] += err * (-0.0338541667)
+    # Row 2
+    buf[y + 2, bx - 3] += err * (-0.01171875)
+    buf[y + 2, bx - 2] += err * 0.0026041667
+    buf[y + 2, bx - 1] += err * 0.0520833333
+    buf[y + 2, bx] += err * 0.109375
+    buf[y + 2, bx + 1] += err * 0.0260416667
+    buf[y + 2, bx + 2] += err * (-0.01171875)
+    buf[y + 2, bx + 3] += err * (-0.0130208333)
+    # Row 3
+    buf[y + 3, bx - 3] += err * (-0.00390625)
+    buf[y + 3, bx - 2] += err * (-0.0182291667)
+    buf[y + 3, bx - 1] += err * (-0.0403645833)
+    buf[y + 3, bx] += err * (-0.0481770833)
+    buf[y + 3, bx + 1] += err * (-0.0299479167)
+    buf[y + 3, bx + 2] += err * (-0.0104166667)
+    buf[y + 3, bx + 3] += err * (-0.0013020833)
+
+
+def apply_error_2nd_4way(buf, bx, y, err, coord_hash):
+    """Apply one of 4 second-order kernels selected by hash bits (LTR only).
+
+    bit 0: this pixel's first-hop kernel (0=FS, 1=JJN)
+    bit 1: H² correction assumption (0=neighbors FS, 1=neighbors JJN)
+
+    Kernels:
+      00 → K_ff = 2H_fs - FS⊗FS
+      01 → K_fj = 2H_fs - FS⊗JJN
+      10 → K_jf = 2H_jjn - JJN⊗FS
+      11 → K_jj = 2H_jjn - JJN⊗JJN
+    """
+    bits = coord_hash & 3
+    if bits == 0:
+        apply_fs2_ltr(buf, bx, y, err)
+    elif bits == 1:
+        apply_fs_jjn_ltr(buf, bx, y, err)
+    elif bits == 2:
+        apply_jjn_fs_ltr(buf, bx, y, err)
+    else:
+        apply_jjn2_ltr(buf, bx, y, err)
+
+
+def apply_error_2nd_cross(buf, bx, y, err, coord_hash):
+    """Apply cross-kernel second-order: always assume the OTHER kernel for H² (LTR only).
+
+    bit 0 = 0 (FS pixel): K_fj = 2H_fs - FS⊗JJN
+    bit 0 = 1 (JJN pixel): K_jf = 2H_jjn - JJN⊗FS
+    """
+    if (coord_hash & 1) == 0:
+        apply_fs_jjn_ltr(buf, bx, y, err)
+    else:
+        apply_jjn_fs_ltr(buf, bx, y, err)
+
+
+# ============================================================================
+# Cross-averaged second-order kernels: K = 2H - H⊗H_avg
+# where H_avg = (H_fs + H_jjn) / 2
+# Statistically correct for random 50/50 kernel switching.
+# ============================================================================
+
+def apply_fs2_xavg_ltr(buf, bx, y, err):
+    """FS cross-averaged kernel: 2·H_fs - H_fs⊗H_avg, LTR. Reach: dx -3..+3, dy 0..3."""
+    # Row 0
+    buf[y, bx + 1] += err * 0.875000
+    buf[y, bx + 2] += err * (-0.127604)
+    buf[y, bx + 3] += err * (-0.022786)
+    # Row 1
+    buf[y + 1, bx - 1] += err * 0.361328
+    buf[y + 1, bx] += err * 0.506510
+    buf[y + 1, bx + 1] += err * (-0.076172)
+    buf[y + 1, bx + 2] += err * (-0.070964)
+    buf[y + 1, bx + 3] += err * (-0.016927)
+    # Row 2
+    buf[y + 2, bx - 3] += err * (-0.005859)
+    buf[y + 2, bx - 2] += err * (-0.037109)
+    buf[y + 2, bx - 1] += err * (-0.095052)
+    buf[y + 2, bx] += err * (-0.110026)
+    buf[y + 2, bx + 1] += err * (-0.069010)
+    buf[y + 2, bx + 2] += err * (-0.028646)
+    buf[y + 2, bx + 3] += err * (-0.006510)
+    # Row 3
+    buf[y + 3, bx - 3] += err * (-0.001953)
+    buf[y + 3, bx - 2] += err * (-0.009115)
+    buf[y + 3, bx - 1] += err * (-0.020182)
+    buf[y + 3, bx] += err * (-0.024089)
+    buf[y + 3, bx + 1] += err * (-0.014974)
+    buf[y + 3, bx + 2] += err * (-0.005208)
+    buf[y + 3, bx + 3] += err * (-0.000651)
+
+
+def apply_jjn2_xavg_ltr(buf, bx, y, err):
+    """JJN cross-averaged kernel: 2·H_jjn - H_jjn⊗H_avg, LTR. Reach: dx -4..+4, dy 0..4."""
+    # Row 0
+    buf[y, bx + 1] += err * 0.291667
+    buf[y, bx + 2] += err * 0.165799
+    buf[y, bx + 3] += err * (-0.037977)
+    buf[y, bx + 4] += err * (-0.005425)
+    # Row 1
+    buf[y + 1, bx - 2] += err * 0.125000
+    buf[y + 1, bx - 1] += err * 0.185547
+    buf[y + 1, bx] += err * 0.233507
+    buf[y + 1, bx + 1] += err * 0.111762
+    buf[y + 1, bx + 2] += err * 0.050998
+    buf[y + 1, bx + 3] += err * (-0.036892)
+    buf[y + 1, bx + 4] += err * (-0.006510)
+    # Row 2
+    buf[y + 2, bx - 4] += err * (-0.001953)
+    buf[y + 2, bx - 3] += err * (-0.012370)
+    buf[y + 2, bx - 2] += err * 0.007595
+    buf[y + 2, bx - 1] += err * 0.063802
+    buf[y + 2, bx] += err * 0.122179
+    buf[y + 2, bx + 1] += err * 0.032118
+    buf[y + 2, bx + 2] += err * (-0.019531)
+    buf[y + 2, bx + 3] += err * (-0.022569)
+    buf[y + 2, bx + 4] += err * (-0.004123)
+    # Row 3
+    buf[y + 3, bx - 4] += err * (-0.001302)
+    buf[y + 3, bx - 3] += err * (-0.008030)
+    buf[y + 3, bx - 2] += err * (-0.025174)
+    buf[y + 3, bx - 1] += err * (-0.046224)
+    buf[y + 3, bx] += err * (-0.054905)
+    buf[y + 3, bx + 1] += err * (-0.041016)
+    buf[y + 3, bx + 2] += err * (-0.021267)
+    buf[y + 3, bx + 3] += err * (-0.006727)
+    buf[y + 3, bx + 4] += err * (-0.001302)
+    # Row 4
+    buf[y + 4, bx - 4] += err * (-0.000217)
+    buf[y + 4, bx - 3] += err * (-0.001302)
+    buf[y + 4, bx - 2] += err * (-0.004123)
+    buf[y + 4, bx - 1] += err * (-0.007812)
+    buf[y + 4, bx] += err * (-0.009766)
+    buf[y + 4, bx + 1] += err * (-0.007812)
+    buf[y + 4, bx + 2] += err * (-0.004123)
+    buf[y + 4, bx + 3] += err * (-0.001302)
+    buf[y + 4, bx + 4] += err * (-0.000217)
+
+
+def apply_error_2nd_xavg(buf, bx, y, err, use_jjn):
+    """Apply cross-averaged second-order kernel (LTR only)."""
+    if use_jjn:
+        apply_jjn2_xavg_ltr(buf, bx, y, err)
+    else:
+        apply_fs2_xavg_ltr(buf, bx, y, err)
+
+
+# ============================================================================
+# Per-neighbor matched second-order kernel
+# K = 2·H_self - Σ_k H_self(k)·H_{neighbor_k}
+# ============================================================================
+
+# First-hop offset tables: (dy, dx, weight) for LTR scanning
+_FS_OFFSETS_LTR = [
+    (0, 1, 7.0 / 16.0),
+    (1, -1, 3.0 / 16.0),
+    (1, 0, 5.0 / 16.0),
+    (1, 1, 1.0 / 16.0),
+]
+
+_JJN_OFFSETS_LTR = [
+    (0, 1, 7.0 / 48.0),
+    (0, 2, 5.0 / 48.0),
+    (1, -2, 3.0 / 48.0),
+    (1, -1, 5.0 / 48.0),
+    (1, 0, 7.0 / 48.0),
+    (1, 1, 5.0 / 48.0),
+    (1, 2, 3.0 / 48.0),
+    (2, -2, 1.0 / 48.0),
+    (2, -1, 3.0 / 48.0),
+    (2, 0, 5.0 / 48.0),
+    (2, 1, 3.0 / 48.0),
+    (2, 2, 1.0 / 48.0),
+]
+
+
+def apply_error_2nd_matched(buf, bx, y, err, use_jjn, hashed_seed, img_x, img_y):
+    """Apply second-order kernel with per-neighbor kernel matching (LTR only).
+
+    Decomposes K = 2H - H² into:
+      Step 1: +2·err·H_self  (double the first-order kernel)
+      Step 2: For each first-hop neighbor k with weight w_k:
+              look up neighbor's actual kernel H_k via coord hash,
+              apply -err·w_k·H_k from neighbor's position.
+
+    This correctly handles mixed FS/JJN by using each neighbor's real kernel
+    in the H² correction, rather than assuming uniform kernel usage.
+    """
+    # Step 1: Apply +2 * H_self from current position
+    if use_jjn:
+        apply_jjn_ltr(buf, bx, y, 2.0 * err)
+        offsets = _JJN_OFFSETS_LTR
+    else:
+        apply_fs_ltr(buf, bx, y, 2.0 * err)
+        offsets = _FS_OFFSETS_LTR
+
+    # Step 2: Subtract H² correction using each neighbor's actual kernel
+    for dy, dx, w in offsets:
+        nbr_img_x = max(img_x + dx, 0)
+        nbr_img_y = max(img_y + dy, 0)
+
+        # Look up which kernel the neighbor actually uses
+        nbr_hash = lowbias32(
+            np.uint32(nbr_img_x) ^ (np.uint32(nbr_img_y) << np.uint32(16)) ^ hashed_seed
+        )
+        nbr_use_jjn = (nbr_hash & 1) == 1
+
+        # Apply -err * w * H_neighbor from neighbor's buffer position
+        scaled_err = -err * w
+        if nbr_use_jjn:
+            apply_jjn_ltr(buf, bx + dx, y + dy, scaled_err)
+        else:
+            apply_fs_ltr(buf, bx + dx, y + dy, scaled_err)
 
 
 # ============================================================================
@@ -436,11 +696,13 @@ def create_seeded_buffer_r4(input_image):
 
 
 def dither_kernel_2nd(input_image, seed=0):
-    """Second-order error diffusion using precomputed 2H-H² kernels.
+    """Second-order error diffusion using 4-way cross-kernel selection.
 
-    Uses the composite kernel K = 2H - H² directly in standard error diffusion.
-    NTF = 1 - K = 1 - (2H - H²) = (1-H)² → +12 dB/octave.
-    Single buffer, no reverse lookup needed.
+    Picks one of 4 precomputed kernels per pixel using 2 hash bits:
+      bit 0: first-hop kernel (FS or JJN)
+      bit 1: H² correction (assumes FS or JJN neighbors)
+    On average: E[K] = 2·H_avg - H_avg² → NTF = (1-H_avg)².
+    Always LTR (no serpentine).
     """
     height, width = input_image.shape
     r = REACH_2ND
@@ -452,10 +714,7 @@ def dither_kernel_2nd(input_image, seed=0):
     process_width = r + width + r
 
     for y in range(process_height):
-        is_rtl = y % 2 == 1
-        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
-
-        for px in px_range:
+        for px in range(process_width):
             bx = bx_start + px
             old_val = buf[y, bx]
             new_val = 1.0 if old_val > 0.5 else 0.0
@@ -466,7 +725,42 @@ def dither_kernel_2nd(input_image, seed=0):
             img_y = max(y - r, 0)
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
-            apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl)
+            apply_error_2nd(buf, bx, y, err, use_jjn, False)
+
+    total_left = r * 2
+    total_top = r
+    return buf[total_top:total_top + height, total_left:total_left + width].copy()
+
+
+def dither_kernel_2nd_xavg(input_image, seed=0):
+    """Second-order error diffusion using cross-averaged 2H-H⊗H_avg kernels.
+
+    Uses precomputed K = 2H - H⊗H_avg where H_avg = (H_fs + H_jjn)/2.
+    Statistically correct for random 50/50 kernel switching.
+    Always LTR (no serpentine).
+    """
+    height, width = input_image.shape
+    r = REACH_2ND
+    buf = create_seeded_buffer_r4(input_image)
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    bx_start = r
+    process_height = r + height
+    process_width = r + width + r
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+            old_val = buf[y, bx]
+            new_val = 1.0 if old_val > 0.5 else 0.0
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            img_x = max(px - r, 0)
+            img_y = max(y - r, 0)
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+            apply_error_2nd_xavg(buf, bx, y, err, use_jjn)
 
     total_left = r * 2
     total_top = r
