@@ -720,6 +720,65 @@ def dither_kernel_3rd(input_image, seed=0):
     return buf[total_top:total_top + height, total_left:total_left + width].copy()
 
 
+def dither_dual_int_2nd(input_image, seed=0):
+    """Dual integrator with 2H-H² kernel on first stage.
+
+    First integrator uses 2nd-order (2H-H²) error diffusion kernels.
+    Second integrator uses 1st-order kernels for accumulated correction.
+    Always LTR (no serpentine, matching 2H-H² behavior).
+    """
+    height, width = input_image.shape
+    r = REACH_2ND
+    s = SEED_2ND
+
+    # First integrator: seeded with input image (same layout as 2H-H²)
+    buf1 = create_seeded_buffer_r4(input_image)
+
+    # Second integrator: zeros, same size
+    buf2 = np.zeros_like(buf1)
+
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    bx_start = r
+    process_height = s + height
+    process_width = s + width + s
+
+    for y in range(process_height):
+        for px in range(process_width):
+            bx = bx_start + px
+
+            # First integrator value
+            int1_val = buf1[y, bx]
+
+            # Second integrator: int1 + accumulated corrections
+            int2_val = int1_val + buf2[y, bx]
+
+            # Quantize based on second integrator
+            new_val = 1.0 if int2_val > 0.5 else 0.0
+            buf1[y, bx] = new_val
+
+            # Errors
+            err1 = int1_val - new_val
+            err2 = int2_val - new_val
+
+            # Kernel selection — different bits for each integrator
+            img_x = (px - s) & 0xFFFF
+            img_y = (y - s) & 0xFFFF
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn_1 = (coord_hash & 1) == 1
+            use_jjn_2 = (coord_hash & 2) == 2
+
+            # First integrator: 2nd-order kernel
+            apply_error_2nd(buf1, bx, y, err1, use_jjn_1, False)
+
+            # Second integrator: 1st-order kernel
+            apply_error(buf2, bx, y, err2, use_jjn_2, False)
+
+    total_left = r + s
+    total_top = s
+    return buf1[total_top:total_top + height, total_left:total_left + width].copy()
+
+
 # ============================================================================
 # Spectral analysis
 # ============================================================================
