@@ -129,6 +129,49 @@ def quantize(value: float, bits: int) -> float:
     return level / max_level if max_level > 0 else 0.0
 
 
+def transform_image(img, swap_xy, mirror_x, mirror_y):
+    """Apply spatial transform: swap XY, mirror X, mirror Y."""
+    result = img
+    if swap_xy:
+        result = result.T
+    if mirror_x:
+        result = result[:, ::-1]
+    if mirror_y:
+        result = result[::-1, :]
+    return np.ascontiguousarray(result)
+
+
+def inverse_transform_image(img, swap_xy, mirror_x, mirror_y):
+    """Undo spatial transform (reverse order, each op is self-inverse)."""
+    result = img
+    if mirror_y:
+        result = result[::-1, :]
+    if mirror_x:
+        result = result[:, ::-1]
+    if swap_xy:
+        result = result.T
+    return np.ascontiguousarray(result)
+
+
+def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False):
+    """Dither with random spatial transform derived from seed."""
+    swap_xy = bool(seed & 1)
+    mirror_x = bool(seed & 2)
+    mirror_y = bool(seed & 4)
+
+    transformed = transform_image(input_image, swap_xy, mirror_x, mirror_y)
+
+    if return_error:
+        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True)
+        return (
+            inverse_transform_image(result, swap_xy, mirror_x, mirror_y),
+            inverse_transform_image(error_map, swap_xy, mirror_x, mirror_y),
+        )
+    else:
+        result = dither(transformed, bits=bits, seed=seed, delay=delay)
+        return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
+
+
 def apply_error(buf, x, y, err, use_jjn, is_rtl):
     """Apply the appropriate error diffusion kernel."""
     if use_jjn:
@@ -278,7 +321,7 @@ def main():
 
         # Level 0: initial 1-bit split
         print("Level 0: 1-bit dither of 0.5 gray")
-        result0 = dither(gray, bits=1, seed=get_seed())
+        result0 = dither_transformed(gray, bits=1, seed=get_seed())
         rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
         img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
@@ -303,7 +346,7 @@ def main():
                 # Split "high" group: scale to [0, 0.5]
                 # Parent 1→0.5 (split), Parent 0→0 (boundary)
                 input_hi = parent_result * 0.5
-                result_hi = dither(input_hi, bits=1, seed=get_seed())
+                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed())
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
@@ -311,7 +354,7 @@ def main():
                 # Split "low" group: scale to [0.5, 1]
                 # Parent 0→0.5 (split), Parent 1→1 (boundary)
                 input_lo = parent_result * 0.5 + 0.5
-                result_lo = dither(input_lo, bits=1, seed=get_seed())
+                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed())
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
                 total_passes += 1
