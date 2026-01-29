@@ -147,8 +147,9 @@ def dither(
     input_image: np.ndarray,
     bits: int = 1,
     seed: int = 0,
-    delay: int = 0
-) -> np.ndarray:
+    delay: int = 0,
+    return_error: bool = False
+):
     """
     Apply mixed FS/JJN error diffusion dithering.
 
@@ -157,13 +158,16 @@ def dither(
         bits: Output bit depth (1 = binary, 2 = 4 levels, etc.)
         seed: Random seed for kernel selection
         delay: FIFO delay in pixels before error is diffused (0 = immediate)
+        return_error: If True, also return the per-pixel error buffer value
+                      (buf[y,x] at time of quantization), centered around 0.5
 
     Returns:
-        Dithered image with values in [0.0, 1.0], quantized to 2^bits levels
+        Dithered image, or (dithered, error_map) if return_error=True
     """
     height, width = input_image.shape
     buf = input_image.copy().astype(np.float64)
     output = np.zeros((height, width), dtype=np.float64)
+    error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
     hashed_seed = lowbias32(np.uint32(seed))
     fifo = deque()
 
@@ -177,6 +181,8 @@ def dither(
 
         for x in x_range:
             old_val = buf[y, x]
+            if return_error:
+                error_map[y, x] = old_val
             new_val = quantize(old_val, bits)
             output[y, x] = new_val
             err = old_val - new_val
@@ -195,6 +201,8 @@ def dither(
         dx, dy, derr, d_jjn, d_rtl = fifo.popleft()
         apply_error(buf, dx, dy, derr, d_jjn, d_rtl)
 
+    if return_error:
+        return output, error_map
     return output
 
 
@@ -270,30 +278,50 @@ def main():
             print(f"Saved: {path}")
             unique, counts = np.unique(img, return_counts=True)
             total = img.size
-            for level, count in zip(unique, counts):
-                print(f"  {level:.4f}: {count:6d} ({count/total*100:.1f}%)")
+            if len(unique) <= 16:
+                for level, count in zip(unique, counts):
+                    print(f"  {level:.4f}: {count:6d} ({count/total*100:.1f}%)")
+            else:
+                print(f"  {len(unique)} unique values, range [{unique[0]:.4f}, {unique[-1]:.4f}]")
 
         gray = np.full((size, size), 0.5, dtype=np.float64)
 
-        # Step 1a: 1-bit dither of 0.5 gray (seed 0)
-        print("Step 1a: 1-bit dither of 0.5 gray (seed 0)")
-        a = dither(gray, bits=1, seed=get_seed())
-        save_step(a, "step1a_1bit")
+        # Step 1: 1-bit dither of 0.5 gray, capturing error
+        print("Step 1: 1-bit dither of 0.5 gray (with error capture)")
+        result_1bit, error_map = dither(gray, bits=1, seed=get_seed(), return_error=True)
+        save_step(result_1bit, "step1_1bit")
 
-        # Step 1b: 1-bit dither of 0.5 gray (seed 1)
-        print("\nStep 1b: 1-bit dither of 0.5 gray (seed 1)")
-        b = dither(gray, bits=1, seed=get_seed())
-        save_step(b, "step1b_1bit")
+        # Error map from step 1
+        emin, emax = error_map.min(), error_map.max()
+        print(f"Error map range: [{emin:.4f}, {emax:.4f}]")
+        error_normalized = (error_map - emin) / (emax - emin) if emax > emin else error_map
+        save_step(error_normalized, "step1_error")
+        np.save(output_dir / "step1_error.npy", error_map)
 
-        # Step 2: Average
-        print("\nStep 2: Average of 1a and 1b")
-        avg = (a + b) / 2.0
-        save_step(avg, "step2_average")
+        # Find top 25% and bottom 25% of error values
+        p25 = np.percentile(error_map, 25)
+        p75 = np.percentile(error_map, 75)
+        mask_extreme = (error_map <= p25) | (error_map >= p75)
+        mask_middle = ~mask_extreme
+        print(f"\nPercentiles: p25={p25:.4f}, p75={p75:.4f}")
+        print(f"Extreme pixels (top+bottom 25%): {mask_extreme.sum()} ({mask_extreme.mean()*100:.1f}%)")
+        print(f"Middle pixels: {mask_middle.sum()} ({mask_middle.mean()*100:.1f}%)")
 
-        # Step 3: 2-bit dither of the average (seed 2)
-        print("\nStep 3: 2-bit dither of average")
-        result_2bit = dither(avg, bits=2, seed=get_seed())
-        save_step(result_2bit, "step3_2bit")
+        # Step 2: Set extreme pixels to gray, keep middle as 0/1, 2-bit dither
+        print("\nStep 2: 1-bit with extreme error pixels → gray, 2-bit dither")
+        input_2 = result_1bit.copy()
+        input_2[mask_extreme] = 0.5
+        save_step(input_2, "step2_input")
+        result_2 = dither(input_2, bits=2, seed=get_seed())
+        save_step(result_2, "step2_2bit")
+
+        # Step 3: Set middle pixels to gray, keep extreme as 0/1, 2-bit dither
+        print("\nStep 3: 1-bit with middle error pixels → gray, 2-bit dither")
+        input_3 = result_1bit.copy()
+        input_3[mask_middle] = 0.5
+        save_step(input_3, "step3_input")
+        result_3 = dither(input_3, bits=2, seed=get_seed())
+        save_step(result_3, "step3_2bit")
 
     elif args.gray is not None:
         # Dither uniform gray
