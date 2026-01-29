@@ -371,8 +371,8 @@ fn mixed_dither_standard(
             let bx = bx_start + px;
             let err = process_pixel(&mut buf, bx, y, &quant);
             // Use original image coordinates for hash (adjusted for seeding offset)
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 == 1;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -409,8 +409,8 @@ fn mixed_dither_wang_standard(
         for px in 0..process_width {
             let bx = bx_start + px;
             let err = process_pixel(&mut buf, bx, y, &quant);
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 == 1;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -450,8 +450,8 @@ fn mixed_dither_serpentine(
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
@@ -461,8 +461,8 @@ fn mixed_dither_serpentine(
             for px in 0..process_width {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -501,8 +501,8 @@ fn mixed_dither_wang_serpentine(
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
@@ -511,8 +511,8 @@ fn mixed_dither_wang_serpentine(
             for px in 0..process_width {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -550,8 +550,8 @@ fn mixed_dither_lowbias_old_standard(
         for px in 0..process_width {
             let bx = bx_start + px;
             let err = process_pixel(&mut buf, bx, y, &quant);
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash & 1 == 1;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -589,8 +589,8 @@ fn mixed_dither_lowbias_old_serpentine(
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
@@ -599,8 +599,8 @@ fn mixed_dither_lowbias_old_serpentine(
             for px in 0..process_width {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -636,14 +636,14 @@ fn mixed_dither_random(
     let bx_start = reach;
 
     for y in 0..process_height {
-        let img_y = y.saturating_sub(reach);
+        let img_y = y.wrapping_sub(reach) as u16;
         let row_hash = lowbias32((img_y as u32) ^ hashed_seed);
         if row_hash & 1 == 1 {
             // Right-to-left (randomly selected)
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
@@ -653,7 +653,7 @@ fn mixed_dither_random(
             for px in 0..process_width {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
-                let img_x = px.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash & 1 == 1;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
@@ -703,9 +703,9 @@ fn zhou_fang_standard(
             let level = ((old + 0.5) as i32).clamp(0, 255);
 
             // Compute modulated threshold based on position
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
-            let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
+            let threshold = zhou_fang_threshold(level, img_x as usize, img_y as usize, hashed_seed);
 
             // Quantize using modulated threshold between floor and ceil
             let floor_val = quant.quantize_floor(old);
@@ -758,9 +758,9 @@ fn zhou_fang_serpentine(
                 let old = buf[y][bx];
                 let level = ((old + 0.5) as i32).clamp(0, 255);
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let threshold = zhou_fang_threshold(level, img_x as usize, img_y as usize, hashed_seed);
 
                 let floor_val = quant.quantize_floor(old);
                 let ceil_val = quant.quantize_ceil(old);
@@ -782,9 +782,9 @@ fn zhou_fang_serpentine(
                 let old = buf[y][bx];
                 let level = ((old + 0.5) as i32).clamp(0, 255);
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let threshold = zhou_fang_threshold(level, img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let threshold = zhou_fang_threshold(level, img_x as usize, img_y as usize, hashed_seed);
 
                 let floor_val = quant.quantize_floor(old);
                 let ceil_val = quant.quantize_ceil(old);
@@ -860,9 +860,9 @@ fn ulichney_threshold_standard(
             let old = buf[y][bx];
 
             // Compute perturbed threshold based on position
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
-            let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
+            let threshold = ulichney_perturbed_threshold(img_x as usize, img_y as usize, hashed_seed);
 
             // Binary decision: output 255 (white) if value > threshold, else 0 (black)
             let new = if old > threshold { 255.0 } else { 0.0 };
@@ -910,9 +910,9 @@ fn ulichney_threshold_serpentine(
                 let bx = bx_start + px;
                 let old = buf[y][bx];
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let threshold = ulichney_perturbed_threshold(img_x as usize, img_y as usize, hashed_seed);
 
                 let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
@@ -926,9 +926,9 @@ fn ulichney_threshold_serpentine(
                 let bx = bx_start + px;
                 let old = buf[y][bx];
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let threshold = ulichney_perturbed_threshold(img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let threshold = ulichney_perturbed_threshold(img_x as usize, img_y as usize, hashed_seed);
 
                 let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
@@ -1042,9 +1042,9 @@ fn ulichney_weight_standard(
             let err = old - new;
 
             // Get perturbed weights for this pixel
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
-            let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
+            let weights = ulichney_perturbed_weights(img_x as usize, img_y as usize, hashed_seed);
 
             apply_ulichney_weights_ltr(&mut buf, bx, y, err, weights);
         }
@@ -1095,9 +1095,9 @@ fn ulichney_weight_serpentine(
 
                 let err = old - new;
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let weights = ulichney_perturbed_weights(img_x as usize, img_y as usize, hashed_seed);
 
                 apply_ulichney_weights_rtl(&mut buf, bx, y, err, weights);
             }
@@ -1112,9 +1112,9 @@ fn ulichney_weight_serpentine(
 
                 let err = old - new;
 
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
-                let weights = ulichney_perturbed_weights(img_x, img_y, hashed_seed);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
+                let weights = ulichney_perturbed_weights(img_x as usize, img_y as usize, hashed_seed);
 
                 apply_ulichney_weights_ltr(&mut buf, bx, y, err, weights);
             }
@@ -1171,11 +1171,11 @@ fn fs_tpdf_standard(
     for y in reach..(height + reach) {
         for px in reach..(width + reach) {
             let bx = px;
-            let img_x = px.saturating_sub(reach);
-            let img_y = y.saturating_sub(reach);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
 
             let old = buf[y][bx];
-            let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+            let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
             let new = if old > threshold { 255.0 } else { 0.0 };
             buf[y][bx] = new;
 
@@ -1222,11 +1222,11 @@ fn fs_tpdf_serpentine(
         if left_to_right {
             for px in reach..(width + reach) {
                 let bx = px;
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
 
                 let old = buf[y][bx];
-                let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+                let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
                 let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
 
@@ -1240,11 +1240,11 @@ fn fs_tpdf_serpentine(
         } else {
             for px in (reach..(width + reach)).rev() {
                 let bx = px;
-                let img_x = px.saturating_sub(reach);
-                let img_y = y.saturating_sub(reach);
+                let img_x = px.wrapping_sub(reach) as u16;
+                let img_y = y.wrapping_sub(reach) as u16;
 
                 let old = buf[y][bx];
-                let threshold = fs_tpdf_threshold(img_x, img_y, hashed_seed, amplitude);
+                let threshold = fs_tpdf_threshold(img_x as usize, img_y as usize, hashed_seed, amplitude);
                 let new = if old > threshold { 255.0 } else { 0.0 };
                 buf[y][bx] = new;
 
