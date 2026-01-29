@@ -449,7 +449,7 @@ python tools/analyze_wavelet.py --compare \
 
 ### 18. `test_map/generate_recursive_map.py`
 
-Floating-point mixed FS/JJN error diffusion with recursive bit decomposition for generating multi-bit ranked dither arrays.
+Floating-point mixed FS/JJN error diffusion with recursive bit decomposition for generating multi-bit ranked dither arrays. Uses triple32 hash for kernel selection in all modes (1st order, 2H-H², dual integrator).
 
 **Features:**
 - Generates gradient dithering at multiple bit depths (1-8 bits)
@@ -551,8 +551,8 @@ Experiments with higher-order error diffusion noise shaping for 2D halftoning.
 
 **Methods compared:**
 - **1st order (mixed FS/JJN)** - Standard error diffusion, ~6.8 dB/oct
-- **2H-H² kernel** - Precomputed kernel aiming for (1-H)² NTF, ~8.2 dB/oct
-- **Dual integrator** - Two coupled error buffers, ~7.1 dB/oct
+- **2H-H² kernel** - Precomputed kernel aiming for (1-H)² NTF, ~8.1 dB/oct (uses triple32 hash for kernel selection)
+- **Dual integrator** - Two coupled error buffers, ~7.0 dB/oct
 
 **Kite et al. insight:** In a single feedback loop, NTF behaves as (1-H) regardless of quantizer gain K. One loop = one order of noise shaping.
 
