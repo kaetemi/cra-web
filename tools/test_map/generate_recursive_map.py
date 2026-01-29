@@ -569,17 +569,30 @@ def main():
                 went_high = parent_mask & (parent_result > 0.5)
                 went_low = parent_mask & (~(parent_result > 0.5))
 
+                # Clean parent: force non-member pixels to boundary values
+                # so they don't accidentally become 0.5 after scaling
+                clean = parent_result.copy()
+                # Non-member pixels that are 1 would become 0.5 in the hi scaling
+                # Non-member pixels that are 0 would become 0.5 in the lo scaling
+                # Set non-members to 0 for hi split, 1 for lo split
+
                 # Split "high" group: scale to [0, 0.5]
-                # Parent 1→0.5 (split), Parent 0→0 (boundary)
-                input_hi = parent_result * 0.5
+                # Member 1→0.5 (split), Member 0→0 (boundary)
+                # Non-member must be 0 so they stay at 0 after scaling
+                input_hi = clean.copy()
+                input_hi[~parent_mask] = 0.0
+                input_hi = input_hi * 0.5
                 result_hi = dither_transformed(input_hi, bits=1, seed=get_seed())
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
 
                 # Split "low" group: scale to [0.5, 1]
-                # Parent 0→0.5 (split), Parent 1→1 (boundary)
-                input_lo = parent_result * 0.5 + 0.5
+                # Member 0→0.5 (split), Member 1→1 (boundary)
+                # Non-member must be 1 so they stay at 1 after scaling
+                input_lo = clean.copy()
+                input_lo[~parent_mask] = 1.0
+                input_lo = input_lo * 0.5 + 0.5
                 result_lo = dither_transformed(input_lo, bits=1, seed=get_seed())
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
