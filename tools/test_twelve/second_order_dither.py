@@ -8,7 +8,40 @@ Compares three approaches to noise shaping:
 3. Dual integrator: two coupled error buffers → NTF = (1-C)², +12 dB/oct target
 
 Uses mixed FS/JJN kernel switching with hash-based selection.
+The kernel switching is equivalent to threshold dithering but with less white noise
+(the hash produces a white noise pattern, but the two kernels are similar enough
+that the effective randomization is much smaller than full threshold dithering).
 Implements edge seeding matching the Rust dither/basic.rs create_seeded_buffer.
+
+Best results at 50% gray: 2H-H² kernel = 8.22 dB/oct (uniform H² assumption).
+
+Approaches tried that gave worse results:
+- Two-pass cascade (X→Y₁, residual X-Y₁→Y₂, threshold Y₁+Y₂):
+  Nearly bit-identical to first-order. The residual is already shaped noise
+  dancing around zero, so pass 2 contributes almost nothing (0.05% differ).
+- MASH-style cascade (tap raw quantization error Q₁ from pass 1):
+  Energy preservation broken (0.49→0.52), slope worse at 5.60 dB/oct.
+  Without differentiating Y₂ before combining, just adds two +6dB sources.
+- Storing shaped_err instead of raw err in error history (for reverse prediction):
+  Slope dropped from ~6.3 to ~5.6 dB/oct. Worse, not better.
+- FS-only kernels (no mixed FS/JJN switching):
+  Collapses into limit cycles / checkerboard at 50% gray (0-5.58 dB/oct).
+  Kernel mixing is essential for breaking limit cycles.
+- Per-neighbor matched H² correction (look up each neighbor's actual kernel):
+  Mathematically correct but slope dropped to 7.51 dB/oct. The cross-kernel
+  H² terms are weaker than self-convolution terms.
+- Cross-averaged kernels (K = 2H - H⊗H_avg, H_avg = (H_fs+H_jjn)/2):
+  7.72 dB/oct. Statistically correct for 50/50 mixing but weaker than
+  the uniform assumption which over-corrects beneficially.
+- 4-way kernel selection (hash bit 0: FS/JJN, bit 1: FS²/JJN² correction):
+  7.41 dB/oct. Adds variation to H² correction but averages to a weaker
+  correction than uniform assumption.
+- Cross-only selection (always assume OTHER kernel for H² correction):
+  6.93 dB/oct. Cross-convolutions FS⊗JJN are weaker than self-convolutions.
+- Blue noise map for kernel selection (dither 50% gray as selection pattern):
+  Helped 2H-H² slightly (8.22→8.33 at 50%) but hurt first-order (6.78→6.32)
+  and dual integrator (7.08→6.52). White noise hash better for limit cycle
+  breaking in first-order methods.
 
 Usage:
     python second_order_dither.py                    # Gray levels + gradient
@@ -696,12 +729,11 @@ def create_seeded_buffer_r4(input_image):
 
 
 def dither_kernel_2nd(input_image, seed=0):
-    """Second-order error diffusion using 4-way cross-kernel selection.
+    """Second-order error diffusion using precomputed 2H-H² kernels.
 
-    Picks one of 4 precomputed kernels per pixel using 2 hash bits:
-      bit 0: first-hop kernel (FS or JJN)
-      bit 1: H² correction (assumes FS or JJN neighbors)
-    On average: E[K] = 2·H_avg - H_avg² → NTF = (1-H_avg)².
+    Uses K = 2H - H² with uniform kernel assumption (H² = H_self⊗H_self).
+    The uniform assumption over-corrects vs the true mixed-kernel H², but
+    this gives the best measured slope (~8.2 dB/oct at 50% gray).
     Always LTR (no serpentine).
     """
     height, width = input_image.shape
