@@ -528,13 +528,12 @@
                 <option value="10">Zhou-Fang (Standard)</option>
                 <option value="11">Zhou-Fang (Serpentine)</option>
                 <option value="18">Our method (2nd Order Kernel)</option>
-                <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
-                <option value="20">Our method (Adaptive 1st+2nd)</option>
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="histogram-dither-description">
                 Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel using lowbias32 hash, with standard scanning. Used for histogram processing quantization (when not using f32 histogram).
             </p>
+            <p class="impl-description" id="histogram-dither-warning" style="display: none; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 8px 12px;"></p>
         </div>
 
         <div class="implementation-section" id="color-aware-histogram-section" style="display: none;">
@@ -580,13 +579,12 @@
                 <option value="10">Zhou-Fang (Standard)</option>
                 <option value="11">Zhou-Fang (Serpentine)</option>
                 <option value="18">Our method (2nd Order Kernel)</option>
-                <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
-                <option value="20">Our method (Adaptive 1st+2nd)</option>
                 <option value="7">None (Nearest Only)</option>
             </select>
             <p class="impl-description" id="output-dither-description">
                 Our method: Randomly selects between Floyd-Steinberg and JJN kernels per-pixel using lowbias32 hash, with standard scanning. Used for final output quantization.
             </p>
+            <p class="impl-description" id="output-dither-warning" style="display: none; color: #b45309; background: #fef3c7; border: 1px solid #fcd34d; border-radius: 4px; padding: 8px 12px;"></p>
         </div>
 
         <div class="implementation-section" id="color-aware-output-section" style="display: none;">

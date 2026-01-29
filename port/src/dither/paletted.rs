@@ -16,7 +16,7 @@ use super::common::{
     triple32, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, RgbaKernel,
 };
-use super::kernels::{apply_h2_kernel_rgba, apply_adaptive_kernel_rgba, H2_REACH, H2_SEED};
+use super::kernels::{apply_h2_kernel_rgba, H2_REACH, H2_SEED};
 use super::palette_hull::EPSILON as HULL_EPSILON;
 use super::palette_projection::ExtendedPalette;
 
@@ -1395,107 +1395,6 @@ fn dither_mixed_h2_standard_paletted(
     }
 }
 
-/// Mixed H2 kernel dithering for paletted RGBA, serpentine scanning.
-fn dither_mixed_h2_serpentine_paletted(
-    ctx: &DitherContextPaletted,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    a_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    err_a: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    a_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        if y % 2 == 1 {
-            for px in (0..process_width).rev() {
-                let bx = bx_start + px;
-                let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-                let (r_val, g_val, b_val, a_val) = if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-                } else {
-                    get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-                };
-
-                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                    process_pixel_paletted(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-                if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                    a_out[idx] = best_a;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
-            }
-        } else {
-            for px in 0..process_width {
-                let bx = bx_start + px;
-                let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-                let (r_val, g_val, b_val, a_val) = if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-                } else {
-                    get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-                };
-
-                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                    process_pixel_paletted(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-                if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                    a_out[idx] = best_a;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
-            }
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
-
 /// Mixed H2 kernel dithering for extended paletted RGBA, LTR only.
 #[inline]
 fn dither_mixed_h2_standard_paletted_extended(
@@ -1564,297 +1463,6 @@ fn dither_mixed_h2_standard_paletted_extended(
     }
 }
 
-/// Mixed H2 kernel dithering for extended paletted RGBA, serpentine scanning.
-fn dither_mixed_h2_serpentine_paletted_extended(
-    ctx: &ExtendedDitherContext,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    a_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    err_a: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    a_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        if y % 2 == 1 {
-            for px in (0..process_width).rev() {
-                let bx = bx_start + px;
-                let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-                let (r_val, g_val, b_val, a_val) = if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-                } else {
-                    get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-                };
-
-                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-                if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                    a_out[idx] = best_a;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, true);
-            }
-        } else {
-            for px in 0..process_width {
-                let bx = bx_start + px;
-                let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-                let (r_val, g_val, b_val, a_val) = if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-                } else {
-                    get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-                };
-
-                let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                    process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-                if in_real_image {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                    a_out[idx] = best_a;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
-            }
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Adaptive (gradient-blended 1st+2nd order) paletted dithering
-// ============================================================================
-
-/// Pre-compute alpha map from RGBA channel luminance gradients (for paletted).
-fn compute_alpha_map_paletted(
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    width: usize,
-    height: usize,
-) -> Vec<f32> {
-    let mut alpha_map = vec![1.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let lum = (0.2126 * r_channel[idx] + 0.7152 * g_channel[idx] + 0.0722 * b_channel[idx]) / 255.0;
-            let gx = if x + 1 < width {
-                let idx_r = y * width + x + 1;
-                let lum_r = (0.2126 * r_channel[idx_r] + 0.7152 * g_channel[idx_r] + 0.0722 * b_channel[idx_r]) / 255.0;
-                (lum_r - lum).abs()
-            } else {
-                0.0
-            };
-            let gy = if y + 1 < height {
-                let idx_b = (y + 1) * width + x;
-                let lum_b = (0.2126 * r_channel[idx_b] + 0.7152 * g_channel[idx_b] + 0.0722 * b_channel[idx_b]) / 255.0;
-                (lum_b - lum).abs()
-            } else {
-                0.0
-            };
-            alpha_map[idx] = (1.0 - gx) * (1.0 - gy);
-        }
-    }
-    alpha_map
-}
-
-/// Mixed adaptive dithering for paletted RGBA, always LTR.
-#[inline]
-fn dither_mixed_adaptive_paletted(
-    ctx: &DitherContextPaletted,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    a_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    err_a: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    a_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    grad_alpha_map: &[f32],
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        for px in 0..process_width {
-            let bx = bx_start + px;
-            let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-            let (r_val, g_val, b_val, a_val) = if in_real_image {
-                let img_x = px - seed;
-                let img_y = y - seed;
-                let idx = img_y * width + img_x;
-                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-            } else {
-                get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-            };
-
-            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                process_pixel_paletted(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-            if in_real_image {
-                let img_x = px - seed;
-                let img_y = y - seed;
-                let idx = img_y * width + img_x;
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
-                a_out[idx] = best_a;
-            }
-
-            let img_x = px.wrapping_sub(seed);
-            let img_y = y.wrapping_sub(seed);
-            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-
-            // Look up gradient alpha: use 1.0 for seed pixels
-            let grad_alpha = if img_x < width && img_y < height {
-                grad_alpha_map[img_y * width + img_x]
-            } else {
-                1.0
-            };
-
-            apply_adaptive_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, grad_alpha, pixel_hash);
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
-
-/// Mixed adaptive dithering for extended paletted RGBA, always LTR.
-#[inline]
-fn dither_mixed_adaptive_paletted_extended(
-    ctx: &ExtendedDitherContext,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    a_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    err_a: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    a_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    grad_alpha_map: &[f32],
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        for px in 0..process_width {
-            let bx = bx_start + px;
-            let in_real_image = y >= seed && px >= seed && px < seed + width;
-
-            let (r_val, g_val, b_val, a_val) = if in_real_image {
-                let img_x = px - seed;
-                let img_y = y - seed;
-                let idx = img_y * width + img_x;
-                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
-            } else {
-                get_seeding_rgba_h2(r_channel, g_channel, b_channel, a_channel, width, px, y, seed)
-            };
-
-            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
-                process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
-
-            if in_real_image {
-                let img_x = px - seed;
-                let img_y = y - seed;
-                let idx = img_y * width + img_x;
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
-                a_out[idx] = best_a;
-            }
-
-            let img_x = px.wrapping_sub(seed);
-            let img_y = y.wrapping_sub(seed);
-            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-
-            // Look up gradient alpha: use 1.0 for seed pixels
-            let grad_alpha = if img_x < width && img_y < height {
-                grad_alpha_map[img_y * width + img_x]
-            } else {
-                1.0
-            };
-
-            apply_adaptive_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, grad_alpha, pixel_hash);
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
 
 // ============================================================================
 // Public API
@@ -1931,7 +1539,7 @@ pub fn paletted_dither_rgba_with_mode(
     let ctx = DitherContextPaletted { palette };
 
     // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
-    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+    if mode == DitherMode::MixedH2Standard {
         let h2_reach = H2_REACH;
         let h2_seed = H2_SEED;
         let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
@@ -1949,50 +1557,11 @@ pub fn paletted_dither_rgba_with_mode(
 
         let hashed_seed = triple32(seed);
 
-        if mode == DitherMode::MixedH2Serpentine {
-            dither_mixed_h2_serpentine_paletted(
-                &ctx, r_channel, g_channel, b_channel, a_channel,
-                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
-                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-                width, height, hashed_seed, progress,
-            );
-        } else {
-            dither_mixed_h2_standard_paletted(
-                &ctx, r_channel, g_channel, b_channel, a_channel,
-                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
-                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-                width, height, hashed_seed, progress,
-            );
-        }
-
-        return (r_out, g_out, b_out, a_out);
-    }
-
-    // Adaptive needs same buffer dimensions as H2, handle as early return
-    if mode == DitherMode::MixedAdaptive {
-        let h2_reach = H2_REACH;
-        let h2_seed = H2_SEED;
-        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
-        let buf_height = h2_seed + height + h2_reach;
-
-        let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_a: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-
-        let mut r_out = vec![0u8; pixels];
-        let mut g_out = vec![0u8; pixels];
-        let mut b_out = vec![0u8; pixels];
-        let mut a_out = vec![0u8; pixels];
-
-        let hashed_seed = triple32(seed);
-        let grad_alpha_map = compute_alpha_map_paletted(r_channel, g_channel, b_channel, width, height);
-
-        dither_mixed_adaptive_paletted(
+        dither_mixed_h2_standard_paletted(
             &ctx, r_channel, g_channel, b_channel, a_channel,
             &mut err_r, &mut err_g, &mut err_b, &mut err_a,
             &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-            width, height, hashed_seed, &grad_alpha_map, progress,
+            width, height, hashed_seed, progress,
         );
 
         return (r_out, g_out, b_out, a_out);
@@ -2147,8 +1716,8 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine | DitherMode::MixedAdaptive => {
-            unreachable!("H2/Adaptive modes handled in early return above");
+        DitherMode::MixedH2Standard => {
+            unreachable!("H2 modes handled in early return above");
         }
     }
 
@@ -2204,7 +1773,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
     };
 
     // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
-    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+    if mode == DitherMode::MixedH2Standard {
         let h2_reach = H2_REACH;
         let h2_seed = H2_SEED;
         let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
@@ -2222,50 +1791,11 @@ pub fn paletted_dither_rgba_gamut_mapped(
 
         let hashed_seed = triple32(seed);
 
-        if mode == DitherMode::MixedH2Serpentine {
-            dither_mixed_h2_serpentine_paletted_extended(
-                &ctx, r_channel, g_channel, b_channel, a_channel,
-                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
-                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-                width, height, hashed_seed, progress,
-            );
-        } else {
-            dither_mixed_h2_standard_paletted_extended(
-                &ctx, r_channel, g_channel, b_channel, a_channel,
-                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
-                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-                width, height, hashed_seed, progress,
-            );
-        }
-
-        return (r_out, g_out, b_out, a_out);
-    }
-
-    // Adaptive needs same buffer dimensions as H2, handle as early return
-    if mode == DitherMode::MixedAdaptive {
-        let h2_reach = H2_REACH;
-        let h2_seed = H2_SEED;
-        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
-        let buf_height = h2_seed + height + h2_reach;
-
-        let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_a: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-
-        let mut r_out = vec![0u8; pixels];
-        let mut g_out = vec![0u8; pixels];
-        let mut b_out = vec![0u8; pixels];
-        let mut a_out = vec![0u8; pixels];
-
-        let hashed_seed = triple32(seed);
-        let grad_alpha_map = compute_alpha_map_paletted(r_channel, g_channel, b_channel, width, height);
-
-        dither_mixed_adaptive_paletted_extended(
+        dither_mixed_h2_standard_paletted_extended(
             &ctx, r_channel, g_channel, b_channel, a_channel,
             &mut err_r, &mut err_g, &mut err_b, &mut err_a,
             &mut r_out, &mut g_out, &mut b_out, &mut a_out,
-            width, height, hashed_seed, &grad_alpha_map, progress,
+            width, height, hashed_seed, progress,
         );
 
         return (r_out, g_out, b_out, a_out);
@@ -2419,8 +1949,8 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine | DitherMode::MixedAdaptive => {
-            unreachable!("H2/Adaptive modes handled in early return above");
+        DitherMode::MixedH2Standard => {
+            unreachable!("H2 modes handled in early return above");
         }
     }
 

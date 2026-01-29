@@ -842,8 +842,6 @@
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
                     <option value="18">Our method (2nd Order Kernel)</option>
-                    <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
-                    <option value="20">Our method (Adaptive 1st+2nd)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="dither-mode-warning hidden" id="dither-mode-warning"></p>
@@ -871,8 +869,6 @@
                     <option value="16">⚠ FS-TPDF Threshold (Standard)</option>
                     <option value="17">FS-TPDF Threshold (Serpentine)</option>
                     <option value="18">Our method (2nd Order Kernel)</option>
-                    <option value="19">Our method (2nd Order Kernel, Serpentine)</option>
-                    <option value="20">Our method (Adaptive 1st+2nd)</option>
                     <option value="7">None (Nearest Only)</option>
                 </select>
                 <p class="alpha-dither-hint">Separate dither mode for alpha channel. Only applies when output has alpha (ARGB, LA).</p>
@@ -1626,8 +1622,7 @@
                 15: 'ulichney-weight-serpentine',
                 16: 'fs-tpdf-standard',
                 17: 'fs-tpdf-serpentine',
-                18: 'boon-h2-standard',
-                19: 'boon-h2-serpentine'
+                18: 'boon-h2-standard'
             };
 
             // Map perceptual space values to CLI names
@@ -2113,6 +2108,9 @@
                 warningEl.classList.remove('hidden');
             } else if (isZhouFang && (isPerceptual || isPaletted)) {
                 warningEl.textContent = '\u26A0 Zhou-Fang threshold modulation is not available in colorspace-aware mode. It will fall back to Ostromoukhov.';
+                warningEl.classList.remove('hidden');
+            } else if (mode === 18 && (isPerceptual || isPaletted)) {
+                warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
                 warningEl.classList.remove('hidden');
             } else {
                 warningEl.classList.add('hidden');

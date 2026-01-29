@@ -21,7 +21,7 @@ use super::common::{
     apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
     linear_rgb_to_perceptual_clamped, triple32, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
 };
-use super::kernels::{apply_h2_kernel_rgb, apply_adaptive_kernel_rgb, H2_REACH, H2_SEED};
+use super::kernels::{apply_h2_kernel_rgb, H2_REACH, H2_SEED};
 
 // Re-export common types for backwards compatibility
 #[allow(unused_imports)]
@@ -701,206 +701,6 @@ fn dither_mixed_h2_standard_rgb(
     }
 }
 
-/// Mixed H2 dithering with serpentine scanning for RGB.
-/// Uses precomputed second-order kernels (FS² and JJN²) selected per-pixel via hash.
-/// Alternates scan direction per row (even=LTR, odd=RTL).
-fn dither_mixed_h2_serpentine_rgb(
-    ctx: &DitherContext,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        if y % 2 == 1 {
-            // Right-to-left on odd rows
-            for px in (0..process_width).rev() {
-                let bx = bx_start + px;
-
-                let (r_val, g_val, b_val) = get_seeding_rgb_h2(
-                    r_channel, g_channel, b_channel, width, px, y, seed
-                );
-
-                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
-
-                let in_real_y = y >= seed;
-                let in_real_x = px >= seed && px < seed + width;
-                if in_real_y && in_real_x {
-                    let real_y = y - seed;
-                    let real_x = px - seed;
-                    let idx = real_y * width + real_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
-            }
-        } else {
-            // Left-to-right on even rows
-            for px in 0..process_width {
-                let bx = bx_start + px;
-
-                let (r_val, g_val, b_val) = get_seeding_rgb_h2(
-                    r_channel, g_channel, b_channel, width, px, y, seed
-                );
-
-                let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                    process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
-
-                let in_real_y = y >= seed;
-                let in_real_x = px >= seed && px < seed + width;
-                if in_real_y && in_real_x {
-                    let real_y = y - seed;
-                    let real_x = px - seed;
-                    let idx = real_y * width + real_x;
-                    r_out[idx] = best_r;
-                    g_out[idx] = best_g;
-                    b_out[idx] = best_b;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                apply_h2_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
-            }
-        }
-        if let Some(ref mut cb) = progress {
-            if y >= seed {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Adaptive (gradient-blended 1st+2nd order) RGB dithering
-// ============================================================================
-
-/// Pre-compute alpha map from RGB channel luminance gradients.
-///
-/// Luminance = 0.2126*R + 0.7152*G + 0.0722*B (BT.709, sRGB values in 0-255).
-/// Alpha = (1 - |gx|) * (1 - |gy|) where gradients are normalized to [0, 1].
-fn compute_alpha_map_rgb(
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    width: usize,
-    height: usize,
-) -> Vec<f32> {
-    let mut alpha_map = vec![1.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let idx = y * width + x;
-            let lum = (0.2126 * r_channel[idx] + 0.7152 * g_channel[idx] + 0.0722 * b_channel[idx]) / 255.0;
-            let gx = if x + 1 < width {
-                let idx_r = y * width + x + 1;
-                let lum_r = (0.2126 * r_channel[idx_r] + 0.7152 * g_channel[idx_r] + 0.0722 * b_channel[idx_r]) / 255.0;
-                (lum_r - lum).abs()
-            } else {
-                0.0
-            };
-            let gy = if y + 1 < height {
-                let idx_b = (y + 1) * width + x;
-                let lum_b = (0.2126 * r_channel[idx_b] + 0.7152 * g_channel[idx_b] + 0.0722 * b_channel[idx_b]) / 255.0;
-                (lum_b - lum).abs()
-            } else {
-                0.0
-            };
-            alpha_map[idx] = (1.0 - gx) * (1.0 - gy);
-        }
-    }
-    alpha_map
-}
-
-/// Mixed adaptive dithering for colorspace-aware RGB, always LTR.
-#[inline]
-fn dither_mixed_adaptive_rgb(
-    ctx: &DitherContext,
-    r_channel: &[f32],
-    g_channel: &[f32],
-    b_channel: &[f32],
-    err_r: &mut [Vec<f32>],
-    err_g: &mut [Vec<f32>],
-    err_b: &mut [Vec<f32>],
-    r_out: &mut [u8],
-    g_out: &mut [u8],
-    b_out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    alpha_map: &[f32],
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        for px in 0..process_width {
-            let bx = bx_start + px;
-
-            let (r_val, g_val, b_val) = get_seeding_rgb_h2(
-                r_channel, g_channel, b_channel, width, px, y, seed
-            );
-
-            let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
-                process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
-
-            let in_real_y = y >= seed;
-            let in_real_x = px >= seed && px < seed + width;
-            if in_real_y && in_real_x {
-                let real_y = y - seed;
-                let real_x = px - seed;
-                let idx = real_y * width + real_x;
-                r_out[idx] = best_r;
-                g_out[idx] = best_g;
-                b_out[idx] = best_b;
-            }
-
-            let img_x = px.wrapping_sub(seed);
-            let img_y = y.wrapping_sub(seed);
-            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-
-            // Look up alpha: use 1.0 for seed pixels
-            let grad_alpha = if img_x < width && img_y < height {
-                alpha_map[img_y * width + img_x]
-            } else {
-                1.0
-            };
-
-            apply_adaptive_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, grad_alpha, pixel_hash);
-        }
-        if let Some(ref mut cb) = progress {
-            if y >= seed {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
 
 // ============================================================================
 // Main dithering implementation
@@ -1059,7 +859,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
     let pixels = width * height;
 
     // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
-    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+    if mode == DitherMode::MixedH2Standard {
         let h2_reach = H2_REACH;
         let h2_seed = H2_SEED;
         let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach; // 4+16+W+16+4 = W+40
@@ -1075,48 +875,11 @@ pub fn colorspace_aware_dither_rgb_with_options(
 
         let hashed_seed = triple32(seed);
 
-        if mode == DitherMode::MixedH2Serpentine {
-            dither_mixed_h2_serpentine_rgb(
-                &ctx, r_channel, g_channel, b_channel,
-                &mut err_r, &mut err_g, &mut err_b,
-                &mut r_out, &mut g_out, &mut b_out,
-                width, height, hashed_seed, progress,
-            );
-        } else {
-            dither_mixed_h2_standard_rgb(
-                &ctx, r_channel, g_channel, b_channel,
-                &mut err_r, &mut err_g, &mut err_b,
-                &mut r_out, &mut g_out, &mut b_out,
-                width, height, hashed_seed, progress,
-            );
-        }
-
-        return (r_out, g_out, b_out);
-    }
-
-    // Adaptive needs same buffer dimensions as H2, handle as early return
-    if mode == DitherMode::MixedAdaptive {
-        let h2_reach = H2_REACH;
-        let h2_seed = H2_SEED;
-        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
-        let buf_height = h2_seed + height + h2_reach;
-
-        let mut err_r: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_g: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut err_b: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-
-        let mut r_out = vec![0u8; pixels];
-        let mut g_out = vec![0u8; pixels];
-        let mut b_out = vec![0u8; pixels];
-
-        let hashed_seed = triple32(seed);
-        let alpha_map = compute_alpha_map_rgb(r_channel, g_channel, b_channel, width, height);
-
-        dither_mixed_adaptive_rgb(
+        dither_mixed_h2_standard_rgb(
             &ctx, r_channel, g_channel, b_channel,
             &mut err_r, &mut err_g, &mut err_b,
             &mut r_out, &mut g_out, &mut b_out,
-            width, height, hashed_seed, &alpha_map, progress,
+            width, height, hashed_seed, progress,
         );
 
         return (r_out, g_out, b_out);
@@ -1191,7 +954,7 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 width, height, reach, hashed_seed, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Serpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
@@ -1273,9 +1036,6 @@ pub fn colorspace_aware_dither_rgb_with_options(
                 &mut r_out, &mut g_out, &mut b_out,
                 width, height, reach, progress,
             );
-        }
-        DitherMode::MixedAdaptive => {
-            unreachable!("Adaptive mode handled in early return above");
         }
     }
 

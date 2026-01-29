@@ -33,7 +33,7 @@ use super::common::{
     triple32, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, SingleChannelKernel,
 };
-use super::kernels::{apply_h2_single_channel_kernel, apply_adaptive_single_channel_kernel, H2_REACH, H2_SEED};
+use super::kernels::{apply_h2_single_channel_kernel, H2_REACH, H2_SEED};
 
 /// Convert linear luminosity to Y'CbCr Y' component for grayscale.
 /// For grayscale (R=G=B), Y' simply equals the gamma-encoded (sRGB) value
@@ -584,165 +584,7 @@ fn dither_mixed_h2_standard_gray_alpha(
     }
 }
 
-/// Mixed H2 kernel dithering for colorspace-aware grayscale+alpha, serpentine scanning.
-#[inline]
-fn dither_mixed_h2_serpentine_gray_alpha(
-    ctx: &GrayAlphaDitherContext,
-    gray_channel: &[f32],
-    err_buf: &mut [Vec<f32>],
-    out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
 
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        if y % 2 == 1 {
-            for px in (0..process_width).rev() {
-                let bx = bx_start + px;
-
-                let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
-                let alpha_value = get_seeding_alpha(ctx.alpha_dithered, width, px, y, seed);
-                let (best_gray, err_val) = process_pixel_gray_alpha_with_values(ctx, gray_value, alpha_value, err_buf, bx, y);
-
-                let in_real_y = y >= seed;
-                let in_real_x = px >= seed && px < seed + width;
-                if in_real_y && in_real_x {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    out[idx] = best_gray;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
-                apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
-            }
-        } else {
-            for px in 0..process_width {
-                let bx = bx_start + px;
-
-                let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
-                let alpha_value = get_seeding_alpha(ctx.alpha_dithered, width, px, y, seed);
-                let (best_gray, err_val) = process_pixel_gray_alpha_with_values(ctx, gray_value, alpha_value, err_buf, bx, y);
-
-                let in_real_y = y >= seed;
-                let in_real_x = px >= seed && px < seed + width;
-                if in_real_y && in_real_x {
-                    let img_x = px - seed;
-                    let img_y = y - seed;
-                    let idx = img_y * width + img_x;
-                    out[idx] = best_gray;
-                }
-
-                let img_x = px.wrapping_sub(seed);
-                let img_y = y.wrapping_sub(seed);
-                let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
-                apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
-            }
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Adaptive (gradient-blended 1st+2nd order) gray+alpha dithering
-// ============================================================================
-
-/// Pre-compute alpha map from grayscale channel gradients.
-fn compute_alpha_map_gray_alpha(gray_channel: &[f32], width: usize, height: usize) -> Vec<f32> {
-    let mut alpha_map = vec![1.0f32; width * height];
-    for y in 0..height {
-        for x in 0..width {
-            let cur = gray_channel[y * width + x] / 255.0;
-            let gx = if x + 1 < width {
-                (gray_channel[y * width + x + 1] / 255.0 - cur).abs()
-            } else {
-                0.0
-            };
-            let gy = if y + 1 < height {
-                (gray_channel[(y + 1) * width + x] / 255.0 - cur).abs()
-            } else {
-                0.0
-            };
-            alpha_map[y * width + x] = (1.0 - gx) * (1.0 - gy);
-        }
-    }
-    alpha_map
-}
-
-/// Mixed adaptive kernel dithering for colorspace-aware gray+alpha, always LTR.
-#[inline]
-fn dither_mixed_adaptive_gray_alpha(
-    ctx: &GrayAlphaDitherContext,
-    gray_channel: &[f32],
-    err_buf: &mut [Vec<f32>],
-    out: &mut [u8],
-    width: usize,
-    height: usize,
-    hashed_seed: u32,
-    grad_alpha_map: &[f32],
-    mut progress: Option<&mut dyn FnMut(f32)>,
-) {
-    let seed = H2_SEED;
-    let reach = H2_REACH;
-
-    let bx_start = reach;
-    let process_width = seed + width + seed;
-    let process_height = seed + height;
-
-    for y in 0..process_height {
-        for px in 0..process_width {
-            let bx = bx_start + px;
-
-            let gray_value = get_seeding_gray(gray_channel, width, px, y, seed);
-            let alpha_value = get_seeding_alpha(ctx.alpha_dithered, width, px, y, seed);
-            let (best_gray, err_val) = process_pixel_gray_alpha_with_values(ctx, gray_value, alpha_value, err_buf, bx, y);
-
-            let in_real_y = y >= seed;
-            let in_real_x = px >= seed && px < seed + width;
-            if in_real_y && in_real_x {
-                let img_x = px - seed;
-                let img_y = y - seed;
-                let idx = img_y * width + img_x;
-                out[idx] = best_gray;
-            }
-
-            let img_x = px.wrapping_sub(seed);
-            let img_y = y.wrapping_sub(seed);
-            let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 != 0;
-
-            // Look up gradient alpha: use 1.0 for seed pixels
-            let grad_alpha = if img_x < width && img_y < height {
-                grad_alpha_map[img_y * width + img_x]
-            } else {
-                1.0
-            };
-
-            apply_adaptive_single_channel_kernel(err_buf, bx, y, err_val, grad_alpha, use_jjn);
-        }
-        if y >= seed {
-            if let Some(ref mut cb) = progress {
-                cb((y - seed + 1) as f32 / height as f32);
-            }
-        }
-    }
-}
 
 // ============================================================================
 // Public API
@@ -903,7 +745,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
     };
 
     // H2 needs different buffer dimensions (REACH=4, SEED=16), handle as early return
-    if mode == DitherMode::MixedH2Standard || mode == DitherMode::MixedH2Serpentine {
+    if mode == DitherMode::MixedH2Standard {
         let h2_reach = H2_REACH;
         let h2_seed = H2_SEED;
         let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
@@ -914,41 +756,14 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
 
         let hashed_seed = triple32(seed);
 
-        if mode == DitherMode::MixedH2Serpentine {
-            dither_mixed_h2_serpentine_gray_alpha(
-                &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, hashed_seed, progress,
-            );
-        } else {
-            dither_mixed_h2_standard_gray_alpha(
-                &ctx, gray_channel, &mut err_buf, &mut out,
-                width, height, hashed_seed, progress,
-            );
-        }
-
-        return (out, alpha_dithered);
-    }
-
-    // Adaptive needs same buffer dimensions as H2, handle as early return
-    if mode == DitherMode::MixedAdaptive {
-        let h2_reach = H2_REACH;
-        let h2_seed = H2_SEED;
-        let buf_width = h2_reach + h2_seed + width + h2_seed + h2_reach;
-        let buf_height = h2_seed + height + h2_reach;
-
-        let mut err_buf: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
-        let mut out = vec![0u8; pixels];
-
-        let hashed_seed = triple32(seed);
-        let grad_alpha_map = compute_alpha_map_gray_alpha(gray_channel, width, height);
-
-        dither_mixed_adaptive_gray_alpha(
+        dither_mixed_h2_standard_gray_alpha(
             &ctx, gray_channel, &mut err_buf, &mut out,
-            width, height, hashed_seed, &grad_alpha_map, progress,
+            width, height, hashed_seed, progress,
         );
 
         return (out, alpha_dithered);
     }
+
 
     // Use JJN reach for all modes (largest kernel)
     let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
@@ -1059,8 +874,8 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine | DitherMode::MixedAdaptive => {
-            unreachable!("H2/Adaptive modes handled in early return above");
+        DitherMode::MixedH2Standard => {
+            unreachable!("H2 modes handled in early return above");
         }
     }
 

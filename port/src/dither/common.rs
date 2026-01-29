@@ -261,17 +261,6 @@ pub enum DitherMode {
     /// but with second-order convolution kernels that have wider reach (4) and
     /// negative weights. Requires larger buffer with SEED=16 padding.
     MixedH2Standard,
-    /// Mixed H2: Precomputed 2nd-order kernels (FS² and JJN²)
-    /// Serpentine scanning (alternating direction each row)
-    /// Same kernels as MixedH2Standard but with RTL mirrored versions on odd rows.
-    MixedH2Serpentine,
-    /// Mixed Adaptive: Gradient-adaptive blend of 1st and 2nd order kernels.
-    /// Smooth areas (low gradient) use 2nd-order kernel (steeper noise shaping),
-    /// edges (high gradient) use 1st-order kernel (more stable).
-    /// Error is split: alpha*err → H2 kernel, (1−alpha)*err → H1 kernel.
-    /// Alpha from input gradients: alpha = (1 − |gx|) × (1 − |gy|).
-    /// Always LTR (no serpentine — 2nd-order component is unstable with serpentine).
-    MixedAdaptive,
 }
 
 /// Wang hash for deterministic randomization.

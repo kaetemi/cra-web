@@ -803,8 +803,6 @@ fn dither_grayscale(
             CSDitherMode::FsTpdfStandard => DitherMode::FsTpdfStandard,
             CSDitherMode::FsTpdfSerpentine => DitherMode::FsTpdfSerpentine,
             CSDitherMode::MixedH2Standard => DitherMode::MixedH2Standard,
-            CSDitherMode::MixedH2Serpentine => DitherMode::MixedH2Serpentine,
-            CSDitherMode::MixedAdaptive => DitherMode::MixedAdaptive,
             CSDitherMode::None => DitherMode::None,
         };
         dither_with_mode_bits(gray, width, height, basic_mode, seed, bits, progress)

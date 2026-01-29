@@ -325,7 +325,7 @@ fn dither_alpha_f16_with_mode(
         DitherMode::JarvisSerpentine => {
             dither_alpha_f16::<JarvisJudiceNinke>(alpha, width, height, true)
         }
-        DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Standard | DitherMode::MixedH2Serpentine | DitherMode::MixedAdaptive => {
+        DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Standard => {
             // For mixed modes, use JJN padding but random kernel selection
             dither_alpha_f16_mixed(alpha, width, height, mode, seed)
         }
@@ -385,7 +385,7 @@ fn dither_alpha_f16_mixed(
 
     for y in 0..process_height {
         let is_rtl = match mode {
-            DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Serpentine => y % 2 == 1,
+            DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => y % 2 == 1,
             DitherMode::MixedRandom => wang_hash((y as u32) ^ hashed_seed) & 1 == 1,
             _ => false,
         };
@@ -1145,7 +1145,7 @@ pub fn dither_rgba_f16_with_options(
                 width, height, reach, overshoot_penalty, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard | DitherMode::MixedAdaptive => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard => {
             dither_mixed_standard_f16(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,
@@ -1154,7 +1154,7 @@ pub fn dither_rgba_f16_with_options(
                 width, height, reach, hashed_seed, overshoot_penalty, progress,
             );
         }
-        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine | DitherMode::MixedH2Serpentine => {
+        DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_f16(
                 space, working_space, &alpha_dithered,
                 r_channel, g_channel, b_channel,

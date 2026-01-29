@@ -167,8 +167,7 @@ function generateCliCommand() {
         4: 'mixed-standard',
         5: 'mixed-serpentine',
         6: 'mixed-random',
-        18: 'boon-h2',
-        19: 'boon-h2-serpentine'
+        18: 'boon-h2'
     };
 
     // Map histogram mode values to CLI histogram mode names
@@ -498,8 +497,7 @@ const OUTPUT_DITHER_DESCRIPTIONS = {
     '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for final output quantization.',
     '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for final output quantization.',
     '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for final output quantization.',
-    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for final output quantization.',
-    '19': 'Our method (2nd Order Kernel, Serpentine): Uses precomputed second-order FS² and JJN² kernels with serpentine scanning. Alternates scan direction each row. Used for final output quantization.'
+    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for final output quantization.'
 };
 
 // Histogram dithering method descriptions
@@ -515,8 +513,7 @@ const HISTOGRAM_DITHER_DESCRIPTIONS = {
     '9': 'Ostromoukhov: Variable-coefficient error diffusion with coefficients based on input intensity. Serpentine scanning. Used for histogram processing.',
     '10': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Standard scanning. Used for histogram processing.',
     '11': 'Zhou-Fang: Variable-coefficient error diffusion with threshold modulation to break "worm" patterns. Serpentine scanning. Used for histogram processing.',
-    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for histogram processing.',
-    '19': 'Our method (2nd Order Kernel, Serpentine): Uses precomputed second-order FS² and JJN² kernels with serpentine scanning. Alternates scan direction each row. Used for histogram processing.'
+    '18': 'Our method (2nd Order Kernel): Uses precomputed second-order FS² and JJN² kernels for improved noise shaping. Standard scanning only. Used for histogram processing.'
 };
 
 // Update output dither method description
@@ -524,6 +521,7 @@ function updateOutputDitherDescription() {
     const ditherMode = document.getElementById('output-dither-select').value;
     const description = document.getElementById('output-dither-description');
     description.textContent = OUTPUT_DITHER_DESCRIPTIONS[ditherMode] || OUTPUT_DITHER_DESCRIPTIONS['2'];
+    updateOutputDitherWarning();
 }
 
 // Update histogram dither method description
@@ -531,6 +529,33 @@ function updateHistogramDitherDescription() {
     const ditherMode = document.getElementById('histogram-dither-select').value;
     const description = document.getElementById('histogram-dither-description');
     description.textContent = HISTOGRAM_DITHER_DESCRIPTIONS[ditherMode] || HISTOGRAM_DITHER_DESCRIPTIONS['4'];
+    updateHistogramDitherWarning();
+}
+
+function updateOutputDitherWarning() {
+    const mode = parseInt(document.getElementById('output-dither-select').value);
+    const csAware = document.getElementById('color-aware-output');
+    const warningEl = document.getElementById('output-dither-warning');
+    if (!warningEl) return;
+    if (mode === 18 && csAware && csAware.checked) {
+        warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
+        warningEl.style.display = '';
+    } else {
+        warningEl.style.display = 'none';
+    }
+}
+
+function updateHistogramDitherWarning() {
+    const mode = parseInt(document.getElementById('histogram-dither-select').value);
+    const csAware = document.getElementById('color-aware-histogram');
+    const warningEl = document.getElementById('histogram-dither-warning');
+    if (!warningEl) return;
+    if (mode === 18 && csAware && csAware.checked) {
+        warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
+        warningEl.style.display = '';
+    } else {
+        warningEl.style.display = 'none';
+    }
 }
 
 // Check if a WASM-only method is selected with Python mode
@@ -679,8 +704,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     document.getElementById('output-dither-select').addEventListener('change', updateOutputDitherDescription);
     document.getElementById('histogram-dither-select').addEventListener('change', updateHistogramDitherDescription);
-    document.getElementById('color-aware-histogram').addEventListener('change', updateColorAwareHistogramToggle);
-    document.getElementById('color-aware-output').addEventListener('change', updateColorAwareOutputToggle);
+    document.getElementById('color-aware-histogram').addEventListener('change', () => { updateColorAwareHistogramToggle(); updateHistogramDitherWarning(); });
+    document.getElementById('color-aware-output').addEventListener('change', () => { updateColorAwareOutputToggle(); updateOutputDitherWarning(); });
     document.getElementById('process-btn').addEventListener('click', processImages);
 
     // Initialize histogram dither visibility based on initial histogram mode state
