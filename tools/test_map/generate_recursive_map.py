@@ -32,6 +32,19 @@ def lowbias32(x: np.uint32) -> np.uint32:
     return x
 
 
+def triple32(x: np.uint32) -> np.uint32:
+    """Triple32 hash function."""
+    x = np.uint32(x)
+    x ^= x >> np.uint32(17)
+    x = np.uint32(np.uint64(x) * np.uint64(0xed5ad4bb) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(11)
+    x = np.uint32(np.uint64(x) * np.uint64(0xac4c1b51) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(15)
+    x = np.uint32(np.uint64(x) * np.uint64(0x31848bab) & 0xFFFFFFFF)
+    x ^= x >> np.uint32(14)
+    return x
+
+
 # ============================================================================
 # First-order kernels (padded buffer, no bounds checking)
 # ============================================================================
@@ -576,7 +589,7 @@ def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
     r = REACH_1ST
     s = r  # seed = reach for first-order
     buf = create_seeded_buffer_1st(input_image)
-    hashed_seed = lowbias32(np.uint32(seed))
+    hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
     error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
     fifo = deque()
@@ -612,7 +625,7 @@ def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
 
             coord_x = img_x & 0xFFFF
             coord_y = img_y & 0xFFFF
-            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
 
             fifo.append((bx, y, err, use_jjn, is_rtl))
@@ -637,7 +650,7 @@ def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
     r = REACH_2ND
     s = SEED_2ND
     buf = create_seeded_buffer_2nd(input_image)
-    hashed_seed = lowbias32(np.uint32(seed))
+    hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
     error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
     fifo = deque()
@@ -670,7 +683,7 @@ def _dither_2hh2(input_image, bits, seed, delay, return_error, tpdf):
 
             coord_x = img_x & 0xFFFF
             coord_y = img_y & 0xFFFF
-            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
 
             fifo.append((bx, y, err, use_jjn))
@@ -698,7 +711,7 @@ def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
     buf1 = create_seeded_buffer_1st(input_image)
     buf2 = np.zeros_like(buf1)
 
-    hashed_seed = lowbias32(np.uint32(seed))
+    hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
     error_map = np.zeros((height, width), dtype=np.float64) if return_error else None
 
@@ -737,7 +750,7 @@ def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
 
             coord_x = img_x & 0xFFFF
             coord_y = img_y & 0xFFFF
-            coord_hash = lowbias32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
+            coord_hash = triple32(np.uint32(coord_x) ^ (np.uint32(coord_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn_1 = (coord_hash & 1) == 1
             use_jjn_2 = (coord_hash & 2) == 2
 
