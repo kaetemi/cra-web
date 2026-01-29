@@ -373,9 +373,9 @@ def dither_first_order(input_image, seed=0):
             buf[y, bx] = new_val
             err = old_val - new_val
 
-            # Map buffer px to image coordinates for hash (saturating_sub)
-            img_x = max(px - REACH, 0)
-            img_y = max(y - REACH, 0)
+            # Wrap coordinates so seed pixels get varied hashes
+            img_x = (px - REACH) & 0xFFFF
+            img_y = (y - REACH) & 0xFFFF
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
             apply_error(buf, bx, y, err, use_jjn, is_rtl)
@@ -434,8 +434,8 @@ def dither_dual_integrator(input_image, seed=0):
             err2 = int2_val - new_val
 
             # Kernel selection — different bits for each integrator
-            img_x = max(px - REACH, 0)
-            img_y = max(y - REACH, 0)
+            img_x = (px - REACH) & 0xFFFF
+            img_y = (y - REACH) & 0xFFFF
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn_1 = (coord_hash & 1) == 1
             use_jjn_2 = (coord_hash & 2) == 2
@@ -448,16 +448,23 @@ def dither_dual_integrator(input_image, seed=0):
 
 
 REACH_2ND = 4  # JJN² kernel radius (dx ±4, dy 0..4)
+SEED_2ND = 16  # Seed area width (4x reach for warm-up with negative weights)
 
 
 def create_seeded_buffer_r4(input_image):
-    """Create padded buffer with reach=4 for second-order kernels."""
+    """Create padded buffer for second-order kernels.
+
+    Buffer layout (reach=4, seed=8):
+        cols: [0..4) overshoot | [4..12) seed | [12..12+W) image | [12+W..20+W) seed | [20+W..24+W) overshoot
+        rows: [0..8) seed | [8..8+H) image | [8+H..12+H) overshoot
+    """
     height, width = input_image.shape
     r = REACH_2ND
-    total_left = r * 2
-    total_right = r * 2
-    total_top = r
-    total_bottom = r
+    s = SEED_2ND
+    total_left = r + s      # overshoot + seed
+    total_right = s + r      # seed + overshoot
+    total_top = s            # seed rows
+    total_bottom = r         # overshoot rows
 
     buf_width = total_left + width + total_right
     buf_height = total_top + height + total_bottom
@@ -468,15 +475,15 @@ def create_seeded_buffer_r4(input_image):
     seed_left_start = r
     seed_right_start = total_left + width
 
-    for sx in range(r):
+    for sx in range(s):
         buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
-    for sx in range(r):
+    for sx in range(s):
         buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
-    for sy in range(r):
-        for sx in range(r):
+    for sy in range(s):
+        for sx in range(s):
             buf[sy, seed_left_start + sx] = input_image[0, 0]
         buf[sy, total_left:total_left + width] = input_image[0, :]
-        for sx in range(r):
+        for sx in range(s):
             buf[sy, seed_right_start + sx] = input_image[0, -1]
 
     return buf
@@ -492,12 +499,13 @@ def dither_kernel_2nd(input_image, seed=0):
     """
     height, width = input_image.shape
     r = REACH_2ND
+    s = SEED_2ND
     buf = create_seeded_buffer_r4(input_image)
     hashed_seed = lowbias32(np.uint32(seed))
 
     bx_start = r  # skip left overshoot
-    process_height = r + height
-    process_width = r + width + r
+    process_height = s + height
+    process_width = s + width + s
 
     for y in range(process_height):
         for px in range(process_width):
@@ -507,14 +515,14 @@ def dither_kernel_2nd(input_image, seed=0):
             buf[y, bx] = new_val
             err = old_val - new_val
 
-            img_x = max(px - r, 0)
-            img_y = max(y - r, 0)
+            img_x = (px - s) & 0xFFFF
+            img_y = (y - s) & 0xFFFF
             coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
             use_jjn = (coord_hash & 1) == 1
             apply_error_2nd(buf, bx, y, err, use_jjn, False)
 
-    total_left = r * 2
-    total_top = r
+    total_left = r + s
+    total_top = s
     return buf[total_top:total_top + height, total_left:total_left + width].copy()
 
 
