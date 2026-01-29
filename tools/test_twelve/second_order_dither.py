@@ -162,6 +162,150 @@ def apply_error(buf, bx, y, err, use_jjn, is_rtl):
 
 
 # ============================================================================
+# Second-order kernels: 2H - H² (single-buffer approach)
+# NTF = 1 - (2H - H²) = (1-H)² → +12 dB/oct
+# These have negative weights and wider reach than the originals.
+# ============================================================================
+
+def apply_fs2_ltr(buf, bx, y, err):
+    """FS second-order kernel (2H_fs - H_fs²), LTR. Reach: dx -2..+2, dy 0..2."""
+    buf[y, bx + 1] += err * (224.0 / 256.0)
+    buf[y, bx + 2] += err * (-49.0 / 256.0)
+    buf[y + 1, bx - 1] += err * (96.0 / 256.0)
+    buf[y + 1, bx] += err * (118.0 / 256.0)
+    buf[y + 1, bx + 1] += err * (-38.0 / 256.0)
+    buf[y + 1, bx + 2] += err * (-14.0 / 256.0)
+    buf[y + 2, bx - 2] += err * (-9.0 / 256.0)
+    buf[y + 2, bx - 1] += err * (-30.0 / 256.0)
+    buf[y + 2, bx] += err * (-31.0 / 256.0)
+    buf[y + 2, bx + 1] += err * (-10.0 / 256.0)
+    buf[y + 2, bx + 2] += err * (-1.0 / 256.0)
+
+
+def apply_fs2_rtl(buf, bx, y, err):
+    """FS second-order kernel, RTL (mirror x)."""
+    buf[y, bx - 1] += err * (224.0 / 256.0)
+    buf[y, bx - 2] += err * (-49.0 / 256.0)
+    buf[y + 1, bx + 1] += err * (96.0 / 256.0)
+    buf[y + 1, bx] += err * (118.0 / 256.0)
+    buf[y + 1, bx - 1] += err * (-38.0 / 256.0)
+    buf[y + 1, bx - 2] += err * (-14.0 / 256.0)
+    buf[y + 2, bx + 2] += err * (-9.0 / 256.0)
+    buf[y + 2, bx + 1] += err * (-30.0 / 256.0)
+    buf[y + 2, bx] += err * (-31.0 / 256.0)
+    buf[y + 2, bx - 1] += err * (-10.0 / 256.0)
+    buf[y + 2, bx - 2] += err * (-1.0 / 256.0)
+
+
+def apply_jjn2_ltr(buf, bx, y, err):
+    """JJN second-order kernel (2H_jjn - H_jjn²), LTR. Reach: dx -4..+4, dy 0..4."""
+    # Row 0
+    buf[y, bx + 1] += err * (672.0 / 2304.0)
+    buf[y, bx + 2] += err * (431.0 / 2304.0)
+    buf[y, bx + 3] += err * (-70.0 / 2304.0)
+    buf[y, bx + 4] += err * (-25.0 / 2304.0)
+    # Row 1
+    buf[y + 1, bx - 2] += err * (288.0 / 2304.0)
+    buf[y + 1, bx - 1] += err * (438.0 / 2304.0)
+    buf[y + 1, bx] += err * (572.0 / 2304.0)
+    buf[y + 1, bx + 1] += err * (332.0 / 2304.0)
+    buf[y + 1, bx + 2] += err * (148.0 / 2304.0)
+    buf[y + 1, bx + 3] += err * (-92.0 / 2304.0)
+    buf[y + 1, bx + 4] += err * (-30.0 / 2304.0)
+    # Row 2
+    buf[y + 2, bx - 4] += err * (-9.0 / 2304.0)
+    buf[y + 2, bx - 3] += err * (-30.0 / 2304.0)
+    buf[y + 2, bx - 2] += err * (29.0 / 2304.0)
+    buf[y + 2, bx - 1] += err * (174.0 / 2304.0)
+    buf[y + 2, bx] += err * (311.0 / 2304.0)
+    buf[y + 2, bx + 1] += err * (88.0 / 2304.0)
+    buf[y + 2, bx + 2] += err * (-63.0 / 2304.0)
+    buf[y + 2, bx + 3] += err * (-74.0 / 2304.0)
+    buf[y + 2, bx + 4] += err * (-19.0 / 2304.0)
+    # Row 3
+    buf[y + 3, bx - 4] += err * (-6.0 / 2304.0)
+    buf[y + 3, bx - 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx - 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx - 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx] += err * (-142.0 / 2304.0)
+    buf[y + 3, bx + 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx + 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx + 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx + 4] += err * (-6.0 / 2304.0)
+    # Row 4
+    buf[y + 4, bx - 4] += err * (-1.0 / 2304.0)
+    buf[y + 4, bx - 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx - 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx - 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx] += err * (-45.0 / 2304.0)
+    buf[y + 4, bx + 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx + 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx + 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx + 4] += err * (-1.0 / 2304.0)
+
+
+def apply_jjn2_rtl(buf, bx, y, err):
+    """JJN second-order kernel, RTL (mirror x)."""
+    # Row 0
+    buf[y, bx - 1] += err * (672.0 / 2304.0)
+    buf[y, bx - 2] += err * (431.0 / 2304.0)
+    buf[y, bx - 3] += err * (-70.0 / 2304.0)
+    buf[y, bx - 4] += err * (-25.0 / 2304.0)
+    # Row 1
+    buf[y + 1, bx + 2] += err * (288.0 / 2304.0)
+    buf[y + 1, bx + 1] += err * (438.0 / 2304.0)
+    buf[y + 1, bx] += err * (572.0 / 2304.0)
+    buf[y + 1, bx - 1] += err * (332.0 / 2304.0)
+    buf[y + 1, bx - 2] += err * (148.0 / 2304.0)
+    buf[y + 1, bx - 3] += err * (-92.0 / 2304.0)
+    buf[y + 1, bx - 4] += err * (-30.0 / 2304.0)
+    # Row 2
+    buf[y + 2, bx + 4] += err * (-9.0 / 2304.0)
+    buf[y + 2, bx + 3] += err * (-30.0 / 2304.0)
+    buf[y + 2, bx + 2] += err * (29.0 / 2304.0)
+    buf[y + 2, bx + 1] += err * (174.0 / 2304.0)
+    buf[y + 2, bx] += err * (311.0 / 2304.0)
+    buf[y + 2, bx - 1] += err * (88.0 / 2304.0)
+    buf[y + 2, bx - 2] += err * (-63.0 / 2304.0)
+    buf[y + 2, bx - 3] += err * (-74.0 / 2304.0)
+    buf[y + 2, bx - 4] += err * (-19.0 / 2304.0)
+    # Row 3
+    buf[y + 3, bx + 4] += err * (-6.0 / 2304.0)
+    buf[y + 3, bx + 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx + 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx + 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx] += err * (-142.0 / 2304.0)
+    buf[y + 3, bx - 1] += err * (-120.0 / 2304.0)
+    buf[y + 3, bx - 2] += err * (-74.0 / 2304.0)
+    buf[y + 3, bx - 3] += err * (-28.0 / 2304.0)
+    buf[y + 3, bx - 4] += err * (-6.0 / 2304.0)
+    # Row 4
+    buf[y + 4, bx + 4] += err * (-1.0 / 2304.0)
+    buf[y + 4, bx + 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx + 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx + 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx] += err * (-45.0 / 2304.0)
+    buf[y + 4, bx - 1] += err * (-36.0 / 2304.0)
+    buf[y + 4, bx - 2] += err * (-19.0 / 2304.0)
+    buf[y + 4, bx - 3] += err * (-6.0 / 2304.0)
+    buf[y + 4, bx - 4] += err * (-1.0 / 2304.0)
+
+
+def apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl):
+    """Apply second-order (2H - H²) kernel."""
+    if use_jjn:
+        if is_rtl:
+            apply_jjn2_rtl(buf, bx, y, err)
+        else:
+            apply_jjn2_ltr(buf, bx, y, err)
+    else:
+        if is_rtl:
+            apply_fs2_rtl(buf, bx, y, err)
+        else:
+            apply_fs2_ltr(buf, bx, y, err)
+
+
+# ============================================================================
 # Reverse kernel lookup (for second-order prediction, padded buffer coords)
 # ============================================================================
 
@@ -374,6 +518,79 @@ def dither_dual_integrator(input_image, seed=0):
     return extract_result(buf1, width, height)
 
 
+REACH_2ND = 4  # JJN² kernel radius (dx ±4, dy 0..4)
+
+
+def create_seeded_buffer_r4(input_image):
+    """Create padded buffer with reach=4 for second-order kernels."""
+    height, width = input_image.shape
+    r = REACH_2ND
+    total_left = r * 2
+    total_right = r * 2
+    total_top = r
+    total_bottom = r
+
+    buf_width = total_left + width + total_right
+    buf_height = total_top + height + total_bottom
+    buf = np.zeros((buf_height, buf_width), dtype=np.float64)
+
+    buf[total_top:total_top + height, total_left:total_left + width] = input_image
+
+    seed_left_start = r
+    seed_right_start = total_left + width
+
+    for sx in range(r):
+        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+    for sx in range(r):
+        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+    for sy in range(r):
+        for sx in range(r):
+            buf[sy, seed_left_start + sx] = input_image[0, 0]
+        buf[sy, total_left:total_left + width] = input_image[0, :]
+        for sx in range(r):
+            buf[sy, seed_right_start + sx] = input_image[0, -1]
+
+    return buf
+
+
+def dither_kernel_2nd(input_image, seed=0):
+    """Second-order error diffusion using precomputed 2H-H² kernels.
+
+    Uses the composite kernel K = 2H - H² directly in standard error diffusion.
+    NTF = 1 - K = 1 - (2H - H²) = (1-H)² → +12 dB/octave.
+    Single buffer, no reverse lookup needed.
+    """
+    height, width = input_image.shape
+    r = REACH_2ND
+    buf = create_seeded_buffer_r4(input_image)
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    bx_start = r  # skip left overshoot
+    process_height = r + height
+    process_width = r + width + r
+
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+            old_val = buf[y, bx]
+            new_val = 1.0 if old_val > 0.5 else 0.0
+            buf[y, bx] = new_val
+            err = old_val - new_val
+
+            img_x = max(px - r, 0)
+            img_y = max(y - r, 0)
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+            apply_error_2nd(buf, bx, y, err, use_jjn, is_rtl)
+
+    total_left = r * 2
+    total_top = r
+    return buf[total_top:total_top + height, total_left:total_left + width].copy()
+
+
 # ============================================================================
 # Spectral analysis
 # ============================================================================
@@ -448,7 +665,7 @@ def analyze_gray(gray_val, output_dir, size=256, seed=0):
 
     methods = [
         ('1st order (mixed FS/JJN)', dither_first_order),
-        ('2nd order (matched)', dither_second_order),
+        ('2H-H² kernel', dither_kernel_2nd),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -522,7 +739,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
 
     methods = [
         ('1st order', dither_first_order),
-        ('2nd order (matched)', dither_second_order),
+        ('2H-H² kernel', dither_kernel_2nd),
         ('dual integrator', dither_dual_integrator),
     ]
 
@@ -562,7 +779,7 @@ def process_image(image_path, output_dir, seed=0):
     stem = Path(image_path).stem
 
     # Standard methods
-    for label, fn in [('1st_order', dither_first_order), ('2nd_order_matched', dither_second_order), ('dual_int', dither_dual_integrator)]:
+    for label, fn in [('1st_order', dither_first_order), ('2H_H2_kernel', dither_kernel_2nd), ('dual_int', dither_dual_integrator)]:
         result = fn(input_image, seed=seed)
         out_img = (result * 255).astype(np.uint8)
         path = output_dir / f"{stem}_{label}.png"
