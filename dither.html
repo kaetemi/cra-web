@@ -2068,8 +2068,13 @@
 
             const warningEl = document.getElementById('dither-mode-warning');
 
+            const isTpdf = mode === 16 || mode === 17;
+
             if (mode === 18 && (isPerceptual || isPaletted)) {
                 warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
+                warningEl.classList.remove('hidden');
+            } else if (isTpdf && (isPerceptual || isPaletted)) {
+                warningEl.textContent = '\u26A0 Floyd-Steinberg TPDF is not available in colorspace-aware or paletted mode. It will fall back to standard Floyd-Steinberg.';
                 warningEl.classList.remove('hidden');
             } else {
                 warningEl.classList.add('hidden');

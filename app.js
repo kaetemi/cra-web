@@ -537,8 +537,12 @@ function updateOutputDitherWarning() {
     const csAware = document.getElementById('color-aware-output');
     const warningEl = document.getElementById('output-dither-warning');
     if (!warningEl) return;
-    if (mode === 18 && csAware && csAware.checked) {
+    const isCs = csAware && csAware.checked;
+    if (mode === 18 && isCs) {
         warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
+        warningEl.style.display = '';
+    } else if ((mode === 16 || mode === 17) && isCs) {
+        warningEl.textContent = '\u26A0 Floyd-Steinberg TPDF is not available in colorspace-aware mode. It will fall back to standard Floyd-Steinberg.';
         warningEl.style.display = '';
     } else {
         warningEl.style.display = 'none';
@@ -550,8 +554,12 @@ function updateHistogramDitherWarning() {
     const csAware = document.getElementById('color-aware-histogram');
     const warningEl = document.getElementById('histogram-dither-warning');
     if (!warningEl) return;
-    if (mode === 18 && csAware && csAware.checked) {
+    const isCs = csAware && csAware.checked;
+    if (mode === 18 && isCs) {
         warningEl.textContent = '\u26A0 2nd order kernels may collapse on full-gamut images in colorspace-aware mode. Consider using 1st order kernels instead.';
+        warningEl.style.display = '';
+    } else if ((mode === 16 || mode === 17) && isCs) {
+        warningEl.textContent = '\u26A0 Floyd-Steinberg TPDF is not available in colorspace-aware mode. It will fall back to standard Floyd-Steinberg.';
         warningEl.style.display = '';
     } else {
         warningEl.style.display = 'none';
