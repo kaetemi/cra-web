@@ -11,10 +11,14 @@ Usage:
 """
 
 import numpy as np
+from numpy.fft import fft2, fftshift
 from PIL import Image
 from pathlib import Path
 from collections import deque
 import argparse
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 
 def lowbias32(x: np.uint32) -> np.uint32:
@@ -172,6 +176,176 @@ def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False)
         return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
 
 
+def compute_power_spectrum(img):
+    """Compute 2D power spectrum with log scaling."""
+    centered = img - img.mean()
+    spectrum = fftshift(fft2(centered))
+    power = np.abs(spectrum) ** 2
+    return np.log1p(power)
+
+
+def compute_segmented_radial_power(img):
+    """Compute segmented radially averaged power spectrum.
+    Returns (frequencies, horizontal, diagonal, vertical) in linear power."""
+    h, w = img.shape
+    centered = img - img.mean()
+    spectrum = np.abs(fftshift(fft2(centered))) ** 2
+
+    cy, cx = h // 2, w // 2
+    max_radius = min(cx, cy)
+    img_size = min(h, w)
+
+    y_coords, x_coords = np.ogrid[:h, :w]
+    dy = y_coords - cy
+    dx = x_coords - cx
+    distances = np.sqrt(dx**2 + dy**2)
+    angles = np.abs(np.degrees(np.arctan2(dy, dx)))
+
+    horizontal, diagonal, vertical = [], [], []
+
+    for r in range(1, max_radius):
+        ring_mask = np.abs(distances - r) < 0.5
+        if not ring_mask.any():
+            horizontal.append(0)
+            diagonal.append(0)
+            vertical.append(0)
+            continue
+
+        ring_angles = angles[ring_mask]
+        ring_power = spectrum[ring_mask]
+
+        h_mask = (ring_angles < 22.5) | (ring_angles > 157.5)
+        v_mask = (ring_angles > 67.5) & (ring_angles < 112.5)
+        d_mask = ((ring_angles > 22.5) & (ring_angles < 67.5)) | \
+                 ((ring_angles > 112.5) & (ring_angles < 157.5))
+
+        horizontal.append(ring_power[h_mask].mean() if h_mask.any() else 0)
+        diagonal.append(ring_power[d_mask].mean() if d_mask.any() else 0)
+        vertical.append(ring_power[v_mask].mean() if v_mask.any() else 0)
+
+    freqs = np.arange(1, max_radius) / img_size
+    return freqs, np.array(horizontal), np.array(diagonal), np.array(vertical)
+
+
+def analyze_ranked_output(rank, output_dir, gray_levels=None):
+    """Analyze the ranked output at multiple gray levels.
+    Generates charts with: halftone, 2D spectrum, radial power + reference lines."""
+    if gray_levels is None:
+        gray_levels = [32, 64, 85, 127, 170, 191, 224]
+
+    for gray in gray_levels:
+        # Threshold the rank array at this gray level
+        threshold = gray  # rank 0..255, threshold 0..255
+        halftone = (rank < threshold).astype(np.float64) * 255.0
+        density = halftone.mean() / 255.0
+
+        # Compute spectra
+        freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(halftone)
+        h_db = 10 * np.log10(h_pow + 1e-10)
+        d_db = 10 * np.log10(d_pow + 1e-10)
+        v_db = 10 * np.log10(v_pow + 1e-10)
+
+        # Reference lines
+        freqs_ideal = np.linspace(0.004, 0.5, 500)
+        P_ref = 10 ** (h_db.max() / 10)
+        power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
+        power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+        power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
+
+        # 2D spectrum
+        spectrum_2d = compute_power_spectrum(halftone)
+
+        # Plot: 3 rows (halftone, spectrum, radial), 1 column
+        fig, axes = plt.subplots(3, 1, figsize=(8, 14))
+
+        # Row 1: Halftone
+        axes[0].imshow(halftone, cmap='gray', vmin=0, vmax=255)
+        axes[0].set_title(f'Threshold at {gray} ({density*100:.1f}% white)', fontsize=12)
+        axes[0].axis('off')
+
+        # Row 2: 2D FFT spectrum
+        axes[1].imshow(spectrum_2d, cmap='gray')
+        axes[1].set_title('2D Power Spectrum', fontsize=12)
+        axes[1].axis('off')
+
+        # Row 3: Radial power + reference lines
+        axes[2].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+        axes[2].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+        axes[2].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
+        axes[2].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
+        axes[2].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
+        axes[2].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
+        axes[2].set_xlim(0, 0.5)
+        axes[2].set_xlabel('Spatial Frequency (cycles/pixel)')
+        axes[2].set_ylabel('Power (dB)')
+        axes[2].set_title('Radial Power Spectrum', fontsize=12)
+        axes[2].grid(True, alpha=0.3)
+        axes[2].legend(loc='lower right', fontsize=8)
+
+        fig.suptitle(f'Recursive Dither Array — gray {gray}/255', fontsize=14, fontweight='bold')
+        plt.tight_layout(rect=[0, 0, 1, 0.96])
+        out_path = output_dir / f"analysis_gray_{gray:03d}.png"
+        plt.savefig(out_path, dpi=150, bbox_inches='tight')
+        plt.close()
+        print(f"Saved: {out_path}")
+
+    # Histogram of rank values
+    fig, ax = plt.subplots(figsize=(8, 4))
+    ax.hist(rank.ravel(), bins=256, range=(0, 256), color='steelblue', edgecolor='none')
+    ax.set_xlabel('Rank value')
+    ax.set_ylabel('Count')
+    ax.set_title('Rank Value Histogram (should be uniform)')
+    plt.tight_layout()
+    hist_path = output_dir / "analysis_histogram.png"
+    plt.savefig(hist_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {hist_path}")
+
+    # Analysis of the ranked output image itself (as grayscale)
+    rank_img = rank.astype(np.float64)
+    freqs, h_pow, d_pow, v_pow = compute_segmented_radial_power(rank_img)
+    h_db = 10 * np.log10(h_pow + 1e-10)
+    d_db = 10 * np.log10(d_pow + 1e-10)
+    v_db = 10 * np.log10(v_pow + 1e-10)
+
+    freqs_ideal = np.linspace(0.004, 0.5, 500)
+    P_ref = 10 ** (h_db.max() / 10)
+    power_3db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) + 1e-10)
+    power_6db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 2 + 1e-10)
+    power_12db = 10 * np.log10(P_ref * (freqs_ideal / 0.5) ** 4 + 1e-10)
+
+    spectrum_2d = compute_power_spectrum(rank_img)
+
+    fig, axes = plt.subplots(3, 1, figsize=(8, 14))
+    axes[0].imshow(rank_img, cmap='gray', vmin=0, vmax=255)
+    axes[0].set_title('Ranked Output (8-bit dither array)', fontsize=12)
+    axes[0].axis('off')
+
+    axes[1].imshow(spectrum_2d, cmap='gray')
+    axes[1].set_title('2D Power Spectrum', fontsize=12)
+    axes[1].axis('off')
+
+    axes[2].plot(freqs, h_db, 'r-', label='H', alpha=0.8, linewidth=1)
+    axes[2].plot(freqs, d_db, 'g-', label='D', alpha=0.8, linewidth=1)
+    axes[2].plot(freqs, v_db, 'b-', label='V', alpha=0.8, linewidth=1)
+    axes[2].plot(freqs_ideal, power_6db, 'k--', linewidth=1.5, alpha=0.6, label='f² (+6dB/oct)')
+    axes[2].plot(freqs_ideal, power_3db, 'k:', linewidth=1.5, alpha=0.6, label='f (+3dB/oct)')
+    axes[2].plot(freqs_ideal, power_12db, 'k-.', linewidth=1.5, alpha=0.6, label='f⁴ (+12dB/oct)')
+    axes[2].set_xlim(0, 0.5)
+    axes[2].set_xlabel('Spatial Frequency (cycles/pixel)')
+    axes[2].set_ylabel('Power (dB)')
+    axes[2].set_title('Radial Power Spectrum', fontsize=12)
+    axes[2].grid(True, alpha=0.3)
+    axes[2].legend(loc='lower right', fontsize=8)
+
+    fig.suptitle('Recursive Dither Array — Raw Ranked Output', fontsize=14, fontweight='bold')
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    out_path = output_dir / "analysis_ranked.png"
+    plt.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {out_path}")
+
+
 def apply_error(buf, x, y, err, use_jjn, is_rtl):
     """Apply the appropriate error diffusion kernel."""
     if use_jjn:
@@ -319,6 +493,17 @@ def main():
         gray = np.full((size, size), 0.5, dtype=np.float64)
         rank = np.zeros((size, size), dtype=np.int32)
 
+        def save_intermediate(rank_arr, level, n_bits):
+            """Save the rank array snapped to the current number of resolved bits."""
+            n_levels = 2 ** (level + 1)
+            # Scale rank to 0-255 range for visualization
+            # At this level, only the top (level+1) bits are set, so values are multiples of 2^(N-1-level)
+            step = 2 ** (N - 1 - level)
+            scaled = (rank_arr // step) * (255 // (n_levels - 1)) if n_levels > 1 else rank_arr
+            path = output_dir / f"ranked_level{level}.png"
+            Image.fromarray(np.clip(scaled, 0, 255).astype(np.uint8), mode='L').save(path)
+            print(f"  Saved: {path} ({n_levels} levels)")
+
         # Level 0: initial 1-bit split
         print("Level 0: 1-bit dither of 0.5 gray")
         result0 = dither_transformed(gray, bits=1, seed=get_seed())
@@ -328,6 +513,7 @@ def main():
         img0.save(output_dir / "step1_1bit.png")
         w = (result0 > 0.5).sum()
         print(f"  white: {w} ({w/result0.size*100:.1f}%)")
+        save_intermediate(rank, 0, N)
 
         # Tree: list of (result_image, mask)
         nodes = [(result0, np.ones((size, size), dtype=bool))]
@@ -360,6 +546,7 @@ def main():
                 total_passes += 1
 
             nodes = new_nodes
+            save_intermediate(rank, level, N)
 
         print(f"\nTotal dither passes: {total_passes}")
 
@@ -373,6 +560,10 @@ def main():
         Image.fromarray(rank.astype(np.uint8), mode='L').save(out_path)
         print(f"Saved: {out_path}")
         np.save(output_dir / "ranked_output.npy", rank)
+
+        # Spectral analysis
+        print("\n--- Spectral Analysis ---")
+        analyze_ranked_output(rank, output_dir)
 
     elif args.gray is not None:
         # Dither uniform gray
