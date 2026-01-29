@@ -273,6 +273,69 @@ def dither_second_order(input_image, seed=0):
     return extract_result(buf, width, height)
 
 
+def dither_dual_integrator(input_image, seed=0):
+    """Second-order via dual integrators in a single pass.
+
+    Two error buffers (integrators) run simultaneously:
+        int1 = input + diffused err1 (standard first-order)
+        int2 = int1 + diffused err2 (second integrator, feeds on int1)
+        output = quantize(int2)
+        err1 = int1 - output → diffuse to buf1
+        err2 = int2 - output → diffuse to buf2
+
+    NTF = (1 - C(z))² for +12 dB/octave noise shaping.
+    Analogous to 1D sigma_delta_2nd with two series integrators.
+    """
+    height, width = input_image.shape
+
+    # First integrator: seeded with input image
+    buf1 = create_seeded_buffer(input_image)
+
+    # Second integrator: starts at zero (pure error accumulation)
+    buf2 = np.zeros_like(buf1)
+
+    hashed_seed = lowbias32(np.uint32(seed))
+
+    bx_start = REACH
+    process_height = REACH + height
+    process_width = REACH + width + REACH
+
+    for y in range(process_height):
+        is_rtl = y % 2 == 1
+        px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
+
+        for px in px_range:
+            bx = bx_start + px
+
+            # First integrator value at this pixel
+            int1_val = buf1[y, bx]
+
+            # Second integrator: int1 + accumulated second-order corrections
+            int2_val = int1_val + buf2[y, bx]
+
+            # Quantize based on second integrator
+            new_val = 1.0 if int2_val > 0.5 else 0.0
+            buf1[y, bx] = new_val  # store output for extraction
+
+            # First integrator error
+            err1 = int1_val - new_val
+
+            # Second integrator error
+            err2 = int2_val - new_val
+
+            # Kernel selection
+            img_x = max(px - REACH, 0)
+            img_y = max(y - REACH, 0)
+            coord_hash = lowbias32(np.uint32(img_x) ^ (np.uint32(img_y) << np.uint32(16)) ^ hashed_seed)
+            use_jjn = (coord_hash & 1) == 1
+
+            # Diffuse errors to respective buffers
+            apply_error(buf1, bx, y, err1, use_jjn, is_rtl)
+            apply_error(buf2, bx, y, err2, use_jjn, is_rtl)
+
+    return extract_result(buf1, width, height)
+
+
 # ============================================================================
 # Spectral analysis
 # ============================================================================
@@ -348,6 +411,7 @@ def analyze_gray(gray_val, output_dir, size=256, seed=0):
     methods = [
         ('1st order (mixed FS/JJN)', dither_first_order),
         ('2nd order (mixed FS/JJN)', dither_second_order),
+        ('dual integrator', dither_dual_integrator),
     ]
 
     results = []
@@ -421,6 +485,7 @@ def analyze_gradient(output_dir, size=256, seed=0):
     methods = [
         ('1st order', dither_first_order),
         ('2nd order', dither_second_order),
+        ('dual integrator', dither_dual_integrator),
     ]
 
     fig, axes = plt.subplots(len(methods), 1, figsize=(16, 3 * len(methods)))
@@ -452,6 +517,22 @@ def analyze_gradient(output_dir, size=256, seed=0):
         print(f"Saved: {path}")
 
 
+def process_image(image_path, output_dir, seed=0):
+    """Process a real image with all dithering methods, including cascade intermediates."""
+    img = Image.open(image_path).convert('L')
+    input_image = np.array(img, dtype=np.float64) / 255.0
+    stem = Path(image_path).stem
+
+    # Standard methods
+    for label, fn in [('1st_order', dither_first_order), ('2nd_order', dither_second_order), ('dual_int', dither_dual_integrator)]:
+        result = fn(input_image, seed=seed)
+        out_img = (result * 255).astype(np.uint8)
+        path = output_dir / f"{stem}_{label}.png"
+        Image.fromarray(out_img, mode='L').save(path)
+        print(f"Saved: {path}")
+
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Second-order error diffusion experiment"
@@ -464,16 +545,22 @@ def main():
                         help="Gray level(s) to test (0.0-1.0)")
     parser.add_argument("--gradient-only", action="store_true",
                         help="Only generate gradient comparison")
+    parser.add_argument("--image", type=str,
+                        help="Process an image file (grayscale PNG)")
 
     args = parser.parse_args()
     output_dir = Path(__file__).parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    if args.image:
+        process_image(args.image, output_dir, seed=args.seed)
+        return
+
     if args.gradient_only:
         analyze_gradient(output_dir, size=args.size, seed=args.seed)
         return
 
-    gray_levels = args.gray if args.gray else [0.125, 0.25, 0.333, 0.5, 0.667, 0.75, 0.875]
+    gray_levels = args.gray if args.gray else [0.05, 0.125, 0.25, 0.333, 0.5, 0.667, 0.75, 0.875]
 
     for g in gray_levels:
         analyze_gray(g, output_dir, size=args.size, seed=args.seed)
