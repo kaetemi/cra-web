@@ -43,6 +43,34 @@ use cra_wasm::output::{dither_output_rgb, dither_output_rgba, dither_output_la};
 use cra_wasm::pixel::{Pixel4, unpremultiply_alpha_inplace};
 
 // ============================================================================
+// Output Format Detection
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum OutputImageFormat {
+    Png,
+    Gif,
+}
+
+fn detect_output_format(path: &PathBuf) -> Result<OutputImageFormat, String> {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some(ext) => match ext.to_ascii_lowercase().as_str() {
+            "png" => Ok(OutputImageFormat::Png),
+            "gif" => Ok(OutputImageFormat::Gif),
+            other => Err(format!(
+                "Unsupported output extension '.{}' for '{}'. Supported: .png, .gif",
+                other,
+                path.display()
+            )),
+        },
+        None => Err(format!(
+            "Output path '{}' has no file extension. Use .png or .gif",
+            path.display()
+        )),
+    }
+}
+
+// ============================================================================
 // Progress Bar
 // ============================================================================
 
@@ -1178,6 +1206,7 @@ fn write_metadata(
     outputs: &[(String, PathBuf, usize)],
     safetensors_meta: Option<&SafetensorsMetadata>,
     has_integer_output: bool,
+    has_png_output: bool,
     png_palettized: bool,
 ) -> Result<(), String> {
     // Get name from output filename (without extension)
@@ -1231,7 +1260,7 @@ fn write_metadata(
         json.push_str(&format!("  \"output_distance_space\": \"{:?}\",\n", output_colorspace));
 
         // Palettized output (only when PNG output is present)
-        if args.output.is_some() {
+        if has_png_output {
             json.push_str(&format!("  \"output_palettized\": {},\n", png_palettized));
         }
 
@@ -1662,13 +1691,23 @@ fn main() -> Result<(), String> {
         args.perceptual,
     );
 
+    // Validate output extensions and classify into PNG/GIF
+    let mut png_outputs: Vec<PathBuf> = Vec::new();
+    let mut gif_outputs: Vec<PathBuf> = Vec::new();
+    for path in &args.output {
+        match detect_output_format(path)? {
+            OutputImageFormat::Png => png_outputs.push(path.clone()),
+            OutputImageFormat::Gif => gif_outputs.push(path.clone()),
+        }
+    }
+
     // Check if at least one output is specified
     let has_channel_output = args.output_raw_r.is_some()
         || args.output_raw_g.is_some()
         || args.output_raw_b.is_some()
         || args.output_raw_a.is_some();
-    // Integer output = PNG, raw binary, or channel outputs (requires dithering)
-    let has_integer_output = args.output.is_some()
+    // Integer output = PNG, GIF, raw binary, or channel outputs (requires dithering)
+    let has_integer_output = !args.output.is_empty()
         || args.output_raw.is_some()
         || has_channel_output;
     if !has_integer_output
@@ -1676,7 +1715,7 @@ fn main() -> Result<(), String> {
         && args.output_safetensors.is_none()
     {
         return Err(
-            "No output specified. Use --output, --output-raw, --output-raw-r/g/b/a, --output-meta, or --output-safetensors"
+            "No output specified. Use -o/--output (.png/.gif), --output-raw, --output-raw-r/g/b/a, --output-meta, or --output-safetensors"
                 .to_string(),
         );
     }
@@ -2251,9 +2290,9 @@ fn main() -> Result<(), String> {
             dither_result
         };
 
-        // Write PNG output
+        // Write PNG output(s)
         // Use palettized PNG for explicit palette formats or formats ≤8 bits
-        if let Some(ref png_path) = args.output {
+        for png_path in &png_outputs {
             // Check if we have explicit palette data (from paletted dithering)
             let has_explicit_palette = dither_result.palette_indices.is_some()
                 && dither_result.palette_colors.is_some();
@@ -2312,8 +2351,8 @@ fn main() -> Result<(), String> {
             outputs.push(("png".to_string(), png_path.clone(), size));
         }
 
-        // Write GIF output (paletted formats only)
-        if let Some(ref gif_path) = args.output_gif {
+        // Write GIF output(s) (paletted formats only)
+        for gif_path in &gif_outputs {
             // Check if we have explicit palette data (from paletted dithering)
             let has_explicit_palette = dither_result.palette_indices.is_some()
                 && dither_result.palette_colors.is_some();
@@ -2505,7 +2544,7 @@ fn main() -> Result<(), String> {
         }
         // Determine if PNG output used palettized encoding
         // Explicit palette formats (CGA, web-safe) always use palettized PNG
-        let png_palettized = args.output.is_some()
+        let png_palettized = !png_outputs.is_empty()
             && (palette_format.is_some() || (supports_palettized_png(&format) && !args.no_palettized_output));
         write_metadata(
             meta_path,
@@ -2519,6 +2558,7 @@ fn main() -> Result<(), String> {
             &outputs,
             safetensors_meta.as_ref(),
             has_integer_output,
+            !png_outputs.is_empty(),
             png_palettized,
         )?;
     }

@@ -437,14 +437,11 @@ pub struct Args {
     #[arg(long, value_enum, default_value_t = InputColorProfile::Auto)]
     pub ref_profile: InputColorProfile,
 
-    /// Output PNG image path (optional)
+    /// Output image path(s) - format detected from extension (.png or .gif)
+    /// Can be specified multiple times for multiple outputs (e.g., -o out.png -o out.gif)
+    /// GIF only supports paletted formats (≤256 colors, 1-bit transparency)
     #[arg(short, long)]
-    pub output: Option<PathBuf>,
-
-    /// Output GIF image path (optional) - for paletted formats only (≤256 colors)
-    /// GIF supports 1-bit transparency only (fully opaque or fully transparent)
-    #[arg(long)]
-    pub output_gif: Option<PathBuf>,
+    pub output: Vec<PathBuf>,
 
     /// Output raw binary file path (optional) - respects --stride for row alignment
     #[arg(long)]

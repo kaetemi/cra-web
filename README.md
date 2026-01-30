@@ -150,8 +150,8 @@ Input/Output:
                                    [values: auto, yes, no]
   -r, --ref <PATH>                 Reference image path (for histogram matching)
       --ref-profile <MODE>         Reference color profile [default: auto]
-  -o, --output <PATH>              Output PNG image path
-      --output-gif <PATH>          Output GIF image path (paletted formats only, 1-bit transparency)
+  -o, --output <PATH>              Output image path (.png or .gif, detected from extension)
+                                   Can be specified multiple times (e.g., -o out.png -o out.gif)
       --no-palettized-output       Disable palettized PNG for ≤8bpp formats
       --output-raw <PATH>          Output raw binary file
       --output-raw-r <PATH>        Output red channel only (raw binary)
@@ -279,7 +279,7 @@ General:
 ./dist/bin/cra -i input.png -o output.png --input-palette palette.png
 
 # GIF output with palette dithering
-./dist/bin/cra -i input.png --output-gif output.gif --input-palette palette.png
+./dist/bin/cra -i input.png -o output.gif --input-palette palette.png
 ```
 
 ## Project Structure
