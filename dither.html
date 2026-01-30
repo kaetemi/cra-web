@@ -2487,6 +2487,16 @@
             downloadBlob(blob, filename);
         });
 
+        // Sync all UI state with current form values.
+        // This handles browser tab duplication, where the browser restores form values
+        // (selects, checkboxes) but doesn't fire change events.
+        updateOutputMode();
+        updatePerceptualMode();
+        updateDownscaleVisibility();
+        updateUpscaleVisibility();
+        updateSeedVisibility();
+        updateDitherModeWarning();
+
         // Initialize
         initWasm();
     </script>

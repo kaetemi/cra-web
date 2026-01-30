@@ -723,10 +723,17 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('color-aware-output').addEventListener('change', () => { updateColorAwareOutputToggle(); updateOutputDitherWarning(); });
     document.getElementById('process-btn').addEventListener('click', processImages);
 
-    // Initialize histogram dither visibility based on initial histogram mode state
-    updateHistogramModeDescription();
-    // Initialize color-aware sections visibility
-    updateColorAwareSectionsVisibility();
+    // Sync all UI state with current form values.
+    // This handles browser tab duplication, where the browser restores form values
+    // (selects, checkboxes) but doesn't fire change events.
+    updateImplementationLabel(); // also calls updateHistogramModeDescription + updateColorAwareSectionsVisibility
+    updateMethodDescription();
+    updateOutputDitherDescription();
+    updateHistogramDitherDescription();
+    updateColorAwareHistogramToggle();
+    updateColorAwareOutputToggle();
+    updateOutputDitherWarning();
+    updateHistogramDitherWarning();
 
     // Load default images
     loadDefaultImages();
