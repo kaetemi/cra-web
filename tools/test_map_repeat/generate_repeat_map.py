@@ -74,10 +74,16 @@ def apply_error_wrap(buf, x, y, height, width, err, use_jjn):
 
 @njit(cache=True)
 def dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes):
-    """Dither with horizontal wrapping. Each row scanned row_passes times."""
+    """Dither with horizontal wrapping. Each row scanned row_passes times.
+    Start offset varies per row via hash to break vertical alignment."""
     for y in range(height):
+        # Hash-derived start offset per row
+        row_hash = triple32(np.uint32(y) ^ hashed_seed)
+        x_offset = int(row_hash % np.uint32(width))
+
         for p in range(row_passes):
-            for x in range(width):
+            for i in range(width):
+                x = (x_offset + i) % width
                 old_val = buf[y, x]
 
                 # TPDF only on first pass — subsequent passes just settle error
