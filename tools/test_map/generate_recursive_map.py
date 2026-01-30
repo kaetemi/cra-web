@@ -364,7 +364,7 @@ def tpdf_threshold(x, y, hashed_seed, amplitude):
     return 0.5 + tpdf * amplitude
 
 
-def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False, method='1st', seed_value=None, wrap_seed=0):
+def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False, method='1st', seed_value=None, wrap_seed=0, serpentine=True):
     """Dither with random spatial transform derived from seed."""
     swap_xy = bool(seed & 1)
     mirror_x = bool(seed & 2)
@@ -373,13 +373,13 @@ def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False,
     transformed = transform_image(input_image, swap_xy, mirror_x, mirror_y)
 
     if return_error:
-        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed)
+        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed, serpentine=serpentine)
         return (
             inverse_transform_image(result, swap_xy, mirror_x, mirror_y),
             inverse_transform_image(error_map, swap_xy, mirror_x, mirror_y),
         )
     else:
-        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed)
+        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed, serpentine=serpentine)
         return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
 
 
@@ -636,14 +636,14 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
 
 
 @njit(cache=True)
-def _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error):
+def _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, serpentine):
     """JIT inner loop for first-order dither (delay=0 only)."""
     bx_start = r
     process_height = sw + height
     process_width = sw + width + sw
 
     for y in range(process_height):
-        is_rtl = y % 2 == 1
+        is_rtl = serpentine and (y % 2 == 1)
 
         if is_rtl:
             px_range = range(process_width - 1, -1, -1)
@@ -677,7 +677,7 @@ def _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed
             apply_error_1st(buf, bx, y, err, use_jjn, is_rtl)
 
 
-def _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay):
+def _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay, serpentine):
     """Python fallback loop for first-order dither with FIFO delay support."""
     fifo = deque()
     bx_start = r
@@ -685,7 +685,7 @@ def _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_s
     process_width = sw + width + sw
 
     for y in range(process_height):
-        is_rtl = y % 2 == 1
+        is_rtl = serpentine and (y % 2 == 1)
         px_range = range(process_width - 1, -1, -1) if is_rtl else range(process_width)
 
         for px in px_range:
@@ -723,8 +723,8 @@ def _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_s
         apply_error_1st(buf, dbx, dy, derr, d_jjn, d_rtl)
 
 
-def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=None, wrap_seed=0):
-    """First-order mixed FS/JJN with serpentine scanning."""
+def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=None, wrap_seed=0, serpentine=True):
+    """First-order mixed FS/JJN with optional serpentine scanning."""
     height, width = input_image.shape
     r = REACH_1ST
     buf, sw = create_seeded_buffer_1st(input_image, seed_value=seed_value, wrap_seed=wrap_seed)
@@ -736,9 +736,9 @@ def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_v
     total_top = sw
 
     if delay == 0:
-        _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error)
+        _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, serpentine)
     else:
-        _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay)
+        _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay, serpentine)
 
     output = buf[total_top:total_top + height, total_left:total_left + width].copy()
     if return_error:
@@ -931,7 +931,8 @@ def dither(
     tpdf: bool = False,
     method: str = '1st',
     seed_value=None,
-    wrap_seed: int = 0
+    wrap_seed: int = 0,
+    serpentine: bool = True
 ):
     """
     Apply error diffusion dithering.
@@ -944,6 +945,7 @@ def dither(
         return_error: If True, also return the per-pixel error buffer value
         tpdf: If True, add TPDF threshold perturbation (1-bit only)
         method: '1st' (first-order FS/JJN), '2hh2' (2H-H² kernels), 'dual' (dual integrator)
+        serpentine: If True, alternate LTR/RTL per row
 
     Returns:
         Dithered image, or (dithered, error_map) if return_error=True
@@ -953,7 +955,7 @@ def dither(
     elif method == 'dual':
         return _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf)
     else:
-        return _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=seed_value, wrap_seed=wrap_seed)
+        return _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=seed_value, wrap_seed=wrap_seed, serpentine=serpentine)
 
 
 def generate_gradient(width: int, height: int) -> np.ndarray:
@@ -981,6 +983,10 @@ def main():
                         help="Run recursive generation experiment")
     parser.add_argument("--tpdf", action="store_true",
                         help="Add TPDF threshold perturbation on top of mixed FS/JJN")
+    parser.add_argument("--no-transform", action="store_true",
+                        help="Disable random spatial transforms per pass")
+    parser.add_argument("--serpentine", action="store_true",
+                        help="Enable serpentine (bidirectional) scanning")
     parser.add_argument("--method", type=str, default="1st",
                         choices=["1st", "2hh2", "dual"],
                         help="Dither method: 1st (first-order), 2hh2 (2H-H²), dual (dual integrator)")
@@ -1049,12 +1055,13 @@ def main():
         use_tpdf = args.tpdf
         if use_tpdf:
             print("TPDF threshold perturbation enabled")
+        dither_fn = dither if args.no_transform else dither_transformed
 
         # Level 0: initial 1-bit split
         print("Level 0: 1-bit dither of 0.5 gray")
         method = args.method
         print(f"Method: {method}")
-        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
+        result0 = dither_fn(gray, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed, serpentine=args.serpentine)
         rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
         img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
@@ -1090,7 +1097,7 @@ def main():
                 input_hi = clean.copy()
                 input_hi[~parent_mask] = 0.0
                 input_hi = input_hi * 0.5
-                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
+                result_hi = dither_fn(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed, serpentine=args.serpentine)
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
@@ -1101,7 +1108,7 @@ def main():
                 input_lo = clean.copy()
                 input_lo[~parent_mask] = 1.0
                 input_lo = input_lo * 0.5 + 0.5
-                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
+                result_lo = dither_fn(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed, serpentine=args.serpentine)
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
                 total_passes += 1
