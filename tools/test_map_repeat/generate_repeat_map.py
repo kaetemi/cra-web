@@ -48,36 +48,38 @@ from generate_recursive_map import (
 
 @njit(cache=True)
 def apply_error_wrap(buf, x, y, height, width, err, use_jjn):
-    """Apply FS or JJN error with horizontal wrapping (LTR only)."""
+    """Apply FS or JJN error with full toroidal wrapping (LTR only)."""
     if use_jjn:
         buf[y, (x + 1) % width] += err * (7.0 / 48.0)
         buf[y, (x + 2) % width] += err * (5.0 / 48.0)
-        if y + 1 < height:
-            buf[y + 1, (x - 2) % width] += err * (3.0 / 48.0)
-            buf[y + 1, (x - 1) % width] += err * (5.0 / 48.0)
-            buf[y + 1, x] += err * (7.0 / 48.0)
-            buf[y + 1, (x + 1) % width] += err * (5.0 / 48.0)
-            buf[y + 1, (x + 2) % width] += err * (3.0 / 48.0)
-        if y + 2 < height:
-            buf[y + 2, (x - 2) % width] += err * (1.0 / 48.0)
-            buf[y + 2, (x - 1) % width] += err * (3.0 / 48.0)
-            buf[y + 2, x] += err * (5.0 / 48.0)
-            buf[y + 2, (x + 1) % width] += err * (3.0 / 48.0)
-            buf[y + 2, (x + 2) % width] += err * (1.0 / 48.0)
+        y1 = (y + 1) % height
+        buf[y1, (x - 2) % width] += err * (3.0 / 48.0)
+        buf[y1, (x - 1) % width] += err * (5.0 / 48.0)
+        buf[y1, x] += err * (7.0 / 48.0)
+        buf[y1, (x + 1) % width] += err * (5.0 / 48.0)
+        buf[y1, (x + 2) % width] += err * (3.0 / 48.0)
+        y2 = (y + 2) % height
+        buf[y2, (x - 2) % width] += err * (1.0 / 48.0)
+        buf[y2, (x - 1) % width] += err * (3.0 / 48.0)
+        buf[y2, x] += err * (5.0 / 48.0)
+        buf[y2, (x + 1) % width] += err * (3.0 / 48.0)
+        buf[y2, (x + 2) % width] += err * (1.0 / 48.0)
     else:
         buf[y, (x + 1) % width] += err * (7.0 / 16.0)
-        if y + 1 < height:
-            buf[y + 1, (x - 1) % width] += err * (3.0 / 16.0)
-            buf[y + 1, x] += err * (5.0 / 16.0)
-            buf[y + 1, (x + 1) % width] += err * (1.0 / 16.0)
+        y1 = (y + 1) % height
+        buf[y1, (x - 1) % width] += err * (3.0 / 16.0)
+        buf[y1, x] += err * (5.0 / 16.0)
+        buf[y1, (x + 1) % width] += err * (1.0 / 16.0)
 
 
 @njit(cache=True)
-def dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes):
-    """Dither with horizontal wrapping. Each row scanned row_passes times.
-    Start offset varies per row via hash to break vertical alignment."""
-    for y in range(height):
-        # Hash-derived start offset per row
+def dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes, y_offset):
+    """Dither with toroidal wrapping. Each row scanned row_passes times.
+    Start offsets vary per row (horizontal) and per pass (vertical)."""
+    for j in range(height):
+        y = (y_offset + j) % height
+
+        # Hash-derived horizontal start offset per row
         row_hash = triple32(np.uint32(y) ^ hashed_seed)
         x_offset = int(row_hash % np.uint32(width))
 
@@ -104,19 +106,24 @@ def dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes
                 apply_error_wrap(buf, x, y, height, width, err, use_jjn)
 
 
-def dither_wrap(input_image, bits=1, seed=0, tpdf=False, row_passes=3):
-    """Dither with horizontally-wrapping error diffusion."""
+def dither_wrap(input_image, bits=1, seed=0, tpdf=False, row_passes=3, y_offset=0):
+    """Dither with toroidally-wrapping error diffusion."""
     height, width = input_image.shape
     buf = input_image.copy()
     hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
 
-    dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes)
+    dither_wrap_loop(buf, height, width, hashed_seed, bits, use_tpdf, row_passes, y_offset)
     return buf
 
 
-def dither_wrap_transformed(input_image, seed=0, transform=True, **kwargs):
-    """Dither with wrapping + optional random spatial transform."""
+def dither_wrap_transformed(input_image, seed=0, transform=True, randomize_y=True, **kwargs):
+    """Dither with wrapping + optional random spatial transform.
+
+    Args:
+        randomize_y: If True, use hash-derived vertical start offset.
+                     Set False for level 0 (uniform input, no benefit).
+    """
     if transform:
         swap_xy = bool(seed & 1)
         mirror_x = bool(seed & 2)
@@ -125,7 +132,13 @@ def dither_wrap_transformed(input_image, seed=0, transform=True, **kwargs):
     else:
         work = input_image
 
-    result = dither_wrap(work, seed=seed, **kwargs)
+    if randomize_y:
+        h = work.shape[0]
+        y_off = int(triple32(np.uint32(seed) ^ np.uint32(0xBEEF)) % h)
+    else:
+        y_off = 0
+
+    result = dither_wrap(work, seed=seed, y_offset=y_off, **kwargs)
 
     if transform:
         result = inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
@@ -183,6 +196,7 @@ def main():
     print("Level 0: 1-bit dither of 0.5 gray")
     result0 = dither_wrap_transformed(gray, seed=get_seed(),
                                        transform=use_transform,
+                                       randomize_y=False,
                                        bits=1, tpdf=use_tpdf,
                                        row_passes=row_passes)
     rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
