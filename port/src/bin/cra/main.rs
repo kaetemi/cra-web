@@ -1756,7 +1756,7 @@ fn main() -> Result<(), String> {
     let output_colorspace = args.output_distance_space.unwrap_or(if format.is_grayscale {
         ColorSpace::LabCie94
     } else {
-        ColorSpace::Oklab
+        ColorSpace::OklabLr
     });
 
     // Now perform format-dependent validation
