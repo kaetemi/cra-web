@@ -139,9 +139,9 @@ function generateCliCommand() {
     const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '0', 10);
     const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
     const colorAwareHistogram = document.getElementById('color-aware-histogram')?.checked || false;
-    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
+    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '8', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
-    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '8', 10);
 
     // Map method values to CLI method names
     const methodMap = {
@@ -164,9 +164,10 @@ function generateCliCommand() {
         1: 'fs-serpentine',
         2: 'jjn-standard',
         3: 'jjn-serpentine',
-        4: 'mixed-standard',
-        5: 'mixed-serpentine',
-        6: 'mixed-random',
+        4: 'boon-standard',
+        5: 'boon-serpentine',
+        6: 'boon-random',
+        7: 'none',
         18: 'boon-h2'
     };
 
@@ -186,7 +187,8 @@ function generateCliCommand() {
         4: 'linear-rgb',
         5: 'y-cb-cr',
         6: 'srgb',
-        7: 'y-cb-cr-bt601'
+        7: 'y-cb-cr-bt601',
+        8: 'oklab-lr'
     };
 
     let cmd = `cra -i input.png -r reference.png -o output.png`;
@@ -230,8 +232,8 @@ function generateCliCommand() {
         if (!colorAwareHistogram) {
             // Colorspace-aware is default ON, add flag only if disabled
             cmd += ' --no-colorspace-aware-histogram';
-        } else if (histogramDistanceSpace !== 1) {
-            // Add distance space only if non-default (1 = Oklab)
+        } else if (histogramDistanceSpace !== 8) {
+            // Add distance space only if non-default (8 = OklabLr)
             cmd += ` --histogram-distance-space ${spaceMap[histogramDistanceSpace]}`;
         }
     }
@@ -242,9 +244,14 @@ function generateCliCommand() {
             // Disable (differs from CLI default)
             cmd += ' --no-colorspace-aware-output';
         }
-        if (colorAwareOutput && outputDistanceSpace !== 1) {
-            // Add distance space only if non-default (1 = Oklab)
+        if (colorAwareOutput && outputDistanceSpace !== 8) {
+            // Add distance space only if non-default (8 = OklabLr)
             cmd += ` --output-distance-space ${spaceMap[outputDistanceSpace]}`;
+        }
+        // Add overshoot penalty flag if disabled (enabled by default)
+        const overshootPenalty = document.getElementById('overshoot-penalty')?.checked !== false;
+        if (colorAwareOutput && !overshootPenalty) {
+            cmd += ' --no-overshoot-penalty';
         }
     }
 
@@ -643,9 +650,9 @@ function processImages() {
     const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
     // Color-aware options
     const colorAwareHistogram = document.getElementById('color-aware-histogram')?.checked || false;
-    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '1', 10);
+    const histogramDistanceSpace = parseInt(document.getElementById('histogram-distance-space')?.value || '8', 10);
     const colorAwareOutput = document.getElementById('color-aware-output')?.checked || false;
-    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '1', 10);
+    const outputDistanceSpace = parseInt(document.getElementById('output-distance-space')?.value || '8', 10);
     const overshootPenalty = document.getElementById('overshoot-penalty')?.checked !== false;
 
     // Store timestamp when processing starts

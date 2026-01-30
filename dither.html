@@ -1591,7 +1591,7 @@
                 3: 'jjn-serpentine',
                 4: 'boon-standard',
                 5: 'boon-serpentine',
-                6: 'mixed-random',
+                6: 'boon-random',
                 7: 'none',
                 8: 'ostro-standard',
                 9: 'ostro-serpentine',
@@ -1603,7 +1603,7 @@
                 15: 'ulichney-weight-serpentine',
                 16: 'fs-tpdf-standard',
                 17: 'fs-tpdf-serpentine',
-                18: 'boon-h2-standard'
+                18: 'boon-h2'
             };
 
             // Map perceptual space values to CLI names
@@ -1713,7 +1713,7 @@
             // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
                 const scaleMethod = parseInt(document.getElementById('scale-method').value) || 13;
-                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest' };
+                const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos3', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos3-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 29: 'bilinear-iterative', 33: 'hybrid-lanczos3' };
                 if (primaryDimension === 'height') {
                     const height = parseInt(document.getElementById('scale-height').value);
                     cmd += ` --height ${height}`;
