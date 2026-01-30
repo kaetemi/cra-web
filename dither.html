@@ -1396,7 +1396,8 @@
             // Palette type: 0=websafe, 1=cga-5153, 2=cga-bios, 3=cga-palette1, 4=cga-palette1-5153
             const paletteType = outputMode === 'palette-cga-5153' ? 1 : outputMode === 'palette-cga-bios' ? 2 : outputMode === 'palette-cga-mode5' ? 3 : outputMode === 'palette-cga-palette1-5153' ? 4 : 0;
             const doDownscale = document.getElementById('downscale-toggle').checked;
-            const scaleMethod = parseInt(document.getElementById('scale-method').value) || 1;
+            const scaleMethodEl = document.getElementById('scale-method');
+            const scaleMethod = scaleMethodEl ? parseInt(scaleMethodEl.value) : 13;
             const isPerceptual = document.getElementById('perceptual-toggle').checked;
             const perceptualSpace = parseInt(document.getElementById('perceptual-space').value);
             const overshootPenalty = document.getElementById('overshoot-penalty-toggle').checked;
@@ -1712,7 +1713,8 @@
 
             // Add resize if downscaling (only primary dimension, other is derived from aspect ratio)
             if (doDownscale) {
-                const scaleMethod = parseInt(document.getElementById('scale-method').value) || 13;
+                const scaleMethodEl = document.getElementById('scale-method');
+                const scaleMethod = scaleMethodEl ? parseInt(scaleMethodEl.value) : 13;
                 const scaleMethodMap = { 0: 'bilinear', 1: 'lanczos3', 2: 'mitchell', 3: 'catmull-rom', 4: 'sinc', 5: 'lanczos3-scatter', 6: 'sinc-scatter', 7: 'lanczos2', 8: 'ewa-sinc-lanczos2', 9: 'ewa-sinc-lanczos3', 12: 'ewa-lanczos2', 13: 'ewa-lanczos3', 14: 'ewa-mitchell', 15: 'ewa-catmull-rom', 16: 'jinc', 17: 'stochastic-jinc', 18: 'stochastic-jinc-scatter', 19: 'stochastic-jinc-scatter-normalized', 20: 'box', 21: 'ewa-lanczos3-sharp', 22: 'ewa-lanczos4-sharpest', 29: 'bilinear-iterative', 33: 'hybrid-lanczos3' };
                 if (primaryDimension === 'height') {
                     const height = parseInt(document.getElementById('scale-height').value);

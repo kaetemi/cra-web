@@ -645,8 +645,8 @@ function processImages() {
     const useWasm = document.getElementById('use-wasm').checked;
     // histogramMode: 0 = binned, 1 = f32 endpoint, 2 = f32 midpoint
     const histogramMode = parseInt(document.getElementById('histogram-mode-select')?.value || '0', 10);
-    // Default: output=2 (Jarvis), histogram=4 (Mixed)
-    const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '2', 10);
+    // Default: output=4 (Boon/Mixed), histogram=4 (Boon/Mixed)
+    const outputDitherMode = parseInt(document.getElementById('output-dither-select')?.value || '4', 10);
     const histogramDitherMode = parseInt(document.getElementById('histogram-dither-select')?.value || '4', 10);
     // Color-aware options
     const colorAwareHistogram = document.getElementById('color-aware-histogram')?.checked || false;
