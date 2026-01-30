@@ -1,20 +1,20 @@
-const CACHE_NAME = 'cra-web-v13';
+const CACHE_NAME = 'cra-web-v14';
 
 // Resources to cache immediately on install
 const PRECACHE_RESOURCES = [
-    '/',
-    '/index.html',
-    '/app.js',
-    '/worker.js',
-    '/wasm/dither.js',
-    '/wasm/dither_bg.wasm',
-    '/assets/forest_plain.png',
-    '/assets/flowers_golden.png',
-    '/scripts/color_correction_basic.py',
-    '/scripts/color_correction_basic_rgb.py',
-    '/scripts/color_correction_cra.py',
-    '/scripts/color_correction_cra_rgb.py',
-    '/scripts/color_correction_tiled.py'
+    './',
+    './index.html',
+    './app.js',
+    './worker.js',
+    './wasm/dither.js',
+    './wasm/dither_bg.wasm',
+    './assets/forest_plain.png',
+    './assets/flowers_golden.png',
+    './scripts/color_correction_basic.py',
+    './scripts/color_correction_basic_rgb.py',
+    './scripts/color_correction_cra.py',
+    './scripts/color_correction_cra_rgb.py',
+    './scripts/color_correction_tiled.py'
 ];
 
 // Install: precache essential resources
