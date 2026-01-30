@@ -129,13 +129,26 @@ def apply_error_1st(buf, bx, y, err, use_jjn, is_rtl):
             apply_fs_ltr(buf, bx, y, err)
 
 
-def create_seeded_buffer_1st(input_image):
-    """Create padded buffer for first-order kernels (reach=2, seed=2)."""
+def create_seeded_buffer_1st(input_image, seed_value=None, wrap_seed=0):
+    """Create padded buffer for first-order kernels.
+
+    Args:
+        input_image: Input image array.
+        seed_value: If not None, fill seed region with this constant instead
+                    of replicating edge pixels.
+        wrap_seed: If > 0, use this many pixels of wrapped content from the
+                   opposite edge to simulate tiling. Overrides seed_value.
+
+    Returns:
+        (buf, sw) where sw is the actual seed width used.
+    """
     height, width = input_image.shape
     r = REACH_1ST
-    total_left = r * 2
-    total_right = r * 2
-    total_top = r
+    sw = wrap_seed if wrap_seed > 0 else r
+
+    total_left = r + sw
+    total_right = r + sw
+    total_top = sw
     total_bottom = r
 
     buf_width = total_left + width + total_right
@@ -147,18 +160,32 @@ def create_seeded_buffer_1st(input_image):
     seed_left_start = r
     seed_right_start = total_left + width
 
-    for sx in range(r):
-        buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
-    for sx in range(r):
-        buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
-    for sy in range(r):
-        for sx in range(r):
-            buf[sy, seed_left_start + sx] = input_image[0, 0]
-        buf[sy, total_left:total_left + width] = input_image[0, :]
-        for sx in range(r):
-            buf[sy, seed_right_start + sx] = input_image[0, -1]
+    if wrap_seed > 0:
+        # Wrap: left seed gets right edge, right seed gets left edge
+        buf[total_top:total_top + height, seed_left_start:seed_left_start + sw] = input_image[:, -sw:]
+        buf[total_top:total_top + height, seed_right_start:seed_right_start + sw] = input_image[:, :sw]
+        # Top seed: bottom edge of image with wrapped corners
+        buf[:total_top, seed_left_start:seed_left_start + sw] = input_image[-sw:, -sw:]
+        buf[:total_top, total_left:total_left + width] = input_image[-sw:, :]
+        buf[:total_top, seed_right_start:seed_right_start + sw] = input_image[-sw:, :sw]
+    elif seed_value is not None:
+        sv = float(seed_value)
+        buf[total_top:total_top + height, seed_left_start:seed_left_start + sw] = sv
+        buf[total_top:total_top + height, seed_right_start:seed_right_start + sw] = sv
+        buf[:total_top, seed_left_start:seed_right_start + sw] = sv
+    else:
+        for sx in range(sw):
+            buf[total_top:total_top + height, seed_left_start + sx] = input_image[:, 0]
+        for sx in range(sw):
+            buf[total_top:total_top + height, seed_right_start + sx] = input_image[:, -1]
+        for sy in range(sw):
+            for sx in range(sw):
+                buf[sy, seed_left_start + sx] = input_image[0, 0]
+            buf[sy, total_left:total_left + width] = input_image[0, :]
+            for sx in range(sw):
+                buf[sy, seed_right_start + sx] = input_image[0, -1]
 
-    return buf
+    return buf, sw
 
 
 # ============================================================================
@@ -337,7 +364,7 @@ def tpdf_threshold(x, y, hashed_seed, amplitude):
     return 0.5 + tpdf * amplitude
 
 
-def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False, method='1st'):
+def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False, tpdf=False, method='1st', seed_value=None, wrap_seed=0):
     """Dither with random spatial transform derived from seed."""
     swap_xy = bool(seed & 1)
     mirror_x = bool(seed & 2)
@@ -346,13 +373,13 @@ def dither_transformed(input_image, bits=1, seed=0, delay=0, return_error=False,
     transformed = transform_image(input_image, swap_xy, mirror_x, mirror_y)
 
     if return_error:
-        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf, method=method)
+        result, error_map = dither(transformed, bits=bits, seed=seed, delay=delay, return_error=True, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed)
         return (
             inverse_transform_image(result, swap_xy, mirror_x, mirror_y),
             inverse_transform_image(error_map, swap_xy, mirror_x, mirror_y),
         )
     else:
-        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf, method=method)
+        result = dither(transformed, bits=bits, seed=seed, delay=delay, tpdf=tpdf, method=method, seed_value=seed_value, wrap_seed=wrap_seed)
         return inverse_transform_image(result, swap_xy, mirror_x, mirror_y)
 
 
@@ -609,11 +636,11 @@ def analyze_ranked_output(rank, output_dir, gray_levels=None):
 
 
 @njit(cache=True)
-def _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error):
+def _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error):
     """JIT inner loop for first-order dither (delay=0 only)."""
     bx_start = r
-    process_height = r + height
-    process_width = r + width + r
+    process_height = sw + height
+    process_width = sw + width + sw
 
     for y in range(process_height):
         is_rtl = y % 2 == 1
@@ -627,8 +654,8 @@ def _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bi
             bx = bx_start + px
             old_val = buf[y, bx]
 
-            img_x = px - r
-            img_y = y - r
+            img_x = px - sw
+            img_y = y - sw
             in_image = (0 <= img_x < width) and (0 <= img_y < height)
 
             if return_error and in_image:
@@ -650,12 +677,12 @@ def _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bi
             apply_error_1st(buf, bx, y, err, use_jjn, is_rtl)
 
 
-def _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error, delay):
+def _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay):
     """Python fallback loop for first-order dither with FIFO delay support."""
     fifo = deque()
     bx_start = r
-    process_height = r + height
-    process_width = r + width + r
+    process_height = sw + height
+    process_width = sw + width + sw
 
     for y in range(process_height):
         is_rtl = y % 2 == 1
@@ -665,8 +692,8 @@ def _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed,
             bx = bx_start + px
             old_val = buf[y, bx]
 
-            img_x = px - r
-            img_y = y - r
+            img_x = px - sw
+            img_y = y - sw
             in_image = (0 <= img_x < width) and (0 <= img_y < height)
 
             if return_error and in_image:
@@ -696,22 +723,22 @@ def _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed,
         apply_error_1st(buf, dbx, dy, derr, d_jjn, d_rtl)
 
 
-def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf):
+def _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=None, wrap_seed=0):
     """First-order mixed FS/JJN with serpentine scanning."""
     height, width = input_image.shape
     r = REACH_1ST
-    buf = create_seeded_buffer_1st(input_image)
+    buf, sw = create_seeded_buffer_1st(input_image, seed_value=seed_value, wrap_seed=wrap_seed)
     hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
     error_map = np.zeros((height, width), dtype=np.float64)
 
-    total_left = r * 2
-    total_top = r
+    total_left = r + sw
+    total_top = sw
 
     if delay == 0:
-        _dither_1st_order_jit_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error)
+        _dither_1st_order_jit_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error)
     else:
-        _dither_1st_order_python_loop(buf, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error, delay)
+        _dither_1st_order_python_loop(buf, error_map, height, width, r, sw, hashed_seed, bits, use_tpdf, return_error, delay)
 
     output = buf[total_top:total_top + height, total_left:total_left + width].copy()
     if return_error:
@@ -877,15 +904,15 @@ def _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf):
     height, width = input_image.shape
     r = REACH_1ST
 
-    buf1 = create_seeded_buffer_1st(input_image)
+    buf1, sw = create_seeded_buffer_1st(input_image)
     buf2 = np.zeros_like(buf1)
 
     hashed_seed = triple32(np.uint32(seed))
     use_tpdf = tpdf and bits == 1
     error_map = np.zeros((height, width), dtype=np.float64)
 
-    total_left = r * 2
-    total_top = r
+    total_left = r + sw
+    total_top = sw
 
     _dither_dual_integrator_jit_loop(buf1, buf2, error_map, height, width, r, hashed_seed, bits, use_tpdf, return_error)
 
@@ -902,7 +929,9 @@ def dither(
     delay: int = 0,
     return_error: bool = False,
     tpdf: bool = False,
-    method: str = '1st'
+    method: str = '1st',
+    seed_value=None,
+    wrap_seed: int = 0
 ):
     """
     Apply error diffusion dithering.
@@ -924,7 +953,7 @@ def dither(
     elif method == 'dual':
         return _dither_dual_integrator(input_image, bits, seed, delay, return_error, tpdf)
     else:
-        return _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf)
+        return _dither_1st_order(input_image, bits, seed, delay, return_error, tpdf, seed_value=seed_value, wrap_seed=wrap_seed)
 
 
 def generate_gradient(width: int, height: int) -> np.ndarray:
@@ -955,6 +984,10 @@ def main():
     parser.add_argument("--method", type=str, default="1st",
                         choices=["1st", "2hh2", "dual"],
                         help="Dither method: 1st (first-order), 2hh2 (2H-H²), dual (dual integrator)")
+    parser.add_argument("--seed-value", type=float, default=None,
+                        help="Fill seed region with this constant instead of replicating edges")
+    parser.add_argument("--wrap-seed", type=int, default=16,
+                        help="Wrap N pixels from opposite edge as seed (simulates tiling, default: 16, 0 to disable)")
     parser.add_argument("--output", "-o", type=str,
                         help="Output path")
 
@@ -1021,7 +1054,7 @@ def main():
         print("Level 0: 1-bit dither of 0.5 gray")
         method = args.method
         print(f"Method: {method}")
-        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
+        result0 = dither_transformed(gray, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
         rank |= (result0 > 0.5).astype(np.int32) << (N - 1)
 
         img0 = Image.fromarray((result0 * 255).astype(np.uint8), mode='L')
@@ -1057,7 +1090,7 @@ def main():
                 input_hi = clean.copy()
                 input_hi[~parent_mask] = 0.0
                 input_hi = input_hi * 0.5
-                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
+                result_hi = dither_transformed(input_hi, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
                 rank[went_high] |= (result_hi > 0.5).astype(np.int32)[went_high] << bit_pos
                 new_nodes.append((result_hi, went_high))
                 total_passes += 1
@@ -1068,7 +1101,7 @@ def main():
                 input_lo = clean.copy()
                 input_lo[~parent_mask] = 1.0
                 input_lo = input_lo * 0.5 + 0.5
-                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method)
+                result_lo = dither_transformed(input_lo, bits=1, seed=get_seed(), tpdf=use_tpdf, method=method, seed_value=args.seed_value, wrap_seed=args.wrap_seed)
                 rank[went_low] |= (result_lo > 0.5).astype(np.int32)[went_low] << bit_pos
                 new_nodes.append((result_lo, went_low))
                 total_passes += 1
