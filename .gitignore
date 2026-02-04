@@ -77,3 +77,4 @@ Thumbs.db
 tools/cie_standard_illuminants_a_d65_spd.csv
 tools/CIE_xyz_1931_2deg.csv
 tools/int_blue_dither
+tools/blue_noise_rng
