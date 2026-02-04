@@ -106,8 +106,8 @@ extern "C" {
 
 /* Per-node error diffusion state */
 typedef struct {
-    float err0;     /* Error for current step */
-    float err1;     /* Error for next step */
+    int32_t err0;   /* Error for current step */
+    int32_t err1;   /* Error for next step (deferred) */
 } BlueNoiseRngState;
 
 /* Blue noise RNG context */
@@ -166,26 +166,19 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
     for (int si = 0; si < num_states; si++) {
         BlueNoiseRngState *s = &rng->states[si];
         for (int w = 0; w < 256; w++) {
-            float pixel = 0.5f + s->err0;
-            float quant_err;
-
-            if (pixel >= 0.5f) {
-                quant_err = pixel - 1.0f;
-            } else {
-                quant_err = pixel;
-            }
+            int output = (s->err0 >= 0) ? 1 : 0;
+            int32_t quant_err = s->err0 + (output ? -1 : 1);
 
             uint32_t hash = blue_noise_rng_hash(
                 (uint32_t)w ^ ((uint32_t)si << 16) ^ seed);
 
             s->err0 = s->err1;
-            s->err1 = 0.0f;
+            s->err1 = 0;
 
             if (hash & 1) {
                 s->err0 += quant_err;
             } else {
-                s->err0 += quant_err * (28.0f / 48.0f);
-                s->err1 += quant_err * (20.0f / 48.0f);
+                s->err1 += quant_err;
             }
         }
     }
@@ -204,7 +197,11 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
     /*
      * Population splitting: traverse binary tree from root to leaf.
      * At each level, a 1D error diffusion ditherer decides high/low
-     * with 50% duty cycle (threshold = 0.5).
+     * at 50% duty cycle. Hash bit selects: forward error immediately
+     * (tight) or defer to t+2 (spread).
+     *
+     * Error is tracked as integers: output = (err0 >= 0), then
+     * quant_err = err0 + (output ? -1 : 1).
      *
      * Tree indexing (heap-style):
      *   Level k, accumulated path v -> index = 2^k - 1 + v
@@ -220,30 +217,19 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
         int idx = (1 << level) - 1 + accumulated;
         BlueNoiseRngState *s = &rng->states[idx];
 
-        float pixel = 0.5f + s->err0;
+        int output = (s->err0 >= 0) ? 1 : 0;
+        int32_t quant_err = s->err0 + (output ? -1 : 1);
 
-        int output;
-        float quant_err;
-
-        if (pixel >= 0.5f) {
-            output = 1;
-            quant_err = pixel - 1.0f;
-        } else {
-            output = 0;
-            quant_err = pixel;
-        }
-
-        /* Shift error buffer and apply diffusion kernel */
+        /* Shift error buffer */
         s->err0 = s->err1;
-        s->err1 = 0.0f;
+        s->err1 = 0;
 
         if ((hash >> level) & 1) {
-            /* Tight kernel: 100% to next */
+            /* Tight: forward error to t+1 */
             s->err0 += quant_err;
         } else {
-            /* Spread kernel: 7/12 and 5/12 */
-            s->err0 += quant_err * (28.0f / 48.0f);
-            s->err1 += quant_err * (20.0f / 48.0f);
+            /* Spread: defer error to t+2 */
+            s->err1 += quant_err;
         }
 
         /* Build output value MSB-first */
