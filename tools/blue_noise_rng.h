@@ -43,10 +43,11 @@
  *
  * MEMORY
  * ======
- * Fixed allocation: 2^N - 1 states x 8 bytes each (max N=8)
- *   bit_depth=1:    1 state  =    8 bytes
- *   bit_depth=4:   15 states =  120 bytes
- *   bit_depth=8:  255 states = 2040 bytes
+ * Fixed allocation: 2^N - 1 states x 2 bytes each (max N=16)
+ *   bit_depth=1:     1 state   =       2 bytes
+ *   bit_depth=4:    15 states  =      30 bytes
+ *   bit_depth=8:   255 states  =     510 bytes
+ *   bit_depth=16: 65535 states = 131,070 bytes
  * Plus 12 bytes overhead (bit_depth, seed, position).
  * No heap allocation required.
  *
@@ -56,10 +57,10 @@
  *
  * Example:
  *   BlueNoiseRng rng;
- *   blue_noise_rng_init(&rng, 8, 12345);  // 8-bit, seed 12345
+ *   blue_noise_rng_init(&rng, 16, 12345);  // 16-bit, seed 12345
  *   for (int i = 0; i < 1000; i++) {
- *       uint8_t val = blue_noise_rng_next(&rng);
- *       // val is 0-255 with blue noise temporal distribution
+ *       uint16_t val = blue_noise_rng_next(&rng);
+ *       // val is 0-65535 with blue noise temporal distribution
  *   }
  *
  * BSD 3-Clause License
@@ -104,30 +105,31 @@ extern "C" {
 #endif
 
 /* Maximum supported bit depth */
-#define BLUE_NOISE_RNG_MAX_DEPTH 8
+#define BLUE_NOISE_RNG_MAX_DEPTH 16
 
 /* Maximum states in binary tree: 2^MAX_DEPTH - 1 */
-#define BLUE_NOISE_RNG_MAX_STATES 255
+#define BLUE_NOISE_RNG_MAX_STATES 65535
 
-/* Per-node error diffusion state (integer error slots) */
+/* Per-node error diffusion state (integer error slots).
+ * Only 5 states are reachable: err0 in {-2,-1,0}, err1 in {-1,0}. */
 typedef struct {
-    int32_t err0;   /* Error for current step (decision: output 1 if >= 0) */
-    int32_t err1;   /* Deferred error for next step */
+    int8_t err0;    /* Error for current step (decision: output 1 if >= 0) */
+    int8_t err1;    /* Deferred error for next step */
 } BlueNoiseRngState;
 
 /* Blue noise RNG context */
 typedef struct {
-    uint8_t bit_depth;      /* Number of output bits (1-8) */
+    uint8_t bit_depth;      /* Number of output bits (1-16) */
     uint32_t seed;          /* Random seed */
     uint32_t position;      /* Position counter for hash */
     BlueNoiseRngState states[BLUE_NOISE_RNG_MAX_STATES];
 } BlueNoiseRng;
 
-/* Initialize RNG. bit_depth: 1-8, seed: any uint32_t */
+/* Initialize RNG. bit_depth: 1-16, seed: any uint32_t */
 void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed);
 
 /* Generate next value. Returns 0 to 2^bit_depth - 1 */
-uint8_t blue_noise_rng_next(BlueNoiseRng *rng);
+uint16_t blue_noise_rng_next(BlueNoiseRng *rng);
 
 /* Reset state (clears error, resets position counter) */
 void blue_noise_rng_reset(BlueNoiseRng *rng);
@@ -184,7 +186,7 @@ void blue_noise_rng_reset(BlueNoiseRng *rng) {
     memset(rng->states, 0, sizeof(rng->states));
 }
 
-uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
+uint16_t blue_noise_rng_next(BlueNoiseRng *rng) {
     /* Single hash provides error routing bits for all levels */
     uint32_t hash = blue_noise_rng_hash(rng->position ^ rng->seed);
     rng->position++;
@@ -205,16 +207,16 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
      *   Level 1: indices 1, 2
      *   Level 2: indices 3, 4, 5, 6
      *   ...
-     *   Level 7: indices 127..254
+     *   Level N-1: indices 2^(N-1)-1 .. 2^N-2
      */
-    int accumulated = 0;
+    uint32_t accumulated = 0;
 
     for (int level = 0; level < rng->bit_depth; level++) {
         int idx = (1 << level) - 1 + accumulated;
         BlueNoiseRngState *s = &rng->states[idx];
 
         int output = (s->err0 >= 0) ? 1 : 0;
-        int32_t quant_err = s->err0 + (output ? -1 : 1);
+        int8_t quant_err = s->err0 + (output ? -1 : 1);
 
         /* Advance error slots: err0 = deferred, err1 = clear */
         s->err0 = s->err1;
@@ -230,7 +232,7 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
         accumulated = accumulated * 2 + output;
     }
 
-    return (uint8_t)accumulated;
+    return (uint16_t)accumulated;
 }
 
 #endif /* BLUE_NOISE_RNG_IMPLEMENTATION */

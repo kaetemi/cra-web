@@ -25,7 +25,7 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  %s <count> [bit_depth] [seed]         Print values and statistics\n", prog);
     fprintf(stderr, "  %s --raw <count> [bit_depth] [seed]   Output raw bytes to stdout\n", prog);
     fprintf(stderr, "\n");
-    fprintf(stderr, "bit_depth: 1-8 (default: 8)\n");
+    fprintf(stderr, "bit_depth: 1-16 (default: 8)\n");
     fprintf(stderr, "seed:      any integer (default: 12345)\n");
 }
 
@@ -43,9 +43,9 @@ static void demo_print(int count, int bit_depth, uint32_t seed) {
     printf("States: %d (2^%d - 1)\n", (1 << bit_depth) - 1, bit_depth);
 
     /* Generate all values */
-    uint8_t *values = (uint8_t *)malloc(count);
+    uint16_t *values = (uint16_t *)malloc(count * sizeof(uint16_t));
     if (!values) {
-        fprintf(stderr, "Failed to allocate %d bytes\n", count);
+        fprintf(stderr, "Failed to allocate %d bytes\n", (int)(count * sizeof(uint16_t)));
         return;
     }
 
@@ -58,7 +58,7 @@ static void demo_print(int count, int bit_depth, uint32_t seed) {
     printf("\nFirst %d values:", show);
     for (int i = 0; i < show; i++) {
         if (i % 20 == 0) printf("\n  ");
-        printf("%3d ", values[i]);
+        printf("%5d ", values[i]);
     }
     printf("\n");
 
@@ -153,8 +153,13 @@ static void demo_raw(int count, int bit_depth, uint32_t seed) {
     blue_noise_rng_init(&rng, (uint8_t)bit_depth, seed);
 
     for (int i = 0; i < count; i++) {
-        uint8_t val = blue_noise_rng_next(&rng);
-        fwrite(&val, 1, 1, stdout);
+        uint16_t val = blue_noise_rng_next(&rng);
+        if (bit_depth <= 8) {
+            uint8_t byte = (uint8_t)val;
+            fwrite(&byte, 1, 1, stdout);
+        } else {
+            fwrite(&val, 2, 1, stdout);
+        }
     }
 }
 
@@ -185,8 +190,8 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: count must be positive\n");
         return 1;
     }
-    if (bit_depth < 1 || bit_depth > 8) {
-        fprintf(stderr, "Error: bit_depth must be 1-8\n");
+    if (bit_depth < 1 || bit_depth > 16) {
+        fprintf(stderr, "Error: bit_depth must be 1-16\n");
         return 1;
     }
 

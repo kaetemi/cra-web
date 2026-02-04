@@ -48,7 +48,10 @@ def blue_noise_rng(count, bit_depth, seed):
         print(f"Error running blue_noise_rng: {result.stderr.decode()}", file=sys.stderr)
         sys.exit(1)
 
-    return np.frombuffer(result.stdout, dtype=np.uint8).astype(np.int32)
+    if bit_depth <= 8:
+        return np.frombuffer(result.stdout, dtype=np.uint8).astype(np.int32)
+    else:
+        return np.frombuffer(result.stdout, dtype=np.uint16).astype(np.int32)
 
 # =============================================================================
 # White noise reference
@@ -245,40 +248,64 @@ def generate_reference_blue_noise(count, seed=42):
     return np.clip(np.round(blue), 0, 255).astype(np.uint8)
 
 
-def generate_wav(seed, output_dir):
+def generate_wav(seed, output_dir, bits=8):
     """Generate 30-second WAV files at 8kHz and 48kHz: our RNG, reference blue noise, white noise."""
     import wave
+
+    sample_width = bits // 8
+    bit_depth = bits
+    max_val = (1 << bit_depth) - 1
 
     def write_wav(path, data, sr):
         with wave.open(str(path), 'wb') as w:
             w.setnchannels(1)
-            w.setsampwidth(1)  # 8-bit unsigned PCM
+            w.setsampwidth(sample_width)
             w.setframerate(sr)
             w.writeframes(data)
+
+    def to_pcm(unsigned_data):
+        """Convert unsigned integer data to WAV PCM format."""
+        if bits == 8:
+            # 8-bit WAV is unsigned (0-255)
+            return unsigned_data.astype(np.uint8).tobytes()
+        else:
+            # 16-bit WAV is signed: offset unsigned to signed
+            pcm16 = (unsigned_data.astype(np.int32) - 32768).astype(np.int16)
+            return pcm16.tobytes()
+
+    suffix = f'_{bits}bit' if bits != 8 else ''
 
     for sr, name in [(8000, '8k'), (48000, '48k')]:
         count = sr * 30
 
         # Our blue noise RNG
-        print(f"  blue_noise_rng_{name}.wav ({sr}Hz)...", end="", flush=True)
-        sig = blue_noise_rng(count, 8, seed)
-        write_wav(output_dir / f'blue_noise_rng_{name}.wav',
-                  sig.astype(np.uint8).tobytes(), sr)
+        print(f"  blue_noise_rng_{name}{suffix}.wav ({sr}Hz, {bits}-bit)...", end="", flush=True)
+        sig = blue_noise_rng(count, bit_depth, seed)
+        write_wav(output_dir / f'blue_noise_rng_{name}{suffix}.wav',
+                  to_pcm(sig), sr)
         print(" done")
 
         # Reference: filtered white noise with +6 dB/oct
-        print(f"  ref_blue_noise_{name}.wav ({sr}Hz)...", end="", flush=True)
-        ref = generate_reference_blue_noise(count, seed=42)
-        write_wav(output_dir / f'ref_blue_noise_{name}.wav',
-                  ref.tobytes(), sr)
+        print(f"  ref_blue_noise_{name}{suffix}.wav ({sr}Hz, {bits}-bit)...", end="", flush=True)
+        rng_ref = np.random.default_rng(42)
+        white = rng_ref.standard_normal(count)
+        fft = np.fft.rfft(white)
+        freqs = np.fft.rfftfreq(count)
+        freqs[0] = 1e-10
+        fft *= freqs
+        blue = np.fft.irfft(fft, n=count)
+        blue = (blue - blue.min()) / (blue.max() - blue.min()) * max_val
+        ref = np.clip(np.round(blue), 0, max_val).astype(np.int32)
+        write_wav(output_dir / f'ref_blue_noise_{name}{suffix}.wav',
+                  to_pcm(ref), sr)
         print(" done")
 
         # Reference: white noise
-        print(f"  ref_white_noise_{name}.wav ({sr}Hz)...", end="", flush=True)
+        print(f"  ref_white_noise_{name}{suffix}.wav ({sr}Hz, {bits}-bit)...", end="", flush=True)
         rng_wn = np.random.default_rng(42)
-        wn = rng_wn.integers(0, 256, size=count, dtype=np.uint8)
-        write_wav(output_dir / f'ref_white_noise_{name}.wav',
-                  wn.tobytes(), sr)
+        wn = rng_wn.integers(0, max_val + 1, size=count)
+        write_wav(output_dir / f'ref_white_noise_{name}{suffix}.wav',
+                  to_pcm(wn), sr)
         print(" done")
 
 
@@ -292,6 +319,8 @@ def main():
                         help='RNG seed (default: 12345)')
     parser.add_argument('--wav', action='store_true',
                         help='Generate 30s WAV files (8kHz and 48kHz, 8-bit)')
+    parser.add_argument('--wav16', action='store_true',
+                        help='Generate 30s WAV files (8kHz and 48kHz, 16-bit signed)')
     args = parser.parse_args()
 
     output_dir = Path(__file__).parent / 'test_images' / 'analysis'
@@ -300,8 +329,12 @@ def main():
     analyze_bit_depths(args.count, args.seed, output_dir)
 
     if args.wav:
-        print("\nGenerating WAV files:")
-        generate_wav(args.seed, output_dir)
+        print("\nGenerating 8-bit WAV files:")
+        generate_wav(args.seed, output_dir, bits=8)
+
+    if args.wav16:
+        print("\nGenerating 16-bit WAV files:")
+        generate_wav(args.seed, output_dir, bits=16)
 
     print(f"\nDone! Results in {output_dir}")
 
