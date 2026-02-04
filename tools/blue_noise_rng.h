@@ -186,8 +186,8 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
             if (hash & 1) {
                 s->err0 += quant_err;
             } else {
-                s->err0 += (quant_err * 38) / 48;
-                s->err1 += (quant_err * 10) / 48;
+                s->err0 += (quant_err * 28) / 48;
+                s->err1 += (quant_err * 20) / 48;
             }
         }
     }
@@ -248,9 +248,9 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
             /* Tight kernel: 100% to next (48/48) */
             s->err0 += quant_err;
         } else {
-            /* Spread kernel: 38:10 ratio (~4:1) */
-            s->err0 += (quant_err * 38) / 48;
-            s->err1 += (quant_err * 10) / 48;
+            /* Spread kernel: 28:20 ratio (~3:2) */
+            s->err0 += (quant_err * 28) / 48;
+            s->err1 += (quant_err * 20) / 48;
         }
 
         /* Build output value MSB-first */

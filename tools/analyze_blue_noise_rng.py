@@ -69,8 +69,8 @@ def _warmup_states(err0, err1, bit_depth, seed):
             if h & 1:
                 err0[si] = old_err1 + quant_err
             else:
-                err0[si] = old_err1 + (quant_err * 38) // 48
-                err1[si] = (quant_err * 10) // 48
+                err0[si] = old_err1 + (quant_err * 28) // 48
+                err1[si] = (quant_err * 20) // 48
 
 
 @njit(cache=True)
@@ -113,8 +113,8 @@ def blue_noise_rng(count, bit_depth, seed):
             if (h >> level) & 1:
                 err0[idx] = old_err1 + quant_err
             else:
-                err0[idx] = old_err1 + (quant_err * 38) // 48
-                err1[idx] = (quant_err * 10) // 48
+                err0[idx] = old_err1 + (quant_err * 28) // 48
+                err1[idx] = (quant_err * 20) // 48
 
             accumulated = accumulated * 2 + bit_out
 
@@ -299,6 +299,61 @@ def analyze_bit_depths(count, seed, output_dir):
     print(f"  {'Ideal':>6} {'':>10} {'+6.0 dB/oct':>12}")
 
 
+def generate_reference_blue_noise(count, seed=42):
+    """Generate ideal blue noise by filtering white noise with +6 dB/oct slope."""
+    rng = np.random.default_rng(seed)
+    white = rng.standard_normal(count)
+
+    # FFT, multiply amplitude by f for +6 dB/oct power spectrum
+    fft = np.fft.rfft(white)
+    freqs = np.fft.rfftfreq(count)
+    freqs[0] = 1e-10  # avoid DC
+    fft *= freqs
+
+    blue = np.fft.irfft(fft, n=count)
+
+    # Normalize to 0-255
+    blue = (blue - blue.min()) / (blue.max() - blue.min()) * 255
+    return np.clip(np.round(blue), 0, 255).astype(np.uint8)
+
+
+def generate_wav(seed, output_dir):
+    """Generate 30-second WAV files at 8kHz and 48kHz: our RNG, reference blue noise, white noise."""
+    import wave
+
+    def write_wav(path, data, sr):
+        with wave.open(str(path), 'wb') as w:
+            w.setnchannels(1)
+            w.setsampwidth(1)  # 8-bit unsigned PCM
+            w.setframerate(sr)
+            w.writeframes(data)
+
+    for sr, name in [(8000, '8k'), (48000, '48k')]:
+        count = sr * 30
+
+        # Our blue noise RNG
+        print(f"  blue_noise_rng_{name}.wav ({sr}Hz)...", end="", flush=True)
+        sig = blue_noise_rng(count, 8, seed)
+        write_wav(output_dir / f'blue_noise_rng_{name}.wav',
+                  sig.astype(np.uint8).tobytes(), sr)
+        print(" done")
+
+        # Reference: filtered white noise with +6 dB/oct
+        print(f"  ref_blue_noise_{name}.wav ({sr}Hz)...", end="", flush=True)
+        ref = generate_reference_blue_noise(count, seed=42)
+        write_wav(output_dir / f'ref_blue_noise_{name}.wav',
+                  ref.tobytes(), sr)
+        print(" done")
+
+        # Reference: white noise
+        print(f"  ref_white_noise_{name}.wav ({sr}Hz)...", end="", flush=True)
+        rng_wn = np.random.default_rng(42)
+        wn = rng_wn.integers(0, 256, size=count, dtype=np.uint8)
+        write_wav(output_dir / f'ref_white_noise_{name}.wav',
+                  wn.tobytes(), sr)
+        print(" done")
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Analyze blue noise RNG spectrum across bit depths'
@@ -307,12 +362,19 @@ def main():
                         help='Sample count (default: 131072)')
     parser.add_argument('--seed', type=int, default=12345,
                         help='RNG seed (default: 12345)')
+    parser.add_argument('--wav', action='store_true',
+                        help='Generate 30s WAV files (8kHz and 48kHz, 8-bit)')
     args = parser.parse_args()
 
     output_dir = Path(__file__).parent / 'test_images' / 'analysis'
     output_dir.mkdir(parents=True, exist_ok=True)
 
     analyze_bit_depths(args.count, args.seed, output_dir)
+
+    if args.wav:
+        print("\nGenerating WAV files:")
+        generate_wav(args.seed, output_dir)
+
     print(f"\nDone! Results in {output_dir}")
 
 
