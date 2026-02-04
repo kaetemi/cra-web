@@ -18,109 +18,37 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from pathlib import Path
 import argparse
-
-try:
-    from numba import njit
-except ImportError:
-    def njit(*args, **kwargs):
-        if len(args) == 1 and callable(args[0]):
-            return args[0]
-        def wrapper(func):
-            return func
-        return wrapper
+import subprocess
+import sys
 
 # =============================================================================
-# Hash function (matches C implementation)
+# Blue noise RNG - calls the C binary
 # =============================================================================
 
-@njit(cache=True)
-def lowbias32(x):
-    """lowbias32 hash - matches blue_noise_rng.h / blue_dither.h."""
-    x = x & 0xFFFFFFFF
-    x ^= (x >> 16)
-    x = (x * 0x21f0aaad) & 0xFFFFFFFF
-    x ^= (x >> 15)
-    x = (x * 0x735a2d97) & 0xFFFFFFFF
-    x ^= (x >> 15)
-    return x
+# Path to compiled C binary (next to this script)
+_BIN_PATH = Path(__file__).parent / 'blue_noise_rng'
 
-# =============================================================================
-# Blue noise RNG (matches C implementation)
-# =============================================================================
-
-@njit(cache=True)
-def _warmup_states(err0, err1, bit_depth, seed):
-    """Run each state through 256 error diffusion steps to fill error buffers."""
-    num_states = (1 << bit_depth) - 1
-    for si in range(num_states):
-        for w in range(256):
-            pixel = 128 * 48 + err0[si]
-            if pixel >= 6120:
-                quant_err = pixel - 12240
-            else:
-                quant_err = pixel
-
-            h = lowbias32((w & 0xFFFFFFFF) ^ ((si << 16) & 0xFFFFFFFF)
-                          ^ (seed & 0xFFFFFFFF))
-
-            old_err1 = err1[si]
-            err1[si] = 0
-
-            if h & 1:
-                err0[si] = old_err1 + quant_err
-            else:
-                err0[si] = old_err1 + (quant_err * 28) // 48
-                err1[si] = (quant_err * 20) // 48
-
-
-@njit(cache=True)
 def blue_noise_rng(count, bit_depth, seed):
     """
-    Blue noise RNG - matches blue_noise_rng.h implementation.
+    Generate blue noise RNG output by calling the C binary in --raw mode.
 
-    Population splitting with binary tree of 1D error diffusion states.
-    Each output traverses N levels (one per bit), each deciding high/low
-    via error diffusion at 50% duty cycle. All states are warmed up with
-    256 individual error diffusion steps during init.
+    This ensures the analysis tests the actual C implementation rather than
+    a Python reimplementation that could diverge.
     """
-    err0 = np.zeros(255, dtype=np.int64)
-    err1 = np.zeros(255, dtype=np.int64)
+    if not _BIN_PATH.exists():
+        print(f"Error: C binary not found at {_BIN_PATH}", file=sys.stderr)
+        print(f"Build it with: gcc -O2 -o tools/blue_noise_rng tools/blue_noise_rng.c -lm", file=sys.stderr)
+        sys.exit(1)
 
-    # Warmup: 256 steps per state (matches C init)
-    _warmup_states(err0, err1, bit_depth, seed)
+    result = subprocess.run(
+        [str(_BIN_PATH), '--raw', str(count), str(bit_depth), str(seed)],
+        capture_output=True
+    )
+    if result.returncode != 0:
+        print(f"Error running blue_noise_rng: {result.stderr.decode()}", file=sys.stderr)
+        sys.exit(1)
 
-    output = np.zeros(count, dtype=np.int32)
-
-    for i in range(count):
-        h = lowbias32((i & 0xFFFFFFFF) ^ (seed & 0xFFFFFFFF))
-
-        accumulated = 0
-        for level in range(bit_depth):
-            idx = (1 << level) - 1 + accumulated
-
-            pixel = 128 * 48 + err0[idx]
-
-            if pixel >= 6120:
-                bit_out = 1
-                quant_err = pixel - 12240
-            else:
-                bit_out = 0
-                quant_err = pixel
-
-            old_err1 = err1[idx]
-            err1[idx] = 0
-
-            if (h >> level) & 1:
-                err0[idx] = old_err1 + quant_err
-            else:
-                err0[idx] = old_err1 + (quant_err * 28) // 48
-                err1[idx] = (quant_err * 20) // 48
-
-            accumulated = accumulated * 2 + bit_out
-
-        output[i] = accumulated
-
-    return output
+    return np.frombuffer(result.stdout, dtype=np.uint8).astype(np.int32)
 
 # =============================================================================
 # White noise reference

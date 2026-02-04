@@ -1,8 +1,7 @@
 /*
  * blue_noise_rng.h - Blue noise random number generator
  *
- * Single-header library for generating blue noise distributed random integers
- * using integer arithmetic only. Suitable for embedded systems.
+ * Single-header library for generating blue noise distributed random integers.
  *
  * THE TECHNIQUE
  * =============
@@ -20,8 +19,8 @@
  *   Total: 2^N - 1 ditherer states
  *
  * Each ditherer uses the mixed-kernel 1D blue noise technique from
- * blue_dither.h: randomly selecting between a tight [48] kernel and a
- * spread [38,10] kernel (~4:1 ratio) using lowbias32 hash bits.
+ * blue_dither.h: randomly selecting between a tight [1] kernel and a
+ * spread [7/12, 5/12] kernel using lowbias32 hash bits.
  *
  * EFFICIENCY
  * ==========
@@ -35,7 +34,6 @@
  * - Nearly uniform distribution over the output range
  * - Blue noise temporal autocorrelation (consecutive values repel)
  * - Scale-invariant: thresholding output at any level gives blue noise
- * - Integer-only arithmetic (no floating point)
  * - MSB has strongest blue noise property (most samples per state)
  *
  * MEMORY
@@ -108,8 +106,8 @@ extern "C" {
 
 /* Per-node error diffusion state */
 typedef struct {
-    int32_t err0;   /* Error for current step */
-    int32_t err1;   /* Error for next step */
+    float err0;     /* Error for current step */
+    float err1;     /* Error for next step */
 } BlueNoiseRngState;
 
 /* Blue noise RNG context */
@@ -168,11 +166,11 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
     for (int si = 0; si < num_states; si++) {
         BlueNoiseRngState *s = &rng->states[si];
         for (int w = 0; w < 256; w++) {
-            int32_t pixel = 128 * 48 + s->err0;
-            int32_t quant_err;
+            float pixel = 0.5f + s->err0;
+            float quant_err;
 
-            if (pixel >= 6120) {
-                quant_err = pixel - 12240;
+            if (pixel >= 0.5f) {
+                quant_err = pixel - 1.0f;
             } else {
                 quant_err = pixel;
             }
@@ -181,13 +179,13 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
                 (uint32_t)w ^ ((uint32_t)si << 16) ^ seed);
 
             s->err0 = s->err1;
-            s->err1 = 0;
+            s->err1 = 0.0f;
 
             if (hash & 1) {
                 s->err0 += quant_err;
             } else {
-                s->err0 += (quant_err * 28) / 48;
-                s->err1 += (quant_err * 20) / 48;
+                s->err0 += quant_err * (28.0f / 48.0f);
+                s->err1 += quant_err * (20.0f / 48.0f);
             }
         }
     }
@@ -206,7 +204,7 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
     /*
      * Population splitting: traverse binary tree from root to leaf.
      * At each level, a 1D error diffusion ditherer decides high/low
-     * with 50% duty cycle (brightness = 128).
+     * with 50% duty cycle (threshold = 0.5).
      *
      * Tree indexing (heap-style):
      *   Level k, accumulated path v -> index = 2^k - 1 + v
@@ -215,11 +213,6 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
      *   Level 2: indices 3, 4, 5, 6
      *   ...
      *   Level 7: indices 127..254
-     *
-     * Scale: all values in 48ths (LCM of FS=16 and JJN=48)
-     *   brightness 128 -> 128 * 48 = 6144
-     *   threshold 127.5 -> 127.5 * 48 = 6120
-     *   white 255 -> 255 * 48 = 12240
      */
     int accumulated = 0;
 
@@ -227,14 +220,14 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
         int idx = (1 << level) - 1 + accumulated;
         BlueNoiseRngState *s = &rng->states[idx];
 
-        int32_t pixel = 128 * 48 + s->err0;
+        float pixel = 0.5f + s->err0;
 
         int output;
-        int32_t quant_err;
+        float quant_err;
 
-        if (pixel >= 6120) {
+        if (pixel >= 0.5f) {
             output = 1;
-            quant_err = pixel - 12240;
+            quant_err = pixel - 1.0f;
         } else {
             output = 0;
             quant_err = pixel;
@@ -242,15 +235,15 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
 
         /* Shift error buffer and apply diffusion kernel */
         s->err0 = s->err1;
-        s->err1 = 0;
+        s->err1 = 0.0f;
 
         if ((hash >> level) & 1) {
-            /* Tight kernel: 100% to next (48/48) */
+            /* Tight kernel: 100% to next */
             s->err0 += quant_err;
         } else {
-            /* Spread kernel: 28:20 ratio (~3:2) */
-            s->err0 += (quant_err * 28) / 48;
-            s->err1 += (quant_err * 20) / 48;
+            /* Spread kernel: 7/12 and 5/12 */
+            s->err0 += quant_err * (28.0f / 48.0f);
+            s->err1 += quant_err * (20.0f / 48.0f);
         }
 
         /* Build output value MSB-first */
