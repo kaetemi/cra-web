@@ -2,6 +2,7 @@
  * blue_noise_rng.h - Blue noise random number generator
  *
  * Single-header library for generating blue noise distributed random integers.
+ * Uses only integer arithmetic (no floats, no division).
  *
  * THE TECHNIQUE
  * =============
@@ -18,15 +19,18 @@
  *   Level N-1: 2^(N-1) ditherers determine the LSB
  *   Total: 2^N - 1 ditherer states
  *
- * Each ditherer uses the mixed-kernel 1D blue noise technique from
- * blue_dither.h: randomly selecting between a tight [1] kernel and a
- * spread [7/12, 5/12] kernel using lowbias32 hash bits.
+ * Each ditherer tracks two integer error slots (err0, err1). The output
+ * decision is: output = (err0 >= 0) ? 1 : 0. The quantization error is
+ * then routed based on a hash bit: either forwarded to t+1 (tight) or
+ * deferred to t+2 (spread). A single lowbias32 hash per output provides
+ * the routing bits for all N levels.
  *
  * EFFICIENCY
  * ==========
  * Each output value only processes N states (one per bit level), traversing
  * a single root-to-leaf path in the binary tree. A single lowbias32 hash
- * per output provides kernel selection bits for all N levels.
+ * per output provides routing bits for all N levels. All arithmetic is
+ * integer addition and comparison only.
  *
  * PROPERTIES
  * ==========
@@ -35,6 +39,7 @@
  * - Blue noise temporal autocorrelation (consecutive values repel)
  * - Scale-invariant: thresholding output at any level gives blue noise
  * - MSB has strongest blue noise property (most samples per state)
+ * - Integer-only arithmetic: no floats, no division
  *
  * MEMORY
  * ======
@@ -104,10 +109,10 @@ extern "C" {
 /* Maximum states in binary tree: 2^MAX_DEPTH - 1 */
 #define BLUE_NOISE_RNG_MAX_STATES 255
 
-/* Per-node error diffusion state */
+/* Per-node error diffusion state (integer error slots) */
 typedef struct {
-    int32_t err0;   /* Error for current step */
-    int32_t err1;   /* Error for next step (deferred) */
+    int32_t err0;   /* Error for current step (decision: output 1 if >= 0) */
+    int32_t err1;   /* Deferred error for next step */
 } BlueNoiseRngState;
 
 /* Blue noise RNG context */
@@ -127,7 +132,7 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng);
 /* Reset state (clears error, resets position counter) */
 void blue_noise_rng_reset(BlueNoiseRng *rng);
 
-/* Utility: lowbias32 hash function (same as blue_dither.h) */
+/* Utility: lowbias32 hash function */
 static inline uint32_t blue_noise_rng_hash(uint32_t x) {
     x ^= x >> 16;
     x *= 0x21f0aaad;
@@ -157,11 +162,11 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
     memset(rng->states, 0, sizeof(rng->states));
 
     /* Warmup: run each state individually through 256 error diffusion
-     * steps at 50% duty cycle. This fills the error buffers so the first
+     * steps at 50% duty cycle. This fills the error slots so the first
      * outputs don't exhibit the cold-start pattern (all states at zero
      * error produce a deterministic sequence).
      * Hash uses (warmup_step, state_index, seed) to give each state a
-     * unique kernel selection sequence during warmup. */
+     * unique routing sequence during warmup. */
     int num_states = (1 << bit_depth) - 1;
     for (int si = 0; si < num_states; si++) {
         BlueNoiseRngState *s = &rng->states[si];
@@ -190,18 +195,19 @@ void blue_noise_rng_reset(BlueNoiseRng *rng) {
 }
 
 uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
-    /* Single hash provides kernel selection bits for all levels */
+    /* Single hash provides error routing bits for all levels */
     uint32_t hash = blue_noise_rng_hash(rng->position ^ rng->seed);
     rng->position++;
 
     /*
      * Population splitting: traverse binary tree from root to leaf.
      * At each level, a 1D error diffusion ditherer decides high/low
-     * at 50% duty cycle. Hash bit selects: forward error immediately
-     * (tight) or defer to t+2 (spread).
+     * at 50% duty cycle. The hash bit routes the quantization error:
+     *   bit=1: forward error to t+1 (tight)
+     *   bit=0: defer error to t+2 (spread)
      *
-     * Error is tracked as integers: output = (err0 >= 0), then
-     * quant_err = err0 + (output ? -1 : 1).
+     * Decision: output = (err0 >= 0) ? 1 : 0
+     * Quantization error: qe = err0 + (output ? -1 : 1)
      *
      * Tree indexing (heap-style):
      *   Level k, accumulated path v -> index = 2^k - 1 + v
@@ -220,16 +226,14 @@ uint8_t blue_noise_rng_next(BlueNoiseRng *rng) {
         int output = (s->err0 >= 0) ? 1 : 0;
         int32_t quant_err = s->err0 + (output ? -1 : 1);
 
-        /* Shift error buffer */
+        /* Advance error slots: err0 = deferred, err1 = clear */
         s->err0 = s->err1;
         s->err1 = 0;
 
         if ((hash >> level) & 1) {
-            /* Tight: forward error to t+1 */
-            s->err0 += quant_err;
+            s->err0 += quant_err;  /* Forward to t+1 */
         } else {
-            /* Spread: defer error to t+2 */
-            s->err1 += quant_err;
+            s->err1 += quant_err;  /* Defer to t+2 */
         }
 
         /* Build output value MSB-first */
