@@ -49,16 +49,46 @@ def lowbias32(x):
 # =============================================================================
 
 @njit(cache=True)
+def _warmup_states(err0, err1, bit_depth, seed):
+    """Run each state through 256 error diffusion steps to fill error buffers."""
+    num_states = (1 << bit_depth) - 1
+    for si in range(num_states):
+        for w in range(256):
+            pixel = 128 * 48 + err0[si]
+            if pixel >= 6120:
+                quant_err = pixel - 12240
+            else:
+                quant_err = pixel
+
+            h = lowbias32((w & 0xFFFFFFFF) ^ ((si << 16) & 0xFFFFFFFF)
+                          ^ (seed & 0xFFFFFFFF))
+
+            old_err1 = err1[si]
+            err1[si] = 0
+
+            if h & 1:
+                err0[si] = old_err1 + quant_err
+            else:
+                err0[si] = old_err1 + (quant_err * 38) // 48
+                err1[si] = (quant_err * 10) // 48
+
+
+@njit(cache=True)
 def blue_noise_rng(count, bit_depth, seed):
     """
     Blue noise RNG - matches blue_noise_rng.h implementation.
 
     Population splitting with binary tree of 1D error diffusion states.
     Each output traverses N levels (one per bit), each deciding high/low
-    via error diffusion at 50% duty cycle.
+    via error diffusion at 50% duty cycle. All states are warmed up with
+    256 individual error diffusion steps during init.
     """
     err0 = np.zeros(255, dtype=np.int64)
     err1 = np.zeros(255, dtype=np.int64)
+
+    # Warmup: 256 steps per state (matches C init)
+    _warmup_states(err0, err1, bit_depth, seed)
+
     output = np.zeros(count, dtype=np.int32)
 
     for i in range(count):

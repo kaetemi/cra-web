@@ -157,6 +157,40 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
     rng->seed = seed;
     rng->position = 0;
     memset(rng->states, 0, sizeof(rng->states));
+
+    /* Warmup: run each state individually through 256 error diffusion
+     * steps at 50% duty cycle. This fills the error buffers so the first
+     * outputs don't exhibit the cold-start pattern (all states at zero
+     * error produce a deterministic sequence).
+     * Hash uses (warmup_step, state_index, seed) to give each state a
+     * unique kernel selection sequence during warmup. */
+    int num_states = (1 << bit_depth) - 1;
+    for (int si = 0; si < num_states; si++) {
+        BlueNoiseRngState *s = &rng->states[si];
+        for (int w = 0; w < 256; w++) {
+            int32_t pixel = 128 * 48 + s->err0;
+            int32_t quant_err;
+
+            if (pixel >= 6120) {
+                quant_err = pixel - 12240;
+            } else {
+                quant_err = pixel;
+            }
+
+            uint32_t hash = blue_noise_rng_hash(
+                (uint32_t)w ^ ((uint32_t)si << 16) ^ seed);
+
+            s->err0 = s->err1;
+            s->err1 = 0;
+
+            if (hash & 1) {
+                s->err0 += quant_err;
+            } else {
+                s->err0 += (quant_err * 38) / 48;
+                s->err1 += (quant_err * 10) / 48;
+            }
+        }
+    }
 }
 
 void blue_noise_rng_reset(BlueNoiseRng *rng) {
