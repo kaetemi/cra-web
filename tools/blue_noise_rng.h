@@ -161,31 +161,21 @@ void blue_noise_rng_init(BlueNoiseRng *rng, uint8_t bit_depth, uint32_t seed) {
     rng->position = 0;
     memset(rng->states, 0, sizeof(rng->states));
 
-    /* Warmup: run each state individually through 256 error diffusion
-     * steps at 50% duty cycle. This fills the error slots so the first
-     * outputs don't exhibit the cold-start pattern (all states at zero
-     * error produce a deterministic sequence).
-     * Hash uses (warmup_step, state_index, seed) to give each state a
-     * unique routing sequence during warmup. */
+    /* The error diffusion state machine has exactly 5 reachable states
+     * with stationary distribution 3:3:2:1:1 (out of 10). Initialize
+     * each node to a random reachable state matching the distribution. */
+    static const int8_t init_states[10][2] = {
+        { 0,  0}, { 0,  0}, { 0,  0},   /* 3/10 */
+        {-1,  0}, {-1,  0}, {-1,  0},   /* 3/10 */
+        { 0, -1}, { 0, -1},             /* 2/10 */
+        {-2,  0},                        /* 1/10 */
+        {-1, -1},                        /* 1/10 */
+    };
     int num_states = (1 << bit_depth) - 1;
     for (int si = 0; si < num_states; si++) {
-        BlueNoiseRngState *s = &rng->states[si];
-        for (int w = 0; w < 256; w++) {
-            int output = (s->err0 >= 0) ? 1 : 0;
-            int32_t quant_err = s->err0 + (output ? -1 : 1);
-
-            uint32_t hash = blue_noise_rng_hash(
-                (uint32_t)w ^ ((uint32_t)si << 16) ^ seed);
-
-            s->err0 = s->err1;
-            s->err1 = 0;
-
-            if (hash & 1) {
-                s->err0 += quant_err;
-            } else {
-                s->err1 += quant_err;
-            }
-        }
+        uint32_t h = blue_noise_rng_hash((uint32_t)si ^ seed) % 10;
+        rng->states[si].err0 = init_states[h][0];
+        rng->states[si].err1 = init_states[h][1];
     }
 }
 
