@@ -4,13 +4,13 @@ Tools for generating test images and analyzing dithering algorithm quality.
 
 ## Environment
 
-- Python virtual environment: `/root/venv/bin/activate`
-- CRA binary: `/root/cra-web/port/target/release/cra`
+- Python virtual environment: `/home/kaetemi/venv/bin/activate`
+- CRA binary: `/home/kaetemi/cra-web/port/target/release/cra`
 
 ### Python Dependencies
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 pip install numpy pillow matplotlib numba
 ```
 
@@ -31,7 +31,7 @@ Generates synthetic test images and downloads reference images for dithering exp
 - `david.png`, `gradient.png`, `gradient_steps.png` - Reference images (downloaded)
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/generate_test_images.py
 ```
 
@@ -46,7 +46,7 @@ Generates 1-bit noise images using various hash functions for spectral compariso
 Hash functions tested: Wang, Double Wang, Triple32, Lowbias32, Lowbias32_old, xxHash32, IQ Int1, IQ Int3, Murmur3, PCG, SplitMix32, Xorshift32, LCG, NumPy random.
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/generate_rng_noise.py
 ```
 
@@ -85,7 +85,7 @@ Generates Fourier analysis charts (like Zhou-Fang paper Figure 5):
 - `rng_noise_*.png` - RNG spectral analysis
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/analyze_dither.py --serpentine   # All images, serpentine modes
 python tools/analyze_dither.py --compare      # All images, all modes
 python tools/analyze_dither.py --hash         # Hash function comparison (lowbias32 vs wang)
@@ -121,7 +121,7 @@ Generates 1-bit dithered images from arbitrary gray levels (including fractional
 **Note:** Simplified implementation without edge seeding. Produces equivalent spectral characteristics but not exact pixel match with CRA tool.
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/our_method_dither.py 127.5                    # 50% gray
 python tools/our_method_dither.py 64 -o my_output.png      # 25% gray, custom output
 python tools/our_method_dither.py 127.5 --size 512         # Larger image
@@ -224,7 +224,7 @@ All charts use log frequency scale to clearly show noise shaping characteristics
 - `spectrum_1d_top8_kernels_sum*.png` - Top 8 kernels for specific kernel sums
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/analyze_1d_dither.py              # All analyses
 python tools/analyze_1d_dither.py --log        # Log-scale only
 python tools/analyze_1d_dither.py --low-gray   # Focus on low gray levels (1,2,5,10,20,42,64,85,127)
@@ -261,7 +261,7 @@ Sum=48 with kernel [46,2] achieves the highest average and minimum spectral slop
 **Output:** `spectrum_1d_kernel_comparison.png`
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/analyze_1d_kernels.py
 ```
 
@@ -272,7 +272,7 @@ Tests all prime pairs [p, q] where p + q = 48 for spectral quality.
 **Output:** `spectrum_1d_prime_pairs.png`
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/experiments/analyze_1d_prime_pairs.py
 ```
 
@@ -295,7 +295,7 @@ Where K is a constant:
 **Output:** `principal_frequency_comparison.png`
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/principal_frequency_comparison.py
 ```
 
@@ -315,7 +315,7 @@ Note: This is a theoretical model, not necessarily what empirical blue noise loo
 **Output:** `spectrum_shape_comparison.png`
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/spectrum_shape_comparison.py
 ```
 
@@ -334,7 +334,7 @@ In graphics, "blue noise" refers to noise with steep low-frequency suppression, 
 - `noise_color_comparison_linear.png` - Linear frequency scale
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/noise_color_comparison.py          # Both charts
 python tools/noise_color_comparison.py --log    # Log scale only
 python tools/noise_color_comparison.py --linear # Linear scale only
@@ -353,7 +353,7 @@ Generates white noise dithered images for comparison/validation.
 - Blueness = 0 by definition (baseline for calibration)
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/generate_whitenoise_dither.py
 python tools/generate_whitenoise_dither.py --ref-dir path/to/images --output-dir path/to/output
 ```
@@ -371,7 +371,7 @@ Generates blue noise (ordered) dithered images using the void-and-cluster thresh
 - Useful as "gold standard" blue noise reference
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/generate_bluenoise_dither.py
 python tools/generate_bluenoise_dither.py --blue-noise path/to/texture.png
 ```
@@ -428,7 +428,7 @@ Compares dithered 1-bit images against their grayscale originals by decomposing 
 - `wavelet_results.json` - Full results for further analysis
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 
 # Compare all methods on all reference images
 python tools/analyze_wavelet.py --compare
@@ -475,7 +475,7 @@ Floating-point mixed FS/JJN error diffusion with recursive bit decomposition for
 - `analysis_ranked.png` - Ranked array vs void-and-cluster comparison
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/test_map/generate_recursive_map.py --gradient 1 2 4 8   # Gradients at bit depths 1-8
 python tools/test_map/generate_recursive_map.py --bits 4 --gray 0.5  # 50% gray at 4-bit
 python tools/test_map/generate_recursive_map.py --recursive-test     # Full ranked output + analysis
@@ -492,7 +492,7 @@ Tools for building and analyzing threshold maps from error diffusion patterns.
 - Density accuracy testing
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/dither_map_experiment.py --gray 127.5                    # Single dither pattern
 python tools/dither_map_experiment.py --generate-map -o threshold.png # 8-bit threshold map
 python tools/dither_map_experiment.py --analyze-map threshold.png     # Spectral analysis
@@ -504,7 +504,7 @@ python tools/dither_map_experiment.py --test-map threshold.png        # Density 
 Compares two 1D dithering kernels across the full gray range for spectral quality.
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/compare_kernels.py                        # Compare [38,10] vs [46,2]
 python tools/compare_kernels.py --k1 38 10 --k2 46 2  # Custom kernels
 ```
@@ -514,7 +514,7 @@ python tools/compare_kernels.py --k1 38 10 --k2 46 2  # Custom kernels
 Visual demonstration of how Haar wavelets encode different patterns (horizontal/vertical/diagonal lines, checkerboard, noise). Shows why wavelet analysis is effective for detecting dithering artifacts like directional "worms".
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/wavelet_pattern_demo.py
 ```
 
@@ -531,7 +531,7 @@ Tent-space kernel derivation tools for computing effective direct kernels for ar
 - `tent_kernel_lanczos_constraint.py` - Constrained Lanczos kernel derivation
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/tent_kernel.py --ratio 2 --kernel box --width 2      # 2x downsample
 python tools/tent_kernel.py --ratio 3 --kernel lanczos2 --width 4 # 3x with Lanczos-2
 ```
@@ -546,7 +546,7 @@ Tools for deriving and validating color science constants.
 - `derive_k_from_matrix.py` - Derives correlated color temperature from an RGB-to-XYZ matrix white point. Shows how the sRGB matrix implicitly defines a D65 white point.
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/derive_d65.py
 python tools/derive_k_from_matrix.py
 ```
@@ -568,7 +568,7 @@ Experiments with higher-order error diffusion noise shaping for 2D halftoning.
 - `david_*.png` - Real image dithering comparison
 
 ```bash
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/test_twelve/second_order_dither.py                    # All gray levels + gradient
 python tools/test_twelve/second_order_dither.py --gray 0.5         # Single gray level
 python tools/test_twelve/second_order_dither.py --gradient-only    # Gradient only
@@ -579,11 +579,11 @@ python tools/test_twelve/second_order_dither.py --image FILE       # Process an 
 
 ```bash
 # 1. Build CRA (if needed)
-cd /root/cra-web/port
+cd /home/kaetemi/cra-web/port
 cargo build --release --bin cra --features cli
 
 # 2. Generate test images (includes downloading reference images)
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 python tools/generate_test_images.py
 
 # 3. Generate RNG noise images
@@ -794,7 +794,7 @@ curl -sL "https://raw.githubusercontent.com/MomentsInGraphics/BlueNoise/master/B
 # Fix for modern numpy
 sed -i 's/np\.int\b/np.int64/g; s/np\.bool\b/np.bool_/g' /tmp/BlueNoise.py
 
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 pip install scipy pypng
 python3 << 'EOF'
 import sys; sys.path.insert(0, '/tmp')
