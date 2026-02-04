@@ -701,7 +701,7 @@ def analyze_sanity_check(base_dir: Path, output_dir: Path):
 
     # 5. C integer implementation
     c_tool = base_dir.parent / 'int_blue_dither'
-    cra_tool = Path('/root/cra-web/port/target/release/cra')
+    cra_tool = Path('/home/kaetemi/cra-web/port/target/release/cra')
     if c_tool.exists() and cra_tool.exists():
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:

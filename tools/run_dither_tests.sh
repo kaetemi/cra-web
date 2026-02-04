@@ -4,9 +4,9 @@
 
 set -e
 
-CRA="/root/cra-web/port/target/release/cra"
-INPUT_DIR="/root/cra-web/tools/test_images/sources"
-OUTPUT_BASE="/root/cra-web/tools/test_images/dithered"
+CRA="/home/kaetemi/cra-web/port/target/release/cra"
+INPUT_DIR="/home/kaetemi/cra-web/tools/test_images/sources"
+OUTPUT_BASE="/home/kaetemi/cra-web/tools/test_images/dithered"
 
 # All dither modes: standard and serpentine variants
 DITHER_MODES=(

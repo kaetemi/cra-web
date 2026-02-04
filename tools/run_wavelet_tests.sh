@@ -104,7 +104,7 @@ echo "Generating Python-based dithered images"
 echo "=============================================="
 
 # Activate Python environment
-source /root/venv/bin/activate
+source /home/kaetemi/venv/bin/activate
 
 # Generate white noise dithered images (random threshold, no error diffusion)
 echo "  Generating whitenoise dithered images..."
