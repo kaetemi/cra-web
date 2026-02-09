@@ -136,7 +136,8 @@ def generate_spectrum(count, seed, output_dir):
     ax.set_xlabel('Frequency')
     ax.set_ylabel('Power')
     ax.legend(fontsize=9)
-    ax.grid(True, alpha=0.3)
+    ax.grid(True, which='major', alpha=0.3)
+    ax.grid(True, which='minor', axis='y', alpha=0.1)
 
     plt.tight_layout()
     path = output_dir / 'spectrum_blue_noise_float.png'
@@ -279,16 +280,18 @@ def main():
     parser = argparse.ArgumentParser(
         description='Analyze blue noise RNG floating-point output'
     )
-    parser.add_argument('--count', type=int, default=10_485_760,
-                        help='Sample count for spectrum (default: 10485760)')
+    parser.add_argument('--count', type=int, default=67_108_864,
+                        help='Sample count for spectrum (default: 67108864)')
     parser.add_argument('--seed', type=int, default=12345,
                         help='RNG seed (default: 12345)')
-    parser.add_argument('--dist-count', type=int, default=134_217_728,
-                        help='Sample count for distribution test (default: 134217728)')
+    parser.add_argument('--dist-count', type=int, default=67_108_864,
+                        help='Sample count for distribution test (default: 67108864)')
     parser.add_argument('--dist-bits', type=int, default=16,
                         help='Bit depth for distribution test (default: 16)')
     parser.add_argument('--no-wav', action='store_true',
                         help='Skip WAV file generation')
+    parser.add_argument('--no-dist', action='store_true',
+                        help='Skip distribution histogram')
     args = parser.parse_args()
 
     output_dir = Path(__file__).parent / 'test_images' / 'analysis'
@@ -297,8 +300,9 @@ def main():
     print("=== Spectral analysis (nextf, bit_depth=16) ===")
     generate_spectrum(args.count, args.seed, output_dir)
 
-    print(f"\n=== Distribution histogram (nextf, bit_depth={args.dist_bits}) ===")
-    generate_distribution(args.dist_count, args.dist_bits, args.seed, output_dir)
+    if not args.no_dist:
+        print(f"\n=== Distribution histogram (nextf, bit_depth={args.dist_bits}) ===")
+        generate_distribution(args.dist_count, args.dist_bits, args.seed, output_dir)
 
     if not args.no_wav:
         print(f"\n=== Float32 WAV files (30s, centered) ===")

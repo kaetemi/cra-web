@@ -23,6 +23,53 @@
 #include <array>
 #include <algorithm>
 
+// --- lowbias32 RNG (matches llama_dist_rng_lowbias32) ---
+
+struct lowbias32_rng {
+    uint32_t hashed_seed = 0;
+    uint32_t position    = 0;
+
+    static uint32_t hash(uint32_t x) { // lowbias32
+        x ^= x >> 16; x *= 0x21f0aaad;
+        x ^= x >> 15; x *= 0x735a2d97;
+        x ^= x >> 15;
+        return x;
+    }
+
+    void seed_init(uint32_t seed) {
+        hashed_seed = hash(seed);
+        position = 0;
+    }
+
+    uint32_t next() {
+        uint32_t val = hash(position ^ hashed_seed);
+        position++;
+        return val;
+    }
+
+    uint32_t next32() {
+        return next();
+    }
+
+    uint64_t next64() {
+        uint64_t lo = hash(position ^ ~hashed_seed); // secondary sequence using opposing seed
+        uint64_t hi = next();
+        return (hi << 32) | lo;
+    }
+
+    double nextf() {
+        uint64_t combined = next64();
+        return (combined >> 11) * 0x1.0p-53;
+    }
+
+    void reset() {
+        position = 0;
+    }
+};
+
+// --- Blue noise RNG using lowbias32 ---
+
+// generative error diffusion for sequential blue noise
 // pseudo-random number generator with ~6db/octave blue noise
 // this generator produces a uniform distribution
 // important: blue noise properties cannot be preserved when
@@ -32,7 +79,8 @@
 struct blue_noise_rng {
     uint8_t  bit_depth = 0;
     uint32_t seed      = 0;
-    uint32_t position  = 0;
+
+    lowbias32_rng rng;
 
     // binary tree of 1-bit 50% duty cycle error diffusion dithering blue noise generators
     std::vector<std::array<int8_t, 2>> states; // {err0, err1} per tree node
@@ -43,26 +91,25 @@ struct blue_noise_rng {
         init(bit_depth, seed);
     }
 
-    static uint32_t hash(uint32_t x) { // lowbias32
-        x ^= x >> 16; x *= 0x21f0aaad;
-        x ^= x >> 15; x *= 0x735a2d97;
-        x ^= x >> 15;
-        return x;
-    }
-
     void init(uint8_t depth, uint32_t s) {
         bit_depth = std::clamp<uint8_t>(depth, 1, 16);
-        seed      = hash(s);
+        seed      = s;
+        rng.seed_init(s);
 
         const int n = (1 << bit_depth) - 1;
         states.resize(n);
 
-        reset();
+        reset_states();
     }
 
-    void reset() {
+    void reseed(uint32_t s) {
+        seed = s;
+        rng.seed_init(s);
+        reset_states();
+    }
+
+    void reset_states() {
         const int n = (int)states.size();
-        position  = 0;
 
         // 5 reachable states with distribution 3:3:2:1:1
         static const int8_t tbl[10][2] = {
@@ -73,15 +120,12 @@ struct blue_noise_rng {
             {-1, -1},
         };
         for (int i = 0; i < n; i++) {
-            uint32_t h = hash((uint32_t)i ^ seed) % 10;
+            uint32_t h = rng.next32() % 10;
             states[i] = {tbl[h][0], tbl[h][1]}; // random initial state
         }
     }
 
-    uint16_t next(uint32_t * hash_remainder = nullptr) {
-        uint32_t h = hash(position ^ seed);
-        position++;
-
+    uint16_t advance(uint32_t h) {
         // traverse binary tree, one error diffusion ditherer per population split
         // thresholding output at any value still produces blue noise
         uint32_t acc = 0;
@@ -95,31 +139,36 @@ struct blue_noise_rng {
             s[1] = 0;
 
             // error diffusion dithering using binary weight perturbation
-            s[(h >> level) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
+            s[(h >> (31 - level)) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
 
             acc = acc * 2 + out;
         }
-
-        if (hash_remainder) {
-            *hash_remainder = h >> bit_depth; // unused bits from random hash
-        }
-
         return (uint16_t)acc;
     }
 
-    // blue noise in the upper bit_depth bits, white noise hash remainder in the lower bits
+    uint16_t next() {
+        uint32_t h = rng.next32();
+        return advance(h);
+    }
+
+    // blue noise in the upper bit_depth bits, white noise in the lower bits
     // do not use with modulo operator, as it would just produce white noise
     uint32_t next32() {
-        uint32_t rem;
-        uint32_t val = next(&rem);
-        return (val << (32 - bit_depth)) | rem;
+        uint32_t h   = rng.next32();
+        uint32_t val = advance(h);
+        return (val << (32 - bit_depth)) | (h & ((1u << (32 - bit_depth)) - 1));
+    }
+
+    // blue noise in the upper bits, white noise in the lower bits
+    uint64_t next64() {
+        uint64_t r   = rng.next64();
+        uint32_t val = advance((uint32_t)(r >> 32));
+        return ((uint64_t)val << (64 - bit_depth)) | (r & ((UINT64_C(1) << (64 - bit_depth)) - 1));
     }
 
     // uniform double in [0, 1) with blue noise temporal autocorrelation
     double nextf() {
-        uint32_t lo = hash(position ^ ~seed); // white noise low bits
-        uint32_t hi = next32();               // blue noise high bits
-        uint64_t combined = ((uint64_t)hi << 32) | lo;
+        uint64_t combined = next64();
         return (combined >> 11) * 0x1.0p-53;
     }
 };
@@ -173,17 +222,14 @@ int main(int argc, char *argv[]) {
     }
 
     if (mode == MODE_RAW_WHITE_F64) {
-        // White noise using lowbias32 hash, same double construction as nextf()
-        uint32_t h_seed = blue_noise_rng::hash(seed);
+        // White noise using lowbias32, same double construction as nextf()
+        lowbias32_rng white_rng;
+        white_rng.seed_init(seed);
 #ifdef _WIN32
         _setmode(_fileno(stdout), _O_BINARY);
 #endif
         for (int i = 0; i < count; i++) {
-            uint32_t pos = (uint32_t)i;
-            uint32_t lo = blue_noise_rng::hash(pos ^ ~h_seed);
-            uint32_t hi = blue_noise_rng::hash(pos ^ h_seed);
-            uint64_t combined = ((uint64_t)hi << 32) | lo;
-            double res = (combined >> 11) * 0x1.0p-53;
+            double res = white_rng.nextf();
             fwrite(&res, sizeof(double), 1, stdout);
         }
         return 0;

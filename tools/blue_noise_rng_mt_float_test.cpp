@@ -26,13 +26,46 @@
 static_assert(std::mt19937::min() == 0, "mt19937 min must be 0");
 static_assert(std::mt19937::max() == 0xFFFFFFFFu, "mt19937 max must be 2^32-1");
 
+// --- mt19937 RNG wrapper (matches llama_dist_rng_mt19937) ---
+
+struct mt19937_rng {
+    uint32_t     seed;
+    std::mt19937 mt;
+
+    void seed_init(uint32_t s) {
+        seed = s;
+        mt.seed(s);
+    }
+
+    uint32_t next32() {
+        return mt();
+    }
+
+    uint64_t next64() {
+        uint64_t hi = (uint64_t)mt() << 32;
+        uint64_t lo = (uint64_t)mt();
+        return hi | lo;
+    }
+
+    double nextf() {
+        uint64_t combined = next64();
+        return (combined >> 11) * 0x1.0p-53;
+    }
+
+    void reset() {
+        mt.seed(seed);
+    }
+};
+
+// --- Blue noise RNG using mt19937 ---
+
 // pseudo-random number generator with ~6db/octave blue noise
 // this variant uses mt19937 instead of lowbias32 for comparison
 struct blue_noise_rng_mt {
     uint8_t  bit_depth = 0;
     uint32_t seed      = 0;
 
-    std::mt19937 mt;
+    mt19937_rng rng;
 
     // binary tree of 1-bit 50% duty cycle error diffusion dithering blue noise generators
     std::vector<std::array<int8_t, 2>> states; // {err0, err1} per tree node
@@ -46,17 +79,22 @@ struct blue_noise_rng_mt {
     void init(uint8_t depth, uint32_t s) {
         bit_depth = std::clamp<uint8_t>(depth, 1, 16);
         seed      = s;
-        mt.seed(s);
+        rng.seed_init(s);
 
         const int n = (1 << bit_depth) - 1;
         states.resize(n);
 
-        reset();
+        reset_states();
     }
 
-    void reset() {
+    void reseed(uint32_t s) {
+        seed = s;
+        rng.seed_init(s);
+        reset_states();
+    }
+
+    void reset_states() {
         const int n = (int)states.size();
-        mt.seed(seed);
 
         // 5 reachable states with distribution 3:3:2:1:1
         static const int8_t tbl[10][2] = {
@@ -67,14 +105,12 @@ struct blue_noise_rng_mt {
             {-1, -1},
         };
         for (int i = 0; i < n; i++) {
-            uint32_t h = mt() % 10;
+            uint32_t h = rng.next32() % 10;
             states[i] = {tbl[h][0], tbl[h][1]}; // random initial state
         }
     }
 
-    uint16_t next(uint32_t * hash_remainder = nullptr) {
-        uint32_t h = mt();
-
+    uint16_t advance(uint32_t h) {
         // traverse binary tree, one error diffusion ditherer per population split
         // thresholding output at any value still produces blue noise
         uint32_t acc = 0;
@@ -88,30 +124,35 @@ struct blue_noise_rng_mt {
             s[1] = 0;
 
             // error diffusion dithering using binary weight perturbation
-            s[(h >> level) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
+            s[(h >> (31 - level)) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
 
             acc = acc * 2 + out;
         }
-
-        if (hash_remainder) {
-            *hash_remainder = h >> bit_depth; // unused bits from random hash
-        }
-
         return (uint16_t)acc;
     }
 
-    // blue noise in the upper bit_depth bits, white noise mt remainder in the lower bits
+    uint16_t next() {
+        uint32_t h = rng.next32();
+        return advance(h);
+    }
+
+    // blue noise in the upper bit_depth bits, white noise in the lower bits
     uint32_t next32() {
-        uint32_t rem;
-        uint32_t val = next(&rem);
-        return (val << (32 - bit_depth)) | rem;
+        uint32_t h   = rng.next32();
+        uint32_t val = advance(h);
+        return (val << (32 - bit_depth)) | (h & ((1u << (32 - bit_depth)) - 1));
+    }
+
+    // blue noise in the upper bits, white noise in the lower bits
+    uint64_t next64() {
+        uint64_t r   = rng.next64();
+        uint32_t val = advance((uint32_t)(r >> 32));
+        return ((uint64_t)val << (64 - bit_depth)) | (r & ((UINT64_C(1) << (64 - bit_depth)) - 1));
     }
 
     // uniform double in [0, 1) with blue noise temporal autocorrelation
     double nextf() {
-        uint32_t lo = mt();       // white noise low bits
-        uint32_t hi = next32();   // blue noise high bits
-        uint64_t combined = ((uint64_t)hi << 32) | lo;
+        uint64_t combined = next64();
         return (combined >> 11) * 0x1.0p-53;
     }
 };
@@ -166,15 +207,13 @@ int main(int argc, char *argv[]) {
 
     if (mode == MODE_RAW_WHITE_F64) {
         // White noise using mt19937, same double construction as nextf()
-        std::mt19937 mt_white(seed);
+        mt19937_rng white_rng;
+        white_rng.seed_init(seed);
 #ifdef _WIN32
         _setmode(_fileno(stdout), _O_BINARY);
 #endif
         for (int i = 0; i < count; i++) {
-            uint32_t lo = mt_white();
-            uint32_t hi = mt_white();
-            uint64_t combined = ((uint64_t)hi << 32) | lo;
-            double res = (combined >> 11) * 0x1.0p-53;
+            double res = white_rng.nextf();
             fwrite(&res, sizeof(double), 1, stdout);
         }
         return 0;

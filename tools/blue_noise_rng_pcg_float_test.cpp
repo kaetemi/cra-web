@@ -24,46 +24,115 @@
 #include <vector>
 #include <array>
 #include <algorithm>
+#include <random>
 
-// --- PCG64-DXSM implementation (NumPy-compatible) ---
-
-typedef unsigned __int128 pcg_uint128_t;
+// --- PCG64-DXSM implementation (portable, matches llama_dist_rng_pcg64_dxsm) ---
+// reference: https://dotat.at/@/2023-06-21-pcg64-dxsm.html
 
 struct pcg64_state {
-    pcg_uint128_t s;
-    pcg_uint128_t q; // increment (must be odd after init)
+    struct u128 { uint64_t lo, hi; };
+
+    static constexpr uint64_t MUL_64 = 0xDA942042E4DD58B5ULL;
+
+    u128 state;
+    u128 inc;
+    u128 init_state; // saved for reset()
+
+    // 128x64 multiply
+    static u128 mul128x64(u128 a, uint64_t b) {
+#ifdef __SIZEOF_INT128__
+        // compiler has native 128-bit support (GCC, Clang)
+        unsigned __int128 full = (unsigned __int128)a.lo * b;
+        uint64_t lo = (uint64_t)full;
+        uint64_t hi = (uint64_t)(full >> 64) + a.hi * b;
+        return {lo, hi};
+#elif defined(_MSC_VER) && defined(_M_X64)
+        // MSVC on x64
+        uint64_t hi_lo;
+        uint64_t lo = _umul128(a.lo, b, &hi_lo);
+        uint64_t hi = hi_lo + a.hi * b;
+        return {lo, hi};
+#else
+        // 32-bit fallback
+        uint64_t a0 = a.lo & 0xFFFFFFFF;
+        uint64_t a1 = a.lo >> 32;
+        uint64_t b0 = b & 0xFFFFFFFF;
+        uint64_t b1 = b >> 32;
+
+        uint64_t p0 = a0 * b0;
+        uint64_t p1 = a0 * b1;
+        uint64_t p2 = a1 * b0;
+        uint64_t p3 = a1 * b1;
+
+        uint64_t mid = (p0 >> 32) + (p1 & 0xFFFFFFFF) + (p2 & 0xFFFFFFFF);
+        uint64_t lo  = (p0 & 0xFFFFFFFF) | (mid << 32);
+        uint64_t hi  = p3 + (p1 >> 32) + (p2 >> 32) + (mid >> 32) + a.hi * b;
+
+        return {lo, hi};
+#endif
+    }
+
+    static u128 add128(u128 a, u128 b) {
+        uint64_t lo = a.lo + b.lo;
+        uint64_t hi = a.hi + b.hi + (lo < a.lo ? 1 : 0);
+        return {lo, hi};
+    }
+
+    void step() {
+        state = add128(mul128x64(state, MUL_64), inc);
+    }
+
+    uint64_t output() const {
+        uint64_t hi = state.hi;
+        uint64_t lo = state.lo | 1;
+        hi ^= hi >> 32;
+        hi *= MUL_64;
+        hi ^= hi >> 48;
+        hi *= lo;
+        return hi;
+    }
+
+    void seed_init(uint32_t seed) {
+        // use std::seed_seq to derive both state and increment from a single seed
+        std::seed_seq seq{seed};
+        uint32_t vals[8];
+        seq.generate(vals, vals + 8);
+
+        uint64_t s_lo = (uint64_t)vals[1] << 32 | vals[0];
+        uint64_t s_hi = (uint64_t)vals[3] << 32 | vals[2];
+        uint64_t i_lo = (uint64_t)vals[5] << 32 | vals[4];
+        uint64_t i_hi = (uint64_t)vals[7] << 32 | vals[6];
+
+        inc = { (i_lo << 1) | 1, (i_hi << 1) | (i_lo >> 63) };
+        state = {0, 0};
+        step();
+        state = add128(state, {s_lo, s_hi});
+        step();
+        init_state = state;
+    }
+
+    uint64_t next_raw() {
+        uint64_t out = output();
+        step();
+        return out;
+    }
+
+    uint32_t next32() {
+        return (uint32_t)(next_raw() >> 32);
+    }
+
+    uint64_t next64() {
+        return next_raw();
+    }
+
+    double nextf() {
+        return (next_raw() >> 11) * 0x1.0p-53;
+    }
+
+    void reset() {
+        state = init_state;
+    }
 };
-
-// cheap (half-width) multiplier — used for both LCG and DXSM output
-static const uint64_t PCG_CHEAP_MUL = 0xDA942042E4DD58B5ULL;
-
-static void pcg64_step(pcg64_state *g) {
-    g->s = g->s * (pcg_uint128_t)PCG_CHEAP_MUL + g->q;
-}
-
-static pcg64_state pcg64_init(pcg_uint128_t state, pcg_uint128_t seq) {
-    pcg64_state g;
-    g.s = 0;
-    g.q = (seq << 1u) | 1u;
-    pcg64_step(&g);
-    g.s += state;
-    pcg64_step(&g);
-    return g;
-}
-
-static uint64_t pcg64_random(pcg64_state *g) {
-    // output from pre-step state (not post-step)
-    uint64_t h = (uint64_t)(g->s >> 64);
-    uint64_t l = (uint64_t)g->s;
-    l |= 1;
-    h ^= h >> 32;
-    h *= PCG_CHEAP_MUL;
-    h ^= h >> 48;
-    h *= l;
-    // then advance
-    pcg64_step(g);
-    return h;
-}
 
 // --- Blue noise RNG using PCG64-DXSM ---
 
@@ -85,8 +154,7 @@ struct blue_noise_rng_pcg {
     void init(uint8_t depth, uint32_t s) {
         bit_depth = std::clamp<uint8_t>(depth, 1, 16);
         seed      = s;
-        pcg = pcg64_init((pcg_uint128_t)s,
-                         (pcg_uint128_t)s ^ 0x5851F42D4C957F2DULL);
+        pcg.seed_init(s);
 
         const int n = (1 << bit_depth) - 1;
         states.resize(n);
@@ -96,8 +164,7 @@ struct blue_noise_rng_pcg {
 
     void reseed(uint32_t s) {
         seed = s;
-        pcg = pcg64_init((pcg_uint128_t)s,
-                         (pcg_uint128_t)s ^ 0x5851F42D4C957F2DULL);
+        pcg.seed_init(s);
         reset_states();
     }
 
@@ -113,7 +180,7 @@ struct blue_noise_rng_pcg {
             {-1, -1},
         };
         for (int i = 0; i < n; i++) {
-            uint32_t h = (uint32_t)pcg64_random(&pcg) % 10;
+            uint32_t h = pcg.next32() % 10;
             states[i] = {tbl[h][0], tbl[h][1]}; // random initial state
         }
     }
@@ -132,7 +199,7 @@ struct blue_noise_rng_pcg {
             s[1] = 0;
 
             // error diffusion dithering using binary weight perturbation
-            s[(h >> level) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
+            s[(h >> (31 - level)) & 1 ? 0 : 1] += qe; // forward to t+1 or defer to t+2
 
             acc = acc * 2 + out;
         }
@@ -140,22 +207,22 @@ struct blue_noise_rng_pcg {
     }
 
     uint16_t next() {
-        uint32_t h = (uint32_t)pcg64_random(&pcg);
+        uint32_t h = pcg.next32();
         return advance(h);
     }
 
     // blue noise in the upper bit_depth bits, white noise in the lower bits
     uint32_t next32() {
-        uint32_t h   = (uint32_t)pcg64_random(&pcg);
+        uint32_t h   = pcg.next32();
         uint32_t val = advance(h);
-        return (val << (32 - bit_depth)) | (h >> bit_depth);
+        return (val << (32 - bit_depth)) | (h & ((1u << (32 - bit_depth)) - 1));
     }
 
     // blue noise in the upper bits, white noise in the lower bits
     uint64_t next64() {
-        uint64_t r   = pcg64_random(&pcg);
-        uint32_t val = advance((uint32_t)r);
-        return ((uint64_t)val << (64 - bit_depth)) | (r >> bit_depth);
+        uint64_t r   = pcg.next64();
+        uint32_t val = advance((uint32_t)(r >> 32));
+        return ((uint64_t)val << (64 - bit_depth)) | (r & ((UINT64_C(1) << (64 - bit_depth)) - 1));
     }
 
     // uniform double in [0, 1) with blue noise temporal autocorrelation
@@ -215,14 +282,13 @@ int main(int argc, char *argv[]) {
 
     if (mode == MODE_RAW_WHITE_F64) {
         // White noise using PCG64-DXSM, native 64-bit output -> double
-        pcg64_state pcg_white = pcg64_init((pcg_uint128_t)seed,
-                                           (pcg_uint128_t)seed ^ 0x5851F42D4C957F2DULL);
+        pcg64_state pcg_white;
+        pcg_white.seed_init(seed);
 #ifdef _WIN32
         _setmode(_fileno(stdout), _O_BINARY);
 #endif
         for (int i = 0; i < count; i++) {
-            uint64_t r = pcg64_random(&pcg_white);
-            double res = (r >> 11) * 0x1.0p-53;
+            double res = pcg_white.nextf();
             fwrite(&res, sizeof(double), 1, stdout);
         }
         return 0;
