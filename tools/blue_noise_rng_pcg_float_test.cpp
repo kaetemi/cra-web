@@ -34,6 +34,14 @@ struct pcg64_state {
 
     static constexpr uint64_t MUL_64 = 0xDA942042E4DD58B5ULL;
 
+#if 1
+    static constexpr uint64_t INC_LO = 0x14057B7EF767814FULL;
+    static constexpr uint64_t INC_HI = 0x5851F42D4C957F2DULL;
+#elif 1
+    static constexpr uint64_t INC_LO = 0xDA3E39CB94B95BDBULL;
+    static constexpr uint64_t INC_HI = 0x0000000000000001ULL;
+#endif
+
     u128 state;
     u128 inc;
     u128 init_state; // saved for reset()
@@ -93,8 +101,15 @@ struct pcg64_state {
     }
 
     void seed_init(uint32_t seed) {
-        // use std::seed_seq to derive both state and increment from a single seed
-        std::seed_seq seq{seed};
+#if 1
+        // fixed increment — all seeds share the same stream
+        uint64_t s_lo = (uint64_t)seed;
+        uint64_t s_hi = 0;
+        inc = {INC_LO, INC_HI};
+#else
+        // note: for numpy compatibility, this should use seed_seq_fe from the following gist rather than std::seed_seq
+        // https://gist.githubusercontent.com/imneme/540829265469e673d045/raw/5afb4439c23a6c060eda72121bff8bf9da59591a/randutils.hpp
+        std::seed_seq seq{seed}; // std::seed_seq is strictly worse than using the default constant increment
         uint32_t vals[8];
         seq.generate(vals, vals + 8);
 
@@ -104,6 +119,7 @@ struct pcg64_state {
         uint64_t i_hi = (uint64_t)vals[7] << 32 | vals[6];
 
         inc = { (i_lo << 1) | 1, (i_hi << 1) | (i_lo >> 63) };
+#endif
         state = {0, 0};
         step();
         state = add128(state, {s_lo, s_hi});
