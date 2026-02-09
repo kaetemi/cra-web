@@ -80,3 +80,4 @@ tools/int_blue_dither
 tools/blue_noise_rng
 tools/blue_noise_rng_float_test
 tools/blue_noise_rng_mt_float_test
+tools/blue_noise_rng_pcg_float_test
