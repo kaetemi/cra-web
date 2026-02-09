@@ -25,7 +25,7 @@
 #include <array>
 #include <algorithm>
 
-// --- PCG64-DXSM implementation ---
+// --- PCG64-DXSM implementation (NumPy-compatible) ---
 
 typedef unsigned __int128 pcg_uint128_t;
 
@@ -34,11 +34,11 @@ struct pcg64_state {
     pcg_uint128_t q; // increment (must be odd after init)
 };
 
+// cheap (half-width) multiplier — used for both LCG and DXSM output
+static const uint64_t PCG_CHEAP_MUL = 0xDA942042E4DD58B5ULL;
+
 static void pcg64_step(pcg64_state *g) {
-    // full-width 128-bit multiplier
-    pcg_uint128_t m = ((pcg_uint128_t)0x2360ED051FC65DA4ULL << 64)
-                    + 0x4385DF649FCCF645ULL;
-    g->s = g->s * m + g->q;
+    g->s = g->s * (pcg_uint128_t)PCG_CHEAP_MUL + g->q;
 }
 
 static pcg64_state pcg64_init(pcg_uint128_t state, pcg_uint128_t seq) {
@@ -52,15 +52,16 @@ static pcg64_state pcg64_init(pcg_uint128_t state, pcg_uint128_t seq) {
 }
 
 static uint64_t pcg64_random(pcg64_state *g) {
-    pcg64_step(g);
-    // DXSM (double xor shift multiply) output permutation
+    // output from pre-step state (not post-step)
     uint64_t h = (uint64_t)(g->s >> 64);
     uint64_t l = (uint64_t)g->s;
     l |= 1;
     h ^= h >> 32;
-    h *= 0xDA942042E4DD58B5ULL;
+    h *= PCG_CHEAP_MUL;
     h ^= h >> 48;
     h *= l;
+    // then advance
+    pcg64_step(g);
     return h;
 }
 
