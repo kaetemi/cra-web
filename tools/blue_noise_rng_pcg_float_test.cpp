@@ -34,10 +34,10 @@ struct pcg64_state {
 
     static constexpr uint64_t MUL_64 = 0xDA942042E4DD58B5ULL;
 
-#if 1
+#if 0
     static constexpr uint64_t INC_LO = 0x14057B7EF767814FULL;
     static constexpr uint64_t INC_HI = 0x5851F42D4C957F2DULL;
-#elif 1
+#elif 0
     static constexpr uint64_t INC_LO = 0xDA3E39CB94B95BDBULL;
     static constexpr uint64_t INC_HI = 0x0000000000000001ULL;
 #endif
@@ -100,18 +100,38 @@ struct pcg64_state {
         return hi;
     }
 
+    static uint32_t lowbias32(uint32_t x) {
+        x ^= x >> 16; x *= 0x21f0aaad;
+        x ^= x >> 15; x *= 0x735a2d97;
+        x ^= x >> 15;
+        return x;
+    }
+
     void seed_init(uint32_t seed) {
-#if 1
+#if 0
         // fixed increment — all seeds share the same stream
         uint64_t s_lo = (uint64_t)seed;
         uint64_t s_hi = 0;
         inc = {INC_LO, INC_HI};
-#else
+#elif 0
         // note: for numpy compatibility, this should use seed_seq_fe from the following gist rather than std::seed_seq
         // https://gist.githubusercontent.com/imneme/540829265469e673d045/raw/5afb4439c23a6c060eda72121bff8bf9da59591a/randutils.hpp
-        std::seed_seq seq{seed}; // std::seed_seq is strictly worse than using the default constant increment
+        std::seed_seq seq{seed}; // std::seed_seq gives poor quality output
         uint32_t vals[8];
         seq.generate(vals, vals + 8);
+
+        uint64_t s_lo = (uint64_t)vals[1] << 32 | vals[0];
+        uint64_t s_hi = (uint64_t)vals[3] << 32 | vals[2];
+        uint64_t i_lo = (uint64_t)vals[5] << 32 | vals[4];
+        uint64_t i_hi = (uint64_t)vals[7] << 32 | vals[6];
+
+        inc = { (i_lo << 1) | 1, (i_hi << 1) | (i_lo >> 63) };
+#else
+        // use lowbias32 as seed sequencer to expand 32-bit seed into 256 bits
+        uint32_t vals[8];
+        for (int i = 0; i < 8; i++) {
+            vals[i] = lowbias32(seed + (uint32_t)i);
+        }
 
         uint64_t s_lo = (uint64_t)vals[1] << 32 | vals[0];
         uint64_t s_hi = (uint64_t)vals[3] << 32 | vals[2];
