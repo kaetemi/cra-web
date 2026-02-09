@@ -117,13 +117,10 @@ struct blue_noise_rng {
 
     // uniform double in [0, 1) with blue noise temporal autocorrelation
     double nextf() {
-        double res = 0.0;
-        res += hash(position ^ ~seed); // fill low bits with white noise
-        res *= 1.0 / 4294967296.0;
-        res += next32();
-        res *= 1.0 / 4294967296.0;
-        if (res >= 1.0) res = std::nextafter(1.0, 0.0);
-        return res;
+        uint32_t lo = hash(position ^ ~seed); // white noise low bits
+        uint32_t hi = next32();               // blue noise high bits
+        uint64_t combined = ((uint64_t)hi << 32) | lo;
+        return (combined >> 11) * 0x1.0p-53;
     }
 };
 
@@ -132,13 +129,14 @@ static void print_usage(const char *prog) {
     fprintf(stderr, "  %s <count> [bit_depth] [seed]          Print stats\n", prog);
     fprintf(stderr, "  %s --raw-f64 <count> [bit_depth] [seed]  Raw float64 to stdout\n", prog);
     fprintf(stderr, "  %s --raw-u32 <count> [bit_depth] [seed]  Raw uint32 to stdout\n", prog);
+    fprintf(stderr, "  %s --raw-white-f64 <count> [seed]        White noise float64 (lowbias32)\n", prog);
     fprintf(stderr, "\n");
     fprintf(stderr, "  bit_depth: 1-16 (default: 8)\n");
     fprintf(stderr, "  seed:      any integer (default: 12345)\n");
 }
 
 int main(int argc, char *argv[]) {
-    enum { MODE_PRINT, MODE_RAW_F64, MODE_RAW_U32 } mode = MODE_PRINT;
+    enum { MODE_PRINT, MODE_RAW_F64, MODE_RAW_U32, MODE_RAW_WHITE_F64 } mode = MODE_PRINT;
     int arg_offset = 1;
 
     if (argc < 2) {
@@ -151,6 +149,9 @@ int main(int argc, char *argv[]) {
         arg_offset = 2;
     } else if (strcmp(argv[1], "--raw-u32") == 0) {
         mode = MODE_RAW_U32;
+        arg_offset = 2;
+    } else if (strcmp(argv[1], "--raw-white-f64") == 0) {
+        mode = MODE_RAW_WHITE_F64;
         arg_offset = 2;
     } else if (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0) {
         print_usage(argv[0]);
@@ -170,6 +171,24 @@ int main(int argc, char *argv[]) {
         fprintf(stderr, "Error: count must be > 0\n");
         return 1;
     }
+
+    if (mode == MODE_RAW_WHITE_F64) {
+        // White noise using lowbias32 hash, same double construction as nextf()
+        uint32_t h_seed = blue_noise_rng::hash(seed);
+#ifdef _WIN32
+        _setmode(_fileno(stdout), _O_BINARY);
+#endif
+        for (int i = 0; i < count; i++) {
+            uint32_t pos = (uint32_t)i;
+            uint32_t lo = blue_noise_rng::hash(pos ^ ~h_seed);
+            uint32_t hi = blue_noise_rng::hash(pos ^ h_seed);
+            uint64_t combined = ((uint64_t)hi << 32) | lo;
+            double res = (combined >> 11) * 0x1.0p-53;
+            fwrite(&res, sizeof(double), 1, stdout);
+        }
+        return 0;
+    }
+
     if (bit_depth < 1 || bit_depth > 16) {
         fprintf(stderr, "Error: bit_depth must be 1-16\n");
         return 1;

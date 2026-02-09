@@ -24,6 +24,7 @@ import sys
 import struct
 
 _BIN_PATH = Path(__file__).parent / 'blue_noise_rng_float_test'
+_BIN_MT_PATH = Path(__file__).parent / 'blue_noise_rng_mt_float_test'
 
 
 def get_float_samples(count, bit_depth, seed):
@@ -41,6 +42,18 @@ def get_float_samples(count, bit_depth, seed):
         print(f"Error: {result.stderr.decode()}", file=sys.stderr)
         sys.exit(1)
 
+    return np.frombuffer(result.stdout, dtype=np.float64)
+
+
+def get_white_samples(bin_path, count, seed):
+    """Generate white noise float64 samples from a C++ binary."""
+    result = subprocess.run(
+        [str(bin_path), '--raw-white-f64', str(count), str(seed)],
+        capture_output=True
+    )
+    if result.returncode != 0:
+        print(f"Error: {result.stderr.decode()}", file=sys.stderr)
+        sys.exit(1)
     return np.frombuffer(result.stdout, dtype=np.float64)
 
 
@@ -82,15 +95,21 @@ def generate_spectrum(count, seed, output_dir):
         fontsize=14
     )
 
-    # Generate white noise reference
-    rng_ref = np.random.default_rng(seed)
-    white = rng_ref.random(count)
-    fft_white = np.fft.rfft(white - white.mean())
     freqs = np.fft.rfftfreq(count)
-    power_white = np.abs(fft_white) ** 2 / count
     mask = freqs > 0
-    sf_w, sp_w = smooth_spectrum(freqs[mask], power_white[mask])
 
+    # White noise references from both RNG backends
+    white_lb = get_white_samples(_BIN_PATH, count, seed)
+    fft_wlb = np.fft.rfft(white_lb - white_lb.mean())
+    power_wlb = np.abs(fft_wlb) ** 2 / count
+    sf_wlb, sp_wlb = smooth_spectrum(freqs[mask], power_wlb[mask])
+
+    white_mt = get_white_samples(_BIN_MT_PATH, count, seed)
+    fft_wmt = np.fft.rfft(white_mt - white_mt.mean())
+    power_wmt = np.abs(fft_wmt) ** 2 / count
+    sf_wmt, sp_wmt = smooth_spectrum(freqs[mask], power_wmt[mask])
+
+    # Blue noise spectrum
     data = get_float_samples(count, bd, seed)
     data_centered = data - data.mean()
 
@@ -104,8 +123,10 @@ def generate_spectrum(count, seed, output_dir):
     ax.loglog(freqs[mask], power[mask], color='#a3d9a5', linewidth=0.3, alpha=0.5)
     # Smoothed blue noise
     ax.loglog(sf, sp, color='#27ae60', linewidth=2, label=f'nextf() bd={bd}')
-    # White noise reference
-    ax.loglog(sf_w, sp_w, color='red', linewidth=1, linestyle='--', alpha=0.5, label='White noise')
+    # White noise: lowbias32
+    ax.loglog(sf_wlb, sp_wlb, color='red', linewidth=1, linestyle='--', alpha=0.6, label='White (lowbias32)')
+    # White noise: mt19937
+    ax.loglog(sf_wmt, sp_wmt, color='orange', linewidth=1, linestyle='--', alpha=0.6, label='White (mt19937)')
     # Ideal +6 dB/oct
     f_ref = np.array([sf[0], sf[-1]])
     p_ref = sp[len(sp) // 2] * (f_ref / sf[len(sf) // 2]) ** 2

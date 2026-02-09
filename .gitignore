@@ -79,3 +79,4 @@ tools/CIE_xyz_1931_2deg.csv
 tools/int_blue_dither
 tools/blue_noise_rng
 tools/blue_noise_rng_float_test
+tools/blue_noise_rng_mt_float_test
