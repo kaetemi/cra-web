@@ -575,6 +575,75 @@ python tools/test_twelve/second_order_dither.py --gradient-only    # Gradient on
 python tools/test_twelve/second_order_dither.py --image FILE       # Process an image
 ```
 
+### 25. Blue Noise RNG Float Tests
+
+C++ test tools and Python analysis scripts for a 1D temporal blue noise RNG that produces uniform floating-point output with blue noise temporal autocorrelation. Three variants exist, each using a different white noise source but the same blue noise structure.
+
+**The technique:**
+A binary tree of 1-bit error diffusion ditherers (heap-indexed, one per sub-population split). Each level decides one bit of the output value. The tree has `2^bit_depth - 1` nodes, each maintaining a 2-element state `{err0, err1}` with 5 reachable states in a 3:3:2:1:1 stationary distribution. Error is diffused forward to t+1 or deferred to t+2 using a random bit from the white noise source (high bits preferred).
+
+The `nextf()` output is a uniform double in [0, 1) computed as `(next64() >> 11) * 0x1.0p-53`, where `next64()` places blue noise in the upper `bit_depth` bits and white noise in the remaining lower bits.
+
+**Variants:**
+
+| Variant | C++ Tool | Analysis Script | White Noise Source |
+|---------|----------|-----------------|-------------------|
+| lowbias32 | `blue_noise_rng_float_test.cpp` | `analyze_blue_noise_float.py` | lowbias32 hash (sequential positions) |
+| MT19937 | `blue_noise_rng_mt_float_test.cpp` | `analyze_blue_noise_mt_float.py` | `std::mt19937` (32-bit, two draws for 64-bit) |
+| PCG64-DXSM | `blue_noise_rng_pcg_float_test.cpp` | `analyze_blue_noise_pcg_float.py` | PCG64-DXSM (native 64-bit output) |
+
+All three produce identical spectral quality: **+5.1 dB/oct** slope, **0.10% max deviation** from uniform at 16-bit depth with 67M samples.
+
+**PCG64-DXSM details:**
+- 128-bit LCG state, DXSM output permutation, cheap multiplier `0xDA942042E4DD58B5`
+- Portable 128-bit math: native `__int128` (GCC/Clang), `_umul128` (MSVC x64), 32-bit fallback
+- Seed expansion: lowbias32 hash as custom seed sequencer (hashes `seed+0` through `seed+7` to derive 128-bit state + 128-bit increment)
+
+**Build:**
+```bash
+g++ -O2 -std=c++17 -o tools/blue_noise_rng_float_test tools/blue_noise_rng_float_test.cpp
+g++ -O2 -std=c++17 -o tools/blue_noise_rng_mt_float_test tools/blue_noise_rng_mt_float_test.cpp
+g++ -O2 -std=c++17 -o tools/blue_noise_rng_pcg_float_test tools/blue_noise_rng_pcg_float_test.cpp
+```
+
+**C++ tool usage:**
+```bash
+# Print stats (first 20 values, mean, stddev, min, max)
+./tools/blue_noise_rng_pcg_float_test 1000 16 12345
+
+# Raw binary output for analysis
+./tools/blue_noise_rng_pcg_float_test --raw-f64 67108864 16 12345   # Blue noise float64
+./tools/blue_noise_rng_pcg_float_test --raw-u32 67108864 16 12345   # Blue noise uint32
+./tools/blue_noise_rng_pcg_float_test --raw-white-f64 67108864 12345 # White noise float64
+```
+
+**Analysis scripts:**
+```bash
+source /home/kaetemi/venv/bin/activate
+
+# Run one at a time to avoid OOM (each loads ~2-3 GB)
+python tools/analyze_blue_noise_float.py          # lowbias32 variant
+python tools/analyze_blue_noise_mt_float.py       # MT19937 variant
+python tools/analyze_blue_noise_pcg_float.py      # PCG64-DXSM variant
+
+# Options
+python tools/analyze_blue_noise_pcg_float.py --count 134217728   # 128M samples
+python tools/analyze_blue_noise_pcg_float.py --seed 42           # Different seed
+python tools/analyze_blue_noise_pcg_float.py --no-dist           # Skip distribution histogram
+python tools/analyze_blue_noise_pcg_float.py --no-wav            # Skip WAV generation
+```
+
+**Outputs** (`tools/test_images/analysis/`):
+- `spectrum_blue_noise_float.png` - Spectral analysis (lowbias32)
+- `spectrum_blue_noise_mt_float.png` - Spectral analysis (MT19937)
+- `spectrum_blue_noise_pcg_float.png` - Spectral analysis (PCG64-DXSM)
+- `distribution_float_16bit_bd16.png` - Distribution histogram (lowbias32)
+- `distribution_mt_float_16bit_bd16.png` - Distribution histogram (MT19937)
+- `distribution_pcg_float_16bit_bd16.png` - Distribution histogram (PCG64-DXSM)
+- `blue_noise_rng_*_8k.wav` / `*_48k.wav` - 30-second float32 WAV files (centered)
+
+Each spectral analysis chart shows the blue noise power spectrum (smoothed + raw) overlaid with white noise references from the other backends, plus a +6 dB/oct ideal reference line.
+
 ## Full Regeneration Sequence
 
 ```bash

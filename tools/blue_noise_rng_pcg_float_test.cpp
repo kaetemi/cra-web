@@ -216,7 +216,7 @@ struct blue_noise_rng_pcg {
             {-1, -1},
         };
         for (int i = 0; i < n; i++) {
-            uint32_t h = pcg.next32() % 10;
+            uint32_t h = (uint32_t)(((uint64_t)pcg.next32() * 10) >> 32);
             states[i] = {tbl[h][0], tbl[h][1]}; // random initial state
         }
     }
