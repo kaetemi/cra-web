@@ -85,8 +85,11 @@ if [ -f "$VENV" ]; then
         --ref-dir "${INPUT_DIR}" \
         --output-dir "${OUTPUT_BASE}/void-and-cluster" \
         --suffix "void-and-cluster"
+    python tools/generate_bayer_dither.py \
+        --ref-dir "${INPUT_DIR}" \
+        --output-dir "${OUTPUT_BASE}/bayer"
 else
-    echo "  Warning: Python venv not found at $VENV, skipping void-and-cluster"
+    echo "  Warning: Python venv not found at $VENV, skipping void-and-cluster and bayer"
 fi
 
 echo ""
@@ -101,3 +104,5 @@ for mode in "${DITHER_MODES[@]}"; do
 done
 count=$(ls -1 "${OUTPUT_BASE}/void-and-cluster"/*.png 2>/dev/null | wc -l)
 echo "  void-and-cluster/: ${count} files"
+count=$(ls -1 "${OUTPUT_BASE}/bayer"/*.png 2>/dev/null | wc -l)
+echo "  bayer/: ${count} files"
