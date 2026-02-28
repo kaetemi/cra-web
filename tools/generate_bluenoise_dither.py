@@ -53,6 +53,8 @@ def main():
     parser.add_argument('--blue-noise', type=Path,
                         default=Path('tools/test_images/blue_noise_256.png'),
                         help='Blue noise threshold array image')
+    parser.add_argument('--suffix', type=str, default=None,
+                        help='Output filename suffix: {basename}_{suffix}.png')
 
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -83,7 +85,10 @@ def main():
 
         dithered = bluenoise_dither(img_array, blue_noise)
 
-        output_path = args.output_dir / ref_path.name
+        if args.suffix:
+            output_path = args.output_dir / f"{ref_path.stem}_{args.suffix}.png"
+        else:
+            output_path = args.output_dir / ref_path.name
         Image.fromarray(dithered, mode='L').save(output_path)
         print(f"  {ref_path.stem} -> {output_path}")
 

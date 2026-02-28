@@ -74,6 +74,21 @@ for input_file in $INPUT_FILES; do
     echo "  -> ${total_modes} modes completed"
 done
 
+# Generate void-and-cluster blue noise dithered images (Python, not CRA)
+echo ""
+echo "Generating void-and-cluster dithered images..."
+VENV="/home/kaetemi/venv/bin/activate"
+if [ -f "$VENV" ]; then
+    source "$VENV"
+    mkdir -p "${OUTPUT_BASE}/void-and-cluster"
+    python tools/generate_bluenoise_dither.py \
+        --ref-dir "${INPUT_DIR}" \
+        --output-dir "${OUTPUT_BASE}/void-and-cluster" \
+        --suffix "void-and-cluster"
+else
+    echo "  Warning: Python venv not found at $VENV, skipping void-and-cluster"
+fi
+
 echo ""
 echo "Done! Output in ${OUTPUT_BASE}/"
 echo ""
@@ -84,3 +99,5 @@ for mode in "${DITHER_MODES[@]}"; do
     count=$(ls -1 "${OUTPUT_BASE}/${mode}"/*.png 2>/dev/null | wc -l)
     echo "  ${mode}/: ${count} files"
 done
+count=$(ls -1 "${OUTPUT_BASE}/void-and-cluster"/*.png 2>/dev/null | wc -l)
+echo "  void-and-cluster/: ${count} files"
