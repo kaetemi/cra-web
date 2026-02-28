@@ -24,17 +24,7 @@ pub enum AlignmentMode {
     Midpoint,
 }
 
-/// Wang hash for tie-breaking - excellent avalanche properties.
-/// Each bit of input affects all bits of output.
-#[inline]
-fn wang_hash(mut x: u32) -> u32 {
-    x = (x ^ 61) ^ (x >> 16);
-    x = x.wrapping_mul(9);
-    x = x ^ (x >> 4);
-    x = x.wrapping_mul(0x27d4eb2d);
-    x = x ^ (x >> 15);
-    x
-}
+use crate::dither::lowbias32;
 
 /// Match histogram for f32 values using sort-based quantile matching.
 /// No binning/quantization required - works directly on continuous values.
@@ -70,13 +60,13 @@ pub fn match_histogram_f32(
     // Get sorted indices for source (argsort) with random tie-breaking.
     // This prevents horizontal banding when flat regions map to varying reference.
     // Hash the seed so consecutive seeds (0,1,2...) produce uncorrelated patterns.
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
     let mut src_indices: Vec<usize> = (0..src_len).collect();
     src_indices.sort_unstable_by(|&a, &b| {
         match source[a].partial_cmp(&source[b]) {
             Some(std::cmp::Ordering::Equal) | None => {
                 // Random tie-breaking using Wang hash of index XOR hashed seed
-                wang_hash(a as u32 ^ hashed_seed).cmp(&wang_hash(b as u32 ^ hashed_seed))
+                lowbias32(a as u32 ^ hashed_seed).cmp(&lowbias32(b as u32 ^ hashed_seed))
             }
             Some(ord) => ord,
         }
