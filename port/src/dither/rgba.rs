@@ -611,7 +611,7 @@ fn dither_mixed_random_rgba(
 
     for y in 0..process_height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
-        let is_rtl = row_hash & 1 == 1;
+        let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
             for bx in (bx_start..bx_start + process_width).rev() {

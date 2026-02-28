@@ -374,7 +374,7 @@ fn mixed_dither_standard(
             let img_x = px.wrapping_sub(reach) as u16;
             let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
         if let Some(ref mut cb) = progress {
@@ -412,7 +412,7 @@ fn mixed_dither_wang_standard(
             let img_x = px.wrapping_sub(reach) as u16;
             let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
         if let Some(ref mut cb) = progress {
@@ -453,7 +453,7 @@ fn mixed_dither_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
@@ -464,7 +464,7 @@ fn mixed_dither_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
@@ -504,7 +504,7 @@ fn mixed_dither_wang_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
@@ -514,7 +514,7 @@ fn mixed_dither_wang_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
@@ -553,7 +553,7 @@ fn mixed_dither_lowbias_old_standard(
             let img_x = px.wrapping_sub(reach) as u16;
             let img_y = y.wrapping_sub(reach) as u16;
             let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
         if let Some(ref mut cb) = progress {
@@ -592,7 +592,7 @@ fn mixed_dither_lowbias_old_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
@@ -602,7 +602,7 @@ fn mixed_dither_lowbias_old_serpentine(
                 let img_x = px.wrapping_sub(reach) as u16;
                 let img_y = y.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32_old((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
@@ -638,14 +638,14 @@ fn mixed_dither_random(
     for y in 0..process_height {
         let img_y = y.wrapping_sub(reach) as u16;
         let row_hash = lowbias32((img_y as u32) ^ hashed_seed);
-        if row_hash & 1 == 1 {
+        if row_hash >> 31 != 0 {
             // Right-to-left (randomly selected)
             for px in (0..process_width).rev() {
                 let bx = bx_start + px;
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, true);
             }
         } else {
@@ -655,7 +655,7 @@ fn mixed_dither_random(
                 let err = process_pixel(&mut buf, bx, y, &quant);
                 let img_x = px.wrapping_sub(reach) as u16;
                 let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 == 1;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
             }
         }
@@ -1403,7 +1403,7 @@ fn mixed_h2_dither_standard(
             let img_x = px.wrapping_sub(seed_size) as u16;
             let img_y = y.wrapping_sub(seed_size) as u16;
             let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 == 1;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_h2_single_channel_kernel(&mut buf, bx, y, err, use_jjn, false);
         }
         if let Some(ref mut cb) = progress {

@@ -87,7 +87,7 @@ pub fn apply_single_channel_kernel(
 /// based on bits from the pixel_hash. This creates texture variety while maintaining
 /// deterministic results from the seed.
 ///
-/// Bit assignment: R=bit0, G=bit1, B=bit2
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29
 #[inline]
 pub fn apply_mixed_kernel_rgb(
     err_r: &mut [Vec<f32>],
@@ -101,9 +101,9 @@ pub fn apply_mixed_kernel_rgb(
     pixel_hash: u32,
     is_rtl: bool,
 ) {
-    let use_jjn_r = pixel_hash & 1 != 0;
-    let use_jjn_g = pixel_hash & 2 != 0;
-    let use_jjn_b = pixel_hash & 4 != 0;
+    let use_jjn_g = pixel_hash >> 31 != 0;
+    let use_jjn_b = (pixel_hash >> 30) & 1 != 0;
+    let use_jjn_r = (pixel_hash >> 29) & 1 != 0;
 
     apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
     apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
@@ -116,7 +116,7 @@ pub fn apply_mixed_kernel_rgb(
 /// based on bits from the pixel_hash. This creates texture variety while maintaining
 /// deterministic results from the seed.
 ///
-/// Bit assignment: R=bit0, G=bit1, B=bit2, A=bit3
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29, A=bit28
 #[inline]
 pub fn apply_mixed_kernel_rgba(
     err_r: &mut [Vec<f32>],
@@ -132,10 +132,10 @@ pub fn apply_mixed_kernel_rgba(
     pixel_hash: u32,
     is_rtl: bool,
 ) {
-    let use_jjn_r = pixel_hash & 1 != 0;
-    let use_jjn_g = pixel_hash & 2 != 0;
-    let use_jjn_b = pixel_hash & 4 != 0;
-    let use_jjn_a = pixel_hash & 8 != 0;
+    let use_jjn_g = pixel_hash >> 31 != 0;
+    let use_jjn_b = (pixel_hash >> 30) & 1 != 0;
+    let use_jjn_r = (pixel_hash >> 29) & 1 != 0;
+    let use_jjn_a = (pixel_hash >> 28) & 1 != 0;
 
     apply_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
     apply_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
@@ -1192,7 +1192,7 @@ pub fn zhou_fang_threshold(level: i32, x: usize, y: usize, seed: u32) -> f32 {
 
     // Generate position-based noise in [0, 127]
     let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ seed);
-    let noise = (pixel_hash & 127) as f32 / 127.0; // [0.0, 1.0]
+    let noise = (pixel_hash >> 25) as f32 / 127.0; // [0.0, 1.0] using top 7 bits
 
     // Modulate threshold: 0.5 + (noise - 0.5) * m
     // This gives threshold in range [0.5 - m/2, 0.5 + m/2]
@@ -1479,7 +1479,7 @@ pub fn apply_h2_single_channel_kernel(
 
 /// Apply H2 kernel to RGB channels.
 /// Each channel independently selects between FS² and JJN²
-/// based on bits from the pixel_hash. Bit assignment: R=bit0, G=bit1, B=bit2.
+/// based on bits from the pixel_hash. Bit assignment: G=bit31 (highest), B=bit30, R=bit29.
 #[inline]
 pub fn apply_h2_kernel_rgb(
     err_r: &mut [Vec<f32>],
@@ -1493,9 +1493,9 @@ pub fn apply_h2_kernel_rgb(
     pixel_hash: u32,
     is_rtl: bool,
 ) {
-    let use_jjn_r = pixel_hash & 1 != 0;
-    let use_jjn_g = pixel_hash & 2 != 0;
-    let use_jjn_b = pixel_hash & 4 != 0;
+    let use_jjn_g = pixel_hash >> 31 != 0;
+    let use_jjn_b = (pixel_hash >> 30) & 1 != 0;
+    let use_jjn_r = (pixel_hash >> 29) & 1 != 0;
 
     apply_h2_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
     apply_h2_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);
@@ -1504,7 +1504,7 @@ pub fn apply_h2_kernel_rgb(
 
 /// Apply H2 kernel to RGBA channels.
 /// Each channel independently selects between FS² and JJN²
-/// based on bits from the pixel_hash. Bit assignment: R=bit0, G=bit1, B=bit2, A=bit3.
+/// based on bits from the pixel_hash. Bit assignment: G=bit31 (highest), B=bit30, R=bit29, A=bit28.
 #[inline]
 pub fn apply_h2_kernel_rgba(
     err_r: &mut [Vec<f32>],
@@ -1520,10 +1520,10 @@ pub fn apply_h2_kernel_rgba(
     pixel_hash: u32,
     is_rtl: bool,
 ) {
-    let use_jjn_r = pixel_hash & 1 != 0;
-    let use_jjn_g = pixel_hash & 2 != 0;
-    let use_jjn_b = pixel_hash & 4 != 0;
-    let use_jjn_a = pixel_hash & 8 != 0;
+    let use_jjn_g = pixel_hash >> 31 != 0;
+    let use_jjn_b = (pixel_hash >> 30) & 1 != 0;
+    let use_jjn_r = (pixel_hash >> 29) & 1 != 0;
+    let use_jjn_a = (pixel_hash >> 28) & 1 != 0;
 
     apply_h2_single_channel_kernel(err_r, bx, y, err_r_val, use_jjn_r, is_rtl);
     apply_h2_single_channel_kernel(err_g, bx, y, err_g_val, use_jjn_g, is_rtl);

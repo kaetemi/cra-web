@@ -637,7 +637,7 @@ pub fn lab_space_dither_with_options(
     for y in 0..process_height {
         // Determine scan direction for this row
         let is_rtl = if use_random_dir {
-            wang_hash((y as u32) ^ hashed_seed) & 1 == 1
+            wang_hash((y as u32) ^ hashed_seed) >> 31 != 0
         } else if use_serpentine {
             y % 2 == 1
         } else {
@@ -688,7 +688,7 @@ pub fn lab_space_dither_with_options(
             if use_mixed {
                 // Random kernel selection per pixel
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn_pixel = pixel_hash & 1 != 0;
+                let use_jjn_pixel = pixel_hash >> 31 != 0;
 
                 if use_jjn_pixel {
                     if is_rtl {

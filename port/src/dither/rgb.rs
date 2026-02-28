@@ -544,7 +544,7 @@ fn dither_mixed_random_rgb(
     for y in 0..process_height {
         let img_y = y.saturating_sub(reach);
         let row_hash = wang_hash((img_y as u32) ^ hashed_seed);
-        let is_rtl = row_hash & 1 == 1;
+        let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
             for px in (0..process_width).rev() {

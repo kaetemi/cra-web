@@ -382,7 +382,7 @@ fn dither_mixed_standard_gray_alpha(
             }
 
             let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 != 0;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
         }
         if y >= reach {
@@ -428,7 +428,7 @@ fn dither_mixed_serpentine_gray_alpha(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
@@ -449,7 +449,7 @@ fn dither_mixed_serpentine_gray_alpha(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
@@ -479,7 +479,7 @@ fn dither_mixed_random_gray_alpha(
 
     for y in 0..process_height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
-        let is_rtl = row_hash & 1 == 1;
+        let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
             for px in (0..process_width).rev() {
@@ -498,7 +498,7 @@ fn dither_mixed_random_gray_alpha(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
         } else {
@@ -518,7 +518,7 @@ fn dither_mixed_random_gray_alpha(
                 }
 
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
         }
@@ -573,7 +573,7 @@ fn dither_mixed_h2_standard_gray_alpha(
             let img_x = px.wrapping_sub(seed);
             let img_y = y.wrapping_sub(seed);
             let pixel_hash = triple32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
-            let use_jjn = pixel_hash & 1 != 0;
+            let use_jjn = pixel_hash >> 31 != 0;
             apply_h2_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
         }
         if y >= seed {

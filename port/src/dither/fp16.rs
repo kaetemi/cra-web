@@ -386,7 +386,7 @@ fn dither_alpha_f16_mixed(
     for y in 0..process_height {
         let is_rtl = match mode {
             DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => y % 2 == 1,
-            DitherMode::MixedRandom => wang_hash((y as u32) ^ hashed_seed) & 1 == 1,
+            DitherMode::MixedRandom => wang_hash((y as u32) ^ hashed_seed) >> 31 != 0,
             _ => false,
         };
 
@@ -416,7 +416,7 @@ fn dither_alpha_f16_mixed(
 
                 let err_val = adjusted - best_val;
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(&mut err, bx, y, err_val, use_jjn, is_rtl);
             }
         } else {
@@ -445,7 +445,7 @@ fn dither_alpha_f16_mixed(
 
                 let err_val = adjusted - best_val;
                 let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
-                let use_jjn = pixel_hash & 1 != 0;
+                let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(&mut err, bx, y, err_val, use_jjn, is_rtl);
             }
         }
@@ -901,7 +901,7 @@ fn dither_mixed_random_f16(
 
     for y in 0..process_height {
         let row_hash = wang_hash((y as u32) ^ hashed_seed);
-        let is_rtl = row_hash & 1 == 1;
+        let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
             for bx in (bx_start..bx_start + process_width).rev() {
