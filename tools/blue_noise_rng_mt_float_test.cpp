@@ -104,7 +104,7 @@ struct blue_noise_rng_mt {
             {-2,  0},
             {-1, -1},
         };
-        for (int i = 0; i < n; i++) {
+        for (int i = n - 1; i >= 0; i--) {
             uint32_t h = (uint32_t)(((uint64_t)rng.next32() * 10) >> 32);
             states[i] = {tbl[h][0], tbl[h][1]}; // random initial state
         }
