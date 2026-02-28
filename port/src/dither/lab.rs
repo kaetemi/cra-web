@@ -13,7 +13,7 @@ use crate::color::{
     lab_to_linear_rgb, linear_rgb_to_lab, linear_rgb_to_oklab, oklab_to_linear_rgb,
 };
 use crate::color_distance::perceptual_distance_sq;
-use super::common::{gamut_overshoot_penalty, wang_hash, DitherMode, PerceptualSpace};
+use super::common::{gamut_overshoot_penalty, lowbias32, DitherMode, PerceptualSpace};
 use crate::rotation::deg_to_rad;
 
 /// Color space for rotation and quantization operations
@@ -619,7 +619,7 @@ pub fn lab_space_dither_with_options(
     let mut a_out = vec![0u8; pixels];
     let mut b_out = vec![0u8; pixels];
 
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
 
     // Determine if using JJN kernel
     let use_jjn = matches!(mode, DitherMode::JarvisStandard | DitherMode::JarvisSerpentine);
@@ -637,7 +637,7 @@ pub fn lab_space_dither_with_options(
     for y in 0..process_height {
         // Determine scan direction for this row
         let is_rtl = if use_random_dir {
-            wang_hash((y as u32) ^ hashed_seed) >> 31 != 0
+            lowbias32((y as u32) ^ hashed_seed) >> 31 != 0
         } else if use_serpentine {
             y % 2 == 1
         } else {
@@ -687,7 +687,7 @@ pub fn lab_space_dither_with_options(
             // Apply error diffusion kernel
             if use_mixed {
                 // Random kernel selection per pixel
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn_pixel = pixel_hash >> 31 != 0;
 
                 if use_jjn_pixel {

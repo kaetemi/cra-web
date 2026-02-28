@@ -686,7 +686,7 @@ fn zhou_fang_standard(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
     // Same reach as Floyd-Steinberg (3 neighbors)
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
@@ -743,7 +743,7 @@ fn zhou_fang_serpentine(
     quant: QuantParams,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<u8> {
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
     let reach = 1usize;
     let mut buf = create_seeded_buffer(img, width, height, reach);
 

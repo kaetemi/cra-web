@@ -1186,12 +1186,12 @@ pub fn apply_zhou_fang_rtl(
 /// Returns: threshold in [0.0, 1.0] range (typically near 0.5)
 #[inline]
 pub fn zhou_fang_threshold(level: i32, x: usize, y: usize, seed: u32) -> f32 {
-    use super::common::wang_hash;
+    use super::common::lowbias32;
 
     let m = zhou_fang_modulation(level);
 
     // Generate position-based noise in [0, 127]
-    let pixel_hash = wang_hash((x as u32) ^ ((y as u32) << 16) ^ seed);
+    let pixel_hash = lowbias32((x as u32) ^ ((y as u32) << 16) ^ seed);
     let noise = (pixel_hash >> 25) as f32 / 127.0; // [0.0, 1.0] using top 7 bits
 
     // Modulate threshold: 0.5 + (noise - 0.5) * m

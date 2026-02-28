@@ -14,7 +14,7 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
     apply_mixed_kernel_rgb, apply_single_channel_kernel, gamut_overshoot_penalty,
-    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, wang_hash, DitherMode,
+    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped, lowbias32, DitherMode,
     FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, PerceptualSpace, RgbKernel,
     SingleChannelKernel,
 };
@@ -376,7 +376,7 @@ fn dither_alpha_bf16_mixed(
 
     let mut err: Vec<Vec<f32>> = vec![vec![0.0f32; buf_width]; buf_height];
     let mut out = vec![bf16::ZERO; pixels];
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
 
     // Process area: [seeding][real image] for height, [seeding][real][seeding] for width
     let process_height = reach + height;
@@ -386,7 +386,7 @@ fn dither_alpha_bf16_mixed(
     for y in 0..process_height {
         let is_rtl = match mode {
             DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => y % 2 == 1,
-            DitherMode::MixedRandom => wang_hash((y as u32) ^ hashed_seed) >> 31 != 0,
+            DitherMode::MixedRandom => lowbias32((y as u32) ^ hashed_seed) >> 31 != 0,
             _ => false,
         };
 
@@ -415,7 +415,7 @@ fn dither_alpha_bf16_mixed(
                 }
 
                 let err_val = adjusted - best_val;
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(&mut err, bx, y, err_val, use_jjn, is_rtl);
             }
@@ -444,7 +444,7 @@ fn dither_alpha_bf16_mixed(
                 }
 
                 let err_val = adjusted - best_val;
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(&mut err, bx, y, err_val, use_jjn, is_rtl);
             }
@@ -784,7 +784,7 @@ fn dither_mixed_standard_bf16(
                 b_out[idx] = best_b;
             }
 
-            let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
         }
         if y >= reach {
@@ -840,7 +840,7 @@ fn dither_mixed_serpentine_bf16(
                     b_out[idx] = best_b;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
             }
         } else {
@@ -862,7 +862,7 @@ fn dither_mixed_serpentine_bf16(
                     b_out[idx] = best_b;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
             }
         }
@@ -900,7 +900,7 @@ fn dither_mixed_random_bf16(
     let bx_start = reach; // Skip left overshoot
 
     for y in 0..process_height {
-        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let row_hash = lowbias32((y as u32) ^ hashed_seed);
         let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
@@ -922,7 +922,7 @@ fn dither_mixed_random_bf16(
                     b_out[idx] = best_b;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, true);
             }
         } else {
@@ -944,7 +944,7 @@ fn dither_mixed_random_bf16(
                     b_out[idx] = best_b;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
             }
         }
@@ -1081,7 +1081,7 @@ pub fn dither_rgba_bf16_with_options(
     let mut g_out = vec![bf16::ZERO; pixels];
     let mut b_out = vec![bf16::ZERO; pixels];
 
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
 
     match mode {
         DitherMode::None => {

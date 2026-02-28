@@ -30,7 +30,7 @@ use super::basic::dither_with_mode_bits;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
     apply_single_channel_kernel, gray_overshoot_penalty, perceptual_lightness_distance_sq,
-    triple32, wang_hash, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
+    triple32, lowbias32, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, SingleChannelKernel,
 };
 use super::kernels::{apply_h2_single_channel_kernel, H2_REACH, H2_SEED};
@@ -381,7 +381,7 @@ fn dither_mixed_standard_gray_alpha(
                 out[idx] = best_gray;
             }
 
-            let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash >> 31 != 0;
             apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
         }
@@ -427,7 +427,7 @@ fn dither_mixed_serpentine_gray_alpha(
                     out[idx] = best_gray;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
@@ -448,7 +448,7 @@ fn dither_mixed_serpentine_gray_alpha(
                     out[idx] = best_gray;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
@@ -478,7 +478,7 @@ fn dither_mixed_random_gray_alpha(
     let bx_start = reach;
 
     for y in 0..process_height {
-        let row_hash = wang_hash((y as u32) ^ hashed_seed);
+        let row_hash = lowbias32((y as u32) ^ hashed_seed);
         let is_rtl = row_hash >> 31 != 0;
 
         if is_rtl {
@@ -497,7 +497,7 @@ fn dither_mixed_random_gray_alpha(
                     out[idx] = best_gray;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, true);
             }
@@ -517,7 +517,7 @@ fn dither_mixed_random_gray_alpha(
                     out[idx] = best_gray;
                 }
 
-                let pixel_hash = wang_hash((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+                let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
                 let use_jjn = pixel_hash >> 31 != 0;
                 apply_single_channel_kernel(err_buf, bx, y, err_val, use_jjn, false);
             }
@@ -772,7 +772,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
     let mut err_buf = create_seeded_error_buffer(reach, width, height);
     let mut out = vec![0u8; pixels];
 
-    let hashed_seed = wang_hash(seed);
+    let hashed_seed = lowbias32(seed);
 
     match mode {
         DitherMode::None => {
