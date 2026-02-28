@@ -146,6 +146,7 @@ def download_reference_images(output_dir: Path):
             print(f"  {filename} FAILED: {e}")
 
 
+
 def main():
     output_dir = Path(__file__).parent / "test_images" / "sources"
     output_dir.mkdir(parents=True, exist_ok=True)

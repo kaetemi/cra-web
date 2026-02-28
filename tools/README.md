@@ -24,11 +24,12 @@ for `--recursive-test`). The scripts work without it.
 Generates synthetic test images and downloads reference images for dithering experiments.
 
 **Outputs** (`tools/test_images/sources/`):
-- `gray_XXX.png` - Pathological gray levels (256x256) at values like 0, 1, 42, 64, 85, 127, 128, 170, 191, 212, 213, 254, 255
+- `gray_XXX.png` - Pathological gray levels (256x256) at values 0, 1, 18, 42, 43, 54, 64, 85, 91, 127, 128, 170, 191, 212, 213, 254, 255
 - `ramp_continuous.png` - Smooth 0-255 gradient (64x4096)
 - `ramp_step_32.png` - 8-step ramp, 32-value jumps (64x1024)
 - `ramp_step_16.png` - 16-step ramp, 16-value jumps (64x1024)
 - `david.png`, `gradient.png`, `gradient_steps.png` - Reference images (downloaded)
+- `david_small.png` - Manually prepared 256px-height version of david (228x256, not auto-generated)
 
 ```bash
 source /home/kaetemi/venv/bin/activate
@@ -65,6 +66,8 @@ Runs all test images through CRA with every dithering mode.
 - `ulichney-standard`, `ulichney-serpentine` - Ulichney threshold perturbation: FS with ±30% threshold noise (1-bit only)
 - `ulichney-weight-standard`, `ulichney-weight-serpentine` - Ulichney weight perturbation: FS with ±50% paired weight noise (1-bit only)
 - `fs-tpdf-standard`, `fs-tpdf-serpentine` - Floyd-Steinberg with TPDF threshold dither: FS with triangular PDF noise on threshold (1-bit only)
+- `void-and-cluster` - Void-and-cluster blue noise ordered dithering (Python, not CRA)
+- `bayer` - Bayer 8x8 ordered dithering (Python, not CRA)
 
 **Outputs** (`tools/test_images/dithered/{mode}/`):
 - L1 (1-bit) dithered versions of all test images
@@ -695,6 +698,7 @@ tools/
 │   │   ├── gray_*.png           # Pathological gray levels
 │   │   ├── ramp_*.png           # Gradient ramps
 │   │   ├── david.png            # Reference image
+│   │   ├── david_small.png     # david.png resized to 256px height
 │   │   ├── gradient.png         # Reference image
 │   │   └── gradient_steps.png   # Reference image
 │   ├── rng_noise/               # RNG noise test images (not processed)
@@ -720,7 +724,9 @@ tools/
 │   │   ├── ulichney-weight-standard/   # Ulichney weight perturbation standard
 │   │   ├── ulichney-weight-serpentine/ # Ulichney weight perturbation serpentine
 │   │   ├── fs-tpdf-standard/           # FS-TPDF threshold dither standard
-│   │   └── fs-tpdf-serpentine/         # FS-TPDF threshold dither serpentine
+│   │   ├── fs-tpdf-serpentine/         # FS-TPDF threshold dither serpentine
+│   │   ├── void-and-cluster/           # Void-and-cluster blue noise (Python)
+│   │   └── bayer/                      # Bayer 8x8 ordered dither (Python)
 │   └── analysis/
 │       ├── *_serpentine.png           # Dither method comparison
 │       ├── *_hash_comparison.png      # Hash function comparison
