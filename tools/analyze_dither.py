@@ -136,8 +136,20 @@ def plot_analysis(img: np.ndarray, title: str, output_path: Path):
     plt.close()
 
 
-def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path):
-    """Generate comparison figure for multiple dither methods."""
+def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path,
+                    fixed_ylim: tuple[float, float] | None = None,
+                    auto_scale_columns: set[str] | None = None):
+    """Generate comparison figure for multiple dither methods.
+
+    Args:
+        fixed_ylim: If set, use this (min, max) for the radial chart Y-axis
+                    on all columns except those in auto_scale_columns.
+        auto_scale_columns: Set of column names that should use auto-scaling
+                           instead of fixed_ylim. Defaults to {'Original'}.
+    """
+    if auto_scale_columns is None:
+        auto_scale_columns = {'Original'}
+
     n_methods = len(images)
     fig, axes = plt.subplots(3, n_methods, figsize=(4 * n_methods, 12))
 
@@ -156,12 +168,12 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
         v_db = 10 * np.log10(v + 1e-10)
         all_power_db[method_name] = (freqs, h_db, d_db, v_db)
 
-        # Only include non-Original in global scale
-        if method_name != 'Original':
+        # Only include non-auto-scale columns in global scale
+        if method_name not in auto_scale_columns:
             global_min_db = min(global_min_db, h_db.min(), d_db.min(), v_db.min())
             global_max_db = max(global_max_db, h_db.max(), d_db.max(), v_db.max())
 
-    # Add some padding to the range
+    # Add some padding to the range (only used when fixed_ylim is not set)
     if global_min_db < float('inf') and global_max_db > float('-inf'):
         y_padding = (global_max_db - global_min_db) * 0.05
         global_min_db -= y_padding
@@ -188,8 +200,12 @@ def plot_comparison(images: dict[str, np.ndarray], title: str, output_path: Path
         axes[2, col].set_xlabel('cycles/px')
         axes[2, col].grid(True, alpha=0.3)
 
-        # Use global scale for dithered images, auto scale for Original
-        if method_name != 'Original' and global_min_db < float('inf'):
+        # Y-axis scaling: auto for excluded columns, fixed or global for others
+        if method_name in auto_scale_columns:
+            pass  # matplotlib auto-scale
+        elif fixed_ylim is not None:
+            axes[2, col].set_ylim(fixed_ylim[0], fixed_ylim[1])
+        elif global_min_db < float('inf'):
             axes[2, col].set_ylim(global_min_db, global_max_db)
 
         if col == 0:
@@ -347,7 +363,8 @@ def analyze_serpentine_only(base_dir: Path, image_name: str, output_dir: Path):
         return
 
     output_path = output_dir / f"{image_name}_serpentine.png"
-    plot_comparison(images, f"Dither Comparison: {image_name}", output_path)
+    plot_comparison(images, f"Dither Comparison: {image_name}", output_path,
+                    fixed_ylim=(50, 100))
     print(f"  {output_path.name}")
 
 
