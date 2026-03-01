@@ -53,19 +53,19 @@ This directly answers: "Does the error look like noise or like structured patter
 |--------|----------|----------|-----------|----------|
 | fs-standard | **+0.33** | 0.520 | **0.329** | 0.480 |
 | adaptive-blend | **+0.32** | 0.535 | 0.282 | 0.543 |
-| boon-h2 | **+0.32** | 0.536 | 0.278 | 0.542 |
 | fs-serpentine | **+0.32** | 0.524 | 0.321 | 0.484 |
-| ulichney-weight-serpentine | **+0.31** | 0.529 | 0.314 | 0.508 |
-| ulichney-serpentine | **+0.31** | 0.531 | 0.301 | 0.539 |
-| fs-tpdf-serpentine | **+0.30** | 0.535 | 0.295 | 0.551 |
-| boon-standard | +0.29 | **0.541** | **0.326** | **0.567** |
-| boon-serpentine | +0.29 | **0.542** | 0.315 | **0.570** |
+| boon-h2 | **+0.32** | 0.535 | 0.278 | 0.544 |
+| ulichney-weight-serpentine | **+0.31** | 0.528 | 0.315 | 0.518 |
+| ulichney-serpentine | **+0.31** | 0.534 | 0.300 | 0.549 |
+| boon-standard | +0.29 | **0.543** | **0.326** | **0.578** |
+| boon-serpentine | +0.29 | **0.542** | 0.314 | **0.567** |
 | ostro-serpentine | +0.29 | 0.511 | 0.303 | 0.409 |
-| zhou-fang-serpentine | +0.27 | **0.541** | 0.265 | **0.666** |
+| fs-tpdf-serpentine | +0.27 | **0.544** | 0.261 | **0.639** |
+| zhou-fang-serpentine | +0.26 | **0.542** | 0.264 | **0.678** |
 | jjn-serpentine | +0.25 | 0.534 | **0.347** | **0.569** |
 | jjn-standard | +0.24 | 0.532 | **0.360** | 0.584 |
 | bluenoise (void-and-cluster) | +0.23 | 0.411 | 0.254 | **0.687** |
-| whitenoise | 0.00 | **0.562** | 0.196 | **0.969** |
+| whitenoise | +0.00 | **0.562** | 0.197 | **0.967** |
 | none (banding) | **-0.42** | 0.501 | **0.578** | 0.382 |
 
 ### The Blueness Metric
@@ -84,8 +84,8 @@ FS has highest blueness (+0.32) because its small kernel concentrates energy at 
 
 - **Blueness = 0**: By definition, white noise is the baseline
 - **Highest flatness (0.562)**: Error is literally white noise — perfectly flat spectrum
-- **Highest isotropy (0.969)**: White noise is perfectly isotropic
-- **Lowest structure (0.196)**: No error diffusion = terrible tone preservation
+- **Highest isotropy (0.967)**: White noise is perfectly isotropic
+- **Lowest structure (0.197)**: No error diffusion = terrible tone preservation
 
 This proves that **blueness and flatness alone are insufficient**. White noise has blueness=0 and highest flatness, but looks terrible because it doesn't preserve local tone. Good dithering requires:
 
@@ -94,7 +94,7 @@ This proves that **blueness and flatness alone are insufficient**. White noise h
 3. **High structure** — error diffusion must preserve local average intensity
 4. **High isotropy** — no directional bias
 
-The ideal method balances all four. **Boon achieves good blueness (+0.29) with the best flatness** among error diffusion methods.
+The ideal method balances all four. **Boon achieves good blueness (+0.29) with top-tier flatness (0.542-0.543)** among error diffusion methods.
 
 ### Blue Noise Threshold Dithering (Void-and-Cluster)
 
@@ -124,7 +124,7 @@ This validates that **error diffusion produces fundamentally different results t
 
 2. **JJN has lower blueness** (+0.24) — its larger 12-coefficient kernel spreads error to coarser scales.
 
-3. **Boon (our method) balances blueness and flatness** — good blueness (+0.29) with highest flatness (0.542) among error diffusion methods, indicating noise-like error at all scales.
+3. **Boon (our method) balances blueness and flatness** — good blueness (+0.29) with top-tier flatness (0.542-0.543) among error diffusion methods, indicating noise-like error at all scales.
 
 4. **Banding ("none") is red** (-0.42) — low-frequency structure dominates, the opposite of blue noise.
 
@@ -132,7 +132,7 @@ This validates that **error diffusion produces fundamentally different results t
 
 6. **Blue noise threshold dithering underperforms on flatness** — despite using a "gold standard" void-and-cluster texture, threshold dithering produces structured error (flatness 0.411) because error is not actively shaped. Error diffusion fundamentally outperforms threshold dithering on this metric.
 
-7. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
+7. **Structure preservation vs noise trade-off**: Methods with highest flatness (Boon, Zhou-Fang, FS-TPDF) tend to have lower structure scores, suggesting they sacrifice some edge fidelity for better noise characteristics.
 
 ### Per-Level Analysis
 
