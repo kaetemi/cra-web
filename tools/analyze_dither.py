@@ -413,14 +413,18 @@ def analyze_hash_comparison(base_dir: Path, image_name: str, output_dir: Path):
     print(f"  {output_path.name}")
 
 
-def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_from_scale: set):
+def plot_rng_comparison(images: dict, title: str, output_path: Path,
+                       excluded_from_scale: set,
+                       fixed_ylim: tuple[float, float] | None = None):
     """Generate comparison figure for RNG methods with fixed scale for good hashes.
 
     Args:
         images: dict of method_name -> image array
         title: plot title
         output_path: where to save
-        excluded_from_scale: set of method names that should use auto-scale (e.g., Wang, IQ)
+        excluded_from_scale: set of method names that should use auto-scale (e.g., Wang)
+        fixed_ylim: If set, use this (min, max) for the radial chart Y-axis
+                    on all columns except those in excluded_from_scale.
     """
     n_methods = len(images)
     fig, axes = plt.subplots(3, n_methods, figsize=(4 * n_methods, 12))
@@ -443,7 +447,7 @@ def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_fr
             global_min_db = min(global_min_db, h_db.min(), d_db.min(), v_db.min())
             global_max_db = max(global_max_db, h_db.max(), d_db.max(), v_db.max())
 
-    # Add padding
+    # Add padding (only used when fixed_ylim is not set)
     if global_min_db < float('inf') and global_max_db > float('-inf'):
         y_padding = (global_max_db - global_min_db) * 0.05
         global_min_db -= y_padding
@@ -470,8 +474,12 @@ def plot_rng_comparison(images: dict, title: str, output_path: Path, excluded_fr
         axes[2, col].set_xlabel('cycles/px')
         axes[2, col].grid(True, alpha=0.3)
 
-        # Use global scale unless excluded
-        if method_name not in excluded_from_scale and global_min_db < float('inf'):
+        # Y-axis scaling
+        if method_name in excluded_from_scale:
+            pass  # matplotlib auto-scale
+        elif fixed_ylim is not None:
+            axes[2, col].set_ylim(fixed_ylim[0], fixed_ylim[1])
+        elif global_min_db < float('inf'):
             axes[2, col].set_ylim(global_min_db, global_max_db)
 
         if col == 0:
@@ -497,8 +505,8 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
         print(f"RNG noise directory not found: {rng_dir}")
         return
 
-    # Methods to exclude from fixed 75-100 scale (they have different characteristics)
-    excluded_from_scale = {'Wang', 'IQ Int1', 'IQ Int3'}
+    # Fixed Y-axis range for all RNG charts
+    rng_ylim = (80, 100)
 
     # GPU-friendly coordinate-based methods
     gpu_coord_methods = [
@@ -520,7 +528,28 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
     if images:
         output_path = output_dir / "rng_noise_gpu_coord.png"
-        plot_rng_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path, excluded_from_scale)
+        plot_rng_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path, set(), fixed_ylim=rng_ylim)
+        print(f"  {output_path.name}")
+
+    # GPU-friendly coordinate-based (clean version, without IQ hashes)
+    gpu_coord_clean = [
+        ('wang_hash_coord.png', 'Wang'),
+        ('double_wang_coord.png', 'Double Wang'),
+        ('triple32_coord.png', 'Triple32'),
+        ('lowbias32_coord.png', 'Lowbias32'),
+        ('lowbias32_old_coord.png', 'Lowbias32_old'),
+        ('xxhash32_coord.png', 'xxHash32'),
+    ]
+
+    images = {}
+    for filename, label in gpu_coord_clean:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_gpu_coord_clean.png"
+        plot_rng_comparison(images, "GPU-Friendly RNG (Coordinate-based)", output_path, set(), fixed_ylim=rng_ylim)
         print(f"  {output_path.name}")
 
     # Other coordinate-based methods
@@ -541,7 +570,7 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
     if images:
         output_path = output_dir / "rng_noise_other_coord.png"
-        plot_comparison(images, "Other RNG (Coordinate-based)", output_path)
+        plot_comparison(images, "Other RNG (Coordinate-based)", output_path, fixed_ylim=rng_ylim)
         print(f"  {output_path.name}")
 
     # Sequential methods (GPU-friendly)
@@ -564,7 +593,49 @@ def analyze_rng_noise(base_dir: Path, output_dir: Path):
 
     if images:
         output_path = output_dir / "rng_noise_gpu_seq.png"
-        plot_rng_comparison(images, "GPU-Friendly RNG (Sequential)", output_path, excluded_from_scale)
+        plot_rng_comparison(images, "GPU-Friendly RNG (Sequential)", output_path, set(), fixed_ylim=rng_ylim)
+        print(f"  {output_path.name}")
+
+    # High-bit coordinate-based (without IQ hashes)
+    gpu_coord_highbit = [
+        ('wang_hash_coord_highbit.png', 'Wang'),
+        ('double_wang_coord_highbit.png', 'Double Wang'),
+        ('triple32_coord_highbit.png', 'Triple32'),
+        ('lowbias32_coord_highbit.png', 'Lowbias32'),
+        ('lowbias32_old_coord_highbit.png', 'Lowbias32_old'),
+        ('xxhash32_coord_highbit.png', 'xxHash32'),
+    ]
+
+    images = {}
+    for filename, label in gpu_coord_highbit:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_gpu_coord_highbit.png"
+        plot_rng_comparison(images, "GPU-Friendly RNG (Coordinate-based, High Bit)", output_path, set(), fixed_ylim=rng_ylim)
+        print(f"  {output_path.name}")
+
+    # High-bit sequential (without IQ hashes)
+    gpu_seq_highbit = [
+        ('wang_hash_seq_highbit.png', 'Wang'),
+        ('double_wang_seq_highbit.png', 'Double Wang'),
+        ('triple32_seq_highbit.png', 'Triple32'),
+        ('lowbias32_seq_highbit.png', 'Lowbias32'),
+        ('lowbias32_old_seq_highbit.png', 'Lowbias32_old'),
+        ('xxhash32_seq_highbit.png', 'xxHash32'),
+    ]
+
+    images = {}
+    for filename, label in gpu_seq_highbit:
+        path = rng_dir / filename
+        if path.exists():
+            images[label] = load_image(path)
+
+    if images:
+        output_path = output_dir / "rng_noise_gpu_seq_highbit.png"
+        plot_rng_comparison(images, "GPU-Friendly RNG (Sequential, High Bit)", output_path, set(), fixed_ylim=rng_ylim)
         print(f"  {output_path.name}")
 
 

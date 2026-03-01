@@ -130,31 +130,32 @@ def iqint3(seed: np.uint32) -> np.uint32:
     return seed
 
 
-def generate_noise_image(width: int, height: int, hash_func, name: str) -> np.ndarray:
-    """Generate 1-bit noise using hash(x ^ (y << 16) ^ seed) & 1."""
+def generate_noise_image(width: int, height: int, hash_func, name: str, use_high_bit: bool = False) -> np.ndarray:
+    """Generate 1-bit noise using hash(x ^ (y << 16) ^ seed)."""
     img = np.zeros((height, width), dtype=np.uint8)
     seed = np.uint32(12345)
+    bit_mask = np.uint32(0x80000000) if use_high_bit else np.uint32(1)
 
     for y in range(height):
         for x in range(width):
             # Combine coordinates into seed
             coord_seed = np.uint32(x) ^ (np.uint32(y) << np.uint32(16)) ^ seed
             h = hash_func(coord_seed)
-            # Use LSB for 1-bit output
-            img[y, x] = 255 if (h & 1) else 0
+            img[y, x] = 255 if (h & bit_mask) else 0
 
     return img
 
 
-def generate_noise_sequential(width: int, height: int, hash_func, name: str) -> np.ndarray:
+def generate_noise_sequential(width: int, height: int, hash_func, name: str, use_high_bit: bool = False) -> np.ndarray:
     """Generate 1-bit noise using sequential hashing (hash of previous)."""
     img = np.zeros((height, width), dtype=np.uint8)
     state = np.uint32(12345)
+    bit_mask = np.uint32(0x80000000) if use_high_bit else np.uint32(1)
 
     for y in range(height):
         for x in range(width):
             state = hash_func(state)
-            img[y, x] = 255 if (state & 1) else 0
+            img[y, x] = 255 if (state & bit_mask) else 0
 
     return img
 
@@ -203,6 +204,16 @@ def main():
         img = generate_noise_sequential(width, height, func, name)
         save_image(img, output_dir / f"{name}_seq.png")
 
+    print("\nCoordinate-based high bit (hash(x ^ y<<16 ^ seed) >> 31):")
+    for func, name in hash_funcs:
+        img = generate_noise_image(width, height, func, name, use_high_bit=True)
+        save_image(img, output_dir / f"{name}_coord_highbit.png")
+
+    print("\nSequential high bit (hash(prev_state) >> 31):")
+    for func, name in hash_funcs:
+        img = generate_noise_sequential(width, height, func, name, use_high_bit=True)
+        save_image(img, output_dir / f"{name}_seq_highbit.png")
+
     # Also generate reference white noise using numpy
     print("\nReference:")
     np.random.seed(12345)
@@ -211,7 +222,7 @@ def main():
 
     # Blue noise reference (if we had one - for now skip)
 
-    print(f"\nDone! Generated {len(hash_funcs) * 2 + 1} images")
+    print(f"\nDone! Generated {len(hash_funcs) * 4 + 1} images")
 
 
 if __name__ == "__main__":
