@@ -12,7 +12,8 @@ pub use super::common::DitherMode;
 
 // Import shared utilities from common
 use super::common::{
-    apply_single_channel_kernel, bit_replicate, lowbias32, lowbias32_old, triple32, wang_hash, FloydSteinberg,
+    apply_single_channel_kernel, apply_wide_single_channel_kernel,
+    bit_replicate, lowbias32, lowbias32_old, triple32, wang_hash, FloydSteinberg,
     JarvisJudiceNinke, NoneKernel, Ostromoukhov, SingleChannelKernel,
 };
 
@@ -376,6 +377,46 @@ fn mixed_dither_standard(
             let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             let use_jjn = pixel_hash >> 31 != 0;
             apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
+/// Mixed wide dithering with standard left-to-right scanning.
+/// Randomly selects between FS/32 and Residual/32 kernels per pixel.
+/// Uses lowbias32 hash for better spectral properties.
+fn mixed_wide_dither_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = lowbias32(seed);
+    // Use JJN reach (same as wide kernel reach)
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let err = process_pixel(&mut buf, bx, y, &quant);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
+            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_wide = pixel_hash >> 31 != 0;
+            apply_wide_single_channel_kernel(&mut buf, bx, y, err, use_wide);
         }
         if let Some(ref mut cb) = progress {
             if y >= reach {
@@ -1566,6 +1607,7 @@ pub fn dither_with_mode_bits(
         DitherMode::FsTpdfStandard => fs_tpdf_standard(img, width, height, seed, quant, progress),
         DitherMode::FsTpdfSerpentine => fs_tpdf_serpentine(img, width, height, seed, quant, progress),
         DitherMode::MixedH2Standard => mixed_h2_dither_standard(img, width, height, seed, quant, progress),
+        DitherMode::MixedWideStandard => mixed_wide_dither_standard(img, width, height, seed, quant, progress),
     }
 }
 

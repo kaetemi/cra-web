@@ -266,6 +266,12 @@ pub enum DitherMode {
     /// but with second-order convolution kernels that have wider reach (4) and
     /// negative weights. Requires larger buffer with SEED=16 padding.
     MixedH2Standard,
+    /// Mixed Wide: FS/32 and Residual/32 kernels
+    /// Standard left-to-right scanning only
+    /// Uses hash-based per-pixel kernel selection like MixedStandard,
+    /// but with FS×2 (/32) and a Residual kernel (/32) derived from JJN.
+    /// Same buffer layout as boon-standard (reach=2).
+    MixedWideStandard,
 }
 
 /// Wang hash for deterministic randomization.
@@ -533,6 +539,7 @@ pub fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32
 // Re-export kernel types from dedicated module
 pub use super::kernels::{
     apply_mixed_kernel_rgb, apply_mixed_kernel_rgba, apply_single_channel_kernel,
+    apply_wide_single_channel_kernel, apply_mixed_wide_kernel_rgb, apply_mixed_wide_kernel_rgba,
     apply_zhou_fang_ltr, apply_zhou_fang_rtl, apply_zhou_fang_rgb_ltr, apply_zhou_fang_rgb_rtl,
     apply_zhou_fang_rgba_ltr, apply_zhou_fang_rgba_rtl,
     zhou_fang_coefficients, zhou_fang_modulation, zhou_fang_threshold,

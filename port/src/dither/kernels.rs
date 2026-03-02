@@ -81,6 +81,109 @@ pub fn apply_single_channel_kernel(
     }
 }
 
+/// Apply FS/32 or Residual/32 error diffusion to a single channel (LTR only).
+///
+/// This is used by mixed-wide-mode dithering where each channel can use a different kernel.
+/// The kernel is selected at runtime based on the `use_wide` flag.
+///
+/// When `use_wide=false`: FS coefficients scaled to /32 (14, 6, 10, 2)
+/// When `use_wide=true`: Residual coefficients /32 (0,5 / 3,2,2,4,3 / 1,3,5,3,1)
+///
+/// Both kernels sum to 32 and have the same reach as JJN (2 cols, 3 rows).
+#[inline]
+pub fn apply_wide_single_channel_kernel(
+    err: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_val: f32,
+    use_wide: bool,
+) {
+    if use_wide {
+        // Residual kernel /32 (LTR)
+        //            *   0   5
+        //  3   2   2   4   3
+        //  1   3   5   3   1
+        // err[y][bx + 1] += 0; // weight 0, skip
+        err[y][bx + 2] += err_val * (5.0 / 32.0);
+        err[y + 1][bx - 2] += err_val * (3.0 / 32.0);
+        err[y + 1][bx - 1] += err_val * (2.0 / 32.0);
+        err[y + 1][bx] += err_val * (2.0 / 32.0);
+        err[y + 1][bx + 1] += err_val * (4.0 / 32.0);
+        err[y + 1][bx + 2] += err_val * (3.0 / 32.0);
+        err[y + 2][bx - 2] += err_val * (1.0 / 32.0);
+        err[y + 2][bx - 1] += err_val * (3.0 / 32.0);
+        err[y + 2][bx] += err_val * (5.0 / 32.0);
+        err[y + 2][bx + 1] += err_val * (3.0 / 32.0);
+        err[y + 2][bx + 2] += err_val * (1.0 / 32.0);
+    } else {
+        // FS /32 (FS×2) (LTR)
+        //        *  14
+        //    6  10   2
+        err[y][bx + 1] += err_val * (14.0 / 32.0);
+        err[y + 1][bx - 1] += err_val * (6.0 / 32.0);
+        err[y + 1][bx] += err_val * (10.0 / 32.0);
+        err[y + 1][bx + 1] += err_val * (2.0 / 32.0);
+    }
+}
+
+/// Apply mixed-wide error diffusion to RGB channels (3 separate buffers, LTR only).
+///
+/// Each channel independently selects between FS/32 and Residual/32
+/// based on bits from the pixel_hash.
+///
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29
+#[inline]
+pub fn apply_mixed_wide_kernel_rgb(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    pixel_hash: u32,
+) {
+    let use_wide_g = pixel_hash >> 31 != 0;
+    let use_wide_b = (pixel_hash >> 30) & 1 != 0;
+    let use_wide_r = (pixel_hash >> 29) & 1 != 0;
+
+    apply_wide_single_channel_kernel(err_r, bx, y, err_r_val, use_wide_r);
+    apply_wide_single_channel_kernel(err_g, bx, y, err_g_val, use_wide_g);
+    apply_wide_single_channel_kernel(err_b, bx, y, err_b_val, use_wide_b);
+}
+
+/// Apply mixed-wide error diffusion to RGBA channels (4 separate buffers, LTR only).
+///
+/// Each channel independently selects between FS/32 and Residual/32
+/// based on bits from the pixel_hash.
+///
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29, A=bit28
+#[inline]
+pub fn apply_mixed_wide_kernel_rgba(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    pixel_hash: u32,
+) {
+    let use_wide_g = pixel_hash >> 31 != 0;
+    let use_wide_b = (pixel_hash >> 30) & 1 != 0;
+    let use_wide_r = (pixel_hash >> 29) & 1 != 0;
+    let use_wide_a = (pixel_hash >> 28) & 1 != 0;
+
+    apply_wide_single_channel_kernel(err_r, bx, y, err_r_val, use_wide_r);
+    apply_wide_single_channel_kernel(err_g, bx, y, err_g_val, use_wide_g);
+    apply_wide_single_channel_kernel(err_b, bx, y, err_b_val, use_wide_b);
+    apply_wide_single_channel_kernel(err_a, bx, y, err_a_val, use_wide_a);
+}
+
 /// Apply mixed-mode error diffusion to RGB channels (3 separate buffers).
 ///
 /// Each channel independently selects between Floyd-Steinberg and Jarvis-Judice-Ninke

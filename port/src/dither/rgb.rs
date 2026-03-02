@@ -18,7 +18,8 @@ use crate::color::{linear_to_srgb_single, srgb_to_linear_single};
 use crate::color_distance::perceptual_distance_sq;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_mixed_kernel_rgb, gamut_overshoot_penalty, linear_rgb_to_perceptual,
+    apply_mixed_kernel_rgb, apply_mixed_wide_kernel_rgb,
+    gamut_overshoot_penalty, linear_rgb_to_perceptual,
     linear_rgb_to_perceptual_clamped, triple32, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov, RgbKernel,
 };
 use super::kernels::{apply_h2_kernel_rgb, H2_REACH, H2_SEED};
@@ -420,6 +421,65 @@ fn dither_mixed_standard_rgb(
             let img_y = y.saturating_sub(reach);
             let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
             apply_mixed_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+/// Mixed wide kernel dithering with standard (left-to-right) scanning.
+/// Randomly selects between FS/32 and Residual/32 per channel per pixel.
+#[inline]
+fn dither_mixed_wide_standard_rgb(
+    ctx: &DitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+
+            let (r_val, g_val, b_val) = get_seeding_rgb(
+                r_channel, g_channel, b_channel, width, px, y, reach
+            );
+
+            let (best_r, best_g, best_b, err_r_val, err_g_val, err_b_val) =
+                process_pixel_with_rgb(ctx, r_val, g_val, b_val, err_r, err_g, err_b, bx, y);
+
+            let in_real_y = y >= reach;
+            let in_real_x = px >= reach && px < reach + width;
+            if in_real_y && in_real_x {
+                let real_y = y - reach;
+                let real_x = px - reach;
+                let idx = real_y * width + real_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+            }
+
+            let img_x = px.saturating_sub(reach);
+            let img_y = y.saturating_sub(reach);
+            let pixel_hash = lowbias32((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            apply_mixed_wide_kernel_rgb(err_r, err_g, err_b, bx, y, err_r_val, err_g_val, err_b_val, pixel_hash);
         }
         if let Some(ref mut cb) = progress {
             if y >= reach {
@@ -948,6 +1008,14 @@ pub fn colorspace_aware_dither_rgb_with_options(
         }
         DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedH2Standard => {
             dither_mixed_standard_rgb(
+                &ctx, r_channel, g_channel, b_channel,
+                &mut err_r, &mut err_g, &mut err_b,
+                &mut r_out, &mut g_out, &mut b_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedWideStandard => {
+            dither_mixed_wide_standard_rgb(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,
                 &mut r_out, &mut g_out, &mut b_out,

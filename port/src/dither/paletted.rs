@@ -12,7 +12,8 @@
 use crate::color::srgb_to_linear_single;
 use crate::color_distance::perceptual_distance_sq;
 use super::common::{
-    apply_mixed_kernel_rgba, linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
+    apply_mixed_kernel_rgba, apply_mixed_wide_kernel_rgba,
+    linear_rgb_to_perceptual, linear_rgb_to_perceptual_clamped,
     triple32, lowbias32, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, RgbaKernel,
 };
@@ -693,6 +694,71 @@ fn dither_mixed_standard_paletted(
     }
 }
 
+/// Mixed wide kernel dithering with standard (left-to-right) scanning for paletted.
+/// Randomly selects between FS/32 and Residual/32 per channel per pixel.
+#[inline]
+fn dither_mixed_wide_standard_paletted(
+    ctx: &DitherContextPaletted,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, a_val) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+            } else {
+                get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+            };
+
+            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                process_pixel_paletted(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+                a_out[idx] = best_a;
+            }
+
+            let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            apply_mixed_wide_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash);
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
 #[inline]
 fn dither_mixed_serpentine_paletted(
     ctx: &DitherContextPaletted,
@@ -1097,6 +1163,71 @@ fn dither_mixed_standard_paletted_extended(
 
             let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             apply_mixed_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash, false);
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+/// Mixed wide kernel dithering with standard (left-to-right) scanning for extended paletted.
+/// Randomly selects between FS/32 and Residual/32 per channel per pixel.
+#[inline]
+fn dither_mixed_wide_standard_paletted_extended(
+    ctx: &ExtendedDitherContext,
+    r_channel: &[f32],
+    g_channel: &[f32],
+    b_channel: &[f32],
+    a_channel: &[f32],
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    r_out: &mut [u8],
+    g_out: &mut [u8],
+    b_out: &mut [u8],
+    a_out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for bx in bx_start..bx_start + process_width {
+            let px = bx - bx_start;
+            let in_real_image = y >= reach && px >= reach && px < reach + width;
+
+            let (r_val, g_val, b_val, a_val) = if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                (r_channel[idx], g_channel[idx], b_channel[idx], a_channel[idx])
+            } else {
+                get_seeding_rgba(r_channel, g_channel, b_channel, a_channel, width, px, y, reach)
+            };
+
+            let (best_r, best_g, best_b, best_a, err_r_val, err_g_val, err_b_val, err_a_val) =
+                process_pixel_paletted_extended(ctx, r_val, g_val, b_val, a_val, err_r, err_g, err_b, err_a, bx, y);
+
+            if in_real_image {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                r_out[idx] = best_r;
+                g_out[idx] = best_g;
+                b_out[idx] = best_b;
+                a_out[idx] = best_a;
+            }
+
+            let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            apply_mixed_wide_kernel_rgba(err_r, err_g, err_b, err_a, bx, y, err_r_val, err_g_val, err_b_val, err_a_val, pixel_hash);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -1633,6 +1764,14 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, hashed_seed, progress,
             );
         }
+        DitherMode::MixedWideStandard => {
+            dither_mixed_wide_standard_paletted(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
         DitherMode::MixedSerpentine | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldSerpentine => {
             dither_mixed_serpentine_paletted(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
@@ -1860,6 +1999,14 @@ pub fn paletted_dither_rgba_gamut_mapped(
         }
         DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_paletted_extended(
+                &ctx, r_channel, g_channel, b_channel, a_channel,
+                &mut err_r, &mut err_g, &mut err_b, &mut err_a,
+                &mut r_out, &mut g_out, &mut b_out, &mut a_out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedWideStandard => {
+            dither_mixed_wide_standard_paletted_extended(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
                 &mut r_out, &mut g_out, &mut b_out, &mut a_out,
