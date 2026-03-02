@@ -1,8 +1,10 @@
 [package]
 name = "cra_wasm"
-version = "1.13.0"
+version = "1.13.1"
 edition = "2024"
 description = "Color correction algorithms ported to Rust/WASM"
+authors = ["Jan BOON (Kaetemi) <jan.boon@kaetemi.be>"]
+license = "BSD-3-Clause"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
