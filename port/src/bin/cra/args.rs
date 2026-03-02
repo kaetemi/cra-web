@@ -413,7 +413,7 @@ pub enum SafetensorsTransfer {
 
 #[derive(Parser, Debug)]
 #[command(name = "cra")]
-#[command(author, version, about = "CRA - Unified Color Correction and Dithering Tool", long_about = None)]
+#[command(author, version, about = "CRA - Unified Color Correction and Dithering Tool", long_about = "CRA - Unified Color Correction and Dithering Tool\nCopyright (C) 2026 Jan BOON (Kaetemi) - BSD-3-Clause License")]
 pub struct Args {
     /// Input image path
     #[arg(short, long)]
