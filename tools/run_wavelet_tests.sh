@@ -49,6 +49,7 @@ METHODS_STANDARD=(
     "jjn-standard"
     "boon-standard"
     "boon-h2"
+    "boon-wide"
 )
 
 echo "=============================================="

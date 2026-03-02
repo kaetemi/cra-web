@@ -61,6 +61,7 @@ Runs all test images through CRA with every dithering mode.
 - `boon-standard`, `boon-serpentine` - Boon (Our method): FS/JJN per-pixel with lowbias32 hash
 - `boon-wanghash`, `boon-wanghash-serpentine` - Boon with legacy wang_hash (for comparison)
 - `boon-lowbias`, `boon-lowbias-serpentine` - Boon with original lowbias32 (bias 0.174, for comparison)
+- `boon-wide` - Boon wide kernel: FS/32 mixed with Residual/32 (JJN decomposition), standard scanning
 - `ostro-standard`, `ostro-serpentine` - Ostromoukhov variable coefficients
 - `zhou-fang-standard`, `zhou-fang-serpentine` - Zhou-Fang threshold modulation
 - `ulichney-standard`, `ulichney-serpentine` - Ulichney threshold perturbation: FS with ±30% threshold noise (1-bit only)
@@ -391,6 +392,7 @@ Comprehensive test script that generates dithered images from reference photogra
 - `jjn-standard`, `jjn-serpentine` - Jarvis-Judice-Ninke
 - `boon-standard`, `boon-serpentine` - Boon (our method)
 - `boon-h2` - Boon 2nd-order kernel (precomputed FS² and JJN², standard scanning)
+- `boon-wide` - Boon wide kernel (FS/32 + Residual/32, standard scanning)
 - `adaptive-blend` - Gradient-adaptive 1st/2nd order blend (Python: smooth→2nd, edges→1st)
 - `ostro-serpentine` - Ostromoukhov
 - `zhou-fang-serpentine` - Zhou-Fang
@@ -715,6 +717,7 @@ tools/
 │   │   ├── boon-wanghash-serpentine/  # Boon (wang_hash) serpentine
 │   │   ├── boon-lowbias/        # Boon (lowbias32_old) standard
 │   │   ├── boon-lowbias-serpentine/  # Boon (lowbias32_old) serpentine
+│   │   ├── boon-wide/               # Boon wide kernel (FS/32 + Residual/32)
 │   │   ├── ostro-standard/      # Ostromoukhov standard
 │   │   ├── ostro-serpentine/    # Ostromoukhov serpentine
 │   │   ├── zhou-fang-standard/  # Zhou-Fang standard
