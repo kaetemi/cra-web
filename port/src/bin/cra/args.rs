@@ -86,7 +86,7 @@ pub enum DitherMethod {
     #[value(name = "boon-h2", alias = "mixed-h2")]
     BoonH2,
     /// Boon wide kernel: FS/32 and Residual/32 kernels, standard scanning
-    #[value(name = "boon-wide", alias = "mixed-wide")]
+    #[value(name = "boon-wide", alias = "mixed-wide", hide = true)]
     BoonWide,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
