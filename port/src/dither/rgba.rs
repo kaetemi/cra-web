@@ -1052,7 +1052,7 @@ pub fn colorspace_aware_dither_rgba_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_rgba(
                 &ctx, r_channel, g_channel, b_channel,
                 &mut err_r, &mut err_g, &mut err_b,

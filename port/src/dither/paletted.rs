@@ -1625,7 +1625,7 @@ pub fn paletted_dither_rgba_with_mode(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_paletted(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,
@@ -1858,7 +1858,7 @@ pub fn paletted_dither_rgba_gamut_mapped(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_paletted_extended(
                 &ctx, r_channel, g_channel, b_channel, a_channel,
                 &mut err_r, &mut err_g, &mut err_b, &mut err_a,

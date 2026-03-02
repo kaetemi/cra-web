@@ -623,7 +623,7 @@ pub fn lab_space_dither_with_options(
 
     // Determine if using JJN kernel
     let use_jjn = matches!(mode, DitherMode::JarvisStandard | DitherMode::JarvisSerpentine);
-    let use_mixed = matches!(mode, DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine);
+    let use_mixed = matches!(mode, DitherMode::MixedStandard | DitherMode::MixedSerpentine | DitherMode::MixedRandom | DitherMode::MixedWangStandard | DitherMode::MixedWangSerpentine | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard | DitherMode::MixedLowbiasOldSerpentine);
     let use_serpentine = matches!(mode, DitherMode::Serpentine | DitherMode::JarvisSerpentine | DitherMode::MixedSerpentine | DitherMode::MixedLowbiasOldSerpentine);
     let use_random_dir = matches!(mode, DitherMode::MixedRandom);
 

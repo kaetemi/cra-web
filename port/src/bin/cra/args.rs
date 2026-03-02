@@ -93,6 +93,9 @@ pub enum DitherMethod {
     /// Boon with legacy wang_hash serpentine (for testing) - hidden from help
     #[value(name = "boon-wanghash-serpentine", hide = true)]
     BoonWangSerpentine,
+    /// Boon with wang_hash using low bit for kernel selection (intentionally bad, for comparison)
+    #[value(name = "boon-wanghash-lowbit", hide = true)]
+    BoonWangLowbitStandard,
     /// Boon with original lowbias32 (bias 0.174, for testing) - hidden from help
     #[value(name = "boon-lowbias", hide = true)]
     BoonLowbiasOldStandard,
@@ -125,6 +128,7 @@ impl DitherMethod {
             DitherMethod::None => DitherMode::None,
             DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
+            DitherMethod::BoonWangLowbitStandard => DitherMode::MixedWangLowbitStandard,
             DitherMethod::BoonLowbiasOldStandard => DitherMode::MixedLowbiasOldStandard,
             DitherMethod::BoonLowbiasOldSerpentine => DitherMode::MixedLowbiasOldSerpentine,
         }
@@ -153,6 +157,7 @@ impl DitherMethod {
             DitherMethod::None => CSDitherMode::None,
             DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,
+            DitherMethod::BoonWangLowbitStandard => CSDitherMode::MixedWangLowbitStandard,
             DitherMethod::BoonLowbiasOldStandard => CSDitherMode::MixedLowbiasOldStandard,
             DitherMethod::BoonLowbiasOldSerpentine => CSDitherMode::MixedLowbiasOldSerpentine,
         }

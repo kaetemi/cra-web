@@ -425,6 +425,46 @@ fn mixed_dither_wang_standard(
     extract_result_seeded(&buf, width, height, reach)
 }
 
+/// Mixed dithering with standard scanning using wang_hash with LOW BIT extraction.
+/// Uses `pixel_hash & 1` instead of `pixel_hash >> 31` for kernel selection.
+/// This is intentionally "bad" — low bits of hash functions have worse distribution.
+/// Kept only for visual comparison against the high-bit version.
+fn mixed_dither_wang_lowbit_standard(
+    img: &[f32],
+    width: usize,
+    height: usize,
+    seed: u32,
+    quant: QuantParams,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) -> Vec<u8> {
+    let hashed_seed = wang_hash(seed);
+    let reach = <JarvisJudiceNinke as SingleChannelKernel>::REACH;
+    let mut buf = create_seeded_buffer(img, width, height, reach);
+
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let err = process_pixel(&mut buf, bx, y, &quant);
+            let img_x = px.wrapping_sub(reach) as u16;
+            let img_y = y.wrapping_sub(reach) as u16;
+            let pixel_hash = wang_hash((img_x as u32) ^ ((img_y as u32) << 16) ^ hashed_seed);
+            let use_jjn = pixel_hash & 1 != 0;
+            apply_mixed_kernel(&mut buf, bx, y, err, use_jjn, false);
+        }
+        if let Some(ref mut cb) = progress {
+            if y >= reach {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+
+    extract_result_seeded(&buf, width, height, reach)
+}
+
 /// Mixed dithering with serpentine scanning.
 /// Randomly selects kernel per pixel, alternates scan direction each row.
 /// Uses lowbias32 hash for better spectral properties.
@@ -1512,6 +1552,7 @@ pub fn dither_with_mode_bits(
         DitherMode::MixedRandom => mixed_dither_random(img, width, height, seed, quant, progress),
         DitherMode::MixedWangStandard => mixed_dither_wang_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedWangSerpentine => mixed_dither_wang_serpentine(img, width, height, seed, quant, progress),
+        DitherMode::MixedWangLowbitStandard => mixed_dither_wang_lowbit_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedLowbiasOldStandard => mixed_dither_lowbias_old_standard(img, width, height, seed, quant, progress),
         DitherMode::MixedLowbiasOldSerpentine => mixed_dither_lowbias_old_serpentine(img, width, height, seed, quant, progress),
         DitherMode::OstromoukhovStandard => dither_standard::<Ostromoukhov>(img, width, height, quant, progress),

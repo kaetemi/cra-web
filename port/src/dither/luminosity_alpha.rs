@@ -805,7 +805,7 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
                 width, height, reach, progress,
             );
         }
-        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedLowbiasOldStandard => {
+        DitherMode::MixedStandard | DitherMode::MixedWangStandard | DitherMode::MixedWangLowbitStandard | DitherMode::MixedLowbiasOldStandard => {
             dither_mixed_standard_gray_alpha(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,

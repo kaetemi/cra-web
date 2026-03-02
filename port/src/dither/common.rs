@@ -255,6 +255,11 @@ pub enum DitherMode {
     /// Floyd-Steinberg with TPDF threshold dither
     /// Serpentine scanning (alternating direction each row)
     FsTpdfSerpentine,
+    /// Mixed with Wang hash using LOW BIT for kernel selection.
+    /// Uses `pixel_hash & 1` instead of `pixel_hash >> 31`.
+    /// Low bits of hash functions have worse distribution; this is intentionally
+    /// "bad" and kept only for visual comparison against the high-bit version.
+    MixedWangLowbitStandard,
     /// Mixed H2: Precomputed 2nd-order kernels (FS² and JJN²)
     /// Standard left-to-right scanning only
     /// Uses hash-based per-pixel kernel selection like MixedStandard,
