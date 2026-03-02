@@ -37,7 +37,8 @@ def blue_dither_1d(brightness, count, seed=12345, kernel='38_10'):
     Mixes [48] with configurable second kernel.
 
     kernel options:
-        '38_10' - ratio ~4:1 (current best)
+        '0_48'  - [1],[0,1] ideal pair (100% to t+2)
+        '38_10' - ratio ~4:1 (previous best)
         '36_12' - ratio 3:1 ([3,1] scaled)
         '28_20' - ratio 7:5 (original JJN-like)
     """
@@ -47,7 +48,9 @@ def blue_dither_1d(brightness, count, seed=12345, kernel='38_10'):
     white_val = 255 * 48
 
     # Kernel coefficients
-    if kernel == '38_10':
+    if kernel == '0_48':
+        k1_coeff, k2_coeff = 0, 48
+    elif kernel == '38_10':
         k1_coeff, k2_coeff = 38, 10
     elif kernel == '36_12':
         k1_coeff, k2_coeff = 36, 12
@@ -216,16 +219,17 @@ def measure_slope(freqs, power_db, f_low=0.01, f_high=0.1):
 # Analysis Functions
 # =============================================================================
 
-def analyze_linear(gray_levels, count, output_dir):
+def analyze_linear(gray_levels, count, output_dir, kernel='38_10', suffix=''):
     """Linear frequency axis analysis."""
-    print(f"Analyzing {len(gray_levels)} gray levels (linear scale)...")
+    kernel_label = f' [{kernel}]' if kernel != '38_10' else ''
+    print(f"Analyzing {len(gray_levels)} gray levels (linear scale){kernel_label}...")
 
     for gray in gray_levels:
         fig, axes = plt.subplots(2, 3, figsize=(18, 10))
         fig.suptitle(f'1D Temporal Dithering Spectrum - Gray {gray} ({gray*100/255:.1f}%)', fontsize=14)
 
         signals = {
-            'Our 1D Method': blue_dither_1d(gray, count),
+            'Our 1D Method': blue_dither_1d(gray, count, kernel=kernel),
             'ΣΔ 1st Order': sigma_delta_1st(gray, count),
             'ΣΔ 1st + TPDF Dither': sigma_delta_1st_dithered(gray, count),
             'PWM': pwm_dither(gray, count),
@@ -292,15 +296,16 @@ def analyze_linear(gray_levels, count, output_dir):
         ax.grid(True, alpha=0.3, which='both')
 
         plt.tight_layout()
-        output_path = output_dir / f'spectrum_1d_gray_{gray:03d}.png'
+        output_path = output_dir / f'spectrum_1d_gray_{gray:03d}{suffix}.png'
         plt.savefig(output_path, dpi=150)
         plt.close()
         print(f"  {output_path.name}")
 
 
-def analyze_log_scale(gray_levels, count, output_dir, suffix=''):
+def analyze_log_scale(gray_levels, count, output_dir, kernel='38_10', suffix=''):
     """Log frequency axis analysis - ideal for seeing blue noise slope."""
-    print(f"Analyzing {len(gray_levels)} gray levels (log scale)...")
+    kernel_label = f' [{kernel}]' if kernel != '38_10' else ''
+    print(f"Analyzing {len(gray_levels)} gray levels (log scale){kernel_label}...")
 
     n_cols = 3
     n_rows = (len(gray_levels) + n_cols - 1) // n_cols
@@ -314,7 +319,7 @@ def analyze_log_scale(gray_levels, count, output_dir, suffix=''):
         ax = axes[idx // n_cols, idx % n_cols]
 
         # Generate signals
-        our_sig = blue_dither_1d(gray, count)
+        our_sig = blue_dither_1d(gray, count, kernel=kernel)
         white_sig = white_noise_dither(gray, count)
 
         duty_our = np.mean(our_sig) * 100
@@ -364,7 +369,7 @@ def analyze_log_scale(gray_levels, count, output_dir, suffix=''):
     print(f"  {'-'*40}")
 
     for gray in gray_levels:
-        sig = blue_dither_1d(gray, count)
+        sig = blue_dither_1d(gray, count, kernel=kernel)
         duty = np.mean(sig) * 100
         freqs, power = compute_spectrum(sig)
         slope = measure_slope(freqs, power)
@@ -385,16 +390,17 @@ def analyze_log_scale(gray_levels, count, output_dir, suffix=''):
     print(f"\n  Ideal blue noise: +6.0 dB/octave")
 
 
-def analyze_comparison(gray_levels, count, output_dir, suffix=''):
+def analyze_comparison(gray_levels, count, output_dir, kernel='38_10', suffix=''):
     """Single comparison plot across gray levels."""
-    print("Generating comparison plot...")
+    kernel_label = f' [{kernel}]' if kernel != '38_10' else ''
+    print(f"Generating comparison plot{kernel_label}...")
 
     fig, ax = plt.subplots(1, 1, figsize=(12, 6))
 
     colors = plt.cm.viridis(np.linspace(0.2, 0.8, len(gray_levels)))
 
     for idx, gray in enumerate(gray_levels):
-        sig = blue_dither_1d(gray, count)
+        sig = blue_dither_1d(gray, count, kernel=kernel)
         freqs, power_db = compute_spectrum(sig)
         f_smooth, p_smooth = smooth_spectrum_log(freqs, power_db)
 
@@ -584,11 +590,12 @@ def analyze_kernel_comparison(gray_levels, count, output_dir):
     print("Comparing kernels across all gray levels...")
 
     kernels = {
+        '[0,48] [1],[0,1]': '0_48',
         '[38,10] (3.8:1)': '38_10',
         '[36,12] (3:1)': '36_12',
         '[28,20] (1.4:1)': '28_20',
     }
-    colors = {'38_10': '#2ecc71', '36_12': '#3498db', '28_20': '#e74c3c'}
+    colors = {'0_48': '#f39c12', '38_10': '#2ecc71', '36_12': '#3498db', '28_20': '#e74c3c'}
 
     # Print table header
     print(f"\n  {'Kernel':<20}", end="")
@@ -626,7 +633,7 @@ def analyze_kernel_comparison(gray_levels, count, output_dir):
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 4 * n_rows))
     if n_rows == 1:
         axes = axes.reshape(1, -1)
-    fig.suptitle('1D Kernel Comparison: [38,10] vs [36,12] vs [28,20]', fontsize=14)
+    fig.suptitle('1D Kernel Comparison: [0,48] vs [38,10] vs [36,12] vs [28,20]', fontsize=14)
 
     for idx, gray in enumerate(gray_levels):
         ax = axes[idx // n_cols, idx % n_cols]
@@ -721,13 +728,22 @@ def main():
     suffix = '_low_gray' if args.low_gray else ''
 
     # Always run log-scale analysis (it's the most useful)
-    analyze_log_scale(gray_levels, count, output_dir, suffix)
+    analyze_log_scale(gray_levels, count, output_dir, kernel='38_10', suffix=suffix)
 
     # Linear analysis for detailed per-gray-level view
     if args.all or not args.log:
-        analyze_linear(gray_levels, count, output_dir)
+        analyze_linear(gray_levels, count, output_dir, kernel='38_10', suffix=suffix)
 
-    analyze_comparison(gray_levels, count, output_dir, suffix)
+    analyze_comparison(gray_levels, count, output_dir, kernel='38_10', suffix=suffix)
+
+    # Generate _new set with [1],[0,1] kernel pairing
+    new_suffix = suffix + '_new'
+    analyze_log_scale(gray_levels, count, output_dir, kernel='0_48', suffix=new_suffix)
+
+    if args.all or not args.log:
+        analyze_linear(gray_levels, count, output_dir, kernel='0_48', suffix=new_suffix)
+
+    analyze_comparison(gray_levels, count, output_dir, kernel='0_48', suffix=new_suffix)
 
     print(f"\nDone! Results in {output_dir}")
 
