@@ -21,6 +21,7 @@ DITHER_MODES=(
     "boon-lowbias"
     "boon-lowbias-serpentine"
     "boon-wide"
+    "boon-half"
     "ostro-standard"
     "ostro-serpentine"
     "zhou-fang-standard"

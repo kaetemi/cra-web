@@ -169,7 +169,8 @@ function generateCliCommand() {
         6: 'boon-random',
         7: 'none',
         18: 'boon-h2',
-        19: 'boon-wide'
+        19: 'boon-wide',
+        20: 'boon-half'
     };
 
     // Map histogram mode values to CLI histogram mode names

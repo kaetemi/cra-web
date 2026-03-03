@@ -184,6 +184,94 @@ pub fn apply_mixed_wide_kernel_rgba(
     apply_wide_single_channel_kernel(err_a, bx, y, err_a_val, use_wide_a);
 }
 
+// ============================================================================
+// Half-kernel error diffusion (split FS into forward-ish / downward-ish)
+// ============================================================================
+
+/// Apply half-FS error diffusion to a single channel.
+///
+/// Splits Floyd-Steinberg into two half-kernels, each summing to /8:
+///   use_forward=true  (forward-ish):  right(7) + bottom-right(1)
+///   use_forward=false (downward-ish): bottom-left(3) + bottom(5)
+///
+/// Both halves have reach=1 (same as standard FS).
+#[inline]
+pub fn apply_half_single_channel_kernel(
+    err: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_val: f32,
+    use_forward: bool,
+) {
+    if use_forward {
+        // Forward-ish half /8 (LTR)
+        //    *  7
+        //       1
+        err[y][bx + 1] += err_val * (7.0 / 8.0);
+        err[y + 1][bx + 1] += err_val * (1.0 / 8.0);
+    } else {
+        // Downward-ish half /8 (LTR)
+        //    *
+        // 3  5
+        err[y + 1][bx - 1] += err_val * (3.0 / 8.0);
+        err[y + 1][bx] += err_val * (5.0 / 8.0);
+    }
+}
+
+/// Apply mixed-half error diffusion to RGB channels (3 separate buffers, LTR only).
+///
+/// Each channel independently selects between forward and downward halves.
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29
+#[inline]
+pub fn apply_mixed_half_kernel_rgb(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    pixel_hash: u32,
+) {
+    let use_fwd_g = pixel_hash >> 31 != 0;
+    let use_fwd_b = (pixel_hash >> 30) & 1 != 0;
+    let use_fwd_r = (pixel_hash >> 29) & 1 != 0;
+
+    apply_half_single_channel_kernel(err_r, bx, y, err_r_val, use_fwd_r);
+    apply_half_single_channel_kernel(err_g, bx, y, err_g_val, use_fwd_g);
+    apply_half_single_channel_kernel(err_b, bx, y, err_b_val, use_fwd_b);
+}
+
+/// Apply mixed-half error diffusion to RGBA channels (4 separate buffers, LTR only).
+///
+/// Each channel independently selects between forward and downward halves.
+/// Bit assignment: G=bit31 (highest), B=bit30, R=bit29, A=bit28
+#[inline]
+pub fn apply_mixed_half_kernel_rgba(
+    err_r: &mut [Vec<f32>],
+    err_g: &mut [Vec<f32>],
+    err_b: &mut [Vec<f32>],
+    err_a: &mut [Vec<f32>],
+    bx: usize,
+    y: usize,
+    err_r_val: f32,
+    err_g_val: f32,
+    err_b_val: f32,
+    err_a_val: f32,
+    pixel_hash: u32,
+) {
+    let use_fwd_g = pixel_hash >> 31 != 0;
+    let use_fwd_b = (pixel_hash >> 30) & 1 != 0;
+    let use_fwd_r = (pixel_hash >> 29) & 1 != 0;
+    let use_fwd_a = (pixel_hash >> 28) & 1 != 0;
+
+    apply_half_single_channel_kernel(err_r, bx, y, err_r_val, use_fwd_r);
+    apply_half_single_channel_kernel(err_g, bx, y, err_g_val, use_fwd_g);
+    apply_half_single_channel_kernel(err_b, bx, y, err_b_val, use_fwd_b);
+    apply_half_single_channel_kernel(err_a, bx, y, err_a_val, use_fwd_a);
+}
+
 /// Apply mixed-mode error diffusion to RGB channels (3 separate buffers).
 ///
 /// Each channel independently selects between Floyd-Steinberg and Jarvis-Judice-Ninke

@@ -50,6 +50,7 @@ METHODS_STANDARD=(
     "boon-standard"
     "boon-h2"
     "boon-wide"
+    "boon-half"
 )
 
 echo "=============================================="

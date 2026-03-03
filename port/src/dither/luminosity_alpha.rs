@@ -29,7 +29,8 @@ use crate::color_distance::{is_lab_space, is_linear_rgb_space, is_ycbcr_space};
 use super::basic::dither_with_mode_bits;
 use super::bitdepth::{build_linear_lut, QuantLevelParams};
 use super::common::{
-    apply_single_channel_kernel, apply_wide_single_channel_kernel,
+    apply_half_single_channel_kernel, apply_single_channel_kernel,
+    apply_wide_single_channel_kernel,
     gray_overshoot_penalty, perceptual_lightness_distance_sq,
     triple32, lowbias32, DitherMode, FloydSteinberg, JarvisJudiceNinke, NoneKernel, Ostromoukhov,
     PerceptualSpace, SingleChannelKernel,
@@ -431,6 +432,51 @@ fn dither_mixed_wide_standard_gray_alpha(
             let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
             let use_wide = pixel_hash >> 31 != 0;
             apply_wide_single_channel_kernel(err_buf, bx, y, err_val, use_wide);
+        }
+        if y >= reach {
+            if let Some(ref mut cb) = progress {
+                cb((y - reach + 1) as f32 / height as f32);
+            }
+        }
+    }
+}
+
+/// Mixed half kernel dithering with standard (left-to-right) scanning for grayscale+alpha.
+/// Randomly selects between forward-ish and downward-ish halves of FS per pixel.
+fn dither_mixed_half_standard_gray_alpha(
+    ctx: &GrayAlphaDitherContext,
+    gray_channel: &[f32],
+    err_buf: &mut [Vec<f32>],
+    out: &mut [u8],
+    width: usize,
+    height: usize,
+    reach: usize,
+    hashed_seed: u32,
+    mut progress: Option<&mut dyn FnMut(f32)>,
+) {
+    let process_height = reach + height;
+    let process_width = reach + width + reach;
+    let bx_start = reach;
+
+    for y in 0..process_height {
+        for px in 0..process_width {
+            let bx = bx_start + px;
+            let gray_value = get_seeding_gray(gray_channel, width, px, y, reach);
+            let alpha_value = get_seeding_alpha(ctx.alpha_dithered, width, px, y, reach);
+            let (best_gray, err_val) = process_pixel_gray_alpha_with_values(ctx, gray_value, alpha_value, err_buf, bx, y);
+
+            let in_real_y = y >= reach;
+            let in_real_x = px >= reach && px < reach + width;
+            if in_real_y && in_real_x {
+                let img_x = px - reach;
+                let img_y = y - reach;
+                let idx = img_y * width + img_x;
+                out[idx] = best_gray;
+            }
+
+            let pixel_hash = lowbias32((px as u32) ^ ((y as u32) << 16) ^ hashed_seed);
+            let use_forward = pixel_hash >> 31 != 0;
+            apply_half_single_channel_kernel(err_buf, bx, y, err_val, use_forward);
         }
         if y >= reach {
             if let Some(ref mut cb) = progress {
@@ -860,6 +906,12 @@ pub fn colorspace_aware_dither_gray_alpha_with_options(
         }
         DitherMode::MixedWideStandard => {
             dither_mixed_wide_standard_gray_alpha(
+                &ctx, gray_channel, &mut err_buf, &mut out,
+                width, height, reach, hashed_seed, progress,
+            );
+        }
+        DitherMode::MixedHalfStandard => {
+            dither_mixed_half_standard_gray_alpha(
                 &ctx, gray_channel, &mut err_buf, &mut out,
                 width, height, reach, hashed_seed, progress,
             );

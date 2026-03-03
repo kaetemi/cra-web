@@ -88,6 +88,9 @@ pub enum DitherMethod {
     /// Boon wide kernel: FS/32 and Residual/32 kernels, standard scanning
     #[value(name = "boon-wide", alias = "mixed-wide", hide = true)]
     BoonWide,
+    /// Boon half kernel: alternates forward-ish and downward-ish FS halves, standard scanning
+    #[value(name = "boon-half", alias = "mixed-half", hide = true)]
+    BoonHalf,
     /// No error diffusion - each pixel quantized independently (produces banding)
     None,
     /// Boon with legacy wang_hash (for testing) - hidden from help
@@ -129,6 +132,7 @@ impl DitherMethod {
             DitherMethod::FsTpdfSerpentine => DitherMode::FsTpdfSerpentine,
             DitherMethod::BoonH2 => DitherMode::MixedH2Standard,
             DitherMethod::BoonWide => DitherMode::MixedWideStandard,
+            DitherMethod::BoonHalf => DitherMode::MixedHalfStandard,
             DitherMethod::None => DitherMode::None,
             DitherMethod::BoonWangStandard => DitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => DitherMode::MixedWangSerpentine,
@@ -159,6 +163,7 @@ impl DitherMethod {
             DitherMethod::FsTpdfSerpentine => CSDitherMode::FsTpdfSerpentine,
             DitherMethod::BoonH2 => CSDitherMode::MixedH2Standard,
             DitherMethod::BoonWide => CSDitherMode::MixedWideStandard,
+            DitherMethod::BoonHalf => CSDitherMode::MixedHalfStandard,
             DitherMethod::None => CSDitherMode::None,
             DitherMethod::BoonWangStandard => CSDitherMode::MixedWangStandard,
             DitherMethod::BoonWangSerpentine => CSDitherMode::MixedWangSerpentine,

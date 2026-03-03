@@ -272,6 +272,12 @@ pub enum DitherMode {
     /// but with FS×2 (/32) and a Residual kernel (/32) derived from JJN.
     /// Same buffer layout as boon-standard (reach=2).
     MixedWideStandard,
+    /// Mixed Half: Alternates between forward-ish and downward-ish halves of FS
+    /// Standard left-to-right scanning only
+    /// Splits FS into two half-kernels each summing to /8:
+    ///   Forward: right(7) + bottom-right(1)
+    ///   Downward: bottom-left(3) + bottom(5)
+    MixedHalfStandard,
 }
 
 /// Wang hash for deterministic randomization.
@@ -539,6 +545,7 @@ pub fn perceptual_lightness_distance_sq(space: PerceptualSpace, l1: f32, l2: f32
 // Re-export kernel types from dedicated module
 pub use super::kernels::{
     apply_mixed_kernel_rgb, apply_mixed_kernel_rgba, apply_single_channel_kernel,
+    apply_half_single_channel_kernel, apply_mixed_half_kernel_rgb, apply_mixed_half_kernel_rgba,
     apply_wide_single_channel_kernel, apply_mixed_wide_kernel_rgb, apply_mixed_wide_kernel_rgba,
     apply_zhou_fang_ltr, apply_zhou_fang_rtl, apply_zhou_fang_rgb_ltr, apply_zhou_fang_rgb_rtl,
     apply_zhou_fang_rgba_ltr, apply_zhou_fang_rgba_rtl,
