@@ -15,7 +15,7 @@ use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, Inte
 use crate::rotation::{compute_ab_ranges, compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
     accumulate_block_single, accumulate_block_value, create_hamming_weights, extract_block_single,
-    generate_tile_blocks, normalize_accumulated,
+    generate_tile_blocks, normalize_accumulated, Block,
 };
 
 /// Default rotation angles for CRA
@@ -446,6 +446,7 @@ pub fn color_correct_tiled_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    num_threads: usize,
     mut progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let input_pixels = input_width * input_height;
@@ -475,8 +476,15 @@ pub fn color_correct_tiled_linear(
         Vec::new()
     };
 
-    // Process each block
-    for (block_idx, block) in blocks.iter().enumerate() {
+    // --- Per-block compute phase (independent, parallelizable) ---
+    //
+    // A block's CRA correction depends only on the block's own pixels and its
+    // block_idx-derived seeds, never on neighbouring blocks or processing
+    // order. That independence is what lets us fan the compute out across
+    // threads. The weighted accumulation that follows stays strictly
+    // sequential in block order, so the floating-point reduction — and thus
+    // the output — is bit-identical regardless of thread count.
+    let compute_block = |block_idx: usize, block: &Block| -> (Vec<f32>, Vec<f32>, Option<Vec<f32>>) {
         let block_height = block.y_end - block.y_start;
         let block_width = block.x_end - block.x_start;
         let ref_block_height = block.ref_y_end - block.ref_y_start;
@@ -599,6 +607,66 @@ pub fn color_correct_tiled_linear(
             }
         }
 
+        // Only the L channel feeds the accumulator, and only under
+        // tiled_luminosity; otherwise it was just scratch for color-aware
+        // distance and can be dropped here.
+        let l_out = if tiled_luminosity { Some(current_l) } else { None };
+        (current_a, current_b, l_out)
+    };
+
+    // Run the compute phase, optionally across `num_threads` worker threads.
+    // Workers pull block indices from a shared atomic counter (work-stealing,
+    // so the larger edge blocks balance against the smaller interior ones),
+    // each returns its (idx, result) pairs, and we reorder into block order
+    // before accumulating. effective_threads <= 1 keeps the original inline,
+    // allocation-free single-threaded path.
+    let effective_threads = num_threads.max(1).min(num_blocks.max(1));
+    let block_results: Vec<(Vec<f32>, Vec<f32>, Option<Vec<f32>>)> = if effective_threads <= 1 {
+        blocks
+            .iter()
+            .enumerate()
+            .map(|(idx, block)| compute_block(idx, block))
+            .collect()
+    } else {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let next = AtomicUsize::new(0);
+        let next_ref = &next;
+        let compute_ref = &compute_block;
+        let blocks_ref = blocks.as_slice();
+        let mut collected: Vec<(usize, (Vec<f32>, Vec<f32>, Option<Vec<f32>>))> =
+            std::thread::scope(|s| {
+                let handles: Vec<_> = (0..effective_threads)
+                    .map(|_| {
+                        s.spawn(move || {
+                            let mut local = Vec::new();
+                            loop {
+                                let idx = next_ref.fetch_add(1, Ordering::Relaxed);
+                                if idx >= num_blocks {
+                                    break;
+                                }
+                                local.push((idx, compute_ref(idx, &blocks_ref[idx])));
+                            }
+                            local
+                        })
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().expect("tiled CRA worker thread panicked"))
+                    .collect()
+            });
+        // Reorder into block index order so the reduction below is identical
+        // to the single-threaded path regardless of how work was scheduled.
+        collected.sort_by_key(|&(idx, _)| idx);
+        collected.into_iter().map(|(_, result)| result).collect()
+    };
+
+    // --- Sequential weighted accumulation (order-deterministic reduction) ---
+    for (block_idx, block) in blocks.iter().enumerate() {
+        let (current_a, current_b, current_l_opt) = &block_results[block_idx];
+        let block_height = block.y_end - block.y_start;
+        let block_width = block.x_end - block.x_start;
+
         // Create Hamming weights for smooth blending
         let weights = create_hamming_weights(block_height, block_width);
 
@@ -609,7 +677,7 @@ pub fn color_correct_tiled_linear(
             &mut a_acc,
             &mut weight_acc,
             input_width,
-            &current_a,
+            current_a,
             &weights,
             block.y_start,
             block.y_end,
@@ -620,7 +688,7 @@ pub fn color_correct_tiled_linear(
         accumulate_block_value(
             &mut b_acc,
             input_width,
-            &current_b,
+            current_b,
             &weights,
             block.y_start,
             block.y_end,
@@ -629,10 +697,13 @@ pub fn color_correct_tiled_linear(
         );
 
         if tiled_luminosity {
+            let current_l = current_l_opt
+                .as_ref()
+                .expect("L channel must be present when tiled_luminosity is enabled");
             accumulate_block_value(
                 &mut l_acc,
                 input_width,
-                &current_l,
+                current_l,
                 &weights,
                 block.y_start,
                 block.y_end,
@@ -641,7 +712,7 @@ pub fn color_correct_tiled_linear(
             );
         }
 
-        // Report progress: block processing is 5% to 85% (80% total for blocks)
+        // Report progress: block accumulation is 5% to 85% (80% total for blocks)
         if let Some(ref mut cb) = progress {
             cb(0.05 + 0.80 * (block_idx + 1) as f32 / num_blocks as f32);
         }
@@ -758,6 +829,7 @@ pub fn color_correct_tiled_lab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    num_threads: usize,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_tiled_linear(
@@ -773,6 +845,7 @@ pub fn color_correct_tiled_lab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        num_threads,
         progress,
     )
 }
@@ -791,6 +864,7 @@ pub fn color_correct_tiled_oklab_linear(
     histogram_dither_mode: DitherMode,
     color_aware_histogram: bool,
     histogram_distance_space: PerceptualSpace,
+    num_threads: usize,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     color_correct_tiled_linear(
@@ -806,6 +880,7 @@ pub fn color_correct_tiled_oklab_linear(
         histogram_dither_mode,
         color_aware_histogram,
         histogram_distance_space,
+        num_threads,
         progress,
     )
 }

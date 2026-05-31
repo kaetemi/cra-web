@@ -63,6 +63,10 @@ impl HistogramOptions {
 /// * `ref_width`, `ref_height` - Reference image dimensions
 /// * `method` - Color correction method selection
 /// * `histogram_options` - Histogram matching options
+/// * `num_threads` - Worker threads for the tiled methods' per-block compute
+///   (0 or 1 = sequential; ignored by non-tiled methods). Output is
+///   bit-identical for any value: blocks are computed independently and the
+///   weighted accumulation always runs sequentially in block order.
 /// * `progress` - Optional progress callback (receives 0.0 to 1.0)
 ///
 /// # Returns
@@ -77,6 +81,7 @@ pub fn color_correct(
     ref_height: usize,
     method: ColorCorrectionMethod,
     histogram_options: HistogramOptions,
+    num_threads: usize,
     progress: Option<&mut dyn FnMut(f32)>,
 ) -> Vec<Pixel4> {
     let hist_mode = histogram_options.mode_as_u8();
@@ -185,6 +190,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                num_threads,
                 progress,
             )
         }
@@ -201,6 +207,7 @@ pub fn color_correct(
                 hist_dither,
                 colorspace_aware,
                 colorspace_aware_space,
+                num_threads,
                 progress,
             )
         }

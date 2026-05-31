@@ -666,6 +666,15 @@ pub struct Args {
     #[arg(long)]
     pub non_uniform: bool,
 
+    /// Worker threads for tiled color correction (--histogram tiled-lab / tiled-oklab)
+    ///
+    /// 1 = sequential (default). 0 = auto-detect available CPU cores.
+    /// Tiles are computed independently and blended in deterministic block
+    /// order, so the output is bit-identical for any thread count. Has no
+    /// effect on non-tiled histogram methods.
+    #[arg(long, default_value_t = 1)]
+    pub threads: usize,
+
     /// Enable verbose output
     #[arg(short, long)]
     pub verbose: bool,

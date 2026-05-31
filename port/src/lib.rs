@@ -659,6 +659,7 @@ pub fn color_correct_wasm(
         ref_height,
         correction_method_from_u8(method, luminosity_flag),
         histogram_options,
+        1, // WASM runs the tiled compute single-threaded
         None,
     );
 
@@ -709,6 +710,7 @@ pub fn color_correct_with_progress_wasm(
         ref_height,
         correction_method_from_u8(method, luminosity_flag),
         histogram_options,
+        1, // WASM runs the tiled compute single-threaded
         Some(&mut progress_fn),
     );
 

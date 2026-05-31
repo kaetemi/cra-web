@@ -1694,6 +1694,20 @@ fn main() -> Result<(), String> {
         args.perceptual,
     );
 
+    // Resolve worker thread count for tiled methods (0 = auto-detect cores).
+    // Output is deterministic regardless of this value; it only affects how the
+    // independent per-block compute is scheduled.
+    let num_threads = if args.threads == 0 {
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(1)
+    } else {
+        args.threads
+    };
+    if args.verbose && matches!(histogram, Histogram::TiledLab | Histogram::TiledOklab) {
+        eprintln!("Tiled color correction using {} thread(s)", num_threads);
+    }
+
     // Validate output extensions and classify into PNG/GIF
     let mut png_outputs: Vec<PathBuf> = Vec::new();
     let mut gif_outputs: Vec<PathBuf> = Vec::new();
@@ -2013,6 +2027,7 @@ fn main() -> Result<(), String> {
                 ref_height_usize,
                 correction_method.expect("Method should not be None when reference is provided"),
                 histogram_options,
+                num_threads,
                 if args.progress { Some(&mut correction_progress) } else { None },
             );
             if args.progress {
