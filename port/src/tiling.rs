@@ -113,7 +113,12 @@ pub fn extract_block_single(
     block
 }
 
-/// Accumulate a weighted block into the result image (single channel)
+/// Accumulate a weighted block into the result image (single channel),
+/// also tallying the per-pixel weight sum into `weight_acc`.
+///
+/// All channels of a block share the same weights and bounds, so the weight
+/// sum only needs to be tallied once. Use [`accumulate_block_value`] for the
+/// remaining channels to avoid recomputing an identical weight map.
 pub fn accumulate_block_single(
     result: &mut [f32],
     weight_acc: &mut [f32],
@@ -135,6 +140,32 @@ pub fn accumulate_block_single(
 
             result[img_idx] += block[block_idx] * weights[block_idx];
             weight_acc[img_idx] += weights[block_idx];
+        }
+    }
+}
+
+/// Accumulate a weighted block into the result image (single channel) without
+/// tallying weights. Pairs with [`accumulate_block_single`], which builds the
+/// shared weight map once for the first channel of a block.
+pub fn accumulate_block_value(
+    result: &mut [f32],
+    width: usize,
+    block: &[f32],
+    weights: &[f32],
+    y_start: usize,
+    y_end: usize,
+    x_start: usize,
+    x_end: usize,
+) {
+    let block_h = y_end - y_start;
+    let block_w = x_end - x_start;
+
+    for y in 0..block_h {
+        for x in 0..block_w {
+            let block_idx = y * block_w + x;
+            let img_idx = (y_start + y) * width + (x_start + x);
+
+            result[img_idx] += block[block_idx] * weights[block_idx];
         }
     }
 }

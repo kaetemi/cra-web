@@ -14,8 +14,8 @@ use crate::dither::common::PerceptualSpace;
 use crate::histogram::{match_histogram, match_histogram_f32, AlignmentMode, InterpolationMode};
 use crate::rotation::{compute_ab_ranges, compute_oklab_ab_ranges, deg_to_rad, rotate_ab};
 use crate::tiling::{
-    accumulate_block_single, create_hamming_weights, extract_block_single, generate_tile_blocks,
-    normalize_accumulated,
+    accumulate_block_single, accumulate_block_value, create_hamming_weights, extract_block_single,
+    generate_tile_blocks, normalize_accumulated,
 };
 
 /// Default rotation angles for CRA
@@ -602,7 +602,9 @@ pub fn color_correct_tiled_linear(
         // Create Hamming weights for smooth blending
         let weights = create_hamming_weights(block_height, block_width);
 
-        // Accumulate weighted results
+        // Accumulate weighted results. All channels share these weights and
+        // bounds, so tally the weight sum once (with the A channel) and add the
+        // remaining channels value-only.
         accumulate_block_single(
             &mut a_acc,
             &mut weight_acc,
@@ -615,11 +617,8 @@ pub fn color_correct_tiled_linear(
             block.x_end,
         );
 
-        // Need separate weight accumulator for B (but same weights)
-        let mut b_weight_acc = vec![0.0f32; input_pixels];
-        accumulate_block_single(
+        accumulate_block_value(
             &mut b_acc,
-            &mut b_weight_acc,
             input_width,
             &current_b,
             &weights,
@@ -630,10 +629,8 @@ pub fn color_correct_tiled_linear(
         );
 
         if tiled_luminosity {
-            let mut l_weight_acc = vec![0.0f32; input_pixels];
-            accumulate_block_single(
+            accumulate_block_value(
                 &mut l_acc,
-                &mut l_weight_acc,
                 input_width,
                 &current_l,
                 &weights,
