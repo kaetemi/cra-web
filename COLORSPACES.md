@@ -638,6 +638,36 @@ Step 3:
 
 ---
 
+## OKLab Lr (Reference Lightness)
+
+A later refinement by Björn Ottosson (2021). Plain OKLab's L channel does not match CIELAB's reference-white behavior: medium grays sit lower than CIELAB's L*, and the response near black is too compressed. **Lr** replaces L with a toe-adjusted lightness that better matches CIELAB's L* (normalized to [0, 1]) while leaving a and b untouched.
+
+This affects only the lightness scale. The a/b opponent channels, the matrices, and the cube root are identical to plain OKLab. Lr is purely a remapping of L, applied as a final step (and undone as a first step on the inverse).
+
+**Constants:**
+
+```
+k₁ = 0.206
+k₂ = 0.03
+k₃ = (1 + k₁) / (1 + k₂)
+```
+
+**Toe (L → Lr):**
+
+```
+Lr = 0.5 × (k₃·L − k₁ + √((k₃·L − k₁)² + 4·k₂·k₃·L))
+```
+
+**Inverse toe (Lr → L):**
+
+```
+L = (Lr² + k₁·Lr) / (k₃·(Lr + k₂))
+```
+
+The toe function is monotonic on [0, 1], fixes both endpoints (toe(0) = 0, toe(1) = 1), and is its own conceptual inverse via the closed form above—no iteration required. Use Lr when perceptual lightness should agree with CIELAB L*; use plain OKLab L when matching reference implementations that omit the toe.
+
+---
+
 ## Dependency Graph
 
 ```
@@ -655,6 +685,7 @@ CIE XYZ (empirical root)
     │       │
     │       ├── Gamma 2.2 RGB
     │       └── OKLab
+    │             └── OKLab Lr (toe remap of L)
     │
     └── Apple RGB
 ```
@@ -677,6 +708,7 @@ CIE XYZ (empirical root)
 | CIE94 | CIELAB + kL, kC, kH, K₁=0.045, K₂=0.015 | SC, SH |
 | CIEDE2000 | CIELAB + kL, kC, kH, 25⁷, K₁, K₂, etc. | G, T, SL, SC, SH, RT |
 | OKLab | Linear RGB + defined matrices + cube root | — |
+| OKLab Lr | OKLab + toe function (k₁=0.206, k₂=0.03) | k₃ |
 
 ---
 
