@@ -1,0 +1,230 @@
+//! ESD Core `.esdm` binary metadata sidecar encoding (BMP type).
+//!
+//! The `.esdm` file is a fixed-layout binary sidecar placed alongside an asset
+//! file to provide metadata the asset data itself does not contain (dimensions,
+//! EVE bitmap format, stride, palette size, ...). It is consumed at runtime by
+//! ESD Core's `Esd_LoadResourceEx()`. This is distinct from the human-readable
+//! resource-descriptor JSON written by `--output-meta` (which targets EVE Screen
+//! Editor at authoring time).
+//!
+//! Only the BMP type is produced here, describing an uncompressed raw bitmap
+//! (`compression = ESD_RESOURCE_RAW`). All multi-byte fields are little-endian.
+//! See EXT_IMAGE_FORMATS.md for the full layout.
+
+use super::color_format::ColorFormat;
+
+/// `"BMP"` signature, NUL-terminated ASCII, little-endian (`0x00504D42`).
+const SIGNATURE_BMP: u32 = 0x0050_4D42;
+/// Metadata format version.
+const VERSION: u8 = 1;
+/// Total size of a BMP `.esdm` structure (12-byte header + 44-byte type data).
+const BMP_SIZE: usize = 56;
+/// `ESD_RESOURCE_RAW`: uncompressed asset data.
+const COMPRESSION_RAW: u8 = 0;
+/// EVE `PALETTEDARGB8` bitmap format value (BT820, 256-entry ARGB8888 palette).
+const EVE_FORMAT_PALETTEDARGB8: u32 = 21;
+
+/// Map a CRA [`ColorFormat`] to its EVE bitmap format enum value.
+///
+/// Returns `None` for bit-depth combinations that have no EVE equivalent
+/// (CRA accepts arbitrary per-channel bit depths; EVE only defines a fixed set).
+pub fn eve_bitmap_format(fmt: &ColorFormat) -> Option<u32> {
+    let (r, g, b, a) = (fmt.bits_r, fmt.bits_g, fmt.bits_b, fmt.bits_a);
+    if fmt.is_grayscale {
+        if fmt.has_alpha {
+            match (r, a) {
+                (1, 1) => Some(24), // LA1
+                (2, 2) => Some(25), // LA2
+                (4, 4) => Some(26), // LA4
+                (8, 8) => Some(27), // LA8
+                _ => None,
+            }
+        } else {
+            match r {
+                1 => Some(1),  // L1
+                2 => Some(17), // L2
+                4 => Some(2),  // L4
+                8 => Some(3),  // L8
+                _ => None,
+            }
+        }
+    } else if fmt.has_alpha {
+        match (a, r, g, b) {
+            (1, 5, 5, 5) => Some(0),  // ARGB1555
+            (2, 2, 2, 2) => Some(5),  // ARGB2 (ARGB2222)
+            (4, 4, 4, 4) => Some(6),  // ARGB4 (ARGB4444)
+            (6, 6, 6, 6) => Some(23), // ARGB6
+            (8, 8, 8, 8) => Some(20), // ARGB8 (ARGB8888)
+            _ => None,
+        }
+    } else {
+        match (r, g, b) {
+            (3, 3, 2) => Some(4),  // RGB332
+            (5, 6, 5) => Some(7),  // RGB565
+            (6, 6, 6) => Some(22), // RGB6 (RGB666)
+            (8, 8, 8) => Some(19), // RGB8 (RGB888)
+            _ => None,
+        }
+    }
+}
+
+/// Fields needed to encode a BMP-type `.esdm` sidecar.
+struct BmpFields {
+    width: i32,
+    height: i32,
+    stride: i32,
+    eve_format: u32,
+    raw_size: u32,
+    ext_len: u8,
+    palette_size: u16,
+    cells: u16,
+    swizzle: u16,
+}
+
+/// Encode the fixed 56-byte BMP `.esdm` layout (little-endian).
+fn encode(f: &BmpFields) -> Vec<u8> {
+    let mut buf = vec![0u8; BMP_SIZE];
+    // Common header (12 bytes)
+    buf[0..4].copy_from_slice(&SIGNATURE_BMP.to_le_bytes());
+    buf[4] = VERSION;
+    buf[5] = BMP_SIZE as u8;
+    buf[6] = COMPRESSION_RAW;
+    buf[7] = f.ext_len;
+    buf[8..12].copy_from_slice(&f.raw_size.to_le_bytes());
+    // BMP type-specific (44 bytes)
+    buf[12..16].copy_from_slice(&f.width.to_le_bytes());
+    buf[16..20].copy_from_slice(&f.height.to_le_bytes());
+    buf[20..24].copy_from_slice(&f.stride.to_le_bytes());
+    buf[24..28].copy_from_slice(&f.eve_format.to_le_bytes());
+    buf[28..30].copy_from_slice(&f.palette_size.to_le_bytes());
+    // 30..40 paletteFileExt (10 bytes) left NUL.
+    // 40..52 addtlResExt (12 bytes) left NUL.
+    buf[52..54].copy_from_slice(&f.cells.to_le_bytes());
+    buf[54..56].copy_from_slice(&f.swizzle.to_le_bytes());
+    buf
+}
+
+/// Encode a BMP `.esdm` sidecar for a packed (non-paletted) raw bitmap.
+///
+/// - `stride` is the row stride in bytes of the raw file.
+/// - `raw_size` is the total uncompressed byte size of the raw file.
+/// - `ext_len` is the length of the raw file's extension including the dot
+///   (e.g. 4 for `.raw`).
+///
+/// Returns `Err` if the format has no EVE bitmap format equivalent.
+pub fn encode_esdm_bmp_from_format(
+    fmt: &ColorFormat,
+    width: u32,
+    height: u32,
+    stride: u32,
+    raw_size: u32,
+    ext_len: u8,
+) -> Result<Vec<u8>, String> {
+    let eve_format = eve_bitmap_format(fmt).ok_or_else(|| {
+        format!(
+            "Format {} ({} bpp) has no EVE bitmap format equivalent; cannot write .esdm metadata",
+            fmt.name, fmt.total_bits
+        )
+    })?;
+    Ok(encode(&BmpFields {
+        width: width as i32,
+        height: height as i32,
+        stride: stride as i32,
+        eve_format,
+        raw_size,
+        ext_len,
+        palette_size: 0,
+        cells: 1,
+        swizzle: 0,
+    }))
+}
+
+/// Encode a BMP `.esdm` sidecar for paletted output (8-bit indices into an
+/// ARGB8888 palette, `PALETTEDARGB8`). `palette_count` is the number of colors;
+/// the palette sidecar size is `palette_count * 4` bytes.
+pub fn encode_esdm_bmp_paletted(
+    palette_count: u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    raw_size: u32,
+    ext_len: u8,
+) -> Vec<u8> {
+    encode(&BmpFields {
+        width: width as i32,
+        height: height as i32,
+        stride: stride as i32,
+        eve_format: EVE_FORMAT_PALETTEDARGB8,
+        raw_size,
+        ext_len,
+        palette_size: (palette_count.saturating_mul(4)).min(u16::MAX as u32) as u16,
+        cells: 1,
+        swizzle: 0,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fmt(name: &str) -> ColorFormat {
+        ColorFormat::parse(name).unwrap()
+    }
+
+    #[test]
+    fn eve_format_mapping() {
+        assert_eq!(eve_bitmap_format(&fmt("RGB565")), Some(7));
+        assert_eq!(eve_bitmap_format(&fmt("RGB332")), Some(4));
+        assert_eq!(eve_bitmap_format(&fmt("RGB888")), Some(19));
+        assert_eq!(eve_bitmap_format(&fmt("RGB666")), Some(22));
+        assert_eq!(eve_bitmap_format(&fmt("ARGB1555")), Some(0));
+        assert_eq!(eve_bitmap_format(&fmt("ARGB4444")), Some(6));
+        assert_eq!(eve_bitmap_format(&fmt("ARGB8888")), Some(20));
+        assert_eq!(eve_bitmap_format(&fmt("L1")), Some(1));
+        assert_eq!(eve_bitmap_format(&fmt("L2")), Some(17));
+        assert_eq!(eve_bitmap_format(&fmt("L4")), Some(2));
+        assert_eq!(eve_bitmap_format(&fmt("L8")), Some(3));
+        assert_eq!(eve_bitmap_format(&fmt("LA8")), Some(27));
+        // No EVE equivalent for an arbitrary bit combination.
+        assert_eq!(eve_bitmap_format(&fmt("RGB444")), None);
+    }
+
+    #[test]
+    fn header_layout_rgb565() {
+        // 128x64 RGB565, 2 bpp -> stride 256, raw_size 256*64.
+        let stride = 256u32;
+        let raw_size = stride * 64;
+        let bytes =
+            encode_esdm_bmp_from_format(&fmt("RGB565"), 128, 64, stride, raw_size, 4).unwrap();
+
+        assert_eq!(bytes.len(), 56);
+        // Signature "BMP\0".
+        assert_eq!(&bytes[0..4], &[0x42, 0x4D, 0x50, 0x00]);
+        assert_eq!(bytes[4], 1); // version
+        assert_eq!(bytes[5], 56); // size
+        assert_eq!(bytes[6], 0); // compression = RAW
+        assert_eq!(bytes[7], 4); // extLen (".raw")
+        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), raw_size);
+        assert_eq!(i32::from_le_bytes(bytes[12..16].try_into().unwrap()), 128);
+        assert_eq!(i32::from_le_bytes(bytes[16..20].try_into().unwrap()), 64);
+        assert_eq!(i32::from_le_bytes(bytes[20..24].try_into().unwrap()), 256);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 7); // RGB565
+        assert_eq!(u16::from_le_bytes(bytes[28..30].try_into().unwrap()), 0); // paletteSize
+        assert_eq!(u16::from_le_bytes(bytes[52..54].try_into().unwrap()), 1); // cells
+        assert_eq!(u16::from_le_bytes(bytes[54..56].try_into().unwrap()), 0); // swizzle
+    }
+
+    #[test]
+    fn paletted_layout() {
+        let bytes = encode_esdm_bmp_paletted(16, 320, 200, 320, 320 * 200, 4);
+        assert_eq!(bytes.len(), 56);
+        assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 21); // PALETTEDARGB8
+        assert_eq!(u16::from_le_bytes(bytes[28..30].try_into().unwrap()), 64); // 16 * 4 bytes
+    }
+
+    #[test]
+    fn unmappable_format_errors() {
+        let stride = 2u32 * 16;
+        assert!(encode_esdm_bmp_from_format(&fmt("RGB444"), 16, 16, stride, stride * 16, 4).is_err());
+    }
+}

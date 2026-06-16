@@ -1573,6 +1573,34 @@ pub fn format_is_grayscale_wasm(format: &str) -> bool {
     binary_format::format_is_grayscale(format)
 }
 
+/// Encode an ESD Core `.esdm` binary metadata sidecar (BMP type) describing a
+/// raw bitmap asset. `stride` is the row stride in bytes and `raw_size` the total
+/// byte size of the raw file; `ext_len` is the raw file's extension length
+/// including the dot (e.g. 4 for `.raw`). For paletted output pass
+/// `palette_count` > 0 (the index data is `PALETTEDARGB8`); otherwise pass 0 and
+/// a `format` with an EVE bitmap format equivalent (e.g. `RGB565`).
+#[wasm_bindgen]
+pub fn encode_esdm_wasm(
+    format: &str,
+    width: u32,
+    height: u32,
+    stride: u32,
+    raw_size: u32,
+    ext_len: u8,
+    palette_count: u32,
+) -> Result<Vec<u8>, JsValue> {
+    if palette_count > 0 {
+        Ok(format::esdm::encode_esdm_bmp_paletted(
+            palette_count, width, height, stride, raw_size, ext_len,
+        ))
+    } else {
+        let fmt = binary_format::ColorFormat::parse(format)
+            .map_err(|e| JsValue::from_str(&e))?;
+        format::esdm::encode_esdm_bmp_from_format(&fmt, width, height, stride, raw_size, ext_len)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+}
+
 /// Encode interleaved RGB data to row-aligned binary format
 /// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]

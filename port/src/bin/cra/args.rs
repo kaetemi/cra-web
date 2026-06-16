@@ -494,6 +494,14 @@ pub struct Args {
     #[arg(long)]
     pub output_meta: Option<PathBuf>,
 
+    /// Output ESD Core .esdm binary metadata sidecar (optional)
+    ///
+    /// Describes the --output-raw file as an uncompressed EVE bitmap
+    /// (compression = RAW). Requires --output-raw, and a format with an EVE
+    /// bitmap format equivalent (e.g. RGB565, ARGB4444, L8, paletted).
+    #[arg(long)]
+    pub output_esdm: Option<PathBuf>,
+
     /// Output safetensors file path (optional)
     /// Writes the image as floating-point before dithering.
     #[arg(long)]

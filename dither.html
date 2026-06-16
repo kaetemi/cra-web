@@ -1063,6 +1063,7 @@
                 <button class="download-btn" id="download-gif-btn" disabled>GIF Image</button>
                 <button class="download-btn secondary" id="download-raw-btn" disabled>Raw Binary</button>
                 <button class="download-btn tertiary" id="download-meta-btn">Metadata JSON</button>
+                <button class="download-btn tertiary" id="download-esdm-btn" disabled>ESDM Sidecar</button>
             </div>
             <p class="format-info" id="format-info">Format: RGB332 (8 bits/pixel) - raw download available</p>
 
@@ -1113,7 +1114,8 @@
             encode_png_gray_wasm,
             encode_png_gray_alpha_wasm,
             get_palette_colors_wasm,
-            rgba_to_palette_indices_wasm
+            rgba_to_palette_indices_wasm,
+            encode_esdm_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Worker for background processing
@@ -1564,6 +1566,11 @@
             // GIF download - enabled for paletted formats (≤8 bits per pixel or explicit palette)
             const supportsGif = isPaletted || totalBits <= 8;
             document.getElementById('download-gif-btn').disabled = !supportsGif;
+
+            // ESDM sidecar - describes the raw asset, so enabled whenever a raw
+            // download is available (paletted indices, or a binary-capable format).
+            // Formats with no EVE bitmap equivalent surface an error on click.
+            document.getElementById('download-esdm-btn').disabled = !(isPaletted || supportsBinary);
         }
 
         // Download helper function
@@ -2214,6 +2221,48 @@
             const json = JSON.stringify(metadata, null, 2);
             const blob = new Blob([json], { type: 'application/json' });
             const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'json');
+            downloadBlob(blob, filename);
+        });
+
+        document.getElementById('download-esdm-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            const stride = parseInt(document.getElementById('stride-select').value) || 1;
+
+            // Stride/raw-size math mirrors generateMetadata() and the raw download.
+            const isPaletteFormat = format.startsWith('PALETTE_');
+            const bitsPerPixel = isPaletteFormat ? 8 : format_total_bits_wasm(format);
+            const packedRowBytes = Math.ceil((lastDitherResult.width * bitsPerPixel) / 8);
+            const rowStride = stride > 1 ? Math.ceil(packedRowBytes / stride) * stride : packedRowBytes;
+            const totalSize = rowStride * lastDitherResult.height;
+
+            // Paletted output writes 8-bit indices into a PALETTEDARGB8 LUT.
+            let paletteCount = 0;
+            if (isPaletteFormat) {
+                const paletteColorCounts = { 0: 216, 1: 16, 2: 16, 3: 4, 4: 4 };
+                paletteCount = paletteColorCounts[lastDitherResult.paletteType] || 256;
+            }
+
+            // The sidecar describes the .raw download (extension ".raw" = length 4).
+            let esdmData;
+            try {
+                esdmData = encode_esdm_wasm(
+                    format,
+                    lastDitherResult.width,
+                    lastDitherResult.height,
+                    rowStride,
+                    totalSize,
+                    4,
+                    paletteCount
+                );
+            } catch (e) {
+                alert(`Cannot write .esdm metadata: ${e}`);
+                return;
+            }
+
+            const blob = new Blob([esdmData], { type: 'application/octet-stream' });
+            const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'raw.esdm');
             downloadBlob(blob, filename);
         });
 

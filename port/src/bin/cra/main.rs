@@ -23,6 +23,7 @@ use cra_wasm::binary_format::{
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
 use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
+use cra_wasm::format::esdm;
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
 use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
@@ -1745,6 +1746,14 @@ fn main() -> Result<(), String> {
         ));
     }
 
+    // The .esdm sidecar describes the raw asset file, so it requires --output-raw.
+    if args.output_esdm.is_some() && args.output_raw.is_none() {
+        return Err(
+            "--output-esdm requires --output-raw (the .esdm sidecar describes the raw asset file)"
+                .to_string(),
+        );
+    }
+
     // Pre-load input image with ICC profile (single file open)
     // Uses auto-detection to support SFI (safetensors) format
     // Or raw binary format if --input-metadata is provided
@@ -1865,6 +1874,15 @@ fn main() -> Result<(), String> {
     if palette_format.is_none() && args.output_raw.is_some() && !format.supports_binary() {
         return Err(format!(
             "Format {} ({} bits) does not support binary output. Binary output requires 1, 2, 4, 8, 16, 18 (RGB666), 24, or 32 bits per pixel.",
+            format.name, format.total_bits
+        ));
+    }
+
+    // Check .esdm EVE format mappability up front (fail fast before writing the raw file).
+    // Paletted output always maps to PALETTEDARGB8, so only non-palette formats need checking.
+    if args.output_esdm.is_some() && palette_format.is_none() && esdm::eve_bitmap_format(&format).is_none() {
+        return Err(format!(
+            "Format {} ({} bpp) has no EVE bitmap format equivalent; cannot write .esdm metadata",
             format.name, format.total_bits
         ));
     }
@@ -2462,6 +2480,39 @@ fn main() -> Result<(), String> {
                 .map_err(|e| format!("Failed to write {}: {}", bin_path.display(), e))?;
 
             outputs.push(("binary".to_string(), bin_path.clone(), bin_data.len()));
+
+            // Write the .esdm binary metadata sidecar describing this raw file.
+            if let Some(ref esdm_path) = args.output_esdm {
+                // Derive stride/raw_size from the file we just wrote (rows are equal length).
+                let raw_size = bin_data.len() as u32;
+                let row_stride = if height_usize > 0 { bin_data.len() / height_usize } else { 0 } as u32;
+                // Extension length of the raw file, including the dot (e.g. ".raw" = 4).
+                let ext_len = bin_path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| (e.len() + 1) as u8)
+                    .unwrap_or(0);
+
+                let esdm_data = if let Some(ref pf) = palette_format {
+                    esdm::encode_esdm_bmp_paletted(
+                        pf.color_count() as u32,
+                        width, height, row_stride, raw_size, ext_len,
+                    )
+                } else {
+                    esdm::encode_esdm_bmp_from_format(
+                        &format, width, height, row_stride, raw_size, ext_len,
+                    )?
+                };
+
+                if args.verbose {
+                    eprintln!("Writing .esdm metadata sidecar: {}", esdm_path.display());
+                }
+                let mut file = File::create(esdm_path)
+                    .map_err(|e| format!("Failed to create {}: {}", esdm_path.display(), e))?;
+                file.write_all(&esdm_data)
+                    .map_err(|e| format!("Failed to write {}: {}", esdm_path.display(), e))?;
+                outputs.push(("esdm".to_string(), esdm_path.clone(), esdm_data.len()));
+            }
         }
 
         // Write palette colors as ARGB8888 binary (for palette formats only)
