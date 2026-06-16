@@ -1084,6 +1084,36 @@
                     <button class="download-btn secondary" id="download-palette-colors-btn" disabled>Palette LUT</button>
                 </div>
             </div>
+
+            <div class="lvgl-downloads" id="lvgl-downloads">
+                <h5>LVGL Binary (.bin)</h5>
+                <div class="download-row">
+                    <select id="lvgl-format-select" title="LVGL color format (Auto derives from the output format)">
+                        <option value="auto">Auto (from format)</option>
+                        <option value="L8">L8</option>
+                        <option value="I1">I1</option>
+                        <option value="I2">I2</option>
+                        <option value="I4">I4</option>
+                        <option value="I8">I8</option>
+                        <option value="A1">A1</option>
+                        <option value="A2">A2</option>
+                        <option value="A4">A4</option>
+                        <option value="A8">A8</option>
+                        <option value="RGB888">RGB888</option>
+                        <option value="ARGB8888">ARGB8888</option>
+                        <option value="XRGB8888">XRGB8888</option>
+                        <option value="RGB565">RGB565</option>
+                        <option value="RGB565A8">RGB565A8</option>
+                        <option value="AL88">AL88</option>
+                        <option value="ARGB1555">ARGB1555</option>
+                        <option value="ARGB4444">ARGB4444</option>
+                        <option value="ARGB2222">ARGB2222</option>
+                        <option value="ARGB8888_PREMULTIPLIED">ARGB8888 Premultiplied</option>
+                        <option value="RGB565_SWAPPED">RGB565 Swapped</option>
+                    </select>
+                    <button class="download-btn tertiary" id="download-lvgl-btn" disabled>LVGL .bin</button>
+                </div>
+            </div>
         </div>
 
         <div class="cli-command-section" id="cli-command-section" style="margin-top: 20px;">
@@ -1115,7 +1145,9 @@
             encode_png_gray_alpha_wasm,
             get_palette_colors_wasm,
             rgba_to_palette_indices_wasm,
-            encode_esdm_wasm
+            encode_esdm_wasm,
+            default_lvgl_format_wasm,
+            encode_lvgl_wasm
         } from './wasm_cra/cra_wasm.js';
 
         // Worker for background processing
@@ -1571,6 +1603,10 @@
             // download is available (paletted indices, or a binary-capable format).
             // Formats with no EVE bitmap equivalent surface an error on click.
             document.getElementById('download-esdm-btn').disabled = !(isPaletted || supportsBinary);
+
+            // LVGL .bin - self-contained; the color format defaults from the output
+            // format (or the override select). Incompatible picks surface an error on click.
+            document.getElementById('download-lvgl-btn').disabled = false;
         }
 
         // Download helper function
@@ -2263,6 +2299,68 @@
 
             const blob = new Blob([esdmData], { type: 'application/octet-stream' });
             const filename = generateDownloadFilename(lastDitherResult.width, lastDitherResult.height, format, 'raw.esdm');
+            downloadBlob(blob, filename);
+        });
+
+        document.getElementById('download-lvgl-btn').addEventListener('click', () => {
+            if (!lastDitherResult) return;
+
+            const format = getFormatString();
+            const isPaletteFormat = format.startsWith('PALETTE_');
+            let paletteCount = 0;
+            if (isPaletteFormat) {
+                const paletteColorCounts = { 0: 216, 1: 16, 2: 16, 3: 4, 4: 4 };
+                paletteCount = paletteColorCounts[lastDitherResult.paletteType] || 256;
+            }
+
+            // Resolve color format (Auto derives from the output format).
+            let cf = document.getElementById('lvgl-format-select').value;
+            if (cf === 'auto') {
+                cf = default_lvgl_format_wasm(format, paletteCount);
+                if (!cf) {
+                    alert(`No default LVGL format for ${format}; pick one from the dropdown.`);
+                    return;
+                }
+            }
+
+            // Gather source data matching the dither result's shape.
+            const w = lastDitherResult.width, h = lastDitherResult.height;
+            let interleaved = new Uint8Array(0);
+            let paletteIndices = new Uint8Array(0);
+            let paletteColorsArgb = new Uint8Array(0);
+
+            if (isPaletteFormat) {
+                paletteIndices = rgba_to_palette_indices_wasm(
+                    lastDitherResult.rgbaInterleaved, lastDitherResult.paletteType);
+                paletteColorsArgb = get_palette_colors_wasm(lastDitherResult.paletteType);
+            } else if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
+                interleaved = lastDitherResult.laInterleaved;
+            } else if (lastDitherResult.isGrayscale) {
+                interleaved = lastDitherResult.grayChannel;
+            } else if (lastDitherResult.hasAlpha) {
+                interleaved = lastDitherResult.rgbaInterleaved;
+            } else {
+                interleaved = getRgbInterleaved();
+            }
+
+            let binData;
+            try {
+                binData = encode_lvgl_wasm(
+                    cf, w, h,
+                    interleaved,
+                    lastDitherResult.isGrayscale,
+                    lastDitherResult.hasAlpha,
+                    lastDitherResult.bitsR, lastDitherResult.bitsG, lastDitherResult.bitsB, lastDitherResult.bitsA,
+                    paletteIndices,
+                    paletteColorsArgb
+                );
+            } catch (e) {
+                alert(`Cannot write LVGL .bin: ${e}`);
+                return;
+            }
+
+            const blob = new Blob([binData], { type: 'application/octet-stream' });
+            const filename = generateDownloadFilename(w, h, `${format}_lvgl_${cf}`, 'bin');
             downloadBlob(blob, filename);
         });
 

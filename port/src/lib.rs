@@ -1601,6 +1601,81 @@ pub fn encode_esdm_wasm(
     }
 }
 
+/// Return the canonical LVGL color format name for a CRA format string, or an
+/// empty string if there is no default. Pass `palette_count` > 0 for paletted
+/// output (selects the smallest indexed format that fits).
+#[wasm_bindgen]
+pub fn default_lvgl_format_wasm(format: &str, palette_count: u32) -> String {
+    if palette_count > 0 {
+        let n = palette_count;
+        return if n <= 2 {
+            "I1"
+        } else if n <= 4 {
+            "I2"
+        } else if n <= 16 {
+            "I4"
+        } else {
+            "I8"
+        }
+        .to_string();
+    }
+    match binary_format::ColorFormat::parse(format) {
+        Ok(fmt) => format::lvgl::default_cf_for_format(&fmt, None)
+            .map(|cf| cf.name().to_string())
+            .unwrap_or_default(),
+        Err(_) => String::new(),
+    }
+}
+
+/// Encode an LVGL binary image (`.bin`).
+///
+/// `interleaved` is the dithered pixel data (RGB 3/px, RGBA 4/px, grayscale 1/px
+/// or LA 2/px per `is_grayscale`/`has_alpha`). For indexed formats pass
+/// `palette_indices` (1 byte/px) and `palette_colors_argb` (4 bytes/color in
+/// A,R,G,B order, as produced by `get_palette_colors_wasm`); leave them empty
+/// otherwise. The bit depths must match the requested color format.
+#[wasm_bindgen]
+#[allow(clippy::too_many_arguments)]
+pub fn encode_lvgl_wasm(
+    cf_name: &str,
+    width: usize,
+    height: usize,
+    interleaved: Vec<u8>,
+    is_grayscale: bool,
+    has_alpha: bool,
+    bits_r: u8,
+    bits_g: u8,
+    bits_b: u8,
+    bits_a: u8,
+    palette_indices: Vec<u8>,
+    palette_colors_argb: Vec<u8>,
+) -> Result<Vec<u8>, JsValue> {
+    let cf = format::lvgl::LvglColorFormat::from_name(cf_name)
+        .ok_or_else(|| JsValue::from_str(&format!("Unknown LVGL color format: {}", cf_name)))?;
+    // Palette colors arrive as A,R,G,B (matching get_palette_colors_wasm); the
+    // encoder wants (r, g, b, a) tuples.
+    let colors: Vec<(u8, u8, u8, u8)> = palette_colors_argb
+        .chunks_exact(4)
+        .map(|c| (c[1], c[2], c[3], c[0]))
+        .collect();
+    let src = format::lvgl::LvglSource {
+        interleaved: &interleaved,
+        is_grayscale,
+        has_alpha,
+        bits_r,
+        bits_g,
+        bits_b,
+        bits_a,
+        palette_indices: if palette_indices.is_empty() {
+            None
+        } else {
+            Some(&palette_indices)
+        },
+        palette_colors: if colors.is_empty() { None } else { Some(&colors) },
+    };
+    format::lvgl::encode_lvgl_bin(cf, width, height, &src).map_err(|e| JsValue::from_str(&e))
+}
+
 /// Encode interleaved RGB data to row-aligned binary format
 /// Input: Interleaved RGB u8 data (RGBRGB..., 3 bytes per pixel)
 #[wasm_bindgen]

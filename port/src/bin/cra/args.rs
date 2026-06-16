@@ -342,6 +342,62 @@ impl ScaleMethod {
     }
 }
 
+/// LVGL color format for --output-lvgl
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LvglFormat {
+    L8,
+    I1,
+    I2,
+    I4,
+    I8,
+    A1,
+    A2,
+    A4,
+    A8,
+    Rgb888,
+    Argb8888,
+    Xrgb8888,
+    Rgb565,
+    #[value(name = "rgb565a8")]
+    Rgb565a8,
+    Al88,
+    Argb1555,
+    Argb4444,
+    Argb2222,
+    #[value(name = "argb8888-premultiplied", alias = "argb8888-premul")]
+    Argb8888Premultiplied,
+    #[value(name = "rgb565-swapped")]
+    Rgb565Swapped,
+}
+
+impl LvglFormat {
+    pub fn to_lib(self) -> cra_wasm::format::lvgl::LvglColorFormat {
+        use cra_wasm::format::lvgl::LvglColorFormat as L;
+        match self {
+            LvglFormat::L8 => L::L8,
+            LvglFormat::I1 => L::I1,
+            LvglFormat::I2 => L::I2,
+            LvglFormat::I4 => L::I4,
+            LvglFormat::I8 => L::I8,
+            LvglFormat::A1 => L::A1,
+            LvglFormat::A2 => L::A2,
+            LvglFormat::A4 => L::A4,
+            LvglFormat::A8 => L::A8,
+            LvglFormat::Rgb888 => L::Rgb888,
+            LvglFormat::Argb8888 => L::Argb8888,
+            LvglFormat::Xrgb8888 => L::Xrgb8888,
+            LvglFormat::Rgb565 => L::Rgb565,
+            LvglFormat::Rgb565a8 => L::Rgb565a8,
+            LvglFormat::Al88 => L::Al88,
+            LvglFormat::Argb1555 => L::Argb1555,
+            LvglFormat::Argb4444 => L::Argb4444,
+            LvglFormat::Argb2222 => L::Argb2222,
+            LvglFormat::Argb8888Premultiplied => L::Argb8888Premultiplied,
+            LvglFormat::Rgb565Swapped => L::Rgb565Swapped,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, ValueEnum, PartialEq)]
 pub enum Tonemapping {
     /// ACES filmic tonemapping (forward: HDR to SDR)
@@ -501,6 +557,18 @@ pub struct Args {
     /// bitmap format equivalent (e.g. RGB565, ARGB4444, L8, paletted).
     #[arg(long)]
     pub output_esdm: Option<PathBuf>,
+
+    /// Output LVGL binary image (.bin) file path (optional)
+    ///
+    /// Self-contained LVGL image (12-byte header + palette/pixels/alpha plane).
+    /// The color format defaults to the LVGL equivalent of --format; override
+    /// with --lvgl-format for variants (rgb565-swapped, xrgb8888, a8, ...).
+    #[arg(long)]
+    pub output_lvgl: Option<PathBuf>,
+
+    /// LVGL color format for --output-lvgl (default: derived from --format)
+    #[arg(long, value_enum)]
+    pub lvgl_format: Option<LvglFormat>,
 
     /// Output safetensors file path (optional)
     /// Writes the image as floating-point before dithering.

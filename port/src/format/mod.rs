@@ -6,6 +6,7 @@
 //! - `binary`: Raw binary format encoding/decoding
 //! - `color_format`: Color format definition and parsing
 //! - `esdm`: ESD Core `.esdm` binary metadata sidecar encoding
+//! - `lvgl`: LVGL binary image format (`.bin`) encoding
 //! - `rgb666`: RGB666 special format encoding/decoding
 //! - `palettized_png`: Palettized PNG output for low-bit-depth formats
 //! - `gif`: GIF output for palettized formats
@@ -15,6 +16,7 @@ pub mod color_format;
 pub mod decode;
 pub mod esdm;
 pub mod gif;
+pub mod lvgl;
 pub mod palettized_png;
 pub mod rgb666;
 pub mod sfi;

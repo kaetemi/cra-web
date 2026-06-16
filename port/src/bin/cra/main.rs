@@ -23,7 +23,7 @@ use cra_wasm::binary_format::{
     is_valid_stride, supports_palettized_png, ColorFormat, RawImageMetadata, StrideFill,
 };
 use cra_wasm::dither::paletted::{DitherPalette, paletted_dither_rgba_gamut_mapped};
-use cra_wasm::format::esdm;
+use cra_wasm::format::{esdm, lvgl};
 use cra_wasm::sfi::{SfiTransfer, write_sfi_bf16, write_sfi_f16, write_sfi_f32, write_sfi_f16_channels, write_sfi_bf16_channels};
 use cra_wasm::dither::fp16::{dither_rgb_f16_with_mode, dither_rgba_f16_with_mode, Fp16WorkingSpace};
 use cra_wasm::dither::bf16::{dither_rgb_bf16_with_mode, dither_rgba_bf16_with_mode, Bf16WorkingSpace};
@@ -1724,9 +1724,10 @@ fn main() -> Result<(), String> {
         || args.output_raw_g.is_some()
         || args.output_raw_b.is_some()
         || args.output_raw_a.is_some();
-    // Integer output = PNG, GIF, raw binary, or channel outputs (requires dithering)
+    // Integer output = PNG, GIF, raw binary, LVGL .bin, or channel outputs (requires dithering)
     let has_integer_output = !args.output.is_empty()
         || args.output_raw.is_some()
+        || args.output_lvgl.is_some()
         || has_channel_output;
     if !has_integer_output
         && args.output_meta.is_none()
@@ -1886,6 +1887,24 @@ fn main() -> Result<(), String> {
             format.name, format.total_bits
         ));
     }
+
+    // Resolve and validate the LVGL color format up front (fail fast before dithering).
+    let lvgl_cf = if args.output_lvgl.is_some() {
+        let paletted_colors = palette_format.as_ref().map(|pf| pf.color_count());
+        let cf = match args.lvgl_format {
+            Some(f) => f.to_lib(),
+            None => lvgl::default_cf_for_format(&format, paletted_colors).ok_or_else(|| {
+                format!(
+                    "No default LVGL format for {}; specify --lvgl-format explicitly",
+                    format.name
+                )
+            })?,
+        };
+        lvgl::check_compatible(cf, &format, paletted_colors)?;
+        Some(cf)
+    } else {
+        None
+    };
 
     // Check channel output compatibility (requires RGB/ARGB format, not grayscale)
     if (args.output_raw_r.is_some() || args.output_raw_g.is_some() || args.output_raw_b.is_some()) && format.is_grayscale {
@@ -2513,6 +2532,32 @@ fn main() -> Result<(), String> {
                     .map_err(|e| format!("Failed to write {}: {}", esdm_path.display(), e))?;
                 outputs.push(("esdm".to_string(), esdm_path.clone(), esdm_data.len()));
             }
+        }
+
+        // Write LVGL binary image (.bin) - self-contained, independent of --output-raw
+        if let Some(ref lvgl_path) = args.output_lvgl {
+            let cf = lvgl_cf.expect("lvgl_cf resolved when --output-lvgl is set");
+            let lvgl_src = lvgl::LvglSource {
+                interleaved: &dither_result.interleaved,
+                is_grayscale: dither_result.is_grayscale,
+                has_alpha: dither_result.has_alpha,
+                bits_r: format.bits_r,
+                bits_g: format.bits_g,
+                bits_b: format.bits_b,
+                bits_a: format.bits_a,
+                palette_indices: dither_result.palette_indices.as_deref(),
+                palette_colors: dither_result.palette_colors.as_deref(),
+            };
+            let lvgl_data = lvgl::encode_lvgl_bin(cf, width_usize, height_usize, &lvgl_src)?;
+
+            if args.verbose {
+                eprintln!("Writing LVGL .bin ({}): {}", cf.name(), lvgl_path.display());
+            }
+            let mut file = File::create(lvgl_path)
+                .map_err(|e| format!("Failed to create {}: {}", lvgl_path.display(), e))?;
+            file.write_all(&lvgl_data)
+                .map_err(|e| format!("Failed to write {}: {}", lvgl_path.display(), e))?;
+            outputs.push(("lvgl".to_string(), lvgl_path.clone(), lvgl_data.len()));
         }
 
         // Write palette colors as ARGB8888 binary (for palette formats only)
