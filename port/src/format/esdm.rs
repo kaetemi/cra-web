@@ -155,6 +155,49 @@ pub fn encode_esdm_bmp_from_format(
     }))
 }
 
+/// Length of a filename's extension including the leading dot (`".bin"` -> 4).
+/// Returns 0 when there is no extension (no dot, leading-dot only, or trailing dot).
+pub fn extension_ext_len(filename: &str) -> u8 {
+    match filename.rfind('.') {
+        Some(i) if i > 0 && i + 1 < filename.len() => (filename.len() - i).min(u8::MAX as usize) as u8,
+        _ => 0,
+    }
+}
+
+/// Derive the `.esdm` `extLen` and `paletteFileExt` for a paletted bitmap from
+/// the common prefix of the bitmap and palette filenames.
+///
+/// The base is the longest common prefix trimmed of trailing separators
+/// (`_`, `-`, `.`); `extLen` is the bitmap's remaining suffix length and the
+/// returned string is the palette's remaining suffix — so that
+/// `palette = bitmap[..len - extLen] + paletteFileExt`. For example
+/// `blahblah_index.bin` + `blahblah_lut.raw` -> base `blahblah`, extLen 10
+/// (`_index.bin`), `_lut.raw`.
+///
+/// Falls back to the bitmap's plain extension and an empty palette suffix (which
+/// the encoder turns into [`DEFAULT_PALETTE_FILE_EXT`]) when there is no usable
+/// shared prefix or no palette filename.
+pub fn derive_palette_naming(bitmap_name: &str, palette_name: Option<&str>) -> (u8, String) {
+    let fallback = (extension_ext_len(bitmap_name), String::new());
+    let Some(palette_name) = palette_name else {
+        return fallback;
+    };
+    // Longest common prefix, tracked on char boundaries.
+    let mut common = 0usize;
+    for ((i, bc), pc) in bitmap_name.char_indices().zip(palette_name.chars()) {
+        if bc != pc {
+            break;
+        }
+        common = i + bc.len_utf8();
+    }
+    let base = bitmap_name[..common].trim_end_matches(['_', '-', '.']).len();
+    if base == 0 || base >= bitmap_name.len() || base >= palette_name.len() {
+        return fallback;
+    }
+    let ext_len = (bitmap_name.len() - base).min(u8::MAX as usize) as u8;
+    (ext_len, palette_name[base..].to_string())
+}
+
 /// Encode a BMP `.esdm` sidecar for paletted output (8-bit indices into an
 /// ARGB8888 palette, `PALETTEDARGB8`). `palette_count` is the number of colors;
 /// the palette sidecar size is `palette_count * 4` bytes.
@@ -259,6 +302,40 @@ mod tests {
         // Over-long suffix is truncated to the 10-byte field.
         let t = encode_esdm_bmp_paletted(4, 8, 8, 8, 64, 4, ".abcdefghijklmnop.raw");
         assert_eq!(&t[30..40], b".abcdefghi");
+    }
+
+    #[test]
+    fn palette_naming_common_prefix() {
+        // ESD converter convention: base "blahblah", role suffixes keep the separator.
+        assert_eq!(
+            derive_palette_naming("blahblah_index.bin", Some("blahblah_lut.raw")),
+            (10, "_lut.raw".to_string())
+        );
+        // Simple shared-stem case.
+        assert_eq!(
+            derive_palette_naming("foo.raw", Some("foo.pal.raw")),
+            (4, ".pal.raw".to_string())
+        );
+        assert_eq!(
+            derive_palette_naming("img.raw", Some("img.lut.raw")),
+            (4, ".lut.raw".to_string())
+        );
+        // No palette -> plain extension, empty suffix (encoder default).
+        assert_eq!(derive_palette_naming("bar.raw", None), (4, String::new()));
+        // No shared prefix -> fallback.
+        assert_eq!(
+            derive_palette_naming("a.raw", Some("palette.raw")),
+            (4, String::new())
+        );
+    }
+
+    #[test]
+    fn extension_lengths() {
+        assert_eq!(extension_ext_len("foo.raw"), 4);
+        assert_eq!(extension_ext_len("blahblah_index.bin"), 4);
+        assert_eq!(extension_ext_len("noext"), 0);
+        assert_eq!(extension_ext_len(".hidden"), 0);
+        assert_eq!(extension_ext_len("trailing."), 0);
     }
 
     #[test]

@@ -71,23 +71,9 @@ fn detect_output_format(path: &PathBuf) -> Result<OutputImageFormat, String> {
     }
 }
 
-/// Derive the `.esdm` palette filename suffix from the raw bitmap and palette
-/// output paths. If the palette filename begins with the bitmap's stem followed
-/// by a `.` (e.g. `foo.raw` + `foo.pal.raw` -> `.pal.raw`), that suffix is used;
-/// otherwise an empty string is returned so the encoder applies its default.
-fn derive_palette_file_ext(bitmap_path: &std::path::Path, palette_path: Option<&std::path::Path>) -> String {
-    let palette_name = match palette_path.and_then(|p| p.file_name()).and_then(|s| s.to_str()) {
-        Some(n) => n,
-        None => return String::new(),
-    };
-    let stem = bitmap_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    if !stem.is_empty() {
-        let suffix = &palette_name[stem.len().min(palette_name.len())..];
-        if palette_name.starts_with(stem) && suffix.starts_with('.') {
-            return suffix.to_string();
-        }
-    }
-    String::new()
+/// Extract a path's filename as a `&str`, or `""` if it cannot be represented.
+fn file_name_str(path: &std::path::Path) -> &str {
+    path.file_name().and_then(|s| s.to_str()).unwrap_or("")
 }
 
 // ============================================================================
@@ -2524,21 +2510,20 @@ fn main() -> Result<(), String> {
                 // Derive stride/raw_size from the file we just wrote (rows are equal length).
                 let raw_size = bin_data.len() as u32;
                 let row_stride = if height_usize > 0 { bin_data.len() / height_usize } else { 0 } as u32;
-                // Extension length of the raw file, including the dot (e.g. ".raw" = 4).
-                let ext_len = bin_path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| (e.len() + 1) as u8)
-                    .unwrap_or(0);
+                let bitmap_name = file_name_str(bin_path);
 
                 let esdm_data = if let Some(ref pf) = palette_format {
-                    let palette_ext = derive_palette_file_ext(bin_path, args.output_raw_palette.as_deref());
+                    // Derive extLen + paletteFileExt from the common prefix of the
+                    // bitmap and palette filenames (e.g. foo_index.bin + foo_lut.raw).
+                    let palette_name = args.output_raw_palette.as_deref().map(file_name_str);
+                    let (ext_len, palette_ext) = esdm::derive_palette_naming(bitmap_name, palette_name);
                     esdm::encode_esdm_bmp_paletted(
                         pf.color_count() as u32,
                         width, height, row_stride, raw_size, ext_len,
                         &palette_ext,
                     )
                 } else {
+                    let ext_len = esdm::extension_ext_len(bitmap_name);
                     esdm::encode_esdm_bmp_from_format(
                         &format, width, height, row_stride, raw_size, ext_len,
                     )?
