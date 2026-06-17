@@ -1578,7 +1578,9 @@ pub fn format_is_grayscale_wasm(format: &str) -> bool {
 /// byte size of the raw file; `ext_len` is the raw file's extension length
 /// including the dot (e.g. 4 for `.raw`). For paletted output pass
 /// `palette_count` > 0 (the index data is `PALETTEDARGB8`); otherwise pass 0 and
-/// a `format` with an EVE bitmap format equivalent (e.g. `RGB565`).
+/// a `format` with an EVE bitmap format equivalent (e.g. `RGB565`). For paletted
+/// output `palette_ext` is the palette sidecar's filename suffix (empty string
+/// falls back to the default `.pal.raw`).
 #[wasm_bindgen]
 pub fn encode_esdm_wasm(
     format: &str,
@@ -1588,10 +1590,11 @@ pub fn encode_esdm_wasm(
     raw_size: u32,
     ext_len: u8,
     palette_count: u32,
+    palette_ext: &str,
 ) -> Result<Vec<u8>, JsValue> {
     if palette_count > 0 {
         Ok(format::esdm::encode_esdm_bmp_paletted(
-            palette_count, width, height, stride, raw_size, ext_len,
+            palette_count, width, height, stride, raw_size, ext_len, palette_ext,
         ))
     } else {
         let fmt = binary_format::ColorFormat::parse(format)

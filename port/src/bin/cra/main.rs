@@ -71,6 +71,25 @@ fn detect_output_format(path: &PathBuf) -> Result<OutputImageFormat, String> {
     }
 }
 
+/// Derive the `.esdm` palette filename suffix from the raw bitmap and palette
+/// output paths. If the palette filename begins with the bitmap's stem followed
+/// by a `.` (e.g. `foo.raw` + `foo.pal.raw` -> `.pal.raw`), that suffix is used;
+/// otherwise an empty string is returned so the encoder applies its default.
+fn derive_palette_file_ext(bitmap_path: &std::path::Path, palette_path: Option<&std::path::Path>) -> String {
+    let palette_name = match palette_path.and_then(|p| p.file_name()).and_then(|s| s.to_str()) {
+        Some(n) => n,
+        None => return String::new(),
+    };
+    let stem = bitmap_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    if !stem.is_empty() {
+        let suffix = &palette_name[stem.len().min(palette_name.len())..];
+        if palette_name.starts_with(stem) && suffix.starts_with('.') {
+            return suffix.to_string();
+        }
+    }
+    String::new()
+}
+
 // ============================================================================
 // Progress Bar
 // ============================================================================
@@ -2513,9 +2532,11 @@ fn main() -> Result<(), String> {
                     .unwrap_or(0);
 
                 let esdm_data = if let Some(ref pf) = palette_format {
+                    let palette_ext = derive_palette_file_ext(bin_path, args.output_raw_palette.as_deref());
                     esdm::encode_esdm_bmp_paletted(
                         pf.color_count() as u32,
                         width, height, row_stride, raw_size, ext_len,
+                        &palette_ext,
                     )
                 } else {
                     esdm::encode_esdm_bmp_from_format(

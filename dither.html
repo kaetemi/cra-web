@@ -2290,7 +2290,8 @@
                     rowStride,
                     totalSize,
                     4,
-                    paletteCount
+                    paletteCount,
+                    ""  // palette suffix: empty -> encoder default (.pal.raw)
                 );
             } catch (e) {
                 alert(`Cannot write .esdm metadata: ${e}`);

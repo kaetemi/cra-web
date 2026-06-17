@@ -23,6 +23,10 @@ const BMP_SIZE: usize = 56;
 const COMPRESSION_RAW: u8 = 0;
 /// EVE `PALETTEDARGB8` bitmap format value (BT820, 256-entry ARGB8888 palette).
 const EVE_FORMAT_PALETTEDARGB8: u32 = 21;
+/// Default palette sidecar filename suffix when none can be derived.
+const DEFAULT_PALETTE_FILE_EXT: &str = ".pal.raw";
+/// `paletteFileExt` field width in bytes.
+const PALETTE_FILE_EXT_LEN: usize = 10;
 
 /// Map a CRA [`ColorFormat`] to its EVE bitmap format enum value.
 ///
@@ -77,8 +81,19 @@ struct BmpFields {
     raw_size: u32,
     ext_len: u8,
     palette_size: u16,
+    palette_file_ext: [u8; PALETTE_FILE_EXT_LEN],
     cells: u16,
     swizzle: u16,
+}
+
+/// Convert a suffix string into the fixed 10-byte NUL-padded `paletteFileExt`
+/// field (truncated if longer than the field).
+fn palette_ext_bytes(suffix: &str) -> [u8; PALETTE_FILE_EXT_LEN] {
+    let mut out = [0u8; PALETTE_FILE_EXT_LEN];
+    let bytes = suffix.as_bytes();
+    let n = bytes.len().min(PALETTE_FILE_EXT_LEN);
+    out[..n].copy_from_slice(&bytes[..n]);
+    out
 }
 
 /// Encode the fixed 56-byte BMP `.esdm` layout (little-endian).
@@ -97,7 +112,7 @@ fn encode(f: &BmpFields) -> Vec<u8> {
     buf[20..24].copy_from_slice(&f.stride.to_le_bytes());
     buf[24..28].copy_from_slice(&f.eve_format.to_le_bytes());
     buf[28..30].copy_from_slice(&f.palette_size.to_le_bytes());
-    // 30..40 paletteFileExt (10 bytes) left NUL.
+    buf[30..40].copy_from_slice(&f.palette_file_ext);
     // 40..52 addtlResExt (12 bytes) left NUL.
     buf[52..54].copy_from_slice(&f.cells.to_le_bytes());
     buf[54..56].copy_from_slice(&f.swizzle.to_le_bytes());
@@ -134,6 +149,7 @@ pub fn encode_esdm_bmp_from_format(
         raw_size,
         ext_len,
         palette_size: 0,
+        palette_file_ext: [0u8; PALETTE_FILE_EXT_LEN],
         cells: 1,
         swizzle: 0,
     }))
@@ -142,6 +158,9 @@ pub fn encode_esdm_bmp_from_format(
 /// Encode a BMP `.esdm` sidecar for paletted output (8-bit indices into an
 /// ARGB8888 palette, `PALETTEDARGB8`). `palette_count` is the number of colors;
 /// the palette sidecar size is `palette_count * 4` bytes.
+///
+/// `palette_file_ext` is the palette sidecar's filename suffix (e.g. `.pal.raw`);
+/// an empty string falls back to [`DEFAULT_PALETTE_FILE_EXT`].
 pub fn encode_esdm_bmp_paletted(
     palette_count: u32,
     width: u32,
@@ -149,7 +168,13 @@ pub fn encode_esdm_bmp_paletted(
     stride: u32,
     raw_size: u32,
     ext_len: u8,
+    palette_file_ext: &str,
 ) -> Vec<u8> {
+    let ext = if palette_file_ext.is_empty() {
+        DEFAULT_PALETTE_FILE_EXT
+    } else {
+        palette_file_ext
+    };
     encode(&BmpFields {
         width: width as i32,
         height: height as i32,
@@ -158,6 +183,7 @@ pub fn encode_esdm_bmp_paletted(
         raw_size,
         ext_len,
         palette_size: (palette_count.saturating_mul(4)).min(u16::MAX as u32) as u16,
+        palette_file_ext: palette_ext_bytes(ext),
         cells: 1,
         swizzle: 0,
     })
@@ -216,10 +242,23 @@ mod tests {
 
     #[test]
     fn paletted_layout() {
-        let bytes = encode_esdm_bmp_paletted(16, 320, 200, 320, 320 * 200, 4);
+        let bytes = encode_esdm_bmp_paletted(16, 320, 200, 320, 320 * 200, 4, ".pal.raw");
         assert_eq!(bytes.len(), 56);
         assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 21); // PALETTEDARGB8
         assert_eq!(u16::from_le_bytes(bytes[28..30].try_into().unwrap()), 64); // 16 * 4 bytes
+        // paletteFileExt at offset 30, NUL-padded to 10 bytes.
+        assert_eq!(&bytes[30..38], b".pal.raw");
+        assert_eq!(&bytes[38..40], &[0, 0]);
+    }
+
+    #[test]
+    fn paletted_default_ext_and_truncation() {
+        // Empty suffix falls back to the default.
+        let d = encode_esdm_bmp_paletted(4, 8, 8, 8, 64, 4, "");
+        assert_eq!(&d[30..38], b".pal.raw");
+        // Over-long suffix is truncated to the 10-byte field.
+        let t = encode_esdm_bmp_paletted(4, 8, 8, 8, 64, 4, ".abcdefghijklmnop.raw");
+        assert_eq!(&t[30..40], b".abcdefghi");
     }
 
     #[test]
