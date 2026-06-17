@@ -17,8 +17,13 @@ use super::color_format::ColorFormat;
 const SIGNATURE_BMP: u32 = 0x0050_4D42;
 /// Metadata format version.
 const VERSION: u8 = 1;
-/// Total size of a BMP `.esdm` structure (12-byte header + 44-byte type data).
+/// Size of a BMP `.esdm` *structure* (12-byte header + 44-byte type data). This
+/// is the value stored in the `size` field, not the file size.
 const BMP_SIZE: usize = 56;
+/// `ESD_METADATA_MAX`: every `.esdm` file is exactly this many bytes — the
+/// metadata structure followed by zero padding (the reader slurps the whole
+/// file into a fixed-size buffer).
+const ESD_METADATA_MAX: usize = 64;
 /// `ESD_RESOURCE_RAW`: uncompressed asset data.
 const COMPRESSION_RAW: u8 = 0;
 /// EVE `PALETTEDARGB8` bitmap format value (BT820, 256-entry ARGB8888 palette).
@@ -96,13 +101,14 @@ fn palette_ext_bytes(suffix: &str) -> [u8; PALETTE_FILE_EXT_LEN] {
     out
 }
 
-/// Encode the fixed 56-byte BMP `.esdm` layout (little-endian).
+/// Encode the BMP `.esdm` layout (little-endian). The 56-byte structure is
+/// written into a fixed 64-byte (`ESD_METADATA_MAX`) buffer, zero-padded.
 fn encode(f: &BmpFields) -> Vec<u8> {
-    let mut buf = vec![0u8; BMP_SIZE];
+    let mut buf = vec![0u8; ESD_METADATA_MAX];
     // Common header (12 bytes)
     buf[0..4].copy_from_slice(&SIGNATURE_BMP.to_le_bytes());
     buf[4] = VERSION;
-    buf[5] = BMP_SIZE as u8;
+    buf[5] = BMP_SIZE as u8; // structure size, not the (padded) file size
     buf[6] = COMPRESSION_RAW;
     buf[7] = f.ext_len;
     buf[8..12].copy_from_slice(&f.raw_size.to_le_bytes());
@@ -266,11 +272,12 @@ mod tests {
         let bytes =
             encode_esdm_bmp_from_format(&fmt("RGB565"), 128, 64, stride, raw_size, 4).unwrap();
 
-        assert_eq!(bytes.len(), 56);
+        assert_eq!(bytes.len(), 64); // file padded to ESD_METADATA_MAX
+        assert_eq!(&bytes[56..64], &[0u8; 8]); // zero padding past the structure
         // Signature "BMP\0".
         assert_eq!(&bytes[0..4], &[0x42, 0x4D, 0x50, 0x00]);
         assert_eq!(bytes[4], 1); // version
-        assert_eq!(bytes[5], 56); // size
+        assert_eq!(bytes[5], 56); // size field = structure size, not file size
         assert_eq!(bytes[6], 0); // compression = RAW
         assert_eq!(bytes[7], 4); // extLen (".raw")
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), raw_size);
@@ -286,7 +293,7 @@ mod tests {
     #[test]
     fn paletted_layout() {
         let bytes = encode_esdm_bmp_paletted(16, 320, 200, 320, 320 * 200, 4, ".pal.raw");
-        assert_eq!(bytes.len(), 56);
+        assert_eq!(bytes.len(), 64);
         assert_eq!(u32::from_le_bytes(bytes[24..28].try_into().unwrap()), 21); // PALETTEDARGB8
         assert_eq!(u16::from_le_bytes(bytes[28..30].try_into().unwrap()), 64); // 16 * 4 bytes
         // paletteFileExt at offset 30, NUL-padded to 10 bytes.

@@ -103,7 +103,9 @@ cmd_text(100, 100, 8, 0, "Hello");    // Use in widget
 
 ## ESD Core Metadata Format (.esdm)
 
-The `.esdm` file is a binary sidecar placed alongside an asset file to provide metadata that the asset data itself does not contain. For a file named `image.raw`, the metadata file is `image.raw.esdm`. Maximum file size: 64 bytes.
+The `.esdm` file is a binary sidecar placed alongside an asset file to provide metadata that the asset data itself does not contain. For a file named `image.raw`, the metadata file is `image.raw.esdm`.
+
+Every `.esdm` file is **exactly 64 bytes** (`ESD_METADATA_MAX`): the type-specific metadata structure followed by zero padding. The reader loads the whole file into a fixed 64-byte buffer; the `size` field (below) indicates how many of those bytes are the meaningful structure. The structure size varies by type (RES 12, ANI 36, BMP 56) but the file is always padded to 64.
 
 The metadata is loaded by `Esd_LoadResourceEx()` in `esd_core/Esd_ResourceInfo.c` via `EVE_Util_readFile()`.
 
@@ -115,7 +117,7 @@ All `.esdm` files share this header. Type-specific data follows immediately afte
 |--------|------|------|-------|-------------|
 | 0 | 4 | uint32 | `signature` | Type signature, NUL-terminated ASCII: `"RES"` (0x00534552), `"BMP"` (0x00504D42), `"FNT"` (0x00544E46), or `"ANI"` (0x00494E41). Little-endian. |
 | 4 | 1 | uint8 | `version` | Metadata format version. Must be `1`. |
-| 5 | 1 | uint8 | `size` | Total size of the metadata structure in bytes (header + type-specific data). |
+| 5 | 1 | uint8 | `size` | Size of the metadata **structure** in bytes (header + type-specific data). This is not the file size — the file is always padded to 64 bytes. |
 | 6 | 1 | uint8 | `compression` | Compression/load method for the asset data. See [Compression Values](#compression-values). |
 | 7 | 1 | uint8 | `extLen` | String length of the complete file extension of the resource file (e.g., 4 for `.raw`). |
 | 8 | 4 | uint32 | `rawSize` | Uncompressed size of the asset data in bytes. |
@@ -136,7 +138,7 @@ This is a 2-bit enum in the `Esd_ResourceInfo` runtime struct (`Compressed : 2`)
 
 ### BMP Type (Bitmap Metadata)
 
-Signature: `"BMP"` (0x00504D42). Total size: 56 bytes (12 header + 44 type-specific).
+Signature: `"BMP"` (0x00504D42). Structure size: 56 bytes (12 header + 44 type-specific); the file is zero-padded to 64 bytes.
 
 | Offset | Size | Type | Field | Description |
 |--------|------|------|-------|-------------|
