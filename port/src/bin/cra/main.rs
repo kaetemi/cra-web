@@ -2572,13 +2572,14 @@ fn main() -> Result<(), String> {
                 if args.verbose {
                     eprintln!("Writing palette ({} colors, ARGB8888): {}", colors.len(), palette_path.display());
                 }
-                // Write palette as ARGB8888 (4 bytes per color: A, R, G, B)
+                // Write the palette in native EVE byte order: EVE PALETTEDARGB8
+                // reads each entry as a little-endian ARGB8888 value, i.e. B, G, R, A.
                 let mut palette_data = Vec::with_capacity(colors.len() * 4);
                 for &(r, g, b, a) in colors {
-                    palette_data.push(a);
-                    palette_data.push(r);
-                    palette_data.push(g);
                     palette_data.push(b);
+                    palette_data.push(g);
+                    palette_data.push(r);
+                    palette_data.push(a);
                 }
                 let mut file = File::create(palette_path)
                     .map_err(|e| format!("Failed to create {}: {}", palette_path.display(), e))?;

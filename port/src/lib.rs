@@ -1491,7 +1491,8 @@ pub fn dither_paletted_with_progress_wasm(
     BufferU8::new(interleaved)
 }
 
-/// Get palette colors as ARGB8888 binary (4 bytes per color: A, R, G, B)
+/// Get palette colors as a native EVE `PALETTEDARGB8` LUT: ARGB8888 in
+/// little-endian byte order, i.e. 4 bytes per color as B, G, R, A.
 /// palette_type: 0 = web-safe (216 colors), 1 = CGA 5153 (16 colors), 2 = CGA BIOS (16 colors),
 ///               3 = CGA Palette 1 (4 colors), 4 = CGA Palette 1 5153 (4 colors)
 #[wasm_bindgen]
@@ -1499,10 +1500,10 @@ pub fn get_palette_colors_wasm(palette_type: u8) -> Vec<u8> {
     let palette_colors = generate_palette(palette_type);
     let mut result = Vec::with_capacity(palette_colors.len() * 4);
     for (r, g, b, a) in palette_colors {
-        result.push(a);
-        result.push(r);
-        result.push(g);
         result.push(b);
+        result.push(g);
+        result.push(r);
+        result.push(a);
     }
     result
 }
@@ -1634,8 +1635,8 @@ pub fn default_lvgl_format_wasm(format: &str, palette_count: u32) -> String {
 ///
 /// `interleaved` is the dithered pixel data (RGB 3/px, RGBA 4/px, grayscale 1/px
 /// or LA 2/px per `is_grayscale`/`has_alpha`). For indexed formats pass
-/// `palette_indices` (1 byte/px) and `palette_colors_argb` (4 bytes/color in
-/// A,R,G,B order, as produced by `get_palette_colors_wasm`); leave them empty
+/// `palette_indices` (1 byte/px) and `palette_colors_bgra` (4 bytes/color in
+/// B,G,R,A order, as produced by `get_palette_colors_wasm`); leave them empty
 /// otherwise. The bit depths must match the requested color format.
 #[wasm_bindgen]
 #[allow(clippy::too_many_arguments)]
@@ -1651,15 +1652,15 @@ pub fn encode_lvgl_wasm(
     bits_b: u8,
     bits_a: u8,
     palette_indices: Vec<u8>,
-    palette_colors_argb: Vec<u8>,
+    palette_colors_bgra: Vec<u8>,
 ) -> Result<Vec<u8>, JsValue> {
     let cf = format::lvgl::LvglColorFormat::from_name(cf_name)
         .ok_or_else(|| JsValue::from_str(&format!("Unknown LVGL color format: {}", cf_name)))?;
-    // Palette colors arrive as A,R,G,B (matching get_palette_colors_wasm); the
+    // Palette colors arrive as B,G,R,A (matching get_palette_colors_wasm); the
     // encoder wants (r, g, b, a) tuples.
-    let colors: Vec<(u8, u8, u8, u8)> = palette_colors_argb
+    let colors: Vec<(u8, u8, u8, u8)> = palette_colors_bgra
         .chunks_exact(4)
-        .map(|c| (c[1], c[2], c[3], c[0]))
+        .map(|c| (c[2], c[1], c[0], c[3]))
         .collect();
     let src = format::lvgl::LvglSource {
         interleaved: &interleaved,

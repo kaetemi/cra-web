@@ -2328,12 +2328,12 @@
             const w = lastDitherResult.width, h = lastDitherResult.height;
             let interleaved = new Uint8Array(0);
             let paletteIndices = new Uint8Array(0);
-            let paletteColorsArgb = new Uint8Array(0);
+            let paletteColorsBgra = new Uint8Array(0);
 
             if (isPaletteFormat) {
                 paletteIndices = rgba_to_palette_indices_wasm(
                     lastDitherResult.rgbaInterleaved, lastDitherResult.paletteType);
-                paletteColorsArgb = get_palette_colors_wasm(lastDitherResult.paletteType);
+                paletteColorsBgra = get_palette_colors_wasm(lastDitherResult.paletteType);
             } else if (lastDitherResult.isGrayscale && lastDitherResult.hasAlpha) {
                 interleaved = lastDitherResult.laInterleaved;
             } else if (lastDitherResult.isGrayscale) {
@@ -2353,7 +2353,7 @@
                     lastDitherResult.hasAlpha,
                     lastDitherResult.bitsR, lastDitherResult.bitsG, lastDitherResult.bitsB, lastDitherResult.bitsA,
                     paletteIndices,
-                    paletteColorsArgb
+                    paletteColorsBgra
                 );
             } catch (e) {
                 alert(`Cannot write LVGL .bin: ${e}`);
